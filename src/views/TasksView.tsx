@@ -102,6 +102,7 @@ export function TasksView() {
       {state.tasks.length === 0 ? (
         <section className="card">
           <Empty
+            image="/img/spot-tasks.jpg"
             title="Your list is clear."
             text="Add a task when something actually needs a place."
             action={

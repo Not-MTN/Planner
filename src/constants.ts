@@ -39,6 +39,7 @@ export const HABIT_ICONS = [
   { id: 'leaf', label: 'Outdoors' },
   { id: 'coffee', label: 'Coffee' },
   { id: 'pencil', label: 'Writing' },
+  { id: 'home', label: 'Home' },
   { id: 'stretch', label: 'Movement' },
   { id: 'spark', label: 'Focus' },
 ] as const;

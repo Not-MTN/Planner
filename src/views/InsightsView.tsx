@@ -46,12 +46,15 @@ export function InsightsView() {
       </div>
 
       <section className="card wash-sage narrative">
-        <p>{sentence}</p>
-        {trend !== 0 && doneThisWeek + doneLastWeek > 0 ? (
-          <p className="meta trend">
-            {trend > 0 ? '↑' : '↓'} {Math.abs(trend)} {Math.abs(trend) === 1 ? 'thing' : 'things'} {trend > 0 ? 'more' : 'fewer'} finished than last week.
-          </p>
-        ) : null}
+        <img className="narrative-img" src="/img/spot-insights.jpg" alt="" loading="lazy" />
+        <div className="narrative-body">
+          <p>{sentence}</p>
+          {trend !== 0 && doneThisWeek + doneLastWeek > 0 ? (
+            <p className="meta trend">
+              {trend > 0 ? '↑' : '↓'} {Math.abs(trend)} {Math.abs(trend) === 1 ? 'thing' : 'things'} {trend > 0 ? 'more' : 'fewer'} finished than last week.
+            </p>
+          ) : null}
+        </div>
       </section>
 
       <section className="card">

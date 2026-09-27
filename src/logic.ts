@@ -6,7 +6,7 @@ import {
   timeToMinutes,
   weekDates,
 } from './dates';
-import type { DayScore, DotState, Goal, Habit, PlannerEvent, PlannerState, Task } from './types';
+import type { DayScore, DotState, Goal, Habit, HabitFrequency, PlannerEvent, PlannerState, Task } from './types';
 
 export function isDone(state: PlannerState, habitId: string, date: string): boolean {
   return state.completions.some((item) => item.habitId === habitId && item.date === date);
@@ -183,7 +183,11 @@ export function upcomingFocus(state: PlannerState, today: string, within = 3): F
     .slice(0, 3);
 }
 
-export function frequencyLabel(habit: Habit): string {
+export function frequencyLabelOf(frequency: HabitFrequency): string {
+  return frequencyLabel({ frequency });
+}
+
+export function frequencyLabel(habit: Pick<Habit, 'frequency'>): string {
   const frequency = habit.frequency;
   if (frequency.type === 'daily') return 'Every day';
   if (frequency.type === 'weekdays') return 'Weekdays';
@@ -416,6 +420,10 @@ export function weekDoneCount(state: PlannerState, dates: string[]): number {
     done += score.done;
   }
   return done;
+}
+
+export function essentialHabits(state: PlannerState, date: string): Habit[] {
+  return state.habits.filter((habit) => !habit.archived && habit.essential && isDueOn(state, habit, date));
 }
 
 export function isEmptyState(state: PlannerState): boolean {

@@ -54,6 +54,7 @@ export function NotesView() {
       {state.notes.length === 0 ? (
         <section className="card">
           <Empty
+            image="/img/spot-notes.jpg"
             title="No notes yet."
             text="A quick note, an idea, a reminder, or a short journal entry."
             action={

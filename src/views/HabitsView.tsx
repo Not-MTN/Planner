@@ -12,19 +12,22 @@ import {
   todayISO,
   weekDates,
 } from '../dates';
-import { ChevronLeftIcon, ChevronRightIcon, FlameIcon, HabitGlyph } from '../icons';
+import { ChevronLeftIcon, ChevronRightIcon, FlameIcon, HabitGlyph, SunIcon } from '../icons';
 import { formatPercent, frequencyLabel, habitDot, habitStats, habitStreaks } from '../logic';
-import { Empty, Meter } from '../components/ui';
+import { Meter } from '../components/ui';
+import { HabitLibrary } from '../components/HabitLibrary';
+import { ESSENTIAL_PRESETS, presetToInput } from '../presets';
 
 const HEAT_WEEKS = 12;
 
 export function HabitsView() {
-  const { state, openComposer, setHabitArchived, deleteHabit, toggleHabit, flash, undo } = usePlanner();
+  const { state, openComposer, setHabitArchived, deleteHabit, toggleHabit, addHabit, addHabits, flash, undo } = usePlanner();
   const today = todayISO();
   const [cursor, setCursor] = useState(() => {
     const now = new Date();
     return { year: now.getFullYear(), month: now.getMonth() + 1 };
   });
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const active = state.habits.filter((habit) => !habit.archived);
   const archived = state.habits.filter((habit) => habit.archived);
   const week = weekDates(today);
@@ -44,22 +47,61 @@ export function HabitsView() {
           <h1>Habits</h1>
           <p className="lede">Repeat what you want to keep.</p>
         </div>
-        <button type="button" className="btn btn-primary" onClick={() => openComposer({ mode: 'create', type: 'habit' })}>
-          Add habit
-        </button>
+        <div className="page-head-actions">
+          <button type="button" className="btn btn-soft" onClick={() => setLibraryOpen(true)}>
+            Library
+          </button>
+          <button type="button" className="btn btn-primary" onClick={() => openComposer({ mode: 'create', type: 'habit' })}>
+            Add habit
+          </button>
+        </div>
       </header>
 
       {active.length === 0 && archived.length === 0 ? (
-        <section className="card">
-          <Empty
-            title="No habits yet."
-            text="One small repeat is enough to begin. History will collect quietly."
-            action={
-              <button type="button" className="btn btn-primary" onClick={() => openComposer({ mode: 'create', type: 'habit' })}>
-                Add habit
+        <section className="card library-empty">
+          <img className="spot spot-lg" src="/img/spot-library.jpg" alt="" loading="lazy" />
+          <div className="library-empty-body">
+            <p className="kicker">Habit library</p>
+            <h2 className="section-title">Start with a classic</h2>
+            <p className="lede">Built-in habits and daily must-dos, ready in one tap.</p>
+            <div className="preset-grid">
+              {ESSENTIAL_PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  className={cx('preset-chip', `accent-${preset.accent}`)}
+                  onClick={() => {
+                    addHabit(presetToInput(preset));
+                    flash(`Habit “${preset.name}” added.`, { label: 'Undo', run: undo });
+                  }}
+                >
+                  <span className={cx('icon-well', `accent-${preset.accent}`)}>
+                    <HabitGlyph name={preset.icon} />
+                  </span>
+                  <span className="preset-copy">
+                    <strong>{preset.name}</strong>
+                    {preset.blurb ? <small>{preset.blurb}</small> : null}
+                  </span>
+                  <span className="library-add" aria-hidden="true">Add</span>
+                </button>
+              ))}
+            </div>
+            <div className="welcome-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  addHabits(ESSENTIAL_PRESETS.map(presetToInput));
+                  flash('Daily essentials added.', { label: 'Undo', run: undo });
+                }}
+              >
+                Add all essentials
               </button>
-            }
-          />
+              <button type="button" className="btn btn-ghost" onClick={() => setLibraryOpen(true)}>
+                Browse the full library
+              </button>
+            </div>
+          </div>
         </section>
       ) : (
         <>
@@ -88,6 +130,11 @@ export function HabitsView() {
                     <div>
                       <h2>{habit.name}</h2>
                       <p className="meta">{frequencyLabel(habit)}</p>
+                      {habit.essential ? (
+                        <p className="essential-tag">
+                          <SunIcon size={12} /> Daily must-do
+                        </p>
+                      ) : null}
                     </div>
                     <div className="habit-nums">
                       <span className="habit-percent">{formatPercent(monthStats.ratio)}</span>
@@ -191,6 +238,7 @@ export function HabitsView() {
           ) : null}
         </>
       )}
+      {libraryOpen ? <HabitLibrary onClose={() => setLibraryOpen(false)} /> : null}
     </div>
   );
 }

@@ -108,16 +108,22 @@ export function Empty({
   title,
   text,
   action,
+  image,
 }: {
   title: string;
   text: string;
   action?: ReactNode;
+  image?: string;
 }) {
   return (
     <div className="empty">
-      <span className="empty-mark" aria-hidden="true">
-        <LeafIcon size={22} />
-      </span>
+      {image ? (
+        <img className="spot" src={image} alt="" loading="lazy" />
+      ) : (
+        <span className="empty-mark" aria-hidden="true">
+          <LeafIcon size={22} />
+        </span>
+      )}
       <p className="empty-title">{title}</p>
       <p>{text}</p>
       {action}

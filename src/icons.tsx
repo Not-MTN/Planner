@@ -278,6 +278,16 @@ export function PencilDrawIcon(props: IconProps) {
   );
 }
 
+export function HomeIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4.5 11 12 4.5 19.5 11" />
+      <path d="M6.5 10v9.5h11V10" />
+      <path d="M10 19.5v-5h4v5" />
+    </Svg>
+  );
+}
+
 export function StretchIcon(props: IconProps) {
   return (
     <Svg {...props}>
@@ -387,6 +397,8 @@ export function HabitGlyph({ name, size = 18 }: { name: string; size?: number })
       return <CoffeeIcon size={size} />;
     case 'pencil':
       return <PencilDrawIcon size={size} />;
+    case 'home':
+      return <HomeIcon size={size} />;
     case 'stretch':
       return <StretchIcon size={size} />;
     case 'spark':

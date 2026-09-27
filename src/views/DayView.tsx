@@ -15,6 +15,7 @@ import {
 import { useNow } from '../hooks';
 import {
   dayScore,
+  essentialHabits,
   eventsForDate,
   habitsDueOn,
   isEmptyState,
@@ -24,13 +25,15 @@ import {
   upcomingFocus,
 } from '../logic';
 import { QuickAddBar } from '../components/QuickAddBar';
+import { WelcomeCard } from '../components/WelcomeCard';
 import { EventRow, HabitRow, IntentionField, NowMark, TaskRow } from '../components/items';
-import { Empty, Ring } from '../components/ui';
-import { ChevronLeftIcon, ChevronRightIcon, PlusIcon, SparklesIcon, StopwatchIcon } from '../icons';
+import { Empty, Meter, Ring } from '../components/ui';
+import { ChevronLeftIcon, ChevronRightIcon, PlusIcon, StopwatchIcon } from '../icons';
+import type { Habit } from '../types';
 
 export function DayView({ date }: { date: string }) {
   const planner = usePlanner();
-  const { state, openComposer, navigate, swapEventTimes, swapTasks, moveTask, flash, celebrate, loadSample, startFocus } = planner;
+  const { state, openComposer, navigate, swapEventTimes, swapTasks, moveTask, flash, celebrate, startFocus } = planner;
   const now = useNow(20000);
   const today = todayISO(now);
   const isToday = date === today;
@@ -38,7 +41,8 @@ export function DayView({ date }: { date: string }) {
   const tasks = tasksForDate(state, date);
   const openTasks = tasks.filter((task) => !task.completed);
   const doneTasks = tasks.filter((task) => task.completed);
-  const habits = habitsDueOn(state, date);
+  const habits = habitsDueOn(state, date).filter((habit) => !habit.essential);
+  const essentials = essentialHabits(state, date);
   const carried = overdueTasks(state, date);
   const score = dayScore(state, date, true);
   const upcoming = isToday ? upcomingFocus(state, today) : [];
@@ -97,11 +101,6 @@ export function DayView({ date }: { date: string }) {
           </p>
           {isToday ? <p className="quote">{motivationFor(date)}</p> : null}
           <QuickAddBar defaultDate={date} />
-          {fresh && isToday ? (
-            <button type="button" className="text-btn hero-sample" onClick={loadSample}>
-              <SparklesIcon size={15} /> Load a sample day to explore
-            </button>
-          ) : null}
           {upcoming.length > 0 ? (
             <ul className="coming-up">
               {upcoming.map((item) => (
@@ -134,6 +133,7 @@ export function DayView({ date }: { date: string }) {
         </div>
 
         <aside className="card hero-panel">
+          {!fresh ? <img className="postcard" src="/img/hero-day.jpg" alt="" loading="lazy" /> : null}
           <p className="kicker">Progress</p>
           <Ring value={score.ratio ?? 0} label={score.total ? `${score.done}/${score.total}` : 'Open'} caption="done today" />
           <p className="progress-phrase">{progressPhrase(score.ratio)}</p>
@@ -161,6 +161,9 @@ export function DayView({ date }: { date: string }) {
         </aside>
       </header>
 
+      {fresh && isToday ? <WelcomeCard /> : null}
+      {essentials.length > 0 ? <EssentialsCard date={date} habits={essentials} /> : null}
+
       <IntentionField key={date} date={date} />
 
       <div className="today-grid">
@@ -178,6 +181,7 @@ export function DayView({ date }: { date: string }) {
             <div className="timeline timeline-empty">
               {isToday ? <NowMark time={clock} /> : null}
               <Empty
+                image="/img/spot-calendar.jpg"
                 title="Nothing timed yet."
                 text="Add a time only for what you want to protect."
                 action={
@@ -227,6 +231,7 @@ export function DayView({ date }: { date: string }) {
             ) : null}
             {openTasks.length === 0 && doneTasks.length === 0 ? (
               <Empty
+                image="/img/spot-tasks.jpg"
                 title="No tasks for this day."
                 text="A short list is easier to finish."
                 action={
@@ -262,6 +267,7 @@ export function DayView({ date }: { date: string }) {
             </header>
             {habits.length === 0 ? (
               <Empty
+                image="/img/spot-library.jpg"
                 title="No habits for this day."
                 text="Start with one thing you want to repeat."
                 action={
@@ -311,6 +317,37 @@ function DayNotes({ date }: { date: string }) {
           ))}
         </ul>
       )}
+    </section>
+  );
+}
+
+function EssentialsCard({ date, habits }: { date: string; habits: Habit[] }) {
+  const { state } = usePlanner();
+  const done = habits.filter((habit) =>
+    state.completions.some((item) => item.habitId === habit.id && item.date === date),
+  ).length;
+  const complete = habits.length > 0 && done === habits.length;
+  return (
+    <section className="card essentials-card">
+      <header className="card-head">
+        <div>
+          <p className="kicker">Must-dos for every day</p>
+          <h2 className="card-title">Daily essentials</h2>
+        </div>
+        {complete ? (
+          <span className="chip essentials-done">All done ✓</span>
+        ) : (
+          <div className="essentials-progress">
+            <span className="essentials-count">{done}/{habits.length}</span>
+            <Meter value={habits.length === 0 ? 0 : done / habits.length} label="Daily essentials progress" />
+          </div>
+        )}
+      </header>
+      <ul className="item-list essentials-list">
+        {habits.map((habit) => (
+          <HabitRow key={habit.id} habit={habit} date={date} />
+        ))}
+      </ul>
     </section>
   );
 }

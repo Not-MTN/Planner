@@ -106,15 +106,56 @@ describe('app smoke', () => {
     expect(document.querySelector('.palette')).toBeFalsy();
   });
 
-  it('loads the sample day from the empty Today view', () => {
+  it('loads the sample day from the welcome card', () => {
     mountApp();
-    const sample = document.querySelector<HTMLButtonElement>('.hero-sample');
+    const sample = [...document.querySelectorAll<HTMLButtonElement>('.welcome-actions .btn')].find((button) =>
+      button.textContent?.includes('sample day'),
+    );
     expect(sample).toBeTruthy();
     act(() => {
       sample?.click();
     });
     expect(text()).toContain('Finish the report');
     expect(text()).toContain('Read 20 minutes');
+    expect(text()).toContain('Daily essentials');
+  });
+
+  it('adds the daily essentials from the welcome card', () => {
+    mountApp();
+    const add = [...document.querySelectorAll<HTMLButtonElement>('.welcome-actions .btn')].find((button) =>
+      button.textContent?.includes('essential'),
+    );
+    expect(add).toBeTruthy();
+    act(() => {
+      add?.click();
+    });
+    expect(text()).toContain('Daily essentials');
+    expect(text()).toContain('Drink water');
+    expect(text()).toContain('Sleep by 11');
+    expect(document.querySelector('.welcome-card')).toBeFalsy();
+  });
+
+  it('adds a habit from the built-in library', async () => {
+    mountApp();
+    const habitsNav = [...document.querySelectorAll<HTMLButtonElement>('.nav-link')].find((button) =>
+      button.textContent?.includes('Habits'),
+    );
+    await act(async () => {
+      habitsNav?.click();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    expect(text()).toContain('Repeat what you want to keep');
+    const chip = [...document.querySelectorAll<HTMLButtonElement>('.preset-chip')].find((button) =>
+      button.textContent?.includes('Drink water'),
+    );
+    expect(chip).toBeTruthy();
+    await act(async () => {
+      chip?.click();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    expect(document.querySelector('.habit-card')).toBeTruthy();
+    expect(text()).toContain('Drink water');
+    expect(text()).toContain('Daily must-do');
   });
 
   it('toggles dark mode from the sidebar', () => {

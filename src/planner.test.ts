@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { monthGrid, startOfWeek, addDays, isValidISODate, weekDates } from './dates';
-import { agendaWindow, dayScore, goalProgress, habitStats, habitStreaks, hasAgendaPlans, insightTotals, isDueOn, isPlannedDay, laterAgenda } from './logic';
-import { addEvent, addGoal, addHabit, addMilestone, addNote, addTask, clearCompletedTasks, moveTask, swapEventTimes, toggleHabit, toggleMilestone, toggleTask, updateEvent } from './mutate';
+import { agendaWindow, dayScore, essentialHabits, goalProgress, habitStats, habitStreaks, hasAgendaPlans, insightTotals, isDueOn, isPlannedDay, laterAgenda } from './logic';
+import { addEvent, addGoal, addHabit, addHabits, addMilestone, addNote, addTask, clearCompletedTasks, moveTask, swapEventTimes, toggleHabit, toggleMilestone, toggleTask, updateEvent } from './mutate';
 import { parseQuickAdd } from './quickAdd';
 import { parseHash, toHash } from './route';
 import { loadFrom, parseBackup, sanitizeState, saveTo, serialize } from './storage';
+import { ESSENTIAL_PRESETS, presetToInput } from './presets';
 import { createEmptyState, type PlannerState } from './types';
 
 function memoryStorage(initial?: Record<string, string>): Storage {
@@ -367,6 +368,41 @@ describe('streaks and totals', () => {
     expect(totals.tasksCompleted).toBe(1);
     expect(totals.tasksOpen).toBe(0);
     expect(totals.dayStreak).toBe(1);
+  });
+});
+
+describe('habit library and daily essentials', () => {
+  const now = '2026-09-27T10:00:00.000Z';
+  const today = '2026-09-27';
+
+  it('ships essentials as must-do daily habits', () => {
+    expect(ESSENTIAL_PRESETS.length).toBeGreaterThanOrEqual(5);
+    for (const preset of ESSENTIAL_PRESETS) {
+      expect(preset.essential).toBe(true);
+      expect(preset.frequency.type).toBe('daily');
+      expect(preset.name.trim().length).toBeGreaterThan(0);
+    }
+  });
+
+  it('adds habits in bulk and keeps the essential flag', () => {
+    let state = addHabits(createEmptyState(), ESSENTIAL_PRESETS.map(presetToInput), now, today);
+    expect(state.habits).toHaveLength(ESSENTIAL_PRESETS.length);
+    expect(state.habits.every((habit) => habit.essential)).toBe(true);
+    state = addHabit(
+      state,
+      { name: 'Journal one line', icon: 'pencil', accent: 'pink', frequency: { type: 'daily' } },
+      'h-extra',
+      now,
+      today,
+    );
+    expect(state.habits[state.habits.length - 1].essential).toBe(false);
+    const restored = sanitizeState(JSON.parse(JSON.stringify(state)) as unknown);
+    expect(restored?.habits.filter((habit) => habit.essential)).toHaveLength(ESSENTIAL_PRESETS.length);
+  });
+
+  it('lists the essentials due on a day', () => {
+    const state = addHabits(createEmptyState(), ESSENTIAL_PRESETS.map(presetToInput), now, today);
+    expect(essentialHabits(state, today)).toHaveLength(ESSENTIAL_PRESETS.length);
   });
 });
 

@@ -104,6 +104,7 @@ function sanitizeHabit(value: unknown): Habit | null {
     icon: ICON_SET.has(icon) ? icon : 'leaf',
     accent: ACCENT_SET.has(String(raw.accent)) ? (raw.accent as Habit['accent']) : 'sage',
     frequency: sanitizeFrequency(raw.frequency),
+    essential: raw.essential === true,
     archived: raw.archived === true,
     createdOn: createdOn && isValidISODate(createdOn) ? createdOn : localDateFromTimestamp(createdAt),
     createdAt,

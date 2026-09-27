@@ -25,8 +25,8 @@ export function buildSampleState(now = new Date()): PlannerState {
   let state = createEmptyState();
 
   state = addHabit(state, { name: 'Read 20 minutes', icon: 'book', accent: 'sage', frequency: { type: 'daily' } }, 'sample-read', stamp(21), started);
-  state = addHabit(state, { name: 'Morning walk', icon: 'walk', accent: 'peach', frequency: { type: 'weekdays' } }, 'sample-walk', stamp(21), started);
-  state = addHabit(state, { name: 'Drink water', icon: 'water', accent: 'blue', frequency: { type: 'daily' } }, 'sample-water', stamp(21), started);
+  state = addHabit(state, { name: 'Morning walk', icon: 'walk', accent: 'peach', frequency: { type: 'weekdays' }, essential: true }, 'sample-walk', stamp(21), started);
+  state = addHabit(state, { name: 'Drink water', icon: 'water', accent: 'blue', frequency: { type: 'daily' }, essential: true }, 'sample-water', stamp(21), started);
 
   for (let offset = 3; offset >= 0; offset -= 1) {
     const date = addDays(today, -offset);

@@ -29,6 +29,7 @@ export function GoalsView() {
       {state.goals.length === 0 ? (
         <section className="card">
           <Empty
+            image="/img/spot-goals.jpg"
             title="No goals yet."
             text="A short-term goal can be this month. A long-term goal can stay quieter."
             action={

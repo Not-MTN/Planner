@@ -5,6 +5,7 @@ import {
   addEvent as addEventTo,
   addGoal as addGoalTo,
   addHabit as addHabitTo,
+  addHabits as addHabitsTo,
   addMilestone as addMilestoneTo,
   addNote as addNoteTo,
   addTask as addTaskTo,
@@ -115,6 +116,7 @@ interface PlannerContextValue {
   moveTask: (id: string, date: string | null) => void;
   swapEventTimes: (aId: string, bId: string) => void;
   addHabit: (input: HabitInput) => void;
+  addHabits: (inputs: HabitInput[]) => void;
   updateHabit: (id: string, patch: Partial<HabitInput>) => void;
   deleteHabit: (id: string) => void;
   setHabitArchived: (id: string, archived: boolean) => void;
@@ -380,6 +382,7 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     moveTask: (id, date) => commit((current) => moveTaskIn(current, id, date)),
     swapEventTimes: (aId, bId) => commit((current) => swapEventTimesIn(current, aId, bId)),
     addHabit: (input) => commit((current) => addHabitTo(current, input)),
+    addHabits: (inputs) => commit((current) => addHabitsTo(current, inputs)),
     updateHabit: (id, patch) => commit((current) => updateHabitIn(current, id, patch)),
     deleteHabit: (id) => commit((current) => deleteHabitFrom(current, id)),
     setHabitArchived: (id, archived) => commit((current) => setHabitArchivedIn(current, id, archived)),

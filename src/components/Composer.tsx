@@ -294,6 +294,7 @@ function HabitForm({ composer, onClose, onRemove }: { composer: ComposerState; o
   const [freqType, setFreqType] = useState(initial.type);
   const [days, setDays] = useState<number[]>(initial.type === 'custom' ? initial.days : [1, 3, 5]);
   const [times, setTimes] = useState(initial.type === 'weekly' ? initial.times : 3);
+  const [essential, setEssential] = useState(existing?.essential ?? false);
   const [error, setError] = useState<string | null>(null);
 
   const frequency: HabitFrequency = useMemo(() => {
@@ -313,7 +314,7 @@ function HabitForm({ composer, onClose, onRemove }: { composer: ComposerState; o
       setError('Choose at least one day.');
       return;
     }
-    const input: HabitInput = { name, icon, accent, frequency };
+    const input: HabitInput = { name, icon, accent, frequency, essential };
     if (existing) updateHabit(existing.id, input);
     else addHabit(input);
     onClose();
@@ -394,6 +395,10 @@ function HabitForm({ composer, onClose, onRemove }: { composer: ComposerState; o
           />
         </Field>
       ) : null}
+      <label className="check-line">
+        <input type="checkbox" checked={essential} onChange={(event) => setEssential(event.target.checked)} />
+        <span>A must-do for every day — pinned to Today</span>
+      </label>
       <Actions editing={Boolean(existing)} label="Add habit" onClose={onClose} onRemove={onRemove} />
     </form>
   );
