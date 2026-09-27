@@ -167,10 +167,51 @@ export function InsightsView() {
             </ul>
           )}
         </section>
+        <MoodStrip state={state} today={today} />
         <PlanVsFocusCard state={state} today={today} />
         <YearPixelsCard state={state} today={today} />
       </div>
     </div>
+  );
+}
+
+/** The last 7 days of mood check-ins, and what they've been averaging. */
+function MoodStrip({ state, today }: { state: PlannerState; today: string }) {
+  const week = useMemo(() => Array.from({ length: 7 }, (_, index) => addDays(today, index - 6)), [today]);
+  const byDate = useMemo(() => new Map(state.moods.map((entry) => [entry.date, entry.value])), [state.moods]);
+  const recent = state.moods.filter((entry) => entry.date <= today).slice(-14);
+  const average = recent.length
+    ? Math.round((recent.reduce((sum, entry) => sum + entry.value, 0) / recent.length) * 10) / 10
+    : 0;
+  const EMOJI = ['😩', '😕', '🙂', '😄', '🤩'];
+  return (
+    <section className="card wide-card mood-strip">
+      <header className="card-head">
+        <div>
+          <p className="kicker">{t("Feelings")}</p>
+          <h2 className="card-title">{t("Mood, last 7 days")}</h2>
+        </div>
+        {recent.length > 0 ? (
+          <span className="streak-chip big" title={t("Average of your last {0} check-ins", { 0: recent.length })}>
+            {t("{0}/5 lately", { 0: average })}
+          </span>
+        ) : null}
+      </header>
+      <div className="mood-strip-row" role="img" aria-label={t("Logged mood for each of the last 7 days")}>
+        {week.map((date) => {
+          const value = byDate.get(date);
+          return (
+            <div key={date} className="mood-day" title={`${formatWeekdayShort(date)} ${dayNumber(date)}`}>
+              <span className="mood-day-emoji" aria-hidden="true">{value ? EMOJI[value - 1] : '·'}</span>
+              <span className="mood-day-label">{formatWeekdayShort(date).slice(0, 2)}</span>
+            </div>
+          );
+        })}
+      </div>
+      {recent.length === 0 ? (
+        <p className="meta">{t("Log how the day felt on Today — the pattern lands here.")}</p>
+      ) : null}
+    </section>
   );
 }
 

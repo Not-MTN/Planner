@@ -310,6 +310,23 @@ describe('app smoke', () => {
     expect(unlabelled).toEqual([]);
   });
 
+  it('logs the day mood from Today and keeps it', async () => {
+    mountApp();
+    expect(text()).toContain('How did today feel?');
+    const bright = document.querySelector<HTMLButtonElement>('[aria-label="Log today as Bright"]');
+    expect(bright).toBeTruthy();
+    act(() => bright?.click());
+    expect(text()).toContain('Today felt bright');
+    expect(bright?.getAttribute('aria-pressed')).toBe('true');
+    const saved = JSON.parse(window.localStorage.getItem('personal-planner.v1') ?? '{}') as { moods?: Array<{ value: number }> };
+    expect(saved.moods?.[0]?.value).toBe(4);
+    // Tapping the same mood again clears the check-in.
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="Log today as Bright"]')?.click());
+    expect(text()).toContain('How did today feel?');
+    const cleared = JSON.parse(window.localStorage.getItem('personal-planner.v1') ?? '{}') as { moods?: unknown[] };
+    expect(cleared.moods ?? []).toHaveLength(0);
+  });
+
   it('navigates between the main views', async () => {
     mountApp();
     const calendar = [...document.querySelectorAll<HTMLButtonElement>('.nav-link')].find((button) =>

@@ -37,6 +37,7 @@ import {
   skipHabit as skipHabitIn,
   setHabitArchived as setHabitArchivedIn,
   setIntention as setIntentionIn,
+  setMood as setMoodIn,
   swapEventTimes as swapEventTimesIn,
   swapTasks as swapTasksIn,
   toggleEvent as toggleEventIn,
@@ -74,7 +75,7 @@ import { fetchFeedEvents, loadFeeds, mergeFeedEvents, saveFeeds, type CalendarFe
 import { loadWeatherSettings, saveWeatherSettings, type WeatherSettings } from './weather';
 import { applyTheme, loadAccent, loadThemeMode, resolvedMode, type ThemeMode } from './theme';
 import type { Accent } from './constants';
-import { createEmptyState, type AIMemoryInput, type ComposerState, type EventInput, type FixedCommitmentInput, type GoalInput, type HabitInput, type NoteInput, type PlannerState, type TaskInput } from './types';
+import { createEmptyState, type AIMemoryInput, type ComposerState, type EventInput, type FixedCommitmentInput, type GoalInput, type HabitInput, type MoodValue, type NoteInput, type PlannerState, type TaskInput } from './types';
 import { t } from './i18n';
 import { isTestEnv } from './env';
 
@@ -224,6 +225,8 @@ interface PlannerContextValue {
   updateNote: (id: string, patch: Partial<NoteInput>) => void;
   deleteNote: (id: string) => void;
   setIntention: (date: string, text: string) => void;
+  /** Log how a day felt (1–5); pass null to clear. */
+  logMood: (date: string, value: MoodValue | null, taskId?: string) => void;
 }
 
 const PlannerContext = createContext<PlannerContextValue | null>(null);
@@ -289,6 +292,24 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
     noticeTimer.current = window.setTimeout(() => setNotice(null), action ? 5200 : 2800);
   }, []);
+
+  // A small, rotating bit of applause when something gets ticked off — the
+  // reward after the effort, on purpose. Never fires on un-checking.
+  const PRAISES = [
+    () => t("Done. Beautifully ticked. ✨"),
+    () => t("One more off the list. 🎉"),
+    () => t("That counts. Well done. 💛"),
+    () => t("Checked, finished, gone. 🙌"),
+    () => t("Forward motion. Keep it. 🌱"),
+    () => t("You did the thing. ⭐"),
+  ];
+  const praiseStep = useRef(0);
+  const praise = useCallback(() => {
+    flash(PRAISES[praiseStep.current % PRAISES.length]());
+    praiseStep.current += 1;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flash]);
+
 
   const dismissNotice = useCallback(() => {
     if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
@@ -973,7 +994,11 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     },
     moveTasksByIds: (ids, date) => commit((current) => moveTasksIn(current, ids, date)),
     clearCompletedTasks,
-    toggleTask: (id) => commit((current) => toggleTaskIn(current, id)),
+    toggleTask: (id) => {
+      const wasOpen = stateRef.current.tasks.some((task) => task.id === id && !task.completed);
+      commit((current) => toggleTaskIn(current, id));
+      if (wasOpen) praise();
+    },
     toggleSubtask: (taskId, subtaskId) => commit((current) => toggleSubtaskIn(current, taskId, subtaskId)),
     resizeEvent: (id, endTime) => commit((current) => resizeEventIn(current, id, endTime)),
     logFocus: (entry) => commit((current) => logFocusIn(current, entry)),
@@ -1035,7 +1060,8 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
       commit((current) => deleteNoteFrom(current, id));
     },
     setIntention: (date, text) => commit((current) => setIntentionIn(current, date, text)),
-  }), [state, ready, error, notice, saveBlocked, route, navigate, composer, confirm, startFresh, exportData, importText, loadSample, flash, dismissNotice, undo, redo, canUndo, canRedo, themeMode, accent, paletteOpen, settingsOpen, focus, confettiSeed, celebrate, clearCompletedTasks, commit, reminders, setReminders, weekStart, setWeekStart, display, setDisplay, sync, syncStatus, syncMessage, syncAvailable, startSync, stopSync, runSync, deleteCloudCopy, shared, sharedStatus, sharedMessage, startShared, stopShared, runSharedSync, feeds, addFeed, removeFeed, refreshFeeds, weather, setWeather, recordTombstone]);
+    logMood: (date, value, taskId) => commit((current) => setMoodIn(current, date, value, taskId)),
+  }), [state, ready, error, notice, saveBlocked, route, navigate, composer, confirm, startFresh, exportData, importText, loadSample, flash, dismissNotice, praise, undo, redo, canUndo, canRedo, themeMode, accent, paletteOpen, settingsOpen, focus, confettiSeed, celebrate, clearCompletedTasks, commit, reminders, setReminders, weekStart, setWeekStart, display, setDisplay, sync, syncStatus, syncMessage, syncAvailable, startSync, stopSync, runSync, deleteCloudCopy, shared, sharedStatus, sharedMessage, startShared, stopShared, runSharedSync, feeds, addFeed, removeFeed, refreshFeeds, weather, setWeather, recordTombstone]);
 
   return <PlannerContext.Provider value={value}>{children}</PlannerContext.Provider>;
 }

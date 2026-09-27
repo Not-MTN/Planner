@@ -167,6 +167,17 @@ export interface Note {
   updatedAt: string;
 }
 
+export type MoodValue = 1 | 2 | 3 | 4 | 5;
+
+/** One mood check-in per day (the latest wins). */
+export interface MoodEntry {
+  date: string;
+  value: MoodValue;
+  /** Optional link to the task that prompted the check-in. */
+  taskId?: string;
+  updatedAt: string;
+}
+
 export interface PlannerState {
   tasks: Task[];
   events: PlannerEvent[];
@@ -177,6 +188,7 @@ export interface PlannerState {
   completions: HabitCompletion[];
   goals: Goal[];
   notes: Note[];
+  moods: MoodEntry[];
   intentions: Record<string, string>;
   focusLog: FocusLog[];
 }
@@ -262,6 +274,7 @@ export function createEmptyState(): PlannerState {
     goals: [],
     notes: [],
     intentions: {},
+    moods: [],
     focusLog: [],
   };
 }

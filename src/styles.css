@@ -2879,3 +2879,105 @@ body::before {
   color: var(--accent-deep, var(--ink));
 }
 .note-link-pill:hover { background: color-mix(in srgb, var(--accent, #7a68b3) 22%, transparent); }
+
+/* ── Mood check-in — the reward corner ─────────────────── */
+.mood-card { scroll-margin: 90px; transition: box-shadow 0.4s var(--ease), background 0.4s var(--ease); }
+.mood-card.invited { animation: mood-invite 3.2s var(--ease) infinite; }
+@keyframes mood-invite {
+  0%, 100% { box-shadow: var(--shadow); }
+  50% { box-shadow: var(--shadow), 0 0 0 5px color-mix(in srgb, var(--accent, #bd7c4a) 16%, transparent); }
+}
+.mood-current { font-size: 30px; line-height: 1; filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.18)); }
+.mood-row { display: flex; justify-content: space-between; gap: 6px; padding: 4px 2px 2px; }
+.mood-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 10px 4px 8px;
+  border: 0;
+  border-radius: 18px;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  min-height: 74px;
+  transition: background 0.25s var(--ease), transform 0.25s var(--ease);
+}
+.mood-btn:hover { background: var(--surface-2); transform: translateY(-2px); }
+.mood-emoji {
+  font-size: 32px;
+  line-height: 1;
+  filter: grayscale(0.85) opacity(0.55);
+  transform: scale(0.94);
+  transition: filter 0.25s var(--ease), transform 0.35s cubic-bezier(0.34, 1.8, 0.64, 1);
+}
+.mood-btn:hover .mood-emoji { filter: grayscale(0.2) opacity(0.95); transform: scale(1.08); }
+.mood-label { font-size: 11px; font-weight: 600; color: var(--muted); letter-spacing: 0.01em; }
+.mood-btn.on { background: color-mix(in srgb, var(--accent, #bd7c4a) 12%, transparent); }
+.mood-btn.on .mood-emoji {
+  filter: none;
+  transform: scale(1.28);
+  animation: mood-pop 0.55s cubic-bezier(0.34, 1.9, 0.64, 1);
+}
+@keyframes mood-pop {
+  0% { transform: scale(0.6) rotate(-8deg); }
+  60% { transform: scale(1.45) rotate(4deg); }
+  100% { transform: scale(1.28) rotate(0deg); }
+}
+.mood-btn.on .mood-label { color: var(--accent-deep, var(--ink)); }
+.mood-line { margin: 10px 2px 0; font-size: 13px; color: var(--ink-soft); }
+.mood-line.dim { color: var(--muted); }
+.mood-card.has-mood.mood-5 { background: linear-gradient(150deg, color-mix(in srgb, #f2c14e 16%, var(--surface)), var(--surface) 62%); }
+.mood-card.has-mood.mood-4 { background: linear-gradient(150deg, color-mix(in srgb, var(--accent, #bd7c4a) 12%, var(--surface)), var(--surface) 62%); }
+.mood-card.has-mood.mood-3 { background: linear-gradient(150deg, color-mix(in srgb, #7dab8c 10%, var(--surface)), var(--surface) 62%); }
+.mood-card.has-mood.mood-2 { background: linear-gradient(150deg, color-mix(in srgb, #7aa3c8 10%, var(--surface)), var(--surface) 62%); }
+.mood-card.has-mood.mood-1 { background: linear-gradient(150deg, color-mix(in srgb, var(--muted) 10%, var(--surface)), var(--surface) 62%); }
+[data-theme="dark"] .mood-emoji { filter: grayscale(0.7) opacity(0.6); }
+[data-theme="dark"] .mood-btn:hover .mood-emoji,
+[data-theme="dark"] .mood-btn.on .mood-emoji { filter: none; }
+
+/* Insights mood strip */
+.mood-strip-row { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; padding: 8px 2px 2px; }
+.mood-day { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 2px; border-radius: 14px; background: var(--surface-2); }
+.mood-day-emoji { font-size: 24px; line-height: 1; color: var(--muted); }
+.mood-day-label { font-size: 10.5px; font-weight: 650; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+
+@media (max-width: 640px) {
+  .mood-emoji { font-size: 27px; }
+  .mood-btn { min-height: 66px; padding-inline: 2px; }
+  .mood-label { font-size: 9.5px; }
+}
+
+/* ── Cross-device hardening ────────────────────────────── */
+/* 1. iOS Safari zooms the page when an input smaller than 16px gains focus.
+      On touch devices we bump text-entry controls to 16px so the page never
+      jumps; desktop keeps the tighter typography. */
+@media (pointer: coarse) {
+  input:not([type='checkbox']):not([type='radio']),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* 2. Kill the grey tap flash on iOS/Android and the 300ms double-tap delay. */
+html { -webkit-tap-highlight-color: transparent; }
+button, a, [role='button'], .seg, .chip, .dot-btn, .heat-cell { touch-action: manipulation; }
+
+/* 3. Momentum scrolling in the sheet/dialog on iOS. */
+.sheet, [role='dialog'] .form, .palette { overscroll-behavior: contain; }
+
+/* 4. Respect the device text-scale setting on iOS (body text grows if the
+      user asked for larger type). */
+html { -webkit-text-size-adjust: 100%; }
+
+/* 5. Long-press callout images/text: keep images from being dragged on
+      Android while reordering cards stays deliberate. */
+img { -webkit-user-drag: none; }
+
+/* 6. Fine-pointer hover reveals (hidden affordances) get a static fallback on
+      touch, so nothing is discoverable only via hover. */
+@media (hover: none) {
+  .note-card > .text-btn { opacity: 1; }
+}

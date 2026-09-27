@@ -108,3 +108,15 @@ test('weather card appears when enabled, from a stubbed forecast', async ({ page
   await expect(page.locator('.weather-card')).toContainText('18°');
   await expect(page.locator('.weather-card')).toContainText('Helsinki');
 });
+
+test('daily mood check-in saves and re-selects', async ({ page }) => {
+  await expect(page.getByText('How did today feel?')).toBeVisible();
+  await page.getByRole('button', { name: 'Log today as Glowing' }).click();
+  await expect(page.getByText('Today felt glowing')).toBeVisible();
+  const stored = await page.evaluate(
+    () => (JSON.parse(localStorage.getItem('personal-planner.v1') ?? '{}').moods as Array<{ value: number }>)[0]?.value,
+  );
+  expect(stored).toBe(5);
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Log today as Glowing' })).toHaveAttribute('aria-pressed', 'true');
+});

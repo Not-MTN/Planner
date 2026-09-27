@@ -32,7 +32,7 @@ import { WelcomeCard } from '../components/WelcomeCard';
 import { EventRow, FixedEventRow, HabitRow, IntentionField, NowMark, TaskRow } from '../components/items';
 import { Empty, Meter, Ring } from '../components/ui';
 import { ChevronLeftIcon, ChevronRightIcon, PlusIcon, SparklesIcon, StopwatchIcon } from '../icons';
-import type { Habit } from '../types';
+import type { Habit, MoodValue } from '../types';
 import { autoSchedule } from '../scheduler';
 import { t } from '../i18n';
 
@@ -60,7 +60,10 @@ export function DayView({ date }: { date: string }) {
     const complete = score.total > 0 && score.done === score.total;
     if (complete && !celebrateRef.current) {
       celebrate();
-      flash(t("Day complete. Beautifully done."));
+      flash(t("Day complete. Beautifully done."), {
+        label: t("How did it feel?"),
+        run: () => document.querySelector('[data-mood-card]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }),
+      });
     }
     celebrateRef.current = complete;
   }, [score.total, score.done, celebrate, flash]);
@@ -195,6 +198,7 @@ export function DayView({ date }: { date: string }) {
 
       {fresh && isToday ? <WelcomeCard /> : null}
       {isToday ? <WeatherCard /> : null}
+      {isToday ? <MoodCard date={today} /> : null}
       {essentials.length > 0 ? <EssentialsCard date={date} habits={essentials} /> : null}
 
       <IntentionField key={date} date={date} />
@@ -395,6 +399,68 @@ function JournalCard({ date }: { date: string }) {
         onChange={(event) => setBody(event.target.value)}
         onBlur={() => save(body)}
       />
+    </section>
+  );
+}
+
+const MOODS: Array<{ value: MoodValue; emoji: string; label: string; line: string }> = [
+  { value: 1, emoji: '😩', label: t("Drained"), line: t("Rough days count too. Be gentle with yourself tonight.") },
+  { value: 2, emoji: '😕', label: t("Down"), line: t("Feeling down still counts as showing up. Noted with care.") },
+  { value: 3, emoji: '🙂', label: t("Steady"), line: t("Steady is a quiet win. Nicely held.") },
+  { value: 4, emoji: '😄', label: t("Bright"), line: t("Bright! Notice what made it work — do more of that.") },
+  { value: 5, emoji: '🤩', label: t("Glowing"), line: t("Glowing! Bottle this feeling. You earned it.") },
+];
+
+/**
+ * The daily mood check-in — one honest tap about how the day felt. Big, warm,
+ * and a little playful on purpose: this is where the reward for showing up
+ * lives. Logging a top mood fires the confetti.
+ */
+function MoodCard({ date }: { date: string }) {
+  const { state, logMood, celebrate } = usePlanner();
+  const mood = state.moods.find((entry) => entry.date === date);
+  const invited = !mood && new Date().getHours() >= 16;
+  const meta = mood ? MOODS.find((item) => item.value === mood.value) : null;
+
+  const pick = (value: MoodValue) => {
+    if (mood?.value === value) {
+      logMood(date, null);
+      return;
+    }
+    logMood(date, value);
+    if (value === 5) celebrate();
+  };
+
+  return (
+    <section className={cx('card', 'mood-card', invited && 'invited', mood && `mood-${mood.value} has-mood`)} data-mood-card>
+      <header className="card-head">
+        <div>
+          <p className="kicker">{t("Daily check-in")}</p>
+          <h2 className="card-title">{mood ? t("Today felt {0}", { 0: meta?.label.toLowerCase() ?? '' }) : t("How did today feel?")}</h2>
+        </div>
+        {mood ? <span className="mood-current" aria-hidden="true">{meta?.emoji}</span> : null}
+      </header>
+      <div className="mood-row" role="group" aria-label={t("How today felt, 1 to 5")}>
+        {MOODS.map((item) => (
+          <button
+            key={item.value}
+            type="button"
+            className={cx('mood-btn', mood?.value === item.value && 'on')}
+            aria-label={t("Log today as {0}", { 0: item.label })}
+            aria-pressed={mood?.value === item.value}
+            title={mood?.value === item.value ? t("Tap again to clear") : item.label}
+            onClick={() => pick(item.value)}
+          >
+            <span className="mood-emoji" aria-hidden="true">{item.emoji}</span>
+            <span className="mood-label">{item.label}</span>
+          </button>
+        ))}
+      </div>
+      {meta ? (
+        <p className="mood-line" role="status">{meta.line}</p>
+      ) : (
+        <p className="mood-line dim">{t("One tap, no judgment — tomorrow you can see the pattern.")}</p>
+      )}
     </section>
   );
 }

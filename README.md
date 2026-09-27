@@ -96,6 +96,7 @@ Settings → **Language** switches the whole interface to Persian with a right-t
 - **Update toast** — when a new version is deployed, a quiet "Update now" bar appears instead of a silent reload.
 - **PWA shortcuts** — long-press the app icon for Today, Quick add (`#/today?qa=1` drops the caret into quick add), Calendar, and Tasks.
 - **Faster first paint** — Calendar, Insights, and the AI coach load their code on first visit instead of in the main bundle.
+- **Daily mood check-in** — five big, warm faces on Today (drained → glowing). One tap, no judgment; the card glows to invite you each evening, and logging a glowing day fires the confetti. Tapping a finished task also drops a small rotating "well done" toast — the reward is the point. Insights shows your last 7 days of feelings with a running average.
 - **Jalali dates** — optionally shows the Persian (Jalali) date alongside Gregorian dates (Settings → Calendar, dates & time).
 
 ## xAI (Grok) setup

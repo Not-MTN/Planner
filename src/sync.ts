@@ -145,6 +145,12 @@ export function mergeStates(local: PlannerState, remote: PlannerState): PlannerS
   for (const item of [...remote.completions, ...local.completions]) completions.set(completionKey(item), item);
   const focus = new Map(remote.focusLog.map((item) => [item.id, item]));
   for (const item of local.focusLog) focus.set(item.id, item);
+  // Day moods: one entry per date, the newest check-in wins.
+  const moods = new Map(remote.moods.map((item) => [item.date, item]));
+  for (const item of local.moods) {
+    const existing = moods.get(item.date);
+    if (!existing || existing.updatedAt <= item.updatedAt) moods.set(item.date, item);
+  }
   const habits = mergeById(local.habits, remote.habits);
   const habitIds = new Set(habits.map((habit) => habit.id));
   return {
@@ -156,6 +162,7 @@ export function mergeStates(local: PlannerState, remote: PlannerState): PlannerS
     completions: [...completions.values()].filter((item) => habitIds.has(item.habitId)),
     goals: mergeById(local.goals, remote.goals),
     notes: mergeById(local.notes, remote.notes),
+    moods: [...moods.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(-2000),
     intentions: { ...remote.intentions, ...local.intentions },
     focusLog: [...focus.values()].sort((a, b) => a.endedAt.localeCompare(b.endedAt)).slice(-2000),
   };

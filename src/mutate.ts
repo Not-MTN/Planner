@@ -10,6 +10,8 @@ import type {
   FixedCommitmentInput,
   GoalInput,
   HabitInput,
+  MoodEntry,
+  MoodValue,
   NoteInput,
   PlannerState,
   TaskInput,
@@ -704,6 +706,18 @@ export function updateNote(state: PlannerState, id: string, patch: Partial<NoteI
 
 export function deleteNote(state: PlannerState, id: string): PlannerState {
   return { ...state, notes: state.notes.filter((note) => note.id !== id) };
+}
+
+/**
+ * Record how a day felt (1 drained → 5 glowing). One entry per day — logging
+ * again replaces it; passing null clears the day.
+ */
+export function setMood(state: PlannerState, date: string, value: MoodValue | null, taskId?: string, now = nowIso()): PlannerState {
+  const rest = state.moods.filter((entry) => entry.date !== date);
+  if (value === null) return { ...state, moods: rest };
+  const entry: MoodEntry = { date, value, updatedAt: now };
+  if (taskId) entry.taskId = taskId;
+  return { ...state, moods: [...rest, entry].sort((a, b) => a.date.localeCompare(b.date)).slice(-2000) };
 }
 
 export function setIntention(state: PlannerState, date: string, text: string): PlannerState {

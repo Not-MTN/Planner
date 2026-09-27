@@ -1,7 +1,7 @@
 import { ACCENTS, HABIT_ICONS, NOTE_KINDS, PRIORITIES } from './constants';
 import { isValidISODate, isValidTime, localDateFromTimestamp, timeToMinutes } from './dates';
 import { REPEAT_SET } from './recurrence';
-import { createEmptyState, type AIMemory, type AIMemoryCategory, type FixedCommitment, type FocusLog, type HabitCompletion, type Subtask, type TaskRepeat, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type Task } from './types';
+import { createEmptyState, type AIMemory, type AIMemoryCategory, type FixedCommitment, type FocusLog, type HabitCompletion, type MoodEntry, type MoodValue, type Subtask, type TaskRepeat, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type Task } from './types';
 import { t } from './i18n';
 
 export const STORAGE_KEY = 'personal-planner.v1';
@@ -339,6 +339,18 @@ export function sanitizeState(raw: unknown): PlannerState | null {
     const note = sanitizeNote(item);
     return note ? [note] : [];
   }) : [], (item) => item.id);
+  const moodSeen = new Set<string>();
+  const moods = (Array.isArray(source.moods) ? source.moods : []).flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const rawItem = item as Record<string, unknown>;
+    const date = asString(rawItem.date, 10);
+    const value = typeof rawItem.value === 'number' ? Math.round(rawItem.value) : 0;
+    if (!date || !isValidISODate(date) || value < 1 || value > 5 || moodSeen.has(date)) return [];
+    moodSeen.add(date);
+    const entry: MoodEntry = { date, value: value as MoodValue, updatedAt: asString(rawItem.updatedAt, 40) || new Date(0).toISOString() };
+    if (typeof rawItem.taskId === 'string' && rawItem.taskId.length <= 80) entry.taskId = rawItem.taskId;
+    return [entry];
+  });
   const intentions: Record<string, string> = {};
   if (source.intentions && typeof source.intentions === 'object' && !Array.isArray(source.intentions)) {
     for (const [key, value] of Object.entries(source.intentions)) {
@@ -355,6 +367,7 @@ export function sanitizeState(raw: unknown): PlannerState | null {
     completions,
     goals,
     notes,
+    moods,
     intentions,
     focusLog: sanitizeFocusLog(source.focusLog),
   };
