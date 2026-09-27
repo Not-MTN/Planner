@@ -111,6 +111,7 @@ describe('app smoke', () => {
     await act(async () => {
       input?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
     });
+    await settle();
     expect(text()).toContain('How your days are taking shape');
     expect(document.querySelectorAll('[aria-label="Progress charts"] .chart-card')).toHaveLength(2);
     expect(document.querySelectorAll('[aria-label="Focus and rhythm"] .chart-card')).toHaveLength(2);
@@ -153,7 +154,7 @@ describe('app smoke', () => {
     );
     await act(async () => {
       habitsNav?.click();
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 120));
     });
     expect(text()).toContain('Repeat what you want to keep');
     const chip = [...document.querySelectorAll<HTMLButtonElement>('.preset-chip')].find((button) =>
@@ -162,7 +163,7 @@ describe('app smoke', () => {
     expect(chip).toBeTruthy();
     await act(async () => {
       chip?.click();
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 120));
     });
     expect(document.querySelector('.habit-card')).toBeTruthy();
     expect(text()).toContain('Drink water');
@@ -189,7 +190,7 @@ describe('app smoke', () => {
     );
     await act(async () => {
       aiNav?.click();
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 120));
     });
     expect(text()).toContain('Make a plan that fits');
     expect(text()).toContain('Weekly fixed times');
@@ -211,7 +212,7 @@ describe('app smoke', () => {
     const aiNav = [...document.querySelectorAll<HTMLButtonElement>('.nav-link')].find((button) => button.textContent?.includes('AI coach'));
     await act(async () => {
       aiNav?.click();
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 120));
     });
     expect(text()).toContain('AI memory');
     const memory = document.querySelector<HTMLTextAreaElement>('.ai-memory-form textarea');
@@ -229,7 +230,7 @@ describe('app smoke', () => {
     const aiAgain = [...document.querySelectorAll<HTMLButtonElement>('.nav-link')].find((button) => button.textContent?.includes('AI coach'));
     await act(async () => {
       aiAgain?.click();
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 120));
     });
     expect(text()).toContain('I keep Sunday evenings for family.');
   });
@@ -239,7 +240,7 @@ describe('app smoke', () => {
     const aiNav = [...document.querySelectorAll<HTMLButtonElement>('.nav-link')].find((button) => button.textContent?.includes('AI coach'));
     await act(async () => {
       aiNav?.click();
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 120));
     });
     const settings = [...document.querySelectorAll<HTMLButtonElement>('.ai-head-actions button')].find((button) => button.textContent?.includes('AI settings'));
     act(() => settings?.click());
@@ -268,6 +269,28 @@ describe('app smoke', () => {
     expect(text()).toContain('keep going');
   });
 
+  it('shows shared space, feeds, weather, import and templates in settings', async () => {
+    mountApp();
+    click(document.querySelector('[aria-label="Settings"]') ?? buttonByText('Settings'));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    for (const label of ['Shared space', 'Calendar feeds', 'Weather on Today', 'Move your tasks in', 'Templates']) {
+      expect(text()).toContain(label);
+    }
+    // Shared space: create a room from the button.
+    const create = [...document.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Create a shared space'));
+    expect(create).toBeTruthy();
+    await act(async () => {
+      create?.click();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    expect(text()).toContain('Shared space is on');
+    expect(window.localStorage.getItem('planner-shared')).toContain('"code"');
+    // Templates: seeded starters are listed and removable.
+    expect(text()).toContain('Trip packing');
+  });
+
   it('navigates between the main views', async () => {
     mountApp();
     const calendar = [...document.querySelectorAll<HTMLButtonElement>('.nav-link')].find((button) =>
@@ -275,7 +298,7 @@ describe('app smoke', () => {
     );
     await act(async () => {
       calendar?.click();
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 120));
     });
     expect(text()).toContain('Seven days, loosely held');
     const monthTab = [...document.querySelectorAll<HTMLButtonElement>('.cal-tabs .seg')].find((button) =>
@@ -283,11 +306,18 @@ describe('app smoke', () => {
     );
     await act(async () => {
       monthTab?.click();
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 120));
     });
     expect(document.querySelector('.month-grid')).toBeTruthy();
   });
 });
+
+/** Await the lazy route chunks (Calendar / Insights / AI). */
+async function settle(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  });
+}
 
 function click(element: Element | null | undefined): void {
   if (!element) throw new Error('element missing');

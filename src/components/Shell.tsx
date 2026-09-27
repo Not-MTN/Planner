@@ -29,14 +29,17 @@ import { FocusTimer } from './FocusTimer';
 import { Palette } from './Palette';
 import { SettingsSheet } from './SettingsSheet';
 import { LoadingScreen, Modal } from './ui';
-import { CalendarView } from '../views/CalendarView';
+import { lazy, Suspense } from 'react';
 import { DayView } from '../views/DayView';
 import { GoalsView } from '../views/GoalsView';
 import { HabitsView } from '../views/HabitsView';
-import { InsightsView } from '../views/InsightsView';
 import { NotesView } from '../views/NotesView';
 import { TasksView } from '../views/TasksView';
-import { AIView } from '../views/AIView';
+
+const CalendarView = lazy(() => import('../views/CalendarView').then((m) => ({ default: m.CalendarView })));
+const InsightsView = lazy(() => import('../views/InsightsView').then((m) => ({ default: m.InsightsView })));
+const AIView = lazy(() => import('../views/AIView').then((m) => ({ default: m.AIView })));
+import { applyUpdate, onUpdateAvailable } from '../pwa';
 import { t } from '../i18n';
 
 const NAV = [
@@ -98,6 +101,18 @@ export function Shell() {
       behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
     });
   }, [route.name]);
+
+  const [updateReady, setUpdateReady] = useState(false);
+  useEffect(() => onUpdateAvailable(() => setUpdateReady(true)), []);
+
+  // The PWA shortcut / #/today?qa=1 deep link: drop the caret straight into quick add.
+  useEffect(() => {
+    if (route.name !== 'quickadd') return;
+    const id = window.setTimeout(() => {
+      (document.querySelector<HTMLInputElement>('.quick-add input') ?? document.querySelector<HTMLInputElement>('input[aria-autocomplete]'))?.focus();
+    }, 120);
+    return () => window.clearTimeout(id);
+  }, [route.name, key]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -271,15 +286,17 @@ export function Shell() {
                 </div>
               ) : null}
               <div key={key} className="view-enter">
-                {route.name === 'today' ? <DayView date={today} /> : null}
-                {route.name === 'day' ? <DayView date={route.date} /> : null}
-                {route.name === 'calendar' ? <CalendarView /> : null}
-                {route.name === 'tasks' ? <TasksView /> : null}
-                {route.name === 'habits' ? <HabitsView /> : null}
-                {route.name === 'goals' ? <GoalsView /> : null}
-                {route.name === 'notes' ? <NotesView /> : null}
-                {route.name === 'insights' ? <InsightsView /> : null}
-                {route.name === 'ai' ? <AIView /> : null}
+                <Suspense fallback={<LoadingScreen />}>
+                  {route.name === 'today' || route.name === 'quickadd' ? <DayView date={today} /> : null}
+                  {route.name === 'day' ? <DayView date={route.date} /> : null}
+                  {route.name === 'calendar' ? <CalendarView /> : null}
+                  {route.name === 'tasks' ? <TasksView /> : null}
+                  {route.name === 'habits' ? <HabitsView /> : null}
+                  {route.name === 'goals' ? <GoalsView /> : null}
+                  {route.name === 'notes' ? <NotesView /> : null}
+                  {route.name === 'insights' ? <InsightsView /> : null}
+                  {route.name === 'ai' ? <AIView /> : null}
+                </Suspense>
               </div>
             </>
           )}
@@ -350,6 +367,17 @@ export function Shell() {
             </div>
           </div>
         </Modal>
+      ) : null}
+      {updateReady ? (
+        <div className="toast update-toast" role="status">
+          <span>{t("A new version of Planner is ready.")}</span>
+          <button type="button" className="toast-action" onClick={() => applyUpdate()}>
+            {t("Update now")}
+          </button>
+          <button type="button" className="toast-action" onClick={() => setUpdateReady(false)} aria-label={t("Later")}>
+            {t("Later")}
+          </button>
+        </div>
       ) : null}
       {notice ? (
         <div className="toast" role="status">

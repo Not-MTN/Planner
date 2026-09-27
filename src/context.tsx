@@ -52,7 +52,7 @@ import {
   updateNote as updateNoteIn,
   updateTask as updateTaskIn,
 } from './mutate';
-import { loadDisplayPrefs, loadWeekStart, setDisplayPrefs as storeDisplayPrefs, setWeekStart as storeWeekStart, todayISO, type DateLanguage, type TimeFormat, type WeekStart } from './dates';
+import { loadDisplayPrefs, loadWeekStart, setDisplayPrefs as storeDisplayPrefs, setWeekStart as storeWeekStart, todayISO, type DisplayPrefs, type WeekStart } from './dates';
 import { dueReminders, loadFired, loadReminderSettings, saveFired, saveReminderSettings, showNotification, type ReminderSettings } from './reminders';
 import { buildSampleState } from './sample';
 import { deleteRemote, EMPTY_SYNC, generateCode, loadSyncSettings, mergeStates, normalizeCode, saveSyncSettings, SyncError, syncConfigured, syncOnce, type SyncSettings } from './sync';
@@ -145,8 +145,8 @@ interface PlannerContextValue {
   confettiSeed: number;
   reminders: ReminderSettings;
   weekStart: WeekStart;
-  display: { dateLanguage: DateLanguage; timeFormat: TimeFormat };
-  setDisplay: (prefs: { dateLanguage: DateLanguage; timeFormat: TimeFormat }) => void;
+  display: DisplayPrefs;
+  setDisplay: (prefs: DisplayPrefs) => void;
   sync: SyncSettings;
   syncStatus: SyncStatus;
   syncMessage: string | null;
@@ -790,7 +790,7 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     }
   }, [stopSync, flash]);
 
-  const setDisplay = useCallback((prefs: { dateLanguage: DateLanguage; timeFormat: TimeFormat }) => {
+  const setDisplay = useCallback((prefs: DisplayPrefs) => {
     storeDisplayPrefs(prefs);
     setDisplayState(prefs);
   }, []);
