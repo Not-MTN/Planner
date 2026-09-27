@@ -9,6 +9,7 @@ import type { NextHandleFunction } from 'connect';
 import { handleXAIChatCompletions, handleXAIStatus } from './src/server/xaiProxy';
 import { API_SECURITY_HEADERS } from './src/server/security';
 import { handleSync, handleSyncStatus, neonStore } from './src/server/sync';
+import { handleICS } from './src/server/icsProxy';
 
 // API responses can use a deny-all CSP; the HTML document needs its own app CSP,
 // which is configured in vercel.json. Do not put the API CSP on Vite's HTML page.
@@ -109,13 +110,44 @@ function syncApi(databaseUrl: string | undefined): Plugin {
   };
 }
 
+function icsHandler(): NextHandleFunction {
+  return (request, response, next) => {
+    const url = request.url ?? '';
+    if (!url.startsWith('/ics')) {
+      next();
+      return;
+    }
+    void handleICS(toWebRequest(request, `/api${url}`))
+      .then((webResponse) => sendWebResponse(webResponse, response))
+      .catch(() => {
+        if (response.headersSent) return;
+        response.statusCode = 500;
+        response.setHeader('Content-Type', 'application/json');
+        response.end(JSON.stringify({ error: { message: 'The local calendar proxy failed.' } }));
+      });
+  };
+}
+
+function icsApi(): Plugin {
+  const middleware = icsHandler();
+  return {
+    name: 'planner-ics-api',
+    configureServer(server) {
+      server.middlewares.use('/api', middleware);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use('/api', middleware);
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => {
   // Read the secret only inside the Vite/Node process. It is never defined into the browser bundle.
   const fileEnv = loadEnv(mode, cwd(), '');
   const apiKey = env.XAI_API_KEY || fileEnv.XAI_API_KEY;
   const databaseUrl = env.DATABASE_URL || fileEnv.DATABASE_URL;
   return {
-    plugins: [react(), xaiProxy(apiKey), syncApi(databaseUrl)],
+    plugins: [react(), xaiProxy(apiKey), syncApi(databaseUrl), icsApi()],
     server: {
       host: '0.0.0.0',
       port: 5173,

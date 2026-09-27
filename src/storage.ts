@@ -1,7 +1,7 @@
 import { ACCENTS, HABIT_ICONS, NOTE_KINDS, PRIORITIES } from './constants';
 import { isValidISODate, isValidTime, localDateFromTimestamp, timeToMinutes } from './dates';
 import { REPEAT_SET } from './recurrence';
-import { createEmptyState, type AIMemory, type AIMemoryCategory, type FixedCommitment, type FocusLog, type Subtask, type TaskRepeat, type Goal, type Habit, type HabitFrequency, type Note, type PlannerEvent, type PlannerState, type Task } from './types';
+import { createEmptyState, type AIMemory, type AIMemoryCategory, type FixedCommitment, type FocusLog, type HabitCompletion, type Subtask, type TaskRepeat, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type Task } from './types';
 import { t } from './i18n';
 
 export const STORAGE_KEY = 'personal-planner.v1';
@@ -69,7 +69,32 @@ function sanitizeTask(value: unknown): Task | null {
     subtasks: sanitizeSubtasks(raw.subtasks),
     completedAt: asString(raw.completedAt, 40) || null,
     waiting: asString(raw.waiting, 140)?.trim() || null,
+    estimatedMinutes: sanitizeMinutes(raw.estimatedMinutes),
   };
+}
+
+function sanitizeMinutes(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  const minutes = Math.round(value);
+  return minutes >= 1 && minutes <= 1440 ? minutes : null;
+}
+
+function sanitizeUnit(value: unknown): HabitUnit | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const label = asString(raw.label, 20)?.trim().toLowerCase();
+  const target = typeof raw.target === 'number' && Number.isFinite(raw.target) ? Math.round(raw.target) : 0;
+  if (!label || target < 1 || target > 999) return null;
+  return { label: label.slice(0, 20), target };
+}
+
+function sanitizeEventSource(value: unknown): PlannerEvent['source'] {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const url = asString(raw.url, 400)?.trim();
+  const uid = asString(raw.uid, 200)?.trim();
+  if (!url || !uid || !/^https?:\/\//i.test(url)) return null;
+  return { url, uid };
 }
 
 function sanitizeSubtasks(value: unknown): Subtask[] {
@@ -151,6 +176,7 @@ function sanitizeEvent(value: unknown): PlannerEvent | null {
     createdAt: asString(raw.createdAt, 40) || new Date(0).toISOString(),
     updatedAt: asString(raw.updatedAt, 40) || new Date(0).toISOString(),
     repeat: REPEAT_SET.has(String(raw.repeat)) ? (raw.repeat as PlannerEvent['repeat']) : null,
+    source: sanitizeEventSource(raw.source),
   };
 }
 
@@ -200,6 +226,7 @@ function sanitizeHabit(value: unknown): Habit | null {
     createdOn: createdOn && isValidISODate(createdOn) ? createdOn : localDateFromTimestamp(createdAt),
     createdAt,
     updatedAt: asString(raw.updatedAt, 40) || createdAt,
+    unit: sanitizeUnit(raw.unit),
   };
 }
 
@@ -296,7 +323,11 @@ export function sanitizeState(raw: unknown): PlannerState | null {
         const key = `${habitId}|${date}`;
         if (completionSeen.has(key)) return [];
         completionSeen.add(key);
-        return [{ habitId, date }];
+        const rawValue = typeof rawItem.value === 'number' && Number.isFinite(rawItem.value) ? Math.round(rawItem.value) : null;
+        const entry: HabitCompletion = { habitId, date };
+        if (rawValue !== null && rawValue >= 0 && rawValue <= 999) entry.value = rawValue;
+        if (rawItem.skipped === true) entry.skipped = true;
+        return [entry];
       })
     : [];
   const goals = uniqueBy(Array.isArray(source.goals) ? source.goals.flatMap((item) => {

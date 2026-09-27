@@ -4,6 +4,7 @@ import type {
   AIMemoryCategory,
   AIMemoryInput,
   EventInput,
+  Habit,
   Subtask,
   TaskRepeat,
   FixedCommitmentInput,
@@ -85,9 +86,24 @@ export function addTask(state: PlannerState, input: TaskInput, id = uid(), now =
         subtasks: cleanSubtasks(input.subtasks),
         completedAt: null,
         waiting: input.waiting ? clean(input.waiting, 140) : null,
+        estimatedMinutes: cleanEstimate(input.estimatedMinutes),
       },
     ],
   };
+}
+
+function cleanEstimate(value: number | null | undefined): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  const minutes = Math.round(value);
+  return minutes >= 1 && minutes <= 1440 ? minutes : null;
+}
+
+function cleanUnit(value: HabitInput['unit']): Habit['unit'] {
+  if (!value || typeof value !== 'object') return null;
+  const label = String(value.label ?? '').trim().toLowerCase().slice(0, 20);
+  const target = Number.isFinite(value.target) ? Math.round(value.target) : 0;
+  if (!label || target < 1 || target > 999) return null;
+  return { label, target };
 }
 
 export function updateTask(state: PlannerState, id: string, patch: Partial<TaskInput>, now = nowIso()): PlannerState {
@@ -109,10 +125,36 @@ export function updateTask(state: PlannerState, id: string, patch: Partial<TaskI
         repeat: patch.repeat === undefined ? task.repeat : cleanRepeat(patch.repeat),
         subtasks: patch.subtasks === undefined ? task.subtasks : cleanSubtasks(patch.subtasks),
         waiting: patch.waiting === undefined ? task.waiting : patch.waiting ? clean(patch.waiting, 140) : null,
+        estimatedMinutes: patch.estimatedMinutes === undefined ? task.estimatedMinutes : cleanEstimate(patch.estimatedMinutes),
         updatedAt: now,
       };
     }),
   };
+}
+
+/** Apply the same patch to many tasks at once. Single undo covers the whole batch. */
+export function updateTasks(state: PlannerState, ids: string[], patch: Partial<TaskInput>, now = nowIso()): PlannerState {
+  return ids.reduce((next, id) => updateTask(next, id, patch, now), state);
+}
+
+/** Complete or reopen many tasks at once, honouring repeat rules like a single toggle would. */
+export function completeTasks(state: PlannerState, ids: string[], complete: boolean, now = nowIso(), today = todayISO()): PlannerState {
+  let next = state;
+  for (const id of ids) {
+    const task = next.tasks.find((item) => item.id === id);
+    if (!task || task.completed === complete) continue;
+    next = toggleTask(next, id, now, today, uid());
+  }
+  return next;
+}
+
+export function deleteTasks(state: PlannerState, ids: string[]): PlannerState {
+  const drop = new Set(ids);
+  return { ...state, tasks: state.tasks.filter((task) => !drop.has(task.id)) };
+}
+
+export function moveTasks(state: PlannerState, ids: string[], date: string | null, now = nowIso()): PlannerState {
+  return ids.reduce((next, id) => moveTask(next, id, date, now), state);
 }
 
 export function duplicateTask(state: PlannerState, id: string, now = nowIso(), nextId = uid()): PlannerState {
@@ -131,6 +173,7 @@ export function duplicateTask(state: PlannerState, id: string, now = nowIso(), n
       repeat: task.repeat,
       subtasks: task.subtasks.map((step) => ({ ...step, id: '', completed: false })),
       waiting: task.waiting,
+      estimatedMinutes: task.estimatedMinutes,
     },
     nextId,
     now,
@@ -281,6 +324,7 @@ export function addEvent(state: PlannerState, input: EventInput, id = uid(), now
         createdAt: now,
         updatedAt: now,
         repeat: cleanRepeat(input.repeat),
+        source: input.source ?? null,
       },
     ],
   };
@@ -309,6 +353,7 @@ export function updateEvent(state: PlannerState, id: string, patch: Partial<Even
         endTime,
         note: patch.note === undefined ? event.note : patch.note.trim().slice(0, 4000),
         repeat: patch.repeat === undefined ? event.repeat : cleanRepeat(patch.repeat),
+        source: patch.source === undefined ? event.source ?? null : patch.source,
         updatedAt: now,
       };
     }),
@@ -436,6 +481,7 @@ export function addHabit(
         createdOn,
         createdAt: now,
         updatedAt: now,
+        unit: cleanUnit(input.unit),
       },
     ],
   };
@@ -462,6 +508,7 @@ export function updateHabit(state: PlannerState, id: string, patch: Partial<Habi
         ...patch,
         name,
         essential: patch.essential === undefined ? habit.essential : patch.essential === true,
+        unit: patch.unit === undefined ? habit.unit : cleanUnit(patch.unit),
         updatedAt: now,
       };
     }),
@@ -484,14 +531,34 @@ export function deleteHabit(state: PlannerState, id: string): PlannerState {
 }
 
 export function toggleHabit(state: PlannerState, habitId: string, date: string): PlannerState {
-  if (!isValidISODate(date) || !state.habits.some((habit) => habit.id === habitId)) return state;
+  const habit = state.habits.find((item) => item.id === habitId);
+  if (!habit || !isValidISODate(date)) return state;
   const exists = state.completions.some((item) => item.habitId === habitId && item.date === date);
   return {
     ...state,
     completions: exists
       ? state.completions.filter((item) => !(item.habitId === habitId && item.date === date))
-      : [...state.completions, { habitId, date }],
+      : [...state.completions, habit.unit ? { habitId, date, value: habit.unit.target } : { habitId, date }],
   };
+}
+
+/** Record an amount for a unit-based habit; reaching the target marks the day done. 0 clears the day. */
+export function setHabitValue(state: PlannerState, habitId: string, date: string, value: number): PlannerState {
+  const habit = state.habits.find((item) => item.id === habitId);
+  if (!habit || !isValidISODate(date) || !Number.isFinite(value)) return state;
+  const amount = Math.max(0, Math.min(999, Math.round(value)));
+  const others = state.completions.filter((item) => !(item.habitId === habitId && item.date === date));
+  if (amount === 0) return { ...state, completions: others };
+  return { ...state, completions: [...others, { habitId, date, value: amount }] };
+}
+
+/** Toggle a deliberate rest day — neutral for streaks and stats. */
+export function skipHabit(state: PlannerState, habitId: string, date: string): PlannerState {
+  if (!isValidISODate(date) || !state.habits.some((habit) => habit.id === habitId)) return state;
+  const existing = state.completions.find((item) => item.habitId === habitId && item.date === date);
+  const others = state.completions.filter((item) => !(item.habitId === habitId && item.date === date));
+  if (existing?.skipped) return { ...state, completions: others };
+  return { ...state, completions: [...others, { habitId, date, skipped: true }] };
 }
 
 export function addGoal(state: PlannerState, input: GoalInput, id = uid(), milestoneId = uid(), now = nowIso()): PlannerState {

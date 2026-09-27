@@ -107,8 +107,13 @@ function parseDateValue(value: string, params: string): Parsed | null {
   return isValidISODate(date) && isValidTime(time) ? { date, time } : null;
 }
 
+export interface ICSEventInput extends EventInput {
+  /** ORIGINAL VEVENT UID — lets feed subscriptions refresh without duplicating. */
+  uid?: string;
+}
+
 export interface ICSImport {
-  events: EventInput[];
+  events: ICSEventInput[];
   tasks: TaskInput[];
   skipped: number;
 }
@@ -116,7 +121,7 @@ export interface ICSImport {
 /** Reads VEVENTs from an .ics file. Timed events become events; all-day events become dated tasks. */
 export function parseICS(text: string): ICSImport {
   const lines = text.replace(/\r\n?/g, '\n').replace(/\n[ \t]/g, '').split('\n');
-  const events: EventInput[] = [];
+  const events: ICSEventInput[] = [];
   const tasks: TaskInput[] = [];
   let skipped = 0;
   let current: Record<string, { value: string; params: string }> | null = null;
@@ -131,13 +136,14 @@ export function parseICS(text: string): ICSImport {
         const start = current.DTSTART ? parseDateValue(current.DTSTART.value, current.DTSTART.params) : null;
         const end = current.DTEND ? parseDateValue(current.DTEND.value, current.DTEND.params) : null;
         const note = unescapeText(current.DESCRIPTION?.value ?? '').slice(0, 4000);
+        const uid = (current.UID?.value ?? '').trim().slice(0, 200) || undefined;
         if (!summary || !start || events.length + tasks.length >= MAX_IMPORT) {
           skipped += 1;
         } else if (!start.time) {
           tasks.push({ title: summary, priority: 'medium', dueDate: start.date, dueTime: null, category: 'personal', note, goalId: null });
         } else {
           const endTime = end && end.date === start.date && end.time && end.time > start.time ? end.time : null;
-          events.push({ title: summary, date: start.date, startTime: start.time, endTime, category: 'personal', note, important: false });
+          events.push({ title: summary, date: start.date, startTime: start.time, endTime, category: 'personal', note, important: false, uid });
         }
       }
       current = null;

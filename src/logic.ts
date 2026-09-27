@@ -8,11 +8,30 @@ import {
   weekdayIndex,
 } from './dates';
 import { occursOn } from './recurrence';
-import type { DayScore, DotState, Goal, Habit, HabitFrequency, PlannerEvent, PlannerState, Task } from './types';
+import type { DayScore, DotState, Goal, Habit, HabitFrequency, Note, PlannerEvent, PlannerState, Task } from './types';
 import { t } from './i18n';
 
+export function completionFor(state: PlannerState, habitId: string, date: string) {
+  return state.completions.find((item) => item.habitId === habitId && item.date === date);
+}
+
 export function isDone(state: PlannerState, habitId: string, date: string): boolean {
-  return state.completions.some((item) => item.habitId === habitId && item.date === date);
+  const entry = completionFor(state, habitId, date);
+  if (!entry || entry.skipped) return false;
+  if (entry.value === undefined) return true; // plain binary check-in
+  const habit = state.habits.find((item) => item.id === habitId);
+  const target = habit?.unit?.target;
+  return target === undefined || entry.value >= target;
+}
+
+export function isSkipped(state: PlannerState, habitId: string, date: string): boolean {
+  return completionFor(state, habitId, date)?.skipped === true;
+}
+
+/** Progress for unit-based habits on one date; null for binary habits. */
+export function habitProgress(state: PlannerState, habit: Habit, date: string): { value: number; target: number } | null {
+  if (!habit.unit) return null;
+  return { value: completionFor(state, habit.id, date)?.value ?? 0, target: habit.unit.target };
 }
 
 export function isPlannedDay(habit: Habit, date: string): boolean {
@@ -37,6 +56,7 @@ export function isDueOn(state: PlannerState, habit: Habit, date: string): boolea
 export function habitDot(state: PlannerState, habit: Habit, date: string, today: string): DotState {
   if (date < habit.createdOn) return 'off';
   if (isDone(state, habit.id, date)) return 'done';
+  if (isSkipped(state, habit.id, date)) return 'skipped';
   if (habit.frequency.type === 'weekly') return date > today ? 'future' : 'optional';
   if (!isPlannedDay(habit, date)) return 'off';
   return date > today ? 'future' : 'open';
@@ -65,7 +85,8 @@ export function habitStats(
     const done = inRange.filter((date) => isDone(state, habit.id, date)).length;
     return { done, expected, ratio: expected === 0 ? 0 : Math.min(1, done / expected) };
   }
-  const planned = inRange.filter((date) => isPlannedDay(habit, date));
+  // Rest days neither count nor demand: stats measure days that were actually planned.
+  const planned = inRange.filter((date) => isPlannedDay(habit, date) && !isSkipped(state, habit.id, date));
   const done = planned.filter((date) => isDone(state, habit.id, date)).length;
   return { done, expected: planned.length, ratio: planned.length === 0 ? 0 : done / planned.length };
 }
@@ -158,7 +179,7 @@ export function dayScore(state: PlannerState, date: string, includeOpenFlexible 
   const tasks = tasksForDate(state, date);
   const events = eventsForDate(state, date).filter((event) => !event.fixedCommitmentId);
   const fixed = state.habits.filter(
-    (habit) => !habit.archived && habit.frequency.type !== 'weekly' && isPlannedDay(habit, date),
+    (habit) => !habit.archived && habit.frequency.type !== 'weekly' && isPlannedDay(habit, date) && !isSkipped(state, habit.id, date),
   );
   const flexibleDone = state.habits.filter(
     (habit) => !habit.archived && habit.frequency.type === 'weekly' && isDone(state, habit.id, date),
@@ -412,6 +433,8 @@ export function habitStreaks(state: PlannerState, habit: Habit, today: string): 
       if (isDone(state, habit.id, cursor)) {
         run += 1;
         best = Math.max(best, run);
+      } else if (isSkipped(state, habit.id, cursor)) {
+        // A rest day keeps the streak alive but doesn't extend it.
       } else if (cursor < today) {
         run = 0;
       }
@@ -505,7 +528,72 @@ export function weekDoneCount(state: PlannerState, dates: string[]): number {
 }
 
 export function essentialHabits(state: PlannerState, date: string): Habit[] {
-  return state.habits.filter((habit) => !habit.archived && habit.essential && isDueOn(state, habit, date));
+  return state.habits.filter(
+    (habit) => !habit.archived && habit.essential && isDueOn(state, habit, date) && !isSkipped(state, habit.id, date),
+  );
+}
+
+// ── Note links & daily journal ───────────────────────────────────────────
+
+/** Titles linked from a note body via [[note title]] (case-insensitive). */
+export function extractLinks(body: string): string[] {
+  const out = new Set<string>();
+  for (const match of body.matchAll(/\[\[([^\]|]{1,120})(?:\|([^\]]{1,120}))?\]\]/g)) {
+    const title = (match[1] ?? '').trim();
+    if (title) out.add(title);
+  }
+  return [...out];
+}
+
+/** Other notes that link to `note` by title (case-insensitive). */
+export function noteBacklinks(notes: Note[], note: Note): Note[] {
+  const wanted = note.title.trim().toLowerCase();
+  if (!wanted) return [];
+  return notes.filter(
+    (other) => other.id !== note.id && extractLinks(`${other.title}\n${other.body}`).some((title) => title.toLowerCase() === wanted),
+  );
+}
+
+/** The journal note for one date (kind 'journal', date set), if written. */
+export function journalForDate(notes: Note[], date: string): Note | undefined {
+  return notes.find((note) => note.kind === 'journal' && note.date === date);
+}
+
+// ── Time estimates vs. recorded focus ────────────────────────────────────
+
+export interface PlannedFocused {
+  date: string;
+  /** Sum of estimates on tasks that were due or completed that day. */
+  planned: number;
+  /** Focus minutes actually logged that day. */
+  focused: number;
+}
+
+/** Per-day planned minutes (task estimates) vs. logged focus minutes, for the last `days` days. */
+export function planVsFocus(state: PlannerState, today: string, days = 7): PlannedFocused[] {
+  return Array.from({ length: days }, (_, index) => addDays(today, index - (days - 1))).map((date) => {
+    const planned = state.tasks
+      .filter(
+        (task) =>
+          task.estimatedMinutes &&
+          (task.dueDate === date || (task.completed && task.completedAt && task.completedAt.slice(0, 10) === date)),
+      )
+      .reduce((sum, task) => sum + (task.estimatedMinutes ?? 0), 0);
+    const focused = state.focusLog.filter((item) => item.date === date).reduce((sum, item) => sum + item.minutes, 0);
+    return { date, planned, focused };
+  });
+}
+
+/** Whole-year day-completion data for the year-in-pixels wall. */
+export function yearPixels(state: PlannerState, year: number): Array<{ date: string; score: DayScore }> {
+  const result: Array<{ date: string; score: DayScore }> = [];
+  let cursor = `${year}-01-01`;
+  const end = `${year}-12-31`;
+  while (cursor <= end) {
+    result.push({ date: cursor, score: dayScore(state, cursor) });
+    cursor = addDays(cursor, 1);
+  }
+  return result;
 }
 
 export function isEmptyState(state: PlannerState): boolean {

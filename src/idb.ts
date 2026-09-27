@@ -36,9 +36,9 @@ async function run<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) 
 }
 
 /** Serialized planner JSON (the same format as backups). */
-export async function idbRead(): Promise<string | null> {
+export async function idbRead(key = KEY): Promise<string | null> {
   try {
-    const value = await run('readonly', (store) => store.get(KEY) as IDBRequest<unknown>);
+    const value = await run('readonly', (store) => store.get(key) as IDBRequest<unknown>);
     return typeof value === 'string' ? value : null;
   } catch {
     return null;
@@ -48,16 +48,16 @@ export async function idbRead(): Promise<string | null> {
 let queue: Promise<unknown> = Promise.resolve();
 
 /** Writes are serialised so an older write can never land after a newer one. */
-export function idbWrite(serialized: string): Promise<boolean> {
+export function idbWrite(serialized: string, key = KEY): Promise<boolean> {
   const next = queue.then(
-    () => run('readwrite', (store) => store.put(serialized, KEY)).then(() => true, () => false),
+    () => run('readwrite', (store) => store.put(serialized, key)).then(() => true, () => false),
   );
   queue = next;
   return next;
 }
 
-export function idbClear(): Promise<boolean> {
-  const next = queue.then(() => run('readwrite', (store) => store.delete(KEY)).then(() => true, () => false));
+export function idbClear(key = KEY): Promise<boolean> {
+  const next = queue.then(() => run('readwrite', (store) => store.delete(key)).then(() => true, () => false));
   queue = next;
   return next;
 }

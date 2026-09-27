@@ -13,6 +13,7 @@ export interface QuickAddParse {
   priority: Priority | null;
   category: string | null;
   repeat: TaskRepeat | null;
+  estimatedMinutes: number | null;
   chips: string[];
 }
 
@@ -189,6 +190,17 @@ export function parseQuickAdd(input: string, defaultDate: string | null): QuickA
     }
   }
 
+  // Effort estimates: ~45, ~45m, ~90min, ~1h, ~1.5h, ~1h30m
+  let estimatedMinutes: number | null = null;
+  for (const token of tokens) {
+    if (token.used) continue;
+    const estimate = parseEstimateToken(token.text);
+    if (estimate !== null) {
+      estimatedMinutes = estimate;
+      token.used = true;
+    }
+  }
+
   // Repeat phrases: "daily", "every day", "every weekday", "every mon", "weekly" …
   let repeat: TaskRepeat | null = null;
   const SOLO: Record<string, TaskRepeat> = { daily: 'daily', weekly: 'weekly', monthly: 'monthly', yearly: 'yearly', annually: 'yearly', weekdays: 'weekdays' };
@@ -320,6 +332,7 @@ export function parseQuickAdd(input: string, defaultDate: string | null): QuickA
   if (priority) chips.push(labelPriority(priority));
   if (category) chips.push(labelCategory(category));
   if (repeat && kind === 'task') chips.push(`↻ ${repeatLabel(repeat)}`);
+  if (estimatedMinutes !== null && kind === 'task') chips.push(`≈ ${formatEstimate(estimatedMinutes)}`);
 
   return {
     kind,
@@ -330,6 +343,24 @@ export function parseQuickAdd(input: string, defaultDate: string | null): QuickA
     priority,
     category,
     repeat: kind === 'task' ? repeat : null,
+    estimatedMinutes: kind === 'task' ? estimatedMinutes : null,
     chips,
   };
+}
+
+/** "~45m", "~1h30m", "~2h", "~90" → minutes, or null. */
+function parseEstimateToken(token: string): number | null {
+  const match = /^~(?:(\d+(?:\.\d+)?)h(?:ours?)?)?(?:(\d+)\s*(?:m|min|mins|minutes)?)?$/i.exec(token.trim());
+  if (!match || (match[1] === undefined && match[2] === undefined)) return null;
+  const hours = match[1] !== undefined ? Number(match[1]) : 0;
+  const minutes = match[2] !== undefined ? Number(match[2]) : 0;
+  const total = Math.round(hours * 60 + minutes);
+  return total >= 1 && total <= 720 ? total : null;
+}
+
+export function formatEstimate(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours} h ${rest} min` : `${hours} h`;
 }

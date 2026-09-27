@@ -35,6 +35,7 @@ export function QuickAddBar({ defaultDate, placeholder }: { defaultDate?: string
         note: '',
         goalId: null,
         repeat: parse.repeat,
+        estimatedMinutes: parse.estimatedMinutes,
       });
       flash(t("Task “{0}” added.", { 0: parse.title }), { label: t("Undo"), run: undo });
     }
