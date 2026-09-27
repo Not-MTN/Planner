@@ -11,6 +11,8 @@ npm run dev
 
 Other scripts: `npm run typecheck`, `npm test`, `npm run build`, `npm run test:e2e` (browser tests — run `npx playwright install chromium` once first).
 
+See [SECURITY.md](SECURITY.md) for the threat model, deployment hardening, privacy boundaries, and vulnerability reporting process. No app can be guaranteed unhackable; protect the device, browser profile, sync code, and server secrets too.
+
 ## Sync across devices (Neon)
 
 1. Create a project at [neon.tech](https://neon.tech) and copy the connection string (Dashboard → **Connect**).

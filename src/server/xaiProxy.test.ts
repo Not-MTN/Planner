@@ -6,11 +6,14 @@ import * as statusRoute from '../../api/xai/status';
 import { MAX_PLAN_IMAGE_BYTES, XAI_CHAT_URL, XAI_STATUS_URL } from '../ai';
 import {
   MAX_PROXY_BODY_BYTES,
+  XAI_ALLOWED_MODEL,
   XAI_UPSTREAM_CHAT_COMPLETIONS,
   handleXAIChatCompletions,
   handleXAIStatus,
   isSameOriginRequest,
+  validateChatPayload,
 } from './xaiProxy';
+import { resetRateLimits } from './security';
 
 // Obviously fake placeholder; never a real credential.
 const FAKE_KEY = 'test-placeholder-not-a-real-key';
@@ -136,6 +139,18 @@ describe('chat completions route', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('validates the narrow proxy payload and rejects remote image URLs or extra fields', () => {
+    const valid = JSON.parse(chatBody()) as Record<string, unknown>;
+    expect(validateChatPayload(valid)).toBeNull();
+    expect(validateChatPayload({ ...valid, model: 'another-model' })).toContain('model');
+    expect(XAI_ALLOWED_MODEL).toBe('grok-4.7');
+    expect(validateChatPayload({ ...valid, stream: true })).toContain('unsupported');
+    expect(validateChatPayload({
+      ...valid,
+      messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: 'https://example.com/secret.png' } }] }],
+    })).toContain('invalid');
+  });
+
   it('passes upstream errors through and maps network failures and timeouts', async () => {
     const rejected = await handleXAIChatCompletions(request('/api/xai/chat/completions', { method: 'POST', body: chatBody() }), FAKE_KEY, {
       fetchImpl: async () => new Response(JSON.stringify({ error: 'bad key' }), { status: 401 }),
@@ -152,6 +167,25 @@ describe('chat completions route', () => {
   });
 });
 
+describe('abuse controls', () => {
+  it('throttles repeated xAI proxy calls before the upstream key is used again', async () => {
+    resetRateLimits();
+    const fetchMock = upstreamOk();
+    let last: Response | null = null;
+    for (let index = 0; index < 21; index += 1) {
+      last = await handleXAIChatCompletions(
+        request('/api/xai/chat/completions', { method: 'POST', body: chatBody() }),
+        FAKE_KEY,
+        { fetchImpl: fetchMock },
+      );
+    }
+    expect(last?.status).toBe(429);
+    expect(last?.headers.get('retry-after')).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(20);
+    resetRateLimits();
+  });
+});
+
 describe('request size budget', () => {
   it('keeps a max-size base64 plan image plus prompt under the 4.5 MB Vercel body limit', () => {
     const encodedImage = Math.ceil(MAX_PLAN_IMAGE_BYTES / 3) * 4 + 'data:image/jpeg;base64,'.length;
@@ -162,13 +196,17 @@ describe('request size budget', () => {
 });
 
 describe('same-origin check', () => {
-  it('accepts requests without Origin and matching forwarded hosts', () => {
+  it('accepts requests without Origin and matching request hosts', () => {
     expect(isSameOriginRequest(new Request(`https://${HOST}/api/xai/status`))).toBe(true);
     const forwarded = new Request('http://internal/api/xai/status', {
-      headers: { origin: `https://${HOST}`, 'x-forwarded-host': HOST },
+      headers: { origin: `https://${HOST}`, host: HOST },
     });
     expect(isSameOriginRequest(forwarded)).toBe(true);
     const malformed = new Request(`https://${HOST}/api/xai/status`, { headers: { origin: 'null' } });
     expect(isSameOriginRequest(malformed)).toBe(false);
+    const spoofedForwardedHost = new Request(`https://${HOST}/api/xai/status`, {
+      headers: { origin: 'https://evil.example', 'x-forwarded-host': 'evil.example' },
+    });
+    expect(isSameOriginRequest(spoofedForwardedHost)).toBe(false);
   });
 });

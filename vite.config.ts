@@ -7,7 +7,14 @@ import { cwd, env } from 'node:process';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { NextHandleFunction } from 'connect';
 import { handleXAIChatCompletions, handleXAIStatus } from './src/server/xaiProxy';
+import { API_SECURITY_HEADERS } from './src/server/security';
 import { handleSync, handleSyncStatus, neonStore } from './src/server/sync';
+
+// API responses can use a deny-all CSP; the HTML document needs its own app CSP,
+// which is configured in vercel.json. Do not put the API CSP on Vite's HTML page.
+const DEV_SECURITY_HEADERS = Object.fromEntries(
+  Object.entries(API_SECURITY_HEADERS).filter(([name]) => name !== 'Content-Security-Policy'),
+);
 
 /** Convert a Node request to a Web Request so dev/preview share the Vercel Function code path. */
 function toWebRequest(request: IncomingMessage, pathname: string): Request {
@@ -113,12 +120,15 @@ export default defineConfig(({ mode }) => {
       host: '0.0.0.0',
       port: 5173,
       strictPort: true,
-      allowedHosts: true,
+      headers: DEV_SECURITY_HEADERS,
+      // Keep the Arena preview working without opening the dev server to every Host header.
+      allowedHosts: ['localhost', '127.0.0.1', '0.0.0.0', '.e2b.app'],
     },
     preview: {
       host: '0.0.0.0',
       port: 5173,
-      allowedHosts: true,
+      headers: DEV_SECURITY_HEADERS,
+      allowedHosts: ['localhost', '127.0.0.1', '0.0.0.0', '.e2b.app'],
     },
     test: {
       environment: 'node',

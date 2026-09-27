@@ -51,6 +51,12 @@
   --shadow-lift: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 24px 52px rgba(0, 0, 0, 0.5);
 }
 
+/* ---------- Pre-React loading shell ---------- */
+.boot-shell { max-width: 720px; margin: 0 auto; padding: 32px 20px; color: var(--ink); }
+.boot-kicker { margin: 0; color: var(--muted); font: 600 12px/1.2 var(--sans); letter-spacing: .14em; text-transform: uppercase; }
+.boot-line { height: 40px; width: 240px; margin-top: 14px; border-radius: 14px; background: var(--surface-3); }
+.boot-panel { height: 160px; margin-top: 18px; border-radius: 20px; background: var(--surface); }
+
 /* ---------- Category colours (used by .accent-* classes) ---------- */
 :root {
   --cat-sage: #6f9a7e;
