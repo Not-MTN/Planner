@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type Re
 import { CATEGORIES, categoryById } from '../constants';
 import { usePlanner } from '../context';
 import { addDays, formatFullDate, timeToMinutes, todayISO, weekdayIndex } from '../dates';
-import { checkXAIConfiguration, friendlyXAIError, generateAIPlan, generateAIReview, hasReviewActivity } from '../ai';
+import { MAX_PLAN_IMAGE_BYTES, XAI_KEY_MISSING_MESSAGE, checkXAIConfiguration, friendlyXAIError, generateAIPlan, generateAIReview, hasReviewActivity } from '../ai';
 import type { AIReview, AIDraft, PlanRange } from '../ai';
 import { cx } from '../cx';
 import { CalendarIcon, CheckIcon, LeafIcon, PlusIcon, SparklesIcon, UploadIcon } from '../icons';
@@ -94,7 +94,7 @@ export function AIView() {
     const configured = await checkXAIConfiguration();
     setXaiConfigured(configured);
     if (!configured) {
-      setError('XAI_API_KEY is not configured. Add it to .env.local, restart the dev server, then try again.');
+      setError(XAI_KEY_MISSING_MESSAGE);
       openSettings();
       return;
     }
@@ -120,7 +120,7 @@ export function AIView() {
     const configured = await checkXAIConfiguration();
     setXaiConfigured(configured);
     if (!configured) {
-      setError('XAI_API_KEY is not configured. Add it to .env.local, restart the dev server, then try again.');
+      setError(XAI_KEY_MISSING_MESSAGE);
       openSettings();
       return;
     }
@@ -150,8 +150,8 @@ export function AIView() {
       setError('Use a PNG or JPG image.');
       return;
     }
-    if (file.size > 6 * 1024 * 1024) {
-      setError('That image is over 6 MB. Choose a smaller image for the AI to read.');
+    if (file.size > MAX_PLAN_IMAGE_BYTES) {
+      setError('That image is over 3 MB. Choose a smaller or more compressed image for the AI to read.');
       return;
     }
     try {
@@ -317,7 +317,7 @@ export function AIView() {
                 <UploadIcon size={15} /> Add a plan picture
                 <input type="file" accept="image/png,image/jpeg" onChange={onImage} />
               </label>
-              <span className="hint">PNG or JPG · up to 6 MB. Images are sent to xAI for reading and are not saved in your planner.</span>
+              <span className="hint">PNG or JPG · up to 3 MB. Images are sent to xAI for reading and are not saved in your planner.</span>
             </div>
             {image ? (
               <div className="ai-image-preview">

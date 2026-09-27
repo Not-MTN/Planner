@@ -72,12 +72,14 @@ export function SettingsSheet() {
         <h3 className="kicker">AI coach · xAI</h3>
         <p className="set-hint">The planner uses a server-side proxy for xAI (Grok). Your API key stays out of the browser and planner backups.</p>
         <pre className="env-code"><code>XAI_API_KEY=your_xai_api_key</code></pre>
-        <p className="ai-privacy-note">For local development, put that line in <code>.env.local</code> at the project root, then restart the dev server. The AI sends your prompt and relevant schedule/check-in details to xAI; planner notes are not included.</p>
+        <p className="set-hint"><strong>On Vercel:</strong> Project Settings → Environment Variables → add <code>XAI_API_KEY</code> with your key as the value, then redeploy. Vercel Functions in <code>api/xai</code> handle the requests.</p>
+        <p className="set-hint"><strong>Locally:</strong> put that line in <code>.env.local</code> at the project root, then restart the dev server.</p>
+        <p className="ai-privacy-note">Never use a <code>VITE_</code> prefix for the key. The AI sends your prompt and relevant schedule/check-in details to xAI; planner notes are not included.</p>
       </section>
 
       <section className="set-section">
         <h3 className="kicker">Your data</h3>
-        <p className="set-hint">Planner data stays in this browser. Only AI requests pass through the local server-side xAI proxy.</p>
+        <p className="set-hint">Planner data stays in this browser. Only AI requests pass through the server-side xAI proxy.</p>
         <div className="set-actions">
           <button type="button" className="btn btn-soft" onClick={exportData}>
             <DownloadIcon size={16} /> Export backup

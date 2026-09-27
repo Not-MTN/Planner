@@ -26,7 +26,7 @@ Other scripts: `npm run typecheck`, `npm test`, `npm run build`.
 - **Habits** — streaks (current & best), a week strip, and a 12-week heatmap you can tap to fill in any day.
 - **Calendar** — drag events between days in Week view, see the month at a glance, and scroll the days ahead in Upcoming.
 - **Insights** — day streak, weekly bars, a 7/30/90-day completion trend, a task/event/habit completion donut, habit consistency, and goal progress.
-- **AI Coach (xAI / Grok)** — describe a day, week, month (30 days), or custom plan; get draft tasks, timed events, habits, and gentle wellbeing ideas. Upload a PNG/JPG of a written plan for image reading. Review the draft before adding it; one undo reverses the whole batch.
+- **AI Coach (xAI / Grok)** — describe a day, week, month (30 days), or custom plan; get draft tasks, timed events, habits, and gentle wellbeing ideas. Upload a PNG/JPG (up to 3 MB) of a written plan for image reading. Review the draft before adding it; one undo reverses the whole batch.
 - **Protected weekly times** — add a repeating class, shift, or appointment (for example Tuesday 08:00–09:00). It appears on the calendar and the AI rejects overlapping events.
 - **AI review** — ask for a daily, weekly, monthly, or custom reflection on completed tasks, events, and habit check-ins. Select unfinished tasks and dates to carry them forward; nothing is rescheduled without your action.
 - **Themes** — light, dark, or follow your system, plus five accent colours. All in Settings.
@@ -34,13 +34,41 @@ Other scripts: `npm run typecheck`, `npm test`, `npm run build`.
 
 ## xAI (Grok) setup
 
-1. Create an API key in the xAI Console.
-2. Copy `.env.example` to `.env.local` and set `XAI_API_KEY=your_xai_api_key`.
-3. Restart `npm run dev`; **AI Coach → AI settings** shows the server-side setup instructions and the AI page reports whether the key is configured.
-4. Describe what you want, optionally attach a PNG/JPG plan image, choose the horizon, generate a draft, and review it before adding.
-5. Add your repeating class/work times under **Weekly fixed times**. The planner displays those as protected calendar blocks and the AI will not schedule overlapping events.
+The browser never talks to xAI directly. It calls two same-origin endpoints, and a server-side proxy adds the API key:
 
-The xAI API key is read by the Vite server from `XAI_API_KEY` and is never put in the browser bundle, session storage, or planner export. AI requests use xAI's OpenAI-compatible chat-completions endpoint with Grok 4.7 for text and image understanding. If you deploy the built static app elsewhere, configure an equivalent server-side `/api/xai` proxy and keep `XAI_API_KEY` in the server environment; do not expose it as a `VITE_` variable.
+| Endpoint | Method | Purpose |
+| --- | --- | --- |
+| `/api/xai/status` | GET | Returns `{"configured": true}` or `{"configured": false}` — never the key |
+| `/api/xai/chat/completions` | POST | Forwards the request to xAI's chat-completions API |
+
+The same handler code (`src/server/xaiProxy.ts`) serves both environments:
+
+- **Vercel** — `api/xai/status.ts` and `api/xai/chat/completions.ts` are Vercel Functions, discovered automatically from the `api/` directory (file path = route).
+- **Local** — `vite.config.ts` mounts the same handlers as middleware for `npm run dev` and `npm run preview`.
+
+### Deploy on Vercel
+
+1. Create an API key in the xAI Console.
+2. In Vercel open **Project → Settings → Environment Variables** and add:
+   - **Key:** `XAI_API_KEY`
+   - **Value:** your xAI API key
+   - **Environments:** Production (and Preview if you want AI on preview deployments)
+3. Redeploy. Environment variable changes only apply to new deployments.
+4. Visit `https://<your-app>/api/xai/status` — it should return `{"configured":true}`.
+
+Never name the variable `VITE_XAI_API_KEY` (or anything starting with `VITE_`): Vite would bake it into the public JavaScript bundle. `vercel.json` enables Fluid compute so long AI requests get the 300-second function duration.
+
+### Run locally
+
+1. Copy `.env.example` to `.env.local` and set `XAI_API_KEY=your_xai_api_key`. `.env.local` is git-ignored.
+2. Restart `npm run dev`; the AI page reports whether the key is configured, and **AI Coach → AI settings** repeats these instructions.
+
+### Using the AI coach
+
+1. Describe what you want, optionally attach a PNG/JPG plan image (up to 3 MB so the request fits within Vercel's 4.5 MB function body limit), choose the horizon, generate a draft, and review it before adding.
+2. Add your repeating class/work times under **Weekly fixed times**. The planner displays those as protected calendar blocks and the AI will not schedule overlapping events.
+
+The key is read only on the server from `XAI_API_KEY`; it is never put in the browser bundle, session storage, or planner export, and the status endpoint reports only a boolean. AI requests use xAI's OpenAI-compatible chat-completions endpoint with Grok 4.7 for text and image understanding. If you host the static build somewhere other than Vercel, provide equivalent server-side `/api/xai/*` endpoints (you can reuse `src/server/xaiProxy.ts`).
 
 Old links keep working: `#/daily/…`, `#/weekly/…`, `#/month/…`, `#/future`, and `#/progress` all map to their new homes.
 
