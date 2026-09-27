@@ -1,6 +1,7 @@
 import { isValidISODate, isValidTime, timeToMinutes, todayISO } from './dates';
 import type {
   EventInput,
+  FixedCommitmentInput,
   GoalInput,
   HabitInput,
   NoteInput,
@@ -172,6 +173,68 @@ export function updateEvent(state: PlannerState, id: string, patch: Partial<Even
 
 export function deleteEvent(state: PlannerState, id: string): PlannerState {
   return { ...state, events: state.events.filter((event) => event.id !== id) };
+}
+
+export function addFixedCommitment(
+  state: PlannerState,
+  input: FixedCommitmentInput,
+  id = uid(),
+  now = nowIso(),
+): PlannerState {
+  const title = clean(input.title, 140);
+  if (
+    !title || !Number.isInteger(input.weekday) || input.weekday < 0 || input.weekday > 6 ||
+    !isValidTime(input.startTime) || !isValidTime(input.endTime) ||
+    timeToMinutes(input.endTime) <= timeToMinutes(input.startTime)
+  ) return state;
+  return {
+    ...state,
+    fixedCommitments: [
+      ...state.fixedCommitments,
+      {
+        id,
+        title,
+        weekday: input.weekday,
+        startTime: input.startTime,
+        endTime: input.endTime,
+        category: input.category || 'personal',
+        note: input.note.trim().slice(0, 4000),
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
+  };
+}
+
+export function updateFixedCommitment(
+  state: PlannerState,
+  id: string,
+  patch: Partial<FixedCommitmentInput>,
+  now = nowIso(),
+): PlannerState {
+  return {
+    ...state,
+    fixedCommitments: state.fixedCommitments.map((commitment) => {
+      if (commitment.id !== id) return commitment;
+      const next = { ...commitment, ...patch };
+      const title = clean(next.title, 140);
+      if (
+        !title || !Number.isInteger(next.weekday) || next.weekday < 0 || next.weekday > 6 ||
+        !isValidTime(next.startTime) || !isValidTime(next.endTime) ||
+        timeToMinutes(next.endTime) <= timeToMinutes(next.startTime)
+      ) return commitment;
+      return {
+        ...next,
+        title,
+        note: next.note.trim().slice(0, 4000),
+        updatedAt: now,
+      };
+    }),
+  };
+}
+
+export function deleteFixedCommitment(state: PlannerState, id: string): PlannerState {
+  return { ...state, fixedCommitments: state.fixedCommitments.filter((item) => item.id !== id) };
 }
 
 export function toggleEvent(state: PlannerState, id: string, now = nowIso()): PlannerState {

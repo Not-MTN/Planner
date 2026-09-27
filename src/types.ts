@@ -36,6 +36,29 @@ export interface PlannerEvent {
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
+  /** Present on read-only weekly occurrences generated from a protected time block. */
+  fixedCommitmentId?: string;
+}
+
+export interface FixedCommitment {
+  id: string;
+  title: string;
+  weekday: number;
+  startTime: string;
+  endTime: string;
+  category: string;
+  note: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FixedCommitmentInput {
+  title: string;
+  weekday: number;
+  startTime: string;
+  endTime: string;
+  category: string;
+  note: string;
 }
 
 export interface Habit {
@@ -86,6 +109,7 @@ export interface Note {
 export interface PlannerState {
   tasks: Task[];
   events: PlannerEvent[];
+  fixedCommitments: FixedCommitment[];
   habits: Habit[];
   completions: HabitCompletion[];
   goals: Goal[];
@@ -158,6 +182,7 @@ export function createEmptyState(): PlannerState {
   return {
     tasks: [],
     events: [],
+    fixedCommitments: [],
     habits: [],
     completions: [],
     goals: [],

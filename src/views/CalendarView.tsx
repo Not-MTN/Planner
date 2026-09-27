@@ -174,56 +174,73 @@ function WeekBoard({ anchor, today }: { anchor: string; today: string }) {
               </header>
               <div className="day-col-body">
                 {events.length === 0 && tasks.length === 0 ? <p className="open-label">Open</p> : null}
-                {events.map((item) => (
-                  <div
-                    key={item.id}
-                    className={cx('week-chip', `accent-${categoryById(item.category).accent}`, item.completed && 'is-done', item.important && 'is-important')}
-                    draggable
-                    onDragStart={(event) => {
-                      event.dataTransfer.setData('text/plain', `event:${item.id}`);
-                      event.dataTransfer.effectAllowed = 'move';
-                    }}
-                    onDragOver={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                    }}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      setOver(null);
-                      const raw = event.dataTransfer.getData('text/plain');
-                      if (!raw.startsWith('event:')) return;
-                      const sourceId = raw.slice(6);
-                      if (sourceId === item.id) return;
-                      const source = state.events.find((entry) => entry.id === sourceId);
-                      if (!source) return;
-                      if (source.date === item.date) swapEventTimes(sourceId, item.id);
-                      else moveEvent(sourceId, item.date);
-                    }}
-                  >
-                    <button
-                      type="button"
-                      className="week-chip-main"
-                      onClick={() => openComposer({ mode: 'edit', type: 'event', id: item.id })}
-                    >
-                      <time>{item.startTime}</time>
-                      <span>{item.title}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={cx('mini-check', item.completed && 'on')}
-                      aria-label={item.completed ? `Mark ${item.title} not done` : `Mark ${item.title} complete`}
-                      onMouseDown={(event) => event.stopPropagation()}
+                {events.map((item) => {
+                  const fixed = Boolean(item.fixedCommitmentId);
+                  return (
+                    <div
+                      key={item.id}
+                      className={cx('week-chip', `accent-${categoryById(item.category).accent}`, item.completed && 'is-done', item.important && 'is-important', fixed && 'is-fixed')}
+                      draggable={!fixed}
                       onDragStart={(event) => {
+                        if (fixed) return;
+                        event.dataTransfer.setData('text/plain', `event:${item.id}`);
+                        event.dataTransfer.effectAllowed = 'move';
+                      }}
+                      onDragOver={(event) => {
+                        if (fixed) return;
                         event.preventDefault();
                         event.stopPropagation();
                       }}
-                      onClick={() => toggleEvent(item.id)}
+                      onDrop={(event) => {
+                        if (fixed) {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setOver(null);
+                          return;
+                        }
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setOver(null);
+                        const raw = event.dataTransfer.getData('text/plain');
+                        if (!raw.startsWith('event:')) return;
+                        const sourceId = raw.slice(6);
+                        if (sourceId === item.id) return;
+                        const source = state.events.find((entry) => entry.id === sourceId);
+                        if (!source) return;
+                        if (source.date === item.date) swapEventTimes(sourceId, item.id);
+                        else moveEvent(sourceId, item.date);
+                      }}
                     >
-                      {item.completed ? <TickIcon size={12} /> : null}
-                    </button>
-                  </div>
-                ))}
+                      <button
+                        type="button"
+                        className="week-chip-main"
+                        disabled={fixed}
+                        title={fixed ? 'Protected weekly time' : undefined}
+                        onClick={() => {
+                          if (!fixed) openComposer({ mode: 'edit', type: 'event', id: item.id });
+                        }}
+                      >
+                        <time>{item.startTime}</time>
+                        <span>{item.title}</span>
+                      </button>
+                      {fixed ? <span className="fixed-chip-tag">Fixed</span> : (
+                        <button
+                          type="button"
+                          className={cx('mini-check', item.completed && 'on')}
+                          aria-label={item.completed ? `Mark ${item.title} not done` : `Mark ${item.title} complete`}
+                          onMouseDown={(event) => event.stopPropagation()}
+                          onDragStart={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                          }}
+                          onClick={() => toggleEvent(item.id)}
+                        >
+                          {item.completed ? <TickIcon size={12} /> : null}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
                 {tasks.map((task) => (
                   <div key={task.id} className={cx('week-task', task.completed && 'is-done')}>
                     <button
@@ -377,9 +394,17 @@ function MonthBoard({ anchor, today }: { anchor: string; today: string }) {
               <ul className="panel-list">
                 {events.map((event) => (
                   <li key={event.id}>
-                    <button type="button" onClick={() => openComposer({ mode: 'edit', type: 'event', id: event.id })}>
+                    <button
+                      type="button"
+                      disabled={Boolean(event.fixedCommitmentId)}
+                      className={event.fixedCommitmentId ? 'fixed-panel-item' : undefined}
+                      onClick={() => {
+                        if (!event.fixedCommitmentId) openComposer({ mode: 'edit', type: 'event', id: event.id });
+                      }}
+                    >
                       <time>{event.startTime}</time>
                       <span>{event.title}</span>
+                      {event.fixedCommitmentId ? <small>Fixed</small> : null}
                     </button>
                   </li>
                 ))}
@@ -544,18 +569,25 @@ function DayCard({
         {open ? <p className="open-label">Open</p> : null}
         <ul className="plan-list">
           {day.events.map((event) => (
-            <li key={event.id} className={cx('plan-line', event.completed && 'is-done', `accent-${categoryById(event.category).accent}`)}>
-              <button
-                type="button"
-                className={cx('check', event.completed && 'on')}
-                aria-pressed={event.completed}
-                aria-label={event.completed ? `Mark ${event.title} not done` : `Mark ${event.title} complete`}
-                onClick={() => toggleEvent(event.id)}
-              >
-                {event.completed ? <TickIcon size={12} /> : null}
-              </button>
+            <li key={event.id} className={cx('plan-line', event.completed && 'is-done', `accent-${categoryById(event.category).accent}`, event.fixedCommitmentId && 'is-fixed')}>
+              {event.fixedCommitmentId ? (
+                <span className="fixed-plan-mark" aria-label="Protected weekly time">↻</span>
+              ) : (
+                <button
+                  type="button"
+                  className={cx('check', event.completed && 'on')}
+                  aria-pressed={event.completed}
+                  aria-label={event.completed ? `Mark ${event.title} not done` : `Mark ${event.title} complete`}
+                  onClick={() => toggleEvent(event.id)}
+                >
+                  {event.completed ? <TickIcon size={12} /> : null}
+                </button>
+              )}
               <time>{event.startTime}</time>
-              <button type="button" className="item-title" onClick={() => openComposer({ mode: 'edit', type: 'event', id: event.id })}>{event.title}</button>
+              {event.fixedCommitmentId ? <span className="item-title">{event.title}</span> : (
+                <button type="button" className="item-title" onClick={() => openComposer({ mode: 'edit', type: 'event', id: event.id })}>{event.title}</button>
+              )}
+              {event.fixedCommitmentId ? <small className="fixed-plan-tag">Fixed</small> : null}
             </li>
           ))}
           {day.tasks.map((task) => (

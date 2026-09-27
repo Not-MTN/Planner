@@ -1,6 +1,6 @@
 import { ACCENTS, HABIT_ICONS, NOTE_KINDS, PRIORITIES } from './constants';
-import { isValidISODate, isValidTime, localDateFromTimestamp } from './dates';
-import { createEmptyState, type Goal, type Habit, type HabitFrequency, type Note, type PlannerEvent, type PlannerState, type Task } from './types';
+import { isValidISODate, isValidTime, localDateFromTimestamp, timeToMinutes } from './dates';
+import { createEmptyState, type FixedCommitment, type Goal, type Habit, type HabitFrequency, type Note, type PlannerEvent, type PlannerState, type Task } from './types';
 
 export const STORAGE_KEY = 'personal-planner.v1';
 const MAX_BACKUP = 2_000_000;
@@ -86,6 +86,32 @@ function sanitizeEvent(value: unknown): PlannerEvent | null {
     sortOrder: typeof raw.sortOrder === 'number' && Number.isFinite(raw.sortOrder) ? raw.sortOrder : 0,
     createdAt: asString(raw.createdAt, 40) || new Date(0).toISOString(),
     updatedAt: asString(raw.updatedAt, 40) || new Date(0).toISOString(),
+  };
+}
+
+function sanitizeFixedCommitment(value: unknown): FixedCommitment | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = asString(raw.id, 80);
+  const title = asString(raw.title, 140)?.trim();
+  const weekday = typeof raw.weekday === 'number' && Number.isInteger(raw.weekday) ? raw.weekday : -1;
+  const startTime = asString(raw.startTime, 5);
+  const endTime = asString(raw.endTime, 5);
+  if (
+    !id || !title || weekday < 0 || weekday > 6 || !startTime || !endTime ||
+    !isValidTime(startTime) || !isValidTime(endTime) || timeToMinutes(endTime) <= timeToMinutes(startTime)
+  ) return null;
+  const createdAt = asString(raw.createdAt, 40) || new Date(0).toISOString();
+  return {
+    id,
+    title,
+    weekday,
+    startTime,
+    endTime,
+    category: asString(raw.category, 40) || 'personal',
+    note: asString(raw.note, 4000) ?? '',
+    createdAt,
+    updatedAt: asString(raw.updatedAt, 40) || createdAt,
   };
 }
 
@@ -182,6 +208,10 @@ export function sanitizeState(raw: unknown): PlannerState | null {
     const event = sanitizeEvent(item);
     return event ? [event] : [];
   }) : [], (item) => item.id);
+  const fixedCommitments = uniqueBy(Array.isArray(source.fixedCommitments) ? source.fixedCommitments.flatMap((item) => {
+    const commitment = sanitizeFixedCommitment(item);
+    return commitment ? [commitment] : [];
+  }) : [], (item) => item.id);
   const habits = uniqueBy(Array.isArray(source.habits) ? source.habits.flatMap((item) => {
     const habit = sanitizeHabit(item);
     return habit ? [habit] : [];
@@ -220,6 +250,7 @@ export function sanitizeState(raw: unknown): PlannerState | null {
   return {
     tasks: tasks.map((task) => ({ ...task, goalId: task.goalId && goalIds.has(task.goalId) ? task.goalId : null })),
     events,
+    fixedCommitments,
     habits,
     completions,
     goals,

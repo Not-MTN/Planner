@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { monthGrid, startOfWeek, addDays, isValidISODate, weekDates } from './dates';
-import { agendaWindow, dayScore, essentialHabits, goalProgress, habitStats, habitStreaks, hasAgendaPlans, insightTotals, isDueOn, isPlannedDay, laterAgenda } from './logic';
-import { addEvent, addGoal, addHabit, addHabits, addMilestone, addNote, addTask, clearCompletedTasks, moveTask, swapEventTimes, toggleHabit, toggleMilestone, toggleTask, updateEvent } from './mutate';
+import { agendaWindow, dayScore, essentialHabits, eventsForDate, fixedEventsForDate, goalProgress, habitStats, habitStreaks, hasAgendaPlans, insightTotals, isDueOn, isPlannedDay, laterAgenda } from './logic';
+import { addEvent, addFixedCommitment, addGoal, addHabit, addHabits, addMilestone, addNote, addTask, clearCompletedTasks, moveTask, swapEventTimes, toggleHabit, toggleMilestone, toggleTask, updateEvent } from './mutate';
 import { parseQuickAdd } from './quickAdd';
 import { parseHash, toHash } from './route';
 import { loadFrom, parseBackup, sanitizeState, saveTo, serialize } from './storage';
@@ -59,6 +59,8 @@ describe('routing', () => {
     const calendar = { name: 'calendar' as const, tab: 'week' as const, date: '2026-09-27' };
     expect(parseHash(toHash(calendar))).toEqual(calendar);
     expect(parseHash(toHash({ name: 'insights' }))).toEqual({ name: 'insights' });
+    expect(parseHash(toHash({ name: 'ai', tab: 'review' }))).toEqual({ name: 'ai', tab: 'review' });
+    expect(parseHash('#/ai', now)).toEqual({ name: 'ai', tab: 'plan' });
     expect(parseHash('#/nope', now)).toEqual({ name: 'today' });
     expect(parseHash('#/day/2026-02-31', now)).toEqual({ name: 'today' });
   });
@@ -371,6 +373,28 @@ describe('streaks and totals', () => {
   });
 });
 
+describe('protected weekly times', () => {
+  const now = '2026-09-27T10:00:00.000Z';
+  const classInput = { title: 'Class', weekday: 2, startTime: '08:00', endTime: '09:30', category: 'learning', note: '' };
+
+  it('repeats on the matching weekday and does not distort completion scores', () => {
+    let state = addFixedCommitment(createEmptyState(), classInput, 'class-tuesday', now);
+    expect(fixedEventsForDate(state, '2026-09-29')).toHaveLength(1);
+    expect(eventsForDate(state, '2026-09-29')[0]).toMatchObject({ title: 'Class', startTime: '08:00', fixedCommitmentId: 'class-tuesday' });
+    expect(eventsForDate(state, '2026-09-30')).toHaveLength(0);
+    expect(dayScore(state, '2026-09-29').total).toBe(0);
+
+    state = addEvent(state, { title: 'Study', date: '2026-09-29', startTime: '10:00', endTime: '11:00', category: 'learning', note: '', important: false }, 'study', now);
+    expect(dayScore(state, '2026-09-29')).toMatchObject({ eventsTotal: 1, total: 1 });
+  });
+
+  it('rejects an invalid recurring interval', () => {
+    const state = createEmptyState();
+    expect(addFixedCommitment(state, { ...classInput, endTime: '08:00' }, 'bad', now)).toBe(state);
+    expect(addFixedCommitment(state, { ...classInput, weekday: 8 }, 'bad-day', now)).toBe(state);
+  });
+});
+
 describe('habit library and daily essentials', () => {
   const now = '2026-09-27T10:00:00.000Z';
   const today = '2026-09-27';
@@ -416,18 +440,23 @@ describe('storage', () => {
     expect(state?.tasks).toHaveLength(1);
     expect(state?.tasks[0].title).toBe('Call');
     expect(state?.events).toHaveLength(1);
+    expect(state?.fixedCommitments).toEqual([]);
   });
 
   it('round-trips through storage and rejects unreadable backups', () => {
     const storage = memoryStorage();
-    const state = addNote(createEmptyState(), {
+    let state = addNote(createEmptyState(), {
       title: 'Idea',
       body: 'A quieter morning.',
       kind: 'idea',
       date: '2026-09-27',
     }, 'n1', '2026-09-27T10:00:00.000Z');
+    state = addFixedCommitment(state, {
+      title: 'Class', weekday: 2, startTime: '08:00', endTime: '09:00', category: 'learning', note: '',
+    }, 'class-tuesday', '2026-09-27T10:00:00.000Z');
     expect(saveTo(storage, state)).toBeNull();
     expect(loadFrom(storage).state.notes[0].title).toBe('Idea');
+    expect(loadFrom(storage).state.fixedCommitments[0].title).toBe('Class');
     expect(parseBackup(serialize(state)).ok).toBe(true);
     expect(parseBackup('{')).toEqual({ ok: false, error: 'That file could not be read.' });
     expect(parseBackup('[]')).toEqual({ ok: false, error: 'That file is not a planner backup.' });

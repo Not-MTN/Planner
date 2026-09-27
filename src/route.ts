@@ -10,7 +10,8 @@ export type Route =
   | { name: 'habits' }
   | { name: 'goals' }
   | { name: 'notes' }
-  | { name: 'insights' };
+  | { name: 'insights' }
+  | { name: 'ai'; tab?: 'plan' | 'review' };
 
 const PLAIN_NAMES = new Set(['today', 'tasks', 'habits', 'goals', 'notes', 'insights']);
 const CALENDAR_TABS = new Set(['week', 'month', 'agenda']);
@@ -24,6 +25,7 @@ export function parseHash(hash: string, now = new Date()): Route {
   const [head, a, b] = parts;
   const today = todayISO(now);
   if (!head || head === 'today') return { name: 'today' };
+  if (head === 'ai') return { name: 'ai', tab: a === 'review' ? 'review' : 'plan' };
   if (head === 'day' && a && isValidISODate(a)) return { name: 'day', date: a };
   if (head === 'calendar' && a && CALENDAR_TABS.has(a)) {
     return { name: 'calendar', tab: a as CalendarTab, date: b && isValidISODate(b) ? b : today };
@@ -53,6 +55,8 @@ export function toHash(route: Route): string {
       return `#/day/${route.date}`;
     case 'calendar':
       return `#/calendar/${route.tab}/${route.date}`;
+    case 'ai':
+      return route.tab === 'review' ? '#/ai/review' : '#/ai';
     default:
       return `#/${route.name}`;
   }
@@ -80,5 +84,7 @@ export function routeTitle(route: Route): string {
       return 'Notes';
     case 'insights':
       return 'Insights';
+    case 'ai':
+      return route.tab === 'review' ? 'AI review' : 'AI planner';
   }
 }

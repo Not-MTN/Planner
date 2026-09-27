@@ -125,6 +125,25 @@ export function EventRow({ event, onDropSwap }: { event: PlannerEvent; onDropSwa
   );
 }
 
+export function FixedEventRow({ event }: { event: PlannerEvent }) {
+  const accent = categoryById(event.category).accent;
+  const duration = formatDuration(event.startTime, event.endTime);
+  return (
+    <li className={cx('event', 'fixed-event', `accent-${accent}`)} title="Protected weekly time — AI plans will leave this slot clear">
+      <span className="fixed-repeat" aria-hidden="true">↻</span>
+      <time className="fixed-time">{event.startTime}</time>
+      <div className="item-body">
+        <span className="item-title fixed-title">{event.title}</span>
+        <p className="meta">
+          {categoryById(event.category).label}
+          {duration ? ` · ${duration}` : ''}
+          <span className="fixed-tag">Protected weekly</span>
+        </p>
+      </div>
+    </li>
+  );
+}
+
 export function TaskRow({
   task,
   showDate = false,
