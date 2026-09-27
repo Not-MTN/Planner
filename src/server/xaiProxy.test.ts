@@ -1,0 +1,173 @@
+import { readdirSync, statSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as chatRoute from '../../api/xai/chat/completions';
+import * as statusRoute from '../../api/xai/status';
+import { MAX_PLAN_IMAGE_BYTES, XAI_CHAT_URL, XAI_STATUS_URL } from '../ai';
+import {
+  MAX_PROXY_BODY_BYTES,
+  XAI_UPSTREAM_CHAT_COMPLETIONS,
+  handleXAIChatCompletions,
+  handleXAIStatus,
+  isSameOriginRequest,
+} from './xaiProxy';
+
+// Obviously fake placeholder; never a real credential.
+const FAKE_KEY = 'test-placeholder-not-a-real-key';
+const HOST = 'planner.example.test';
+
+function request(path: string, init: RequestInit & { origin?: string } = {}): Request {
+  const headers = new Headers(init.headers);
+  headers.set('host', HOST);
+  if (init.origin) headers.set('origin', init.origin);
+  return new Request(`https://${HOST}${path}`, { ...init, headers });
+}
+
+function chatBody(extra: Record<string, unknown> = {}): string {
+  return JSON.stringify({ model: 'grok-4.7', messages: [{ role: 'user', content: 'Plan my day' }], ...extra });
+}
+
+function upstreamOk() {
+  return vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+    new Response(JSON.stringify({ choices: [{ message: { content: '{}' } }] }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+}
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
+
+describe('Vercel function discovery', () => {
+  it('maps api/ files to exactly the URLs the frontend calls', () => {
+    const apiRoot = join(__dirname, '..', '..', 'api');
+    const walk = (dir: string): string[] => readdirSync(dir).flatMap((name) => {
+      const full = join(dir, name);
+      return statSync(full).isDirectory() ? walk(full) : [full];
+    });
+    const routes = walk(apiRoot)
+      .filter((file) => /\.(ts|js|mjs)$/.test(file) && !file.includes('.test.'))
+      .map((file) => '/api/' + relative(apiRoot, file).split(sep).join('/').replace(/\.(ts|js|mjs)$/, ''))
+      .sort();
+    expect(routes).toEqual([XAI_CHAT_URL, XAI_STATUS_URL].sort());
+  });
+
+  it('exports web handlers for the right HTTP methods', () => {
+    expect(typeof statusRoute.GET).toBe('function');
+    expect(typeof chatRoute.POST).toBe('function');
+    expect(Object.keys(chatRoute)).not.toContain('GET');
+  });
+});
+
+describe('status route', () => {
+  it('reports configured:true from XAI_API_KEY without exposing the key', async () => {
+    vi.stubEnv('XAI_API_KEY', FAKE_KEY);
+    const response = statusRoute.GET(request('/api/xai/status'));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    const text = await response.text();
+    expect(JSON.parse(text)).toEqual({ configured: true });
+    expect(text).not.toContain(FAKE_KEY);
+  });
+
+  it('reports configured:false when the variable is missing or blank', async () => {
+    vi.stubEnv('XAI_API_KEY', '   ');
+    expect(await statusRoute.GET(request('/api/xai/status')).json()).toEqual({ configured: false });
+    expect(await handleXAIStatus(request('/api/xai/status'), undefined).json()).toEqual({ configured: false });
+  });
+
+  it('rejects cross-origin browser requests', () => {
+    const response = handleXAIStatus(request('/api/xai/status', { origin: 'https://evil.example' }), FAKE_KEY);
+    expect(response.status).toBe(403);
+  });
+});
+
+describe('chat completions route', () => {
+  it('forwards the body to xAI with the server-side key and relays the reply', async () => {
+    vi.stubEnv('XAI_API_KEY', FAKE_KEY);
+    const fetchMock = upstreamOk();
+    vi.stubGlobal('fetch', fetchMock);
+    const body = chatBody();
+    const response = await chatRoute.POST(request('/api/xai/chat/completions', {
+      method: 'POST', body, origin: `https://${HOST}`, headers: { 'content-type': 'application/json' },
+    }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ choices: [{ message: { content: '{}' } }] });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(XAI_UPSTREAM_CHAT_COMPLETIONS);
+    expect(new Headers(init?.headers).get('authorization')).toBe(`Bearer ${FAKE_KEY}`);
+    expect(init?.body).toBe(body);
+  });
+
+  it('returns 503 with setup guidance when the key is missing, without calling xAI', async () => {
+    const fetchMock = upstreamOk();
+    const response = await handleXAIChatCompletions(
+      request('/api/xai/chat/completions', { method: 'POST', body: chatBody() }), undefined, { fetchImpl: fetchMock });
+    expect(response.status).toBe(503);
+    expect(((await response.json()) as { error: { message: string } }).error.message).toContain('Vercel');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects oversized bodies with 413 before contacting xAI', async () => {
+    const fetchMock = upstreamOk();
+    const huge = chatBody({ image: 'x'.repeat(MAX_PROXY_BODY_BYTES) });
+    const response = await handleXAIChatCompletions(
+      request('/api/xai/chat/completions', { method: 'POST', body: huge }), FAKE_KEY, { fetchImpl: fetchMock });
+    expect(response.status).toBe(413);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects cross-origin, non-POST, and non-JSON requests', async () => {
+    const fetchMock = upstreamOk();
+    const cross = await handleXAIChatCompletions(request('/api/xai/chat/completions', {
+      method: 'POST', body: chatBody(), origin: 'https://evil.example',
+    }), FAKE_KEY, { fetchImpl: fetchMock });
+    expect(cross.status).toBe(403);
+    const get = await handleXAIChatCompletions(request('/api/xai/chat/completions'), FAKE_KEY, { fetchImpl: fetchMock });
+    expect(get.status).toBe(405);
+    const bad = await handleXAIChatCompletions(request('/api/xai/chat/completions', {
+      method: 'POST', body: 'not json',
+    }), FAKE_KEY, { fetchImpl: fetchMock });
+    expect(bad.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('passes upstream errors through and maps network failures and timeouts', async () => {
+    const rejected = await handleXAIChatCompletions(request('/api/xai/chat/completions', { method: 'POST', body: chatBody() }), FAKE_KEY, {
+      fetchImpl: async () => new Response(JSON.stringify({ error: 'bad key' }), { status: 401 }),
+    });
+    expect(rejected.status).toBe(401);
+    const offline = await handleXAIChatCompletions(request('/api/xai/chat/completions', { method: 'POST', body: chatBody() }), FAKE_KEY, {
+      fetchImpl: async () => { throw new TypeError('fetch failed'); },
+    });
+    expect(offline.status).toBe(502);
+    const slow = await handleXAIChatCompletions(request('/api/xai/chat/completions', { method: 'POST', body: chatBody() }), FAKE_KEY, {
+      fetchImpl: async () => { throw new DOMException('timed out', 'TimeoutError'); },
+    });
+    expect(slow.status).toBe(504);
+  });
+});
+
+describe('request size budget', () => {
+  it('keeps a max-size base64 plan image plus prompt under the 4.5 MB Vercel body limit', () => {
+    const encodedImage = Math.ceil(MAX_PLAN_IMAGE_BYTES / 3) * 4 + 'data:image/jpeg;base64,'.length;
+    const promptAllowance = 150_000;
+    expect(encodedImage + promptAllowance).toBeLessThanOrEqual(MAX_PROXY_BODY_BYTES);
+    expect(MAX_PROXY_BODY_BYTES).toBeLessThan(4_500_000);
+  });
+});
+
+describe('same-origin check', () => {
+  it('accepts requests without Origin and matching forwarded hosts', () => {
+    expect(isSameOriginRequest(new Request(`https://${HOST}/api/xai/status`))).toBe(true);
+    const forwarded = new Request('http://internal/api/xai/status', {
+      headers: { origin: `https://${HOST}`, 'x-forwarded-host': HOST },
+    });
+    expect(isSameOriginRequest(forwarded)).toBe(true);
+    const malformed = new Request(`https://${HOST}/api/xai/status`, { headers: { origin: 'null' } });
+    expect(isSameOriginRequest(malformed)).toBe(false);
+  });
+});

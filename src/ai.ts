@@ -15,6 +15,12 @@ export const XAI_CHAT_URL = '/api/xai/chat/completions';
 export const XAI_STATUS_URL = '/api/xai/status';
 export const XAI_TEXT_MODEL = 'grok-4.7';
 export const XAI_VISION_MODEL = 'grok-4.7';
+/**
+ * Vercel Functions accept request bodies up to 4.5 MB. Base64 grows an image by ~33%,
+ * so a 3 MB image (~4.2 MB encoded) plus the prompt still fits in one request.
+ */
+export const MAX_PLAN_IMAGE_BYTES = 3 * 1024 * 1024;
+export const XAI_KEY_MISSING_MESSAGE = 'XAI_API_KEY is not configured on the server. On Vercel, add it under Project Settings → Environment Variables and redeploy. Locally, add it to .env.local and restart the dev server.';
 
 export interface PlanRange {
   startDate: string;
@@ -302,8 +308,12 @@ async function xaiJson(system: string, user: string, imageDataUrl?: string): Pro
   const payload = await response.json().catch(() => null) as unknown;
   if (!response.ok) {
     const message = cleanText(asRecord(asRecord(payload)?.error)?.message, 240);
-    if (response.status === 401 || response.status === 403) throw new Error('xAI rejected XAI_API_KEY. Check the server environment variable.');
-    if (response.status === 503) throw new Error(message || 'XAI_API_KEY is not configured. Add it to .env.local and restart the dev server.');
+    if (response.status === 401) throw new Error('xAI rejected XAI_API_KEY. Check the server environment variable.');
+    if (response.status === 403) throw new Error(message || 'xAI rejected XAI_API_KEY. Check the server environment variable.');
+    if (response.status === 503) throw new Error(message || XAI_KEY_MISSING_MESSAGE);
+    if (response.status === 413) throw new Error(message || 'The image or plan is too large for one request. Use a smaller image (up to 3 MB).');
+    if (response.status === 404) throw new Error('The xAI proxy was not found on this deployment. Redeploy with the api/ functions included.');
+    if (response.status === 504) throw new Error(message || 'The xAI request timed out. Please try again.');
     throw new Error(message || `xAI request failed (${response.status}). Please try again.`);
   }
   return parseJson(extractContent(payload));
