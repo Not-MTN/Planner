@@ -15,6 +15,7 @@ import {
   PlusIcon,
   SearchIcon,
   SlidersIcon,
+  SparklesIcon,
   SunIcon,
   UndoIcon,
   RedoIcon,
@@ -35,10 +36,12 @@ import { HabitsView } from '../views/HabitsView';
 import { InsightsView } from '../views/InsightsView';
 import { NotesView } from '../views/NotesView';
 import { TasksView } from '../views/TasksView';
+import { AIView } from '../views/AIView';
 
 const NAV = [
   { name: 'today', label: 'Today', icon: SunIcon },
   { name: 'calendar', label: 'Calendar', icon: CalendarIcon },
+  { name: 'ai', label: 'AI coach', icon: SparklesIcon },
   { name: 'tasks', label: 'Tasks', icon: CheckIcon },
   { name: 'habits', label: 'Habits', icon: DotsIcon },
   { name: 'goals', label: 'Goals', icon: FlagIcon },
@@ -134,7 +137,7 @@ export function Shell() {
     setMoreOpen(false);
   };
 
-  const moreActive = ['goals', 'notes', 'insights'].includes(route.name);
+  const moreActive = ['goals', 'notes', 'insights', 'ai'].includes(route.name);
 
   return (
     <div className="app-shell">
@@ -154,11 +157,11 @@ export function Shell() {
         </button>
         <nav className="side-nav" aria-label="Planner">
           <p className="nav-label">Plan</p>
-          {NAV.slice(0, 2).map((item) => (
+          {NAV.slice(0, 3).map((item) => (
             <NavButton key={item.name} item={item} active={route.name === item.name || (item.name === 'calendar' && route.name === 'calendar')} onClick={() => go(item.name)} />
           ))}
           <p className="nav-label">Track</p>
-          {NAV.slice(2).map((item) => (
+          {NAV.slice(3).map((item) => (
             <NavButton key={item.name} item={item} active={route.name === item.name} onClick={() => go(item.name)} />
           ))}
         </nav>
@@ -263,6 +266,7 @@ export function Shell() {
                 {route.name === 'goals' ? <GoalsView /> : null}
                 {route.name === 'notes' ? <NotesView /> : null}
                 {route.name === 'insights' ? <InsightsView /> : null}
+                {route.name === 'ai' ? <AIView /> : null}
               </div>
             </>
           )}
@@ -297,6 +301,9 @@ export function Shell() {
             </button>
             <button type="button" className={cx(route.name === 'insights' && 'on')} onClick={() => go('insights')}>
               <ArcIcon size={18} /> Insights
+            </button>
+            <button type="button" className={cx(route.name === 'ai' && 'on')} onClick={() => go('ai')}>
+              <SparklesIcon size={18} /> AI coach
             </button>
             <button type="button" onClick={openPalette}><SearchIcon size={18} /> Search &amp; quick add</button>
             <button type="button" onClick={openSettings}><SlidersIcon size={18} /> Settings</button>

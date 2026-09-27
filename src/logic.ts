@@ -5,6 +5,7 @@ import {
   startOfWeek,
   timeToMinutes,
   weekDates,
+  weekdayIndex,
 } from './dates';
 import type { DayScore, DotState, Goal, Habit, HabitFrequency, PlannerEvent, PlannerState, Task } from './types';
 
@@ -82,8 +83,33 @@ export function compareTasks(a: Task, b: Task): number {
   return a.createdAt.localeCompare(b.createdAt);
 }
 
+export function fixedEventsForDate(state: PlannerState, date: string): PlannerEvent[] {
+  if (!isValidISODate(date)) return [];
+  const weekday = weekdayIndex(date);
+  return state.fixedCommitments
+    .filter((commitment) => commitment.weekday === weekday)
+    .map((commitment) => ({
+      id: `fixed:${commitment.id}:${date}`,
+      title: commitment.title,
+      date,
+      startTime: commitment.startTime,
+      endTime: commitment.endTime,
+      category: commitment.category,
+      note: commitment.note,
+      important: true,
+      completed: false,
+      sortOrder: -1,
+      createdAt: commitment.createdAt,
+      updatedAt: commitment.updatedAt,
+      fixedCommitmentId: commitment.id,
+    }));
+}
+
 export function eventsForDate(state: PlannerState, date: string): PlannerEvent[] {
-  return state.events.filter((event) => event.date === date).sort(compareEvents);
+  return [
+    ...state.events.filter((event) => event.date === date),
+    ...fixedEventsForDate(state, date),
+  ].sort(compareEvents);
 }
 
 export function tasksForDate(state: PlannerState, date: string): Task[] {
@@ -102,7 +128,7 @@ export function habitsDueOn(state: PlannerState, date: string): Habit[] {
 
 export function dayScore(state: PlannerState, date: string, includeOpenFlexible = false): DayScore {
   const tasks = tasksForDate(state, date);
-  const events = eventsForDate(state, date);
+  const events = eventsForDate(state, date).filter((event) => !event.fixedCommitmentId);
   const fixed = state.habits.filter(
     (habit) => !habit.archived && habit.frequency.type !== 'weekly' && isPlannedDay(habit, date),
   );
@@ -293,7 +319,7 @@ export function laterAgenda(state: PlannerState, today: string, horizon: number)
 }
 
 export function calendarMarks(state: PlannerState, date: string): { events: number; tasks: number; important: boolean } {
-  const events = state.events.filter((event) => event.date === date);
+  const events = eventsForDate(state, date);
   const tasks = state.tasks.filter((task) => task.dueDate === date);
   return {
     events: events.length,
@@ -430,6 +456,7 @@ export function isEmptyState(state: PlannerState): boolean {
   return (
     state.tasks.length === 0 &&
     state.events.length === 0 &&
+    state.fixedCommitments.length === 0 &&
     state.habits.length === 0 &&
     state.goals.length === 0 &&
     state.notes.length === 0

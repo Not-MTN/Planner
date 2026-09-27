@@ -40,6 +40,7 @@ function pressKey(key: string, options?: KeyboardEventInit): void {
 
 beforeEach(() => {
   window.localStorage.clear();
+  window.sessionStorage.clear();
   window.history.replaceState(null, '', '#/today');
   window.matchMedia = ((query: string) =>
     ({
@@ -103,6 +104,7 @@ describe('app smoke', () => {
       input?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
     });
     expect(text()).toContain('How your days are taking shape');
+    expect(document.querySelectorAll('.chart-card')).toHaveLength(2);
     expect(document.querySelector('.palette')).toBeFalsy();
   });
 
@@ -169,6 +171,45 @@ describe('app smoke', () => {
     });
     expect(document.documentElement.dataset.theme).toBe('dark');
     expect(window.localStorage.getItem('planner-theme')).toBe('dark');
+  });
+
+  it('opens the AI coach and shows the protected weekly schedule editor', async () => {
+    mountApp();
+    const aiNav = [...document.querySelectorAll<HTMLButtonElement>('.nav-link')].find((button) =>
+      button.textContent?.includes('AI coach'),
+    );
+    await act(async () => {
+      aiNav?.click();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    expect(text()).toContain('Make a plan that fits');
+    expect(text()).toContain('Weekly fixed times');
+    expect(text()).toContain('Add a plan picture');
+    const fixedForm = document.querySelector<HTMLFormElement>('.fixed-form');
+    expect(fixedForm).toBeTruthy();
+    const title = fixedForm?.querySelector<HTMLInputElement>('input');
+    setInputValue(title as HTMLInputElement, 'Class');
+    act(() => {
+      fixedForm?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    expect(document.querySelector('.fixed-list-item')?.textContent).toContain('Tuesday · 08:00–09:00');
+    const saved = JSON.parse(window.localStorage.getItem('personal-planner.v1') ?? '{}') as { fixedCommitments?: Array<{ title: string }> };
+    expect(saved.fixedCommitments?.[0]?.title).toBe('Class');
+  });
+
+  it('explains how to configure the server-side xAI key', async () => {
+    mountApp();
+    const aiNav = [...document.querySelectorAll<HTMLButtonElement>('.nav-link')].find((button) => button.textContent?.includes('AI coach'));
+    await act(async () => {
+      aiNav?.click();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    const settings = [...document.querySelectorAll<HTMLButtonElement>('.ai-head-actions button')].find((button) => button.textContent?.includes('AI settings'));
+    act(() => settings?.click());
+    expect(text()).toContain('AI coach · xAI');
+    expect(text()).toContain('XAI_API_KEY=your_xai_api_key');
+    expect(text()).toContain('.env.local');
+    expect(document.querySelector('.ai-key-field input')).toBeFalsy();
   });
 
   it('starts a focus session from the hero', () => {

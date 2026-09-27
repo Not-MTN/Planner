@@ -26,9 +26,9 @@ import {
 } from '../logic';
 import { QuickAddBar } from '../components/QuickAddBar';
 import { WelcomeCard } from '../components/WelcomeCard';
-import { EventRow, HabitRow, IntentionField, NowMark, TaskRow } from '../components/items';
+import { EventRow, FixedEventRow, HabitRow, IntentionField, NowMark, TaskRow } from '../components/items';
 import { Empty, Meter, Ring } from '../components/ui';
-import { ChevronLeftIcon, ChevronRightIcon, PlusIcon, StopwatchIcon } from '../icons';
+import { ChevronLeftIcon, ChevronRightIcon, PlusIcon, SparklesIcon, StopwatchIcon } from '../icons';
 import type { Habit } from '../types';
 
 export function DayView({ date }: { date: string }) {
@@ -72,13 +72,17 @@ export function DayView({ date }: { date: string }) {
       );
     }
     timeline.push(
-      <EventRow
-        key={event.id}
-        event={event}
-        onDropSwap={(sourceId) => {
-          if (sourceId !== event.id) swapEventTimes(sourceId, event.id);
-        }}
-      />,
+      event.fixedCommitmentId ? (
+        <FixedEventRow key={event.id} event={event} />
+      ) : (
+        <EventRow
+          key={event.id}
+          event={event}
+          onDropSwap={(sourceId) => {
+            if (sourceId !== event.id) swapEventTimes(sourceId, event.id);
+          }}
+        />
+      ),
     );
   }
   if (isToday && !placedNow) {
@@ -158,6 +162,9 @@ export function DayView({ date }: { date: string }) {
               Focus
             </button>
           </div>
+          <button type="button" className="btn btn-soft btn-small ai-day-link" onClick={() => navigate({ name: 'ai', tab: 'plan' })}>
+            <SparklesIcon size={15} /> Plan with AI
+          </button>
         </aside>
       </header>
 

@@ -3,6 +3,9 @@ import { parseHash, toHash, type Route } from './route';
 import { downloadState, loadFrom, parseBackup, saveTo } from './storage';
 import {
   addEvent as addEventTo,
+  addFixedCommitment as addFixedCommitmentTo,
+  deleteFixedCommitment as deleteFixedCommitmentFrom,
+  updateFixedCommitment as updateFixedCommitmentIn,
   addGoal as addGoalTo,
   addHabit as addHabitTo,
   addHabits as addHabitsTo,
@@ -36,7 +39,7 @@ import { todayISO } from './dates';
 import { buildSampleState } from './sample';
 import { applyTheme, loadAccent, loadThemeMode, resolvedMode, type ThemeMode } from './theme';
 import type { Accent } from './constants';
-import { createEmptyState, type ComposerState, type EventInput, type GoalInput, type HabitInput, type NoteInput, type PlannerState, type TaskInput } from './types';
+import { createEmptyState, type ComposerState, type EventInput, type FixedCommitmentInput, type GoalInput, type HabitInput, type NoteInput, type PlannerState, type TaskInput } from './types';
 
 export interface NoticeAction {
   label: string;
@@ -109,6 +112,11 @@ interface PlannerContextValue {
   toggleTask: (id: string) => void;
   swapTasks: (aId: string, bId: string) => void;
   addEvent: (input: EventInput) => void;
+  addFixedCommitment: (input: FixedCommitmentInput) => void;
+  updateFixedCommitment: (id: string, patch: Partial<FixedCommitmentInput>) => void;
+  deleteFixedCommitment: (id: string) => void;
+  applyAIPlan: (draft: { tasks: TaskInput[]; events: EventInput[]; habits: HabitInput[] }) => void;
+  rescheduleTasks: (moves: Array<{ id: string; date: string }>) => void;
   updateEvent: (id: string, patch: Partial<EventInput>) => void;
   deleteEvent: (id: string) => void;
   toggleEvent: (id: string) => void;
@@ -375,6 +383,17 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     toggleTask: (id) => commit((current) => toggleTaskIn(current, id)),
     swapTasks: (aId, bId) => commit((current) => swapTasksIn(current, aId, bId)),
     addEvent: (input) => commit((current) => addEventTo(current, input)),
+    addFixedCommitment: (input) => commit((current) => addFixedCommitmentTo(current, input)),
+    updateFixedCommitment: (id, patch) => commit((current) => updateFixedCommitmentIn(current, id, patch)),
+    deleteFixedCommitment: (id) => commit((current) => deleteFixedCommitmentFrom(current, id)),
+    applyAIPlan: (draft) => commit((current) => {
+      let next = current;
+      for (const input of draft.tasks) next = addTaskTo(next, input);
+      for (const input of draft.events) next = addEventTo(next, input);
+      for (const input of draft.habits) next = addHabitTo(next, input);
+      return next;
+    }),
+    rescheduleTasks: (moves) => commit((current) => moves.reduce((next, move) => moveTaskIn(next, move.id, move.date), current)),
     updateEvent: (id, patch) => commit((current) => updateEventIn(current, id, patch)),
     deleteEvent: (id) => commit((current) => deleteEventFrom(current, id)),
     toggleEvent: (id) => commit((current) => toggleEventIn(current, id)),
