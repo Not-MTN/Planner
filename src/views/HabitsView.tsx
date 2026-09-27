@@ -2,19 +2,24 @@ import { useState } from 'react';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
 import {
+  addDays,
   dayNumber,
+  formatMonthShort,
   formatMonthYear,
   formatWeekdayShort,
   monthDates,
+  startOfWeek,
   todayISO,
   weekDates,
 } from '../dates';
-import { ChevronLeftIcon, ChevronRightIcon, HabitGlyph } from '../icons';
-import { formatPercent, frequencyLabel, habitDot, habitStats } from '../logic';
+import { ChevronLeftIcon, ChevronRightIcon, FlameIcon, HabitGlyph } from '../icons';
+import { formatPercent, frequencyLabel, habitDot, habitStats, habitStreaks } from '../logic';
 import { Empty, Meter } from '../components/ui';
 
+const HEAT_WEEKS = 12;
+
 export function HabitsView() {
-  const { state, openComposer, setHabitArchived, requestConfirm, deleteHabit, toggleHabit } = usePlanner();
+  const { state, openComposer, setHabitArchived, deleteHabit, toggleHabit, flash, undo } = usePlanner();
   const today = todayISO();
   const [cursor, setCursor] = useState(() => {
     const now = new Date();
@@ -24,6 +29,7 @@ export function HabitsView() {
   const archived = state.habits.filter((habit) => habit.archived);
   const week = weekDates(today);
   const month = monthDates(cursor.year, cursor.month);
+  const heatStart = startOfWeek(addDays(today, -(HEAT_WEEKS - 1) * 7));
 
   const shift = (delta: number) => {
     const date = new Date(cursor.year, cursor.month - 1 + delta, 1);
@@ -58,12 +64,11 @@ export function HabitsView() {
       ) : (
         <>
           <div className="habit-toolbar">
-            <p className="kicker">This week</p>
+            <p className="kicker">{formatMonthYear(cursor.year, cursor.month)}</p>
             <div className="pager">
               <button type="button" className="icon-btn round" aria-label="Previous month" onClick={() => shift(-1)}>
                 <ChevronLeftIcon />
               </button>
-              <span>{formatMonthYear(cursor.year, cursor.month)}</span>
               <button type="button" className="icon-btn round" aria-label="Next month" onClick={() => shift(1)}>
                 <ChevronRightIcon />
               </button>
@@ -73,6 +78,7 @@ export function HabitsView() {
             {active.map((habit) => {
               const weekStats = habitStats(state, habit, week, today);
               const monthStats = habitStats(state, habit, month, today);
+              const streaks = habitStreaks(state, habit, today);
               return (
                 <article key={habit.id} className={cx('card habit-card', `accent-${habit.accent}`)}>
                   <header className="habit-top">
@@ -83,7 +89,12 @@ export function HabitsView() {
                       <h2>{habit.name}</h2>
                       <p className="meta">{frequencyLabel(habit)}</p>
                     </div>
-                    <p className="habit-percent">{formatPercent(monthStats.ratio)}</p>
+                    <div className="habit-nums">
+                      <span className="habit-percent">{formatPercent(monthStats.ratio)}</span>
+                      <span className="streak-chip big" title={`Best streak: ${streaks.best} ${streaks.best === 1 ? 'day' : 'days'}`}>
+                        <FlameIcon size={13} /> {streaks.current} day{streaks.current === 1 ? '' : 's'}
+                      </span>
+                    </div>
                   </header>
                   <Meter value={monthStats.ratio} label={`${habit.name} this month`} />
                   <p className="meta habit-count">
@@ -110,26 +121,37 @@ export function HabitsView() {
                       );
                     })}
                   </div>
-                  <p className="visually-hidden">
-                    This week, {weekStats.done} of {weekStats.expected || week.length} kept.
-                  </p>
-                  <div className="month-dots">
-                    {month.map((date) => {
-                      const status = habitDot(state, habit, date, today);
-                      return (
-                        <button
-                          key={date}
-                          type="button"
-                          title={`${formatWeekdayShort(date)} ${dayNumber(date)}`}
-                          className={cx('dot', 'dot-btn', status, `accent-${habit.accent}`)}
-                          aria-label={`${habit.name} on ${dayNumber(date)} ${formatMonthYear(cursor.year, cursor.month)}, ${status}`}
-                          aria-pressed={status === 'done'}
-                          disabled={status === 'off'}
-                          onClick={() => toggleHabit(habit.id, date)}
-                        />
-                      );
-                    })}
+                  <div className="heat-wrap">
+                    <div className="heat-months" aria-hidden="true">
+                      <span>{formatMonthShort(heatStart)}</span>
+                      <span>{formatMonthShort(addDays(heatStart, Math.round(HEAT_WEEKS / 2 * 7)))}</span>
+                      <span>{formatMonthShort(today)}</span>
+                    </div>
+                    <div className="heat-grid" role="group" aria-label={`${habit.name} over the last ${HEAT_WEEKS} weeks`}>
+                      {Array.from({ length: HEAT_WEEKS }, (_, weekIndex) => (
+                        <div key={weekIndex} className="heat-col">
+                          {weekDates(addDays(heatStart, weekIndex * 7)).map((date) => {
+                            const status = habitDot(state, habit, date, today);
+                            return (
+                              <button
+                                key={date}
+                                type="button"
+                                className={cx('heat-cell', status, `accent-${habit.accent}`)}
+                                title={`${formatWeekdayShort(date)} ${dayNumber(date)} ${formatMonthShort(date)} — ${status === 'done' ? 'done' : status === 'open' ? 'missed' : status === 'future' ? 'upcoming' : status === 'optional' ? 'optional' : 'not planned'}`}
+                                aria-label={`${habit.name} on ${date}: ${status}`}
+                                aria-pressed={status === 'done'}
+                                disabled={status === 'off' || status === 'future'}
+                                onClick={() => toggleHabit(habit.id, date)}
+                              />
+                            );
+                          })}
+                        </div>
+                      ))}
+                    </div>
                   </div>
+                  <p className="visually-hidden">
+                    This week, {weekStats.done} of {weekStats.expected || week.length} kept. Streak: {streaks.current}, best {streaks.best}.
+                  </p>
                   <div className="row-actions">
                     <button type="button" className="btn btn-tiny" onClick={() => openComposer({ mode: 'edit', type: 'habit', id: habit.id })}>
                       Edit
@@ -140,13 +162,10 @@ export function HabitsView() {
                     <button
                       type="button"
                       className="btn btn-tiny danger"
-                      onClick={() =>
-                        requestConfirm({
-                          title: 'Remove this habit?',
-                          body: 'Its history will be deleted too.',
-                          onConfirm: () => deleteHabit(habit.id),
-                        })
-                      }
+                      onClick={() => {
+                        deleteHabit(habit.id);
+                        flash(`Habit “${habit.name}” removed.`, { label: 'Undo', run: undo });
+                      }}
                     >
                       Remove
                     </button>
@@ -172,6 +191,6 @@ export function HabitsView() {
           ) : null}
         </>
       )}
-      </div>
+    </div>
   );
 }

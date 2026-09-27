@@ -1,4 +1,4 @@
-import { categoryById } from './constants';
+import { categoryById, noteKindById } from './constants';
 import {
   addDays,
   isValidISODate,
@@ -296,4 +296,134 @@ export function calendarMarks(state: PlannerState, date: string): { events: numb
     tasks: tasks.length,
     important: events.some((event) => event.important) || tasks.some((task) => task.priority === 'high'),
   };
+}
+
+export interface HabitStreaks {
+  current: number;
+  best: number;
+}
+
+export function habitStreaks(state: PlannerState, habit: Habit, today: string): HabitStreaks {
+  if (habit.frequency.type === 'weekly') {
+    const times = habit.frequency.times;
+    let best = 0;
+    let run = 0;
+    let cursor = startOfWeek(habit.createdOn);
+    const thisWeek = startOfWeek(today);
+    while (cursor <= thisWeek) {
+      const done = weekDates(cursor).filter((date) => isDone(state, habit.id, date)).length;
+      if (done >= times) {
+        run += 1;
+        best = Math.max(best, run);
+      } else if (cursor < thisWeek) {
+        run = 0;
+      }
+      cursor = addDays(cursor, 7);
+    }
+    return { current: run, best };
+  }
+  let best = 0;
+  let run = 0;
+  let cursor = habit.createdOn;
+  while (cursor <= today) {
+    if (isPlannedDay(habit, cursor)) {
+      if (isDone(state, habit.id, cursor)) {
+        run += 1;
+        best = Math.max(best, run);
+      } else if (cursor < today) {
+        run = 0;
+      }
+    }
+    cursor = addDays(cursor, 1);
+  }
+  return { current: run, best };
+}
+
+export type SearchKind = 'task' | 'event' | 'note' | 'goal' | 'habit';
+
+export interface SearchHit {
+  kind: SearchKind;
+  id: string;
+  title: string;
+  sub: string;
+}
+
+export function searchHits(state: PlannerState, query: string, perKind = 4): SearchHit[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [];
+  const hits: SearchHit[] = [];
+  const push = (kind: SearchKind, id: string, title: string, sub: string, haystack: string[]) => {
+    if (hits.filter((hit) => hit.kind === kind).length >= perKind) return;
+    if (matchesQuery([title, ...haystack], needle)) hits.push({ kind, id, title, sub });
+  };
+  for (const task of state.tasks) {
+    push('task', task.id, task.title, `${task.completed ? 'Done' : 'Open'}${task.dueDate ? ` · ${task.dueDate}` : ''}`, [task.note, task.category, task.priority]);
+  }
+  for (const event of state.events) {
+    push('event', event.id, event.title, `${event.date} · ${event.startTime}`, [event.note, event.category]);
+  }
+  for (const note of state.notes) {
+    push('note', note.id, note.title, noteKindById(note.kind).label, [note.body]);
+  }
+  for (const goal of state.goals) {
+    push('goal', goal.id, goal.title, goal.horizon === 'long' ? 'Long-term' : 'Short-term', [goal.description]);
+  }
+  for (const habit of state.habits) {
+    if (habit.archived) continue;
+    push('habit', habit.id, habit.name, frequencyLabel(habit), [habit.name]);
+  }
+  return hits;
+}
+
+export interface InsightTotals {
+  tasksCompleted: number;
+  tasksOpen: number;
+  checkIns: number;
+  activeGoals: number;
+  notes: number;
+  dayStreak: number;
+}
+
+export function insightTotals(state: PlannerState, today: string): InsightTotals {
+  const activeGoals = state.goals.filter((goal) => goalProgress(goal, state.tasks).ratio < 1).length;
+  let dayStreak = 0;
+  let cursor = today;
+  for (let guard = 0; guard < 366; guard += 1) {
+    const score = dayScore(state, cursor, false);
+    if (score.done > 0) {
+      dayStreak += 1;
+      cursor = addDays(cursor, -1);
+    } else if (cursor === today) {
+      cursor = addDays(cursor, -1);
+    } else {
+      break;
+    }
+  }
+  return {
+    tasksCompleted: state.tasks.filter((task) => task.completed).length,
+    tasksOpen: state.tasks.filter((task) => !task.completed).length,
+    checkIns: state.completions.length,
+    activeGoals,
+    notes: state.notes.length,
+    dayStreak,
+  };
+}
+
+export function weekDoneCount(state: PlannerState, dates: string[]): number {
+  let done = 0;
+  for (const date of dates) {
+    const score = dayScore(state, date, false);
+    done += score.done;
+  }
+  return done;
+}
+
+export function isEmptyState(state: PlannerState): boolean {
+  return (
+    state.tasks.length === 0 &&
+    state.events.length === 0 &&
+    state.habits.length === 0 &&
+    state.goals.length === 0 &&
+    state.notes.length === 0
+  );
 }

@@ -88,6 +88,10 @@ export function deleteTask(state: PlannerState, id: string): PlannerState {
   return { ...state, tasks: state.tasks.filter((task) => task.id !== id) };
 }
 
+export function clearCompletedTasks(state: PlannerState): PlannerState {
+  return { ...state, tasks: state.tasks.filter((task) => !task.completed) };
+}
+
 export function toggleTask(state: PlannerState, id: string, now = nowIso()): PlannerState {
   return {
     ...state,

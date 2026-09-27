@@ -1,0 +1,17 @@
+{
+  "name": "Planner — calm daily planning",
+  "short_name": "Planner",
+  "description": "A calm, local-first planner for your day, habits, and goals.",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#f5f0e7",
+  "theme_color": "#f5f0e7",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

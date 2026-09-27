@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { monthGrid, startOfWeek, addDays, isValidISODate, weekDates } from './dates';
-import { agendaWindow, dayScore, goalProgress, habitStats, hasAgendaPlans, isDueOn, isPlannedDay, laterAgenda } from './logic';
-import { addEvent, addGoal, addHabit, addMilestone, addNote, addTask, moveTask, swapEventTimes, toggleHabit, toggleMilestone, toggleTask, updateEvent } from './mutate';
+import { agendaWindow, dayScore, goalProgress, habitStats, habitStreaks, hasAgendaPlans, insightTotals, isDueOn, isPlannedDay, laterAgenda } from './logic';
+import { addEvent, addGoal, addHabit, addMilestone, addNote, addTask, clearCompletedTasks, moveTask, swapEventTimes, toggleHabit, toggleMilestone, toggleTask, updateEvent } from './mutate';
+import { parseQuickAdd } from './quickAdd';
 import { parseHash, toHash } from './route';
 import { loadFrom, parseBackup, sanitizeState, saveTo, serialize } from './storage';
 import { createEmptyState, type PlannerState } from './types';
@@ -49,13 +50,82 @@ describe('dates', () => {
 });
 
 describe('routing', () => {
+  const now = new Date(2026, 8, 27);
+
   it('round-trips known routes and falls back safely', () => {
-    const weekly = { name: 'weekly' as const, date: '2026-09-27' };
-    expect(parseHash(toHash(weekly))).toEqual(weekly);
-    expect(parseHash('#/month/2026/9')).toEqual({ name: 'monthly', year: 2026, month: 9 });
-    expect(parseHash('#/nope')).toEqual({ name: 'today' });
-    expect(parseHash('#/daily/2026-02-31')).toEqual({ name: 'today' });
-    expect(parseHash(toHash({ name: 'future' }))).toEqual({ name: 'future' });
+    const day = { name: 'day' as const, date: '2026-09-27' };
+    expect(parseHash(toHash(day))).toEqual(day);
+    const calendar = { name: 'calendar' as const, tab: 'week' as const, date: '2026-09-27' };
+    expect(parseHash(toHash(calendar))).toEqual(calendar);
+    expect(parseHash(toHash({ name: 'insights' }))).toEqual({ name: 'insights' });
+    expect(parseHash('#/nope', now)).toEqual({ name: 'today' });
+    expect(parseHash('#/day/2026-02-31', now)).toEqual({ name: 'today' });
+  });
+
+  it('keeps legacy routes working', () => {
+    expect(parseHash('#/daily/2026-09-24', now)).toEqual({ name: 'day', date: '2026-09-24' });
+    expect(parseHash('#/weekly/2026-09-24', now)).toEqual({ name: 'calendar', tab: 'week', date: '2026-09-24' });
+    expect(parseHash('#/month/2026/9', now)).toEqual({ name: 'calendar', tab: 'month', date: '2026-09-01' });
+    expect(parseHash('#/monthly/2026/10', now)).toEqual({ name: 'calendar', tab: 'month', date: '2026-10-01' });
+    expect(parseHash('#/future', now)).toEqual({ name: 'calendar', tab: 'agenda', date: '2026-09-27' });
+    expect(parseHash('#/progress', now)).toEqual({ name: 'insights' });
+  });
+});
+
+describe('quick add', () => {
+  const today = '2026-09-27'; // a Sunday
+
+  it('parses a plain title into a task for the default day', () => {
+    const parse = parseQuickAdd('Buy oat milk', today);
+    expect(parse?.kind).toBe('task');
+    expect(parse?.title).toBe('Buy oat milk');
+    expect(parse?.date).toBe(today);
+    expect(parse?.priority).toBeNull();
+  });
+
+  it('understands tomorrow, times, categories, and priorities', () => {
+    const parse = parseQuickAdd('Call mom tomorrow 5pm #personal !high', today);
+    expect(parse?.kind).toBe('task');
+    expect(parse?.title).toBe('Call mom');
+    expect(parse?.date).toBe('2026-09-28');
+    expect(parse?.startTime).toBe('17:00');
+    expect(parse?.category).toBe('personal');
+    expect(parse?.priority).toBe('high');
+  });
+
+  it('turns a time range into an event', () => {
+    const parse = parseQuickAdd('Deep work 9:30-11:30 #work', today);
+    expect(parse?.kind).toBe('event');
+    expect(parse?.title).toBe('Deep work');
+    expect(parse?.startTime).toBe('09:30');
+    expect(parse?.endTime).toBe('11:30');
+    expect(parse?.date).toBe(today);
+  });
+
+  it('handles spoken ranges and weekdays', () => {
+    const parse = parseQuickAdd('Dentist tuesday 2 to 4pm', today);
+    expect(parse?.kind).toBe('event');
+    expect(parse?.date).toBe('2026-09-29');
+    expect(parse?.startTime).toBe('14:00');
+    expect(parse?.endTime).toBe('16:00');
+  });
+
+  it('reads relative dates and next weekdays', () => {
+    expect(parseQuickAdd('Ship the thing in 3 days', today)?.date).toBe('2026-09-30');
+    expect(parseQuickAdd('Standup next monday 9am', today)?.date).toBe('2026-10-05');
+    expect(parseQuickAdd('Review notes next week', today)?.date).toBe('2026-10-04');
+  });
+
+  it('does not mistake titles like 9-1-1 for times', () => {
+    const parse = parseQuickAdd('Watch 9-1-1 tonight', today);
+    expect(parse?.kind).toBe('task');
+    expect(parse?.title).toBe('Watch 9-1-1 tonight');
+    expect(parse?.startTime).toBeNull();
+  });
+
+  it('keeps unknown hashtags in the title', () => {
+    const parse = parseQuickAdd('Try #noscope mode', today);
+    expect(parse?.title).toBe('Try #noscope mode');
   });
 });
 
@@ -219,6 +289,84 @@ describe('planner logic', () => {
     expect(hasAgendaPlans(days[1])).toBe(true);
     expect(laterAgenda(state, '2026-09-27', 1).events).toHaveLength(1);
     expect(laterAgenda(state, '2026-09-27', 7).events).toHaveLength(0);
+  });
+});
+
+describe('streaks and totals', () => {
+  const now = '2026-09-27T10:00:00.000Z';
+  const today = '2026-09-27';
+
+  it('counts habit streaks and survives an unfinished today', () => {
+    let state = addHabit(
+      createEmptyState(),
+      { name: 'Read', icon: 'book', accent: 'sage', frequency: { type: 'daily' } },
+      'h1',
+      now,
+      '2026-09-20',
+    );
+    state = toggleHabit(state, 'h1', '2026-09-24');
+    state = toggleHabit(state, 'h1', '2026-09-25');
+    state = toggleHabit(state, 'h1', '2026-09-26');
+    expect(habitStreaks(state, state.habits[0], today)).toEqual({ current: 3, best: 3 });
+    state = toggleHabit(state, 'h1', today);
+    expect(habitStreaks(state, state.habits[0], today)).toEqual({ current: 4, best: 4 });
+  });
+
+  it('counts weekly-target streaks in weeks', () => {
+    let state = addHabit(
+      createEmptyState(),
+      { name: 'Gym', icon: 'stretch', accent: 'sage', frequency: { type: 'weekly', times: 2 } },
+      'h1',
+      now,
+      '2026-09-07',
+    );
+    state = toggleHabit(state, 'h1', '2026-09-14');
+    state = toggleHabit(state, 'h1', '2026-09-16');
+    state = toggleHabit(state, 'h1', '2026-09-21');
+    state = toggleHabit(state, 'h1', '2026-09-23');
+    expect(habitStreaks(state, state.habits[0], today)).toEqual({ current: 2, best: 2 });
+  });
+
+  it('clears completed tasks in one step', () => {
+    let state = addTask(createEmptyState(), {
+      title: 'Done thing',
+      priority: 'low',
+      dueDate: null,
+      dueTime: null,
+      category: 'personal',
+      note: '',
+      goalId: null,
+    }, 't1', now);
+    state = toggleTask(state, 't1', now);
+    state = addTask(state, {
+      title: 'Open thing',
+      priority: 'low',
+      dueDate: null,
+      dueTime: null,
+      category: 'personal',
+      note: '',
+      goalId: null,
+    }, 't2', now);
+    state = clearCompletedTasks(state);
+    expect(state.tasks).toHaveLength(1);
+    expect(state.tasks[0].title).toBe('Open thing');
+  });
+
+  it('sums insight totals including the day streak', () => {
+    let state = addTask(createEmptyState(), {
+      title: 'Draft',
+      priority: 'medium',
+      dueDate: '2026-09-27',
+      dueTime: null,
+      category: 'work',
+      note: '',
+      goalId: null,
+    }, 't1', now);
+    state = toggleTask(state, 't1', now);
+    const totals = insightTotals(state, today);
+    expect(totals.tasksCompleted).toBe(1);
+    expect(totals.tasksOpen).toBe(0);
+    expect(totals.dayStreak).toBe(1);
   });
 });
 

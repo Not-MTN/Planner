@@ -4,7 +4,7 @@ import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { isValidTime, suggestTime, timeToMinutes, todayISO, WEEKDAY_TOGGLES } from '../dates';
 import { HabitGlyph } from '../icons';
-import type { ComposerState, EventInput, GoalHorizon, HabitFrequency, HabitInput, NoteInput, TaskInput } from '../types';
+import type { ComposerState, EventInput, GoalHorizon, HabitFrequency, HabitInput, NoteInput, PlannerState, TaskInput } from '../types';
 import { Field, Modal } from './ui';
 
 const TITLES: Record<ComposerState['type'], [string, string]> = {
@@ -33,71 +33,64 @@ function ComposerForm({
   const planner = usePlanner();
   const editing = composer.mode === 'edit';
   const [type, setType] = useState(composer.type);
-  const [confirming, setConfirming] = useState(false);
   const activeType = editing ? composer.type : type;
   const heading = TITLES[activeType][editing ? 1 : 0];
 
   const remove = () => {
     if (composer.mode !== 'edit') return;
+    const item = findItem(planner.state, composer);
     if (composer.type === 'task') planner.deleteTask(composer.id);
     if (composer.type === 'event') planner.deleteEvent(composer.id);
     if (composer.type === 'habit') planner.deleteHabit(composer.id);
     if (composer.type === 'goal') planner.deleteGoal(composer.id);
     if (composer.type === 'note') planner.deleteNote(composer.id);
+    planner.flash(`${labelFor(composer.type)} “${item ?? 'Removed'}” removed.`, { label: 'Undo', run: planner.undo });
     onClose();
   };
 
   return (
-    <Modal title={confirming ? 'Remove this?' : heading} onClose={onClose}>
-      {confirming ? (
-        <div className="confirm-copy">
-          <p>{removeCopy(composer.type)}</p>
-          <div className="form-actions">
-            <button type="button" className="btn btn-ghost" data-autofocus onClick={() => setConfirming(false)}>
-              Back
+    <Modal title={heading} onClose={onClose}>
+      {!editing ? (
+        <div className="segmented type-switch" role="tablist" aria-label="What to add">
+          {(['task', 'event', 'habit', 'goal', 'note'] as const).map((item) => (
+            <button
+              key={item}
+              type="button"
+              role="tab"
+              aria-selected={type === item}
+              className={cx('seg', type === item && 'on')}
+              onClick={() => setType(item)}
+            >
+              {labelFor(item)}
             </button>
-            <button type="button" className="btn btn-danger" onClick={remove}>
-              Remove
-            </button>
-          </div>
+          ))}
         </div>
-      ) : (
-        <>
-          {!editing ? (
-            <div className="segmented type-switch" role="tablist" aria-label="What to add">
-              {(['task', 'event', 'habit', 'goal', 'note'] as const).map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  role="tab"
-                  aria-selected={type === item}
-                  className={cx('seg', type === item && 'on')}
-                  onClick={() => setType(item)}
-                >
-                  {labelFor(item)}
-                </button>
-              ))}
-            </div>
-          ) : null}
-          <div hidden={activeType !== 'task'}>
-            <TaskForm composer={composer} goals={goals} onClose={onClose} onRemove={() => setConfirming(true)} />
-          </div>
-          <div hidden={activeType !== 'event'}>
-            <EventForm composer={composer} onClose={onClose} onRemove={() => setConfirming(true)} />
-          </div>
-          <div hidden={activeType !== 'habit'}>
-            <HabitForm composer={composer} onClose={onClose} onRemove={() => setConfirming(true)} />
-          </div>
-          <div hidden={activeType !== 'goal'}>
-            <GoalForm composer={composer} onClose={onClose} onRemove={() => setConfirming(true)} />
-          </div>
-          <div hidden={activeType !== 'note'}>
-            <NoteForm composer={composer} onClose={onClose} onRemove={() => setConfirming(true)} />
-          </div>
-        </>
-      )}
+      ) : null}
+      <div hidden={activeType !== 'task'}>
+        <TaskForm composer={composer} goals={goals} onClose={onClose} onRemove={remove} />
+      </div>
+      <div hidden={activeType !== 'event'}>
+        <EventForm composer={composer} onClose={onClose} onRemove={remove} />
+      </div>
+      <div hidden={activeType !== 'habit'}>
+        <HabitForm composer={composer} onClose={onClose} onRemove={remove} />
+      </div>
+      <div hidden={activeType !== 'goal'}>
+        <GoalForm composer={composer} onClose={onClose} onRemove={remove} />
+      </div>
+      <div hidden={activeType !== 'note'}>
+        <NoteForm composer={composer} onClose={onClose} onRemove={remove} />
+      </div>
     </Modal>
   );
+}
+
+function findItem(state: PlannerState, composer: { type: ComposerState['type']; id: string }): string | null {
+  if (composer.type === 'task') return state.tasks.find((item) => item.id === composer.id)?.title ?? null;
+  if (composer.type === 'event') return state.events.find((item) => item.id === composer.id)?.title ?? null;
+  if (composer.type === 'habit') return state.habits.find((item) => item.id === composer.id)?.name ?? null;
+  if (composer.type === 'goal') return state.goals.find((item) => item.id === composer.id)?.title ?? null;
+  return state.notes.find((item) => item.id === composer.id)?.title ?? null;
 }
 
 function labelFor(type: ComposerState['type']): string {
@@ -106,14 +99,6 @@ function labelFor(type: ComposerState['type']): string {
   if (type === 'habit') return 'Habit';
   if (type === 'goal') return 'Goal';
   return 'Note';
-}
-
-function removeCopy(type: ComposerState['type']): string {
-  if (type === 'habit') return 'Its history will be deleted too.';
-  if (type === 'goal') return 'Steps go with it. Linked tasks stay in your task list.';
-  if (type === 'note') return 'This note will be deleted.';
-  if (type === 'event') return 'It will be taken off your schedule.';
-  return 'It will disappear from your lists.';
 }
 
 function TaskForm({

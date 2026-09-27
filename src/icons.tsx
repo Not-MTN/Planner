@@ -295,6 +295,78 @@ export function SparkIcon(props: IconProps) {
   );
 }
 
+export function SearchIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="m20 20-4.4-4.4" />
+    </Svg>
+  );
+}
+
+export function SlidersIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 7.5h9M17 7.5h3M4 16.5h3M11 16.5h9" />
+      <circle cx="15" cy="7.5" r="2" />
+      <circle cx="9" cy="16.5" r="2" />
+    </Svg>
+  );
+}
+
+export function StopwatchIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="13.5" r="7" />
+      <path d="M12 10.5v3l2 2" />
+      <path d="M10 3.5h4M12 3.5v3" />
+    </Svg>
+  );
+}
+
+export function FlameIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M12 3.5c1.6 3.3 5.5 5 5.5 9.3A5.5 5.5 0 0 1 12 20.5a5.5 5.5 0 0 1-5.5-7.7C7.7 9.9 10 9.3 10 6.5c1 .8 1.5 1.7 1.6 2.9.9-1.4.9-3.4.4-5.9Z" />
+    </Svg>
+  );
+}
+
+export function UndoIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M7.5 4.5 4 8l3.5 3.5" />
+      <path d="M4 8h10.5a5 5 0 0 1 0 10H11" />
+    </Svg>
+  );
+}
+
+export function RedoIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M16.5 4.5 20 8l-3.5 3.5" />
+      <path d="M20 8H9.5a5 5 0 0 0 0 10H13" />
+    </Svg>
+  );
+}
+
+export function CommandIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M9 9V6.5a2.5 2.5 0 1 0-2.5 2.5H9Zm0 0v6m0-6h6m-6 6v2.5A2.5 2.5 0 1 1 6.5 15H9Zm6-6V6.5A2.5 2.5 0 1 1 17.5 9H15Zm0 0v6m0 0v2.5a2.5 2.5 0 1 0 2.5-2.5H15Z" />
+    </Svg>
+  );
+}
+
+export function SparklesIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M9 4.5 10 8l3.5 1L10 10l-1 3.5L8 10l-3.5-1L8 8Z" />
+      <path d="M17 12.5l.7 2.3 2.3.7-2.3.7-.7 2.3-.7-2.3-2.3-.7 2.3-.7Z" />
+    </Svg>
+  );
+}
+
 export function HabitGlyph({ name, size = 18 }: { name: string; size?: number }) {
   switch (name) {
     case 'water':
