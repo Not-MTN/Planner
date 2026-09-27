@@ -134,7 +134,7 @@ export function PlusIcon(props: IconProps) {
 
 export function ChevronLeftIcon(props: IconProps) {
   return (
-    <Svg {...props}>
+    <Svg {...props} className={`icon-dir ${props.className ?? ''}`}>
       <path d="m14.5 6-6 6 6 6" />
     </Svg>
   );
@@ -142,7 +142,7 @@ export function ChevronLeftIcon(props: IconProps) {
 
 export function ChevronRightIcon(props: IconProps) {
   return (
-    <Svg {...props}>
+    <Svg {...props} className={`icon-dir ${props.className ?? ''}`}>
       <path d="m9.5 6 6 6-6 6" />
     </Svg>
   );

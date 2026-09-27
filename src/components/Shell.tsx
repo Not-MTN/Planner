@@ -37,16 +37,17 @@ import { InsightsView } from '../views/InsightsView';
 import { NotesView } from '../views/NotesView';
 import { TasksView } from '../views/TasksView';
 import { AIView } from '../views/AIView';
+import { t } from '../i18n';
 
 const NAV = [
-  { name: 'today', label: 'Today', icon: SunIcon },
-  { name: 'calendar', label: 'Calendar', icon: CalendarIcon },
-  { name: 'ai', label: 'AI coach', icon: SparklesIcon },
-  { name: 'tasks', label: 'Tasks', icon: CheckIcon },
-  { name: 'habits', label: 'Habits', icon: DotsIcon },
-  { name: 'goals', label: 'Goals', icon: FlagIcon },
-  { name: 'notes', label: 'Notes', icon: NoteIcon },
-  { name: 'insights', label: 'Insights', icon: ArcIcon },
+  { name: 'today', label: t("Today"), icon: SunIcon },
+  { name: 'calendar', label: t("Calendar"), icon: CalendarIcon },
+  { name: 'ai', label: t("AI coach"), icon: SparklesIcon },
+  { name: 'tasks', label: t("Tasks"), icon: CheckIcon },
+  { name: 'habits', label: t("Habits"), icon: DotsIcon },
+  { name: 'goals', label: t("Goals"), icon: FlagIcon },
+  { name: 'notes', label: t("Notes"), icon: NoteIcon },
+  { name: 'insights', label: t("Insights"), icon: ArcIcon },
 ] as const;
 
 export function Shell() {
@@ -87,7 +88,7 @@ export function Shell() {
   const today = todayISO();
 
   useEffect(() => {
-    document.title = route.name === 'today' ? 'Planner — today' : `${routeTitle(route)} · Planner`;
+    document.title = route.name === 'today' ? t("Planner — today") : t("{0} · Planner", { 0: routeTitle(route) });
     setMoreOpen(false);
   }, [key, route.name]);
 
@@ -142,26 +143,26 @@ export function Shell() {
 
   return (
     <div className="app-shell">
-      <a className="skip" href="#content">Skip to content</a>
+      <a className="skip" href="#content">{t("Skip to content")}</a>
       <aside className="sidebar">
         <button type="button" className="brand" onClick={() => navigate({ name: 'today' })}>
           <span className="brand-mark"><LeafIcon size={18} /></span>
           <span className="brand-text">
-            <strong>Planner</strong>
-            <span>Calm daily planning</span>
+            <strong>{t("Planner")}</strong>
+            <span>{t("Calm daily planning")}</span>
           </span>
         </button>
         <button type="button" className="side-search" onClick={openPalette}>
           <SearchIcon size={16} />
-          <span>Search or add…</span>
-          <kbd className="kbd">⌘K</kbd>
+          <span>{t("Search or add…")}</span>
+          <kbd className="kbd">{t("⌘K")}</kbd>
         </button>
-        <nav className="side-nav" aria-label="Planner">
-          <p className="nav-label">Plan</p>
+        <nav className="side-nav" aria-label={t("Planner")}>
+          <p className="nav-label">{t("Plan")}</p>
           {NAV.slice(0, 3).map((item) => (
             <NavButton key={item.name} item={item} active={route.name === item.name || (item.name === 'calendar' && route.name === 'calendar')} onClick={() => go(item.name)} />
           ))}
-          <p className="nav-label">Track</p>
+          <p className="nav-label">{t("Track")}</p>
           {NAV.slice(3).map((item) => (
             <NavButton key={item.name} item={item} active={route.name === item.name} onClick={() => go(item.name)} />
           ))}
@@ -171,8 +172,8 @@ export function Shell() {
             <button
               type="button"
               className="icon-btn round"
-              aria-label="Undo last change"
-              title="Undo (⌘Z)"
+              aria-label={t("Undo last change")}
+              title={t("Undo (⌘Z)")}
               disabled={!canUndo}
               onClick={undo}
             >
@@ -181,8 +182,8 @@ export function Shell() {
             <button
               type="button"
               className="icon-btn round"
-              aria-label="Redo"
-              title="Redo (⌘⇧Z)"
+              aria-label={t("Redo")}
+              title={t("Redo (⌘⇧Z)")}
               disabled={!canRedo}
               onClick={redo}
             >
@@ -193,20 +194,20 @@ export function Shell() {
             type="button"
             className="side-tool"
             onClick={() => setThemeMode(isDark ? 'light' : 'dark')}
-            title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+            title={isDark ? t("Switch to light mode") : t("Switch to dark mode")}
           >
             {isDark ? <SunIcon size={16} /> : <MoonIcon size={16} />}
-            <span>{isDark ? 'Light mode' : 'Dark mode'}</span>
+            <span>{isDark ? t("Light mode") : t("Dark mode")}</span>
           </button>
-          <button type="button" className="side-tool" onClick={openSettings} title="Settings">
+          <button type="button" className="side-tool" onClick={openSettings} title={t("Settings")}>
             <SlidersIcon size={16} />
-            <span>Settings</span>
+            <span>{t("Settings")}</span>
           </button>
           <p className="side-note">
-            {syncStatus === 'off' ? 'Saved on this device' : (
+            {syncStatus === 'off' ? t("Saved on this device") : (
               <>
                 <i className={`sync-dot ${syncStatus}`} aria-hidden="true" />{' '}
-                {syncStatus === 'syncing' ? 'Syncing…' : syncStatus === 'error' ? 'Sync problem' : syncStatus === 'offline' ? 'Offline · saved here' : 'Synced'}
+                {syncStatus === 'syncing' ? t("Syncing…") : syncStatus === 'error' ? t("Sync problem") : syncStatus === 'offline' ? t("Offline · saved here") : t("Synced")}
               </>
             )}
           </p>
@@ -217,16 +218,16 @@ export function Shell() {
         <header className="mobile-bar">
           <button type="button" className="brand" onClick={() => navigate({ name: 'today' })}>
             <span className="brand-mark"><LeafIcon size={16} /></span>
-            <span className="brand-text"><strong>Planner</strong></span>
+            <span className="brand-text"><strong>{t("Planner")}</strong></span>
           </button>
           <div className="mobile-bar-actions">
-            <button type="button" className="icon-btn round" aria-label="Search" onClick={openPalette}>
+            <button type="button" className="icon-btn round" aria-label={t("Search")} onClick={openPalette}>
               <SearchIcon size={18} />
             </button>
             <button
               type="button"
               className="icon-btn round"
-              aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+              aria-label={isDark ? t("Switch to light mode") : t("Switch to dark mode")}
               onClick={() => setThemeMode(isDark ? 'light' : 'dark')}
             >
               {isDark ? <SunIcon size={18} /> : <MoonIcon size={18} />}
@@ -243,24 +244,24 @@ export function Shell() {
                   <div className="banner-actions">
                     {saveBlocked ? (
                       <>
-                        <button type="button" className="btn btn-tiny" onClick={importFile.open}>Import</button>
+                        <button type="button" className="btn btn-tiny" onClick={importFile.open}>{t("Import")}</button>
                         <button
                           type="button"
                           className="btn btn-tiny danger"
                           onClick={() =>
                             requestConfirm({
-                              title: 'Start fresh?',
-                              body: 'This clears the planner in this browser. Export a backup first if you might want the old data.',
-                              confirmLabel: 'Start fresh',
+                              title: t("Start fresh?"),
+                              body: t("This clears the planner in this browser. Export a backup first if you might want the old data."),
+                              confirmLabel: t("Start fresh"),
                               onConfirm: startFresh,
                             })
                           }
                         >
-                          Start fresh
+                          {t("Start fresh")}
                         </button>
                       </>
                     ) : (
-                      <button type="button" className="btn btn-tiny" onClick={dismissError}>Dismiss</button>
+                      <button type="button" className="btn btn-tiny" onClick={dismissError}>{t("Dismiss")}</button>
                     )}
                   </div>
                 </div>
@@ -281,42 +282,42 @@ export function Shell() {
         </main>
       </div>
 
-      <nav className="tabbar" aria-label="Primary">
-        <Tab icon={SunIcon} label="Today" active={route.name === 'today'} onClick={() => go('today')} />
-        <Tab icon={CalendarIcon} label="Calendar" active={route.name === 'calendar'} onClick={() => go('calendar')} />
-        <Tab icon={CheckIcon} label="Tasks" active={route.name === 'tasks'} onClick={() => go('tasks')} />
-        <Tab icon={DotsIcon} label="Habits" active={route.name === 'habits'} onClick={() => go('habits')} />
-        <Tab icon={SlidersIcon} label="More" active={moreActive || moreOpen} onClick={() => setMoreOpen(true)} />
+      <nav className="tabbar" aria-label={t("Primary")}>
+        <Tab icon={SunIcon} label={t("Today")} active={route.name === 'today'} onClick={() => go('today')} />
+        <Tab icon={CalendarIcon} label={t("Calendar")} active={route.name === 'calendar'} onClick={() => go('calendar')} />
+        <Tab icon={CheckIcon} label={t("Tasks")} active={route.name === 'tasks'} onClick={() => go('tasks')} />
+        <Tab icon={DotsIcon} label={t("Habits")} active={route.name === 'habits'} onClick={() => go('habits')} />
+        <Tab icon={SlidersIcon} label={t("More")} active={moreActive || moreOpen} onClick={() => setMoreOpen(true)} />
       </nav>
 
       <button
         type="button"
         className="fab"
-        aria-label="Quick add"
+        aria-label={t("Quick add")}
         onClick={openPalette}
       >
         <PlusIcon />
       </button>
 
       {moreOpen ? (
-        <Modal title="More" onClose={() => setMoreOpen(false)}>
+        <Modal title={t("More")} onClose={() => setMoreOpen(false)}>
           <div className="more-list">
             <button type="button" className={cx(route.name === 'goals' && 'on')} onClick={() => go('goals')}>
-              <FlagIcon size={18} /> Goals
+              <FlagIcon size={18} /> {t("Goals")}
             </button>
             <button type="button" className={cx(route.name === 'notes' && 'on')} onClick={() => go('notes')}>
-              <NoteIcon size={18} /> Notes
+              <NoteIcon size={18} /> {t("Notes")}
             </button>
             <button type="button" className={cx(route.name === 'insights' && 'on')} onClick={() => go('insights')}>
-              <ArcIcon size={18} /> Insights
+              <ArcIcon size={18} /> {t("Insights")}
             </button>
             <button type="button" className={cx(route.name === 'ai' && 'on')} onClick={() => go('ai')}>
-              <SparklesIcon size={18} /> AI coach
+              <SparklesIcon size={18} /> {t("AI coach")}
             </button>
-            <button type="button" onClick={openPalette}><SearchIcon size={18} /> Search &amp; quick add</button>
-            <button type="button" onClick={openSettings}><SlidersIcon size={18} /> Settings</button>
-            <button type="button" onClick={exportData}><DownloadIcon size={18} /> Export backup</button>
-            <button type="button" onClick={importFile.open}><UploadIcon size={18} /> Import backup</button>
+            <button type="button" onClick={openPalette}><SearchIcon size={18} /> {t("Search & quick add")}</button>
+            <button type="button" onClick={openSettings}><SlidersIcon size={18} /> {t("Settings")}</button>
+            <button type="button" onClick={exportData}><DownloadIcon size={18} /> {t("Export backup")}</button>
+            <button type="button" onClick={importFile.open}><UploadIcon size={18} /> {t("Import backup")}</button>
           </div>
         </Modal>
       ) : null}
@@ -331,7 +332,7 @@ export function Shell() {
           <div className="confirm-copy">
             <p>{confirm.body}</p>
             <div className="form-actions">
-              <button type="button" className="btn btn-ghost" data-autofocus onClick={closeConfirm}>Cancel</button>
+              <button type="button" className="btn btn-ghost" data-autofocus onClick={closeConfirm}>{t("Cancel")}</button>
               <button
                 type="button"
                 className="btn btn-danger"
@@ -340,7 +341,7 @@ export function Shell() {
                   closeConfirm();
                 }}
               >
-                {confirm.confirmLabel ?? 'Remove'}
+                {confirm.confirmLabel ?? t("Remove")}
               </button>
             </div>
           </div>

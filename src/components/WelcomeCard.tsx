@@ -3,6 +3,7 @@ import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { ESSENTIAL_PRESETS, presetToInput } from '../presets';
 import { HabitGlyph, SparklesIcon, TickIcon } from '../icons';
+import { t } from '../i18n';
 
 export function WelcomeCard() {
   const { addHabits, flash, undo, loadSample } = usePlanner();
@@ -21,16 +22,16 @@ export function WelcomeCard() {
     const chosen = ESSENTIAL_PRESETS.filter((preset) => picked.has(preset.id));
     if (chosen.length === 0) return;
     addHabits(chosen.map(presetToInput));
-    flash(`${chosen.length} daily essentials added.`, { label: 'Undo', run: undo });
+    flash(t("{0} daily essentials added.", { 0: chosen.length }), { label: t("Undo"), run: undo });
   };
 
   return (
     <section className="card welcome-card">
       <img className="welcome-img" src="/img/hero-day.jpg" alt="" loading="lazy" />
       <div className="welcome-body">
-        <p className="kicker">Welcome to Planner</p>
-        <h2 className="welcome-title">Start with the everyday essentials</h2>
-        <p className="lede">These must-dos will be waiting for you every morning. Add them now — adjust any time.</p>
+        <p className="kicker">{t("Welcome to Planner")}</p>
+        <h2 className="welcome-title">{t("Start with the everyday essentials")}</h2>
+        <p className="lede">{t("These must-dos will be waiting for you every morning. Add them now — adjust any time.")}</p>
         <div className="preset-grid">
           {ESSENTIAL_PRESETS.map((preset) => {
             const on = picked.has(preset.id);
@@ -58,10 +59,10 @@ export function WelcomeCard() {
         </div>
         <div className="welcome-actions">
           <button type="button" className="btn btn-primary" onClick={add} disabled={picked.size === 0}>
-            Add {picked.size > 0 ? picked.size : ''} essential{picked.size === 1 ? '' : 's'}
+            {t("Add")} {picked.size > 0 ? picked.size : ''} {picked.size === 1 ? t('essential') : t('essentials')}
           </button>
           <button type="button" className="btn btn-ghost" onClick={loadSample}>
-            <SparklesIcon size={15} /> Explore a sample day
+            <SparklesIcon size={15} /> {t("Explore a sample day")}
           </button>
         </div>
       </div>

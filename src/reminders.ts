@@ -1,6 +1,7 @@
 import { displayTime, timeToMinutes, todayISO } from './dates';
 import { eventsForDate, tasksForDate } from './logic';
 import type { PlannerState } from './types';
+import { t } from './i18n';
 
 export interface ReminderSettings {
   enabled: boolean;
@@ -84,7 +85,7 @@ export function dueReminders(state: PlannerState, now: Date, settings: ReminderS
     out.push({
       key,
       title: event.title,
-      body: settings.lead > 0 ? `Starts at ${displayTime(event.startTime)} · in ${settings.lead} min` : `Starting now · ${displayTime(event.startTime)}`,
+      body: settings.lead > 0 ? t("Starts at {0} · in {1} min", { 0: displayTime(event.startTime), 1: settings.lead }) : t("Starting now · {0}", { 0: displayTime(event.startTime) }),
     });
   }
   for (const task of tasksForDate(state, today)) {
@@ -92,7 +93,7 @@ export function dueReminders(state: PlannerState, now: Date, settings: ReminderS
     const key = `${today}|task|${task.id}|${task.dueTime}`;
     if (fired.has(key)) continue;
     if (!inWindow(timeToMinutes(task.dueTime) - settings.lead)) continue;
-    out.push({ key, title: task.title, body: `Task due at ${displayTime(task.dueTime)}` });
+    out.push({ key, title: task.title, body: t("Task due at {0}", { 0: displayTime(task.dueTime) }) });
   }
   if (settings.digest) {
     const key = `${today}|digest`;
@@ -102,8 +103,8 @@ export function dueReminders(state: PlannerState, now: Date, settings: ReminderS
       if (tasks + events > 0) {
         out.push({
           key,
-          title: 'Good morning — here is your day',
-          body: `${events} ${events === 1 ? 'event' : 'events'} and ${tasks} open ${tasks === 1 ? 'task' : 'tasks'} today.`,
+          title: t("Good morning — here is your day"),
+          body: t("{0} {1} and {2} open {3} today.", { 0: events, 1: events === 1 ? t("event") : t("events"), 2: tasks, 3: tasks === 1 ? t("task") : t("tasks") }),
         });
       }
     }

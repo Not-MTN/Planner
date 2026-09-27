@@ -46,6 +46,7 @@ import { deleteRemote, EMPTY_SYNC, generateCode, loadSyncSettings, mergeStates, 
 import { applyTheme, loadAccent, loadThemeMode, resolvedMode, type ThemeMode } from './theme';
 import type { Accent } from './constants';
 import { createEmptyState, type ComposerState, type EventInput, type FixedCommitmentInput, type GoalInput, type HabitInput, type NoteInput, type PlannerState, type TaskInput } from './types';
+import { t } from './i18n';
 
 export interface NoticeAction {
   label: string;
@@ -246,7 +247,7 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
       // localStorage is full — IndexedDB holds the copy instead (it has far more room).
       if (!idbOnly.current) {
         idbOnly.current = true;
-        setNotice({ message: 'Your planner outgrew basic storage — now saving to larger browser storage.' });
+        setNotice({ message: t("Your planner outgrew basic storage — now saving to larger browser storage.") });
       }
       return true;
     }
@@ -301,7 +302,7 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
       futureRef.current = [];
       syncHistoryFlags();
     } catch {
-      setError('Something went wrong with that change.');
+      setError(t("Something went wrong with that change."));
     }
   }, [trySave, syncHistoryFlags]);
 
@@ -315,7 +316,7 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     stateRef.current = prev;
     setState(prev);
     syncHistoryFlags();
-    flash('Undone.');
+    flash(t("Undone."));
   }, [flash, trySave, syncHistoryFlags]);
 
   const redo = useCallback(() => {
@@ -328,7 +329,7 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     stateRef.current = next;
     setState(next);
     syncHistoryFlags();
-    flash('Redone.');
+    flash(t("Redone."));
   }, [flash, trySave, syncHistoryFlags]);
 
   const undoRef = useRef(undo);
@@ -412,8 +413,8 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
       setSyncMessage(
         failure?.message ??
           (caught instanceof Error && caught.name === 'OperationError'
-            ? 'This sync code does not match the data stored for it.'
-            : 'Sync failed. Your planner is still saved on this device.'),
+            ? t("This sync code does not match the data stored for it.")
+            : t("Sync failed. Your planner is still saved on this device.")),
       );
     } finally {
       syncBusy.current = false;
@@ -492,9 +493,9 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     try {
       await deleteRemote(code);
       stopSync();
-      flash('Cloud copy deleted. This device keeps its planner.');
+      flash(t("Cloud copy deleted. This device keeps its planner."));
     } catch {
-      setSyncMessage('The cloud copy could not be deleted. Try again.');
+      setSyncMessage(t("The cloud copy could not be deleted. Try again."));
     }
   }, [stopSync, flash]);
 
@@ -543,7 +544,7 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     syncHistoryFlags();
     setSaveBlocked(false);
     const saved = trySave(empty);
-    if (saved) flash('Planner cleared.');
+    if (saved) flash(t("Planner cleared."));
   }, [flash, syncHistoryFlags]);
 
   const importText = useCallback((text: string) => {
@@ -560,28 +561,28 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     syncHistoryFlags();
     setSaveBlocked(false);
     const saved = trySave(parsed.state);
-    if (saved) flash('Backup imported.');
+    if (saved) flash(t("Backup imported."));
   }, [flash, trySave, syncHistoryFlags]);
 
   const exportData = useCallback(() => {
     try {
       downloadState(stateRef.current, todayISO());
-      flash('Backup downloaded.');
+      flash(t("Backup downloaded."));
     } catch {
-      setError('The backup could not be downloaded.');
+      setError(t("The backup could not be downloaded."));
     }
   }, [flash]);
 
   const loadSample = useCallback(() => {
     commit(() => buildSampleState());
-    flash('Sample day loaded — undo with ⌘Z any time.');
+    flash(t("Sample day loaded — undo with ⌘Z any time."));
   }, [commit, flash]);
 
   const clearCompletedTasks = useCallback(() => {
     const count = stateRef.current.tasks.filter((task) => task.completed).length;
     if (count === 0) return;
     commit(clearCompletedTasksIn);
-    flash(`${count} completed ${count === 1 ? 'task' : 'tasks'} cleared.`, { label: 'Undo', run: () => undoRef.current() });
+    flash(t("{0} completed {1} cleared.", { 0: count, 1: count === 1 ? t("task") : t("tasks") }), { label: t("Undo"), run: () => undoRef.current() });
   }, [commit, flash]);
 
   const celebrate = useCallback(() => {

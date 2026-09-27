@@ -1,18 +1,19 @@
 import { addDays, parseISODate, toISODate } from './dates';
 import type { TaskRepeat } from './types';
+import { t } from './i18n';
 
 export const REPEAT_CHOICES: { id: TaskRepeat; label: string }[] = [
-  { id: 'daily', label: 'Every day' },
-  { id: 'weekdays', label: 'Every weekday' },
-  { id: 'weekly', label: 'Every week' },
-  { id: 'monthly', label: 'Every month' },
-  { id: 'yearly', label: 'Every year' },
+  { id: 'daily', get label() { return t('Every day'); } },
+  { id: 'weekdays', get label() { return t('Every weekday'); } },
+  { id: 'weekly', get label() { return t('Every week'); } },
+  { id: 'monthly', get label() { return t('Every month'); } },
+  { id: 'yearly', get label() { return t('Every year'); } },
 ];
 
 export const REPEAT_SET = new Set<string>(REPEAT_CHOICES.map((item) => item.id));
 
 export function repeatLabel(repeat: TaskRepeat | null | undefined): string {
-  return REPEAT_CHOICES.find((item) => item.id === repeat)?.label ?? 'Does not repeat';
+  return REPEAT_CHOICES.find((item) => item.id === repeat)?.label ?? t('Does not repeat');
 }
 
 /** Adds calendar months, clamping to the last day (Jan 31 → Feb 28/29). */

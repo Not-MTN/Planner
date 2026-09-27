@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { CheckIcon, CloseIcon, StopwatchIcon } from '../icons';
+import { t } from '../i18n';
 
 const DURATIONS = [15, 25, 45, 60];
 
@@ -87,7 +88,7 @@ function FocusOverlay({ sessionId, title, initialMinutes }: { sessionId: string 
       const spent = Math.floor((total - remaining) / 60);
       if (spent >= 1) {
         logFocus({ taskId: sessionId, title: task?.title ?? title, minutes: spent });
-        flash(`${spent} focused ${spent === 1 ? 'minute' : 'minutes'} saved to Insights.`);
+        flash(t("{0} focused {1} saved to Insights.", { 0: spent, 1: spent === 1 ? t("minute") : t("minutes") }));
       }
     }
     stopFocus();
@@ -105,7 +106,7 @@ function FocusOverlay({ sessionId, title, initialMinutes }: { sessionId: string 
 
   useEffect(() => {
     if (phase === 'running' || phase === 'paused') {
-      document.title = `${formatRemaining(remaining)} · Focus — Planner`;
+      document.title = t("{0} · Focus — Planner", { 0: formatRemaining(remaining) });
     } else if (phase === 'setup') {
       document.title = titleRef.current;
     }
@@ -149,7 +150,7 @@ function FocusOverlay({ sessionId, title, initialMinutes }: { sessionId: string 
   const completeTask = () => {
     if (!sessionId) return;
     toggleTask(sessionId);
-    flash('Task completed. Lovely.', { label: 'Undo', run: undo });
+    flash(t("Task completed. Lovely."), { label: t("Undo"), run: undo });
     stopFocus();
   };
 
@@ -159,14 +160,14 @@ function FocusOverlay({ sessionId, title, initialMinutes }: { sessionId: string 
   const offset = circumference * (1 - ratio);
 
   return (
-    <div className="focus-overlay" role="dialog" aria-modal="true" aria-label="Focus session">
+    <div className="focus-overlay" role="dialog" aria-modal="true" aria-label={t("Focus session")}>
       <div className="focus-card">
-        <button type="button" className="icon-btn focus-close" aria-label="End focus session" onClick={end}>
+        <button type="button" className="icon-btn focus-close" aria-label={t("End focus session")} onClick={end}>
           <CloseIcon size={18} />
         </button>
         <p className="kicker">
-          {mode === 'break' ? (phase === 'done' ? 'Break over' : 'Break') : phase === 'done' ? 'Session complete' : 'Focus'}
-          {rounds > 0 ? ` · round ${rounds}${mode === 'focus' && phase !== 'done' ? ` → ${rounds + 1}` : ''}` : ''}
+          {mode === 'break' ? (phase === 'done' ? t("Break over") : t("Break")) : phase === 'done' ? t("Session complete") : t("Focus")}
+          {rounds > 0 ? t(" · round {0}{1}", { 0: rounds, 1: mode === 'focus' && phase !== 'done' ? t(" → {0}", { 0: rounds + 1 }) : '' }) : ''}
         </p>
         <div className="focus-ring-wrap">
           <svg className="focus-ring" viewBox="0 0 280 280" aria-hidden="true">
@@ -184,27 +185,27 @@ function FocusOverlay({ sessionId, title, initialMinutes }: { sessionId: string 
             {phase === 'setup' ? (
               <>
                 <strong>{minutes}</strong>
-                <span>minutes</span>
+                <span>{t('minutes')}</span>
               </>
             ) : phase === 'done' ? (
               <>
                 <CheckIcon size={44} />
-                <span>{mode === 'break' ? 'ready?' : 'done'}</span>
+                <span>{mode === 'break' ? t("ready?") : t("done")}</span>
               </>
             ) : (
               <>
                 <strong>{formatRemaining(remaining)}</strong>
-                <span>{phase === 'paused' ? 'paused' : mode === 'break' ? 'breathe · stretch' : 'keep going'}</span>
+                <span>{phase === 'paused' ? t("paused") : mode === 'break' ? t("breathe · stretch") : t("keep going")}</span>
               </>
             )}
           </div>
         </div>
         <h2 className="focus-title">{task ? task.title : title}</h2>
-        {task?.completed ? <p className="meta">This task is already done.</p> : null}
+        {task?.completed ? <p className="meta">{t("This task is already done.")}</p> : null}
 
         {phase === 'setup' ? (
           <>
-            <div className="focus-durations" role="radiogroup" aria-label="Session length">
+            <div className="focus-durations" role="radiogroup" aria-label={t("Session length")}>
               {DURATIONS.map((option) => (
                 <button
                   key={option}
@@ -214,51 +215,51 @@ function FocusOverlay({ sessionId, title, initialMinutes }: { sessionId: string 
                   className={cx('day-pill-btn', minutes === option && 'on')}
                   onClick={() => setMinutes(option)}
                 >
-                  {option} min
+                  {option} {t('min')}
                 </button>
               ))}
             </div>
             <div className="focus-actions">
-              <button type="button" className="btn btn-ghost" onClick={stopFocus}>Cancel</button>
+              <button type="button" className="btn btn-ghost" onClick={stopFocus}>{t("Cancel")}</button>
               <button type="button" className="btn btn-primary" onClick={start}>
-                <StopwatchIcon size={16} /> Start focusing
+                <StopwatchIcon size={16} /> {t("Start focusing")}
               </button>
             </div>
           </>
         ) : phase === 'running' ? (
           <div className="focus-actions">
-            <button type="button" className="btn btn-soft" onClick={extend}>+5 min</button>
-            <button type="button" className="btn btn-ghost" onClick={pause}>Pause</button>
-            <button type="button" className="btn btn-danger" onClick={end}>End</button>
+            <button type="button" className="btn btn-soft" onClick={extend}>{t("+5 min")}</button>
+            <button type="button" className="btn btn-ghost" onClick={pause}>{t("Pause")}</button>
+            <button type="button" className="btn btn-danger" onClick={end}>{t("End")}</button>
           </div>
         ) : phase === 'paused' ? (
           <div className="focus-actions">
-            <button type="button" className="btn btn-soft" onClick={extend}>+5 min</button>
-            <button type="button" className="btn btn-primary" onClick={resume}>Resume</button>
-            <button type="button" className="btn btn-danger" onClick={end}>End</button>
+            <button type="button" className="btn btn-soft" onClick={extend}>{t("+5 min")}</button>
+            <button type="button" className="btn btn-primary" onClick={resume}>{t("Resume")}</button>
+            <button type="button" className="btn btn-danger" onClick={end}>{t("End")}</button>
           </div>
         ) : mode === 'break' ? (
           <div className="focus-actions">
             <button type="button" className="btn btn-primary" onClick={start}>
-              <StopwatchIcon size={16} /> Next round · {minutes} min
+              <StopwatchIcon size={16} /> {t("Next round ·")} {minutes} {t('min')}
             </button>
-            <button type="button" className="btn btn-ghost" onClick={stopFocus}>Close</button>
+            <button type="button" className="btn btn-ghost" onClick={stopFocus}>{t("Close")}</button>
           </div>
         ) : (
           <div className="focus-actions">
             <button type="button" className="btn btn-soft" onClick={startBreak}>
-              {rounds > 0 && rounds % 4 === 0 ? 'Long break · 15 min' : 'Break · 5 min'}
+              {rounds > 0 && rounds % 4 === 0 ? t("Long break · 15 min") : t("Break · 5 min")}
             </button>
             {sessionId && !task?.completed ? (
               <button type="button" className="btn btn-primary" onClick={completeTask}>
-                <CheckIcon size={16} /> Complete task
+                <CheckIcon size={16} /> {t("Complete task")}
               </button>
             ) : null}
-            <button type="button" className="btn btn-soft" onClick={again}>Another round</button>
-            <button type="button" className="btn btn-ghost" onClick={stopFocus}>Close</button>
+            <button type="button" className="btn btn-soft" onClick={again}>{t("Another round")}</button>
+            <button type="button" className="btn btn-ghost" onClick={stopFocus}>{t("Close")}</button>
           </div>
         )}
-        <p className="focus-hint">The timer keeps this tab awake — close anytime, no pressure.</p>
+        <p className="focus-hint">{t("The timer keeps this tab awake — close anytime, no pressure.")}</p>
       </div>
     </div>
   );

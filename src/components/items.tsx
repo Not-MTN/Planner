@@ -7,6 +7,7 @@ import { frequencyLabel, habitStreaks } from '../logic';
 import { FlameIcon, GripIcon, HabitGlyph, PencilIcon, StopwatchIcon, TickIcon, TrashIcon } from '../icons';
 import { repeatLabel } from '../recurrence';
 import type { Habit, PlannerEvent, Task } from '../types';
+import { t } from '../i18n';
 
 export function IntentionField({ date }: { date: string }) {
   const { state, setIntention } = usePlanner();
@@ -25,11 +26,11 @@ export function IntentionField({ date }: { date: string }) {
 
   return (
     <label className="intention">
-      <span>Intention</span>
+      <span>{t("Intention")}</span>
       <input
         value={text}
         maxLength={160}
-        placeholder="One line for this day — optional"
+        placeholder={t("One line for this day — optional")}
         onChange={(event) => setText(event.target.value)}
         onBlur={() => {
           if (text !== saved) setIntention(date, text);
@@ -62,13 +63,13 @@ export function EventRow({ event, onDropSwap }: { event: PlannerEvent; onDropSwa
         type="button"
         className={cx('check', event.completed && 'on')}
         aria-pressed={event.completed}
-        aria-label={event.completed ? `Mark ${event.title} not done` : `Mark ${event.title} complete`}
+        aria-label={event.completed ? t("Mark {0} not done", { 0: event.title }) : t("Mark {0} complete", { 0: event.title })}
         onClick={() => toggleEvent(event.id)}
       >
         {event.completed ? <TickIcon size={14} /> : null}
       </button>
       <label className="time-field">
-        <span className="visually-hidden">Start time for {event.title}</span>
+        <span className="visually-hidden">{t("Start time for")} {event.title}</span>
         <input
           type="time"
           value={event.startTime}
@@ -86,14 +87,14 @@ export function EventRow({ event, onDropSwap }: { event: PlannerEvent; onDropSwa
           <i className={cx('dot-inline', `accent-${accent}`)} aria-hidden="true" />
           {categoryById(event.category).label}
           {duration ? ` · ${duration}` : ''}
-          {event.important ? ' · Important' : ''}
+          {event.important ? t(" · Important") : ''}
         </p>
       </div>
       <span
         className="grip"
         draggable
-        aria-label={`Drag ${event.title} to swap times`}
-        title="Drag onto another plan to swap times"
+        aria-label={t("Drag {0} to swap times", { 0: event.title })}
+        title={t("Drag onto another plan to swap times")}
         onDragStart={(dragEvent) => {
           dragEvent.dataTransfer.setData('text/plain', `event:${event.id}`);
           dragEvent.dataTransfer.effectAllowed = 'move';
@@ -106,7 +107,7 @@ export function EventRow({ event, onDropSwap }: { event: PlannerEvent; onDropSwa
       <button
         type="button"
         className="icon-btn"
-        aria-label={`Edit ${event.title}`}
+        aria-label={t("Edit {0}", { 0: event.title })}
         onClick={() => openComposer({ mode: 'edit', type: 'event', id: event.id })}
       >
         <PencilIcon size={16} />
@@ -114,10 +115,10 @@ export function EventRow({ event, onDropSwap }: { event: PlannerEvent; onDropSwa
       <button
         type="button"
         className="icon-btn row-delete"
-        aria-label={`Remove ${event.title}`}
+        aria-label={t("Remove {0}", { 0: event.title })}
         onClick={() => {
           deleteEvent(event.id);
-          flash(`Event “${event.title}” removed.`, { label: 'Undo', run: undo });
+          flash(t("Event “{0}” removed.", { 0: event.title }), { label: t("Undo"), run: undo });
         }}
       >
         <TrashIcon size={16} />
@@ -130,7 +131,7 @@ export function FixedEventRow({ event }: { event: PlannerEvent }) {
   const accent = categoryById(event.category).accent;
   const duration = formatDuration(event.startTime, event.endTime);
   return (
-    <li className={cx('event', 'fixed-event', `accent-${accent}`)} title="Protected weekly time — AI plans will leave this slot clear">
+    <li className={cx('event', 'fixed-event', `accent-${accent}`)} title={t("Protected weekly time — AI plans will leave this slot clear")}>
       <span className="fixed-repeat" aria-hidden="true">↻</span>
       <time className="fixed-time">{displayTime(event.startTime)}</time>
       <div className="item-body">
@@ -138,7 +139,7 @@ export function FixedEventRow({ event }: { event: PlannerEvent }) {
         <p className="meta">
           {categoryById(event.category).label}
           {duration ? ` · ${duration}` : ''}
-          <span className="fixed-tag">Protected weekly</span>
+          <span className="fixed-tag">{t("Protected weekly")}</span>
         </p>
       </div>
     </li>
@@ -180,7 +181,7 @@ export function TaskRow({
         type="button"
         className={cx('check', task.completed && 'on')}
         aria-pressed={task.completed}
-        aria-label={task.completed ? `Mark ${task.title} not done` : `Mark ${task.title} complete`}
+        aria-label={task.completed ? t("Mark {0} not done", { 0: task.title }) : t("Mark {0} complete", { 0: task.title })}
         onClick={() => toggleTask(task.id)}
       >
         {task.completed ? <TickIcon size={14} /> : null}
@@ -192,7 +193,7 @@ export function TaskRow({
         <p className="meta">
           <span className={cx('prio', `prio-${task.priority}`)}>
             <i aria-hidden="true" />
-            {task.priority === 'high' ? 'High' : task.priority === 'low' ? 'Low' : 'Medium'}
+            {task.priority === 'high' ? t("High") : task.priority === 'low' ? t("Low") : t("Medium")}
           </span>
           <i className={cx('dot-inline', `accent-${accent}`)} aria-hidden="true" />
           {categoryById(task.category).label}
@@ -202,7 +203,7 @@ export function TaskRow({
           {task.subtasks.length ? (
             <button type="button" className="steps-chip" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
               <span className="steps-bar" aria-hidden="true"><i style={{ width: `${(stepsDone / task.subtasks.length) * 100}%` }} /></span>
-              {stepsDone}/{task.subtasks.length} steps
+              {stepsDone}/{task.subtasks.length} {t('steps')}
             </button>
           ) : null}
         </p>
@@ -215,7 +216,7 @@ export function TaskRow({
                   type="button"
                   className={cx('check', 'mini', item.completed && 'on')}
                   aria-pressed={item.completed}
-                  aria-label={item.completed ? `Mark step ${item.title} not done` : `Mark step ${item.title} done`}
+                  aria-label={item.completed ? t("Mark step {0} not done", { 0: item.title }) : t("Mark step {0} done", { 0: item.title })}
                   onClick={() => toggleSubtask(task.id, item.id)}
                 >
                   {item.completed ? <TickIcon size={10} /> : null}
@@ -234,8 +235,8 @@ export function TaskRow({
       <span
         className="grip"
         draggable
-        aria-label={`Drag ${task.title} to reorder`}
-        title="Drag onto another task to reorder"
+        aria-label={t("Drag {0} to reorder", { 0: task.title })}
+        title={t("Drag onto another task to reorder")}
         onDragStart={(dragEvent) => {
           dragEvent.dataTransfer.setData('text/plain', `task:${task.id}`);
           dragEvent.dataTransfer.effectAllowed = 'move';
@@ -247,8 +248,8 @@ export function TaskRow({
         <button
           type="button"
           className="icon-btn row-focus"
-          aria-label={`Start a focus session for ${task.title}`}
-          title="Focus on this"
+          aria-label={t("Start a focus session for {0}", { 0: task.title })}
+          title={t("Focus on this")}
           onClick={() => startFocus({ taskId: task.id, title: task.title, minutes: 25 })}
         >
           <StopwatchIcon size={16} />
@@ -257,10 +258,10 @@ export function TaskRow({
       <button
         type="button"
         className="icon-btn row-delete"
-        aria-label={`Remove ${task.title}`}
+        aria-label={t("Remove {0}", { 0: task.title })}
         onClick={() => {
           deleteTask(task.id);
-          flash(`Task “${task.title}” removed.`, { label: 'Undo', run: undo });
+          flash(t("Task “{0}” removed.", { 0: task.title }), { label: t("Undo"), run: undo });
         }}
       >
         <TrashIcon size={16} />
@@ -289,7 +290,7 @@ export function HabitRow({ habit, date }: { habit: Habit; date: string }) {
         type="button"
         className={cx('check', 'circle', done && 'on')}
         aria-pressed={done}
-        aria-label={done ? `Mark ${habit.name} not done` : `Mark ${habit.name} complete`}
+        aria-label={done ? t("Mark {0} not done", { 0: habit.name }) : t("Mark {0} complete", { 0: habit.name })}
         onClick={() => toggleHabit(habit.id, date)}
       >
         {done ? <TickIcon size={14} /> : null}
@@ -301,7 +302,7 @@ export function HabitRow({ habit, date }: { habit: Habit; date: string }) {
 export function NowMark({ time }: { time: string }) {
   return (
     <div className="now-mark">
-      <span>Now</span>
+      <span>{t("Now")}</span>
       <time dateTime={time}>{displayTime(time)}</time>
     </div>
   );

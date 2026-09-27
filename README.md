@@ -29,6 +29,14 @@ How it works: the sync code never leaves your devices. The browser derives an AE
 | `/api/sync` | GET / PUT / DELETE | Read, compare-and-swap write, or delete the encrypted blob (`X-Sync-Id` header) |
 
 
+## Languages (English / فارسی)
+
+Settings → **Language** switches the whole interface to Persian with a right-to-left layout (Vazirmatn font, mirrored arrows, logical CSS). Choosing فارسی also sets Persian day/month names and a Saturday week start; the page reloads to apply. The AI coach replies in Persian while it is selected.
+
+- Strings are wrapped in `t('English text')` (`src/i18n.ts`); English is the key and the fallback.
+- Persian lives in `src/locales/fa.ts`. `src/i18n.test.ts` fails if any `t(...)` string lacks a translation or a placeholder like `{0}` goes missing.
+- Dates stay on the Gregorian calendar with Latin digits so times and ISO dates line up everywhere.
+
 ## What's inside
 
 **Eight simple places** — Today, Calendar (Week · Month · Upcoming), AI Coach, Tasks, Habits, Goals, Notes, Insights.

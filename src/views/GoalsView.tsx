@@ -6,6 +6,7 @@ import { formatPercent, goalProgress, linkedTasks } from '../logic';
 import { TickIcon } from '../icons';
 import { Empty, Meter } from '../components/ui';
 import type { Goal } from '../types';
+import { t } from '../i18n';
 
 const FILLS = ['sage', 'blue', 'peach', 'lav', 'pink'] as const;
 
@@ -18,27 +19,27 @@ export function GoalsView() {
     <div className="view">
       <header className="page-head">
         <div>
-          <p className="kicker">Goals</p>
-          <h1>Goals</h1>
-          <p className="lede">Direction, with steps you can finish.</p>
+          <p className="kicker">{t("Goals")}</p>
+          <h1>{t("Goals")}</h1>
+          <p className="lede">{t("Direction, with steps you can finish.")}</p>
         </div>
         <button type="button" className="btn btn-primary" onClick={() => openComposer({ mode: 'create', type: 'goal', horizon: 'short' })}>
-          Add goal
+          {t("Add goal")}
         </button>
       </header>
       {state.goals.length === 0 ? (
         <section className="card">
           <Empty
             image="/img/spot-goals.jpg"
-            title="No goals yet."
-            text="A short-term goal can be this month. A long-term goal can stay quieter."
+            title={t("No goals yet.")}
+            text={t("A short-term goal can be this month. A long-term goal can stay quieter.")}
             action={
               <div className="empty-actions">
                 <button type="button" className="btn btn-primary" onClick={() => openComposer({ mode: 'create', type: 'goal', horizon: 'short' })}>
-                  Short-term
+                  {t("Short-term")}
                 </button>
                 <button type="button" className="btn btn-ghost" onClick={() => openComposer({ mode: 'create', type: 'goal', horizon: 'long' })}>
-                  Long-term
+                  {t("Long-term")}
                 </button>
               </div>
             }
@@ -46,8 +47,8 @@ export function GoalsView() {
         </section>
       ) : (
         <div className="goal-grid">
-          <GoalColumn title="Short-term" goals={short} horizon="short" />
-          <GoalColumn title="Long-term" goals={long} horizon="long" />
+          <GoalColumn title={t("Short-term")} goals={short} horizon="short" />
+          <GoalColumn title={t("Long-term")} goals={long} horizon="long" />
         </div>
       )}
     </div>
@@ -61,10 +62,10 @@ function GoalColumn({ title, goals, horizon }: { title: string; goals: Goal[]; h
       <header className="card-head">
         <h2 className="kicker">{title}</h2>
         <button type="button" className="btn btn-tiny" onClick={() => openComposer({ mode: 'create', type: 'goal', horizon })}>
-          Add
+          {t("Add")}
         </button>
       </header>
-      {goals.length === 0 ? <p className="empty-inline">Nothing here yet.</p> : goals.map((goal, index) => (
+      {goals.length === 0 ? <p className="empty-inline">{t("Nothing here yet.")}</p> : goals.map((goal, index) => (
         <GoalCard key={goal.id} goal={goal} fill={FILLS[index % FILLS.length]} />
       ))}
     </section>
@@ -88,10 +89,10 @@ function GoalCard({ goal, fill }: { goal: Goal; fill: (typeof FILLS)[number] }) 
       <Meter value={progress.ratio} label={`${goal.title} progress`} />
       <p className={cx('meta', late && 'is-late')}>
         {progress.total === 0
-          ? 'Add a step to track this.'
+          ? t("Add a step to track this.")
           : progress.ratio === 1
-            ? 'Complete'
-            : `${progress.done} of ${progress.total} steps`}
+            ? t("Complete")
+            : t("{0} of {1} steps", { 0: progress.done, 1: progress.total })}
         {goal.deadline ? ` · ${late ? 'Deadline passed' : `Due ${formatEdited(goal.deadline + 'T12:00:00')}`}` : ''}
       </p>
       <ul className="steps">
@@ -101,7 +102,7 @@ function GoalCard({ goal, fill }: { goal: Goal; fill: (typeof FILLS)[number] }) 
               type="button"
               className={cx('check', milestone.completed && 'on')}
               aria-pressed={milestone.completed}
-              aria-label={milestone.completed ? `Mark ${milestone.title} not done` : `Mark ${milestone.title} complete`}
+              aria-label={milestone.completed ? t("Mark {0} not done", { 0: milestone.title }) : t("Mark {0} complete", { 0: milestone.title })}
               onClick={() => toggleMilestone(goal.id, milestone.id)}
             >
               {milestone.completed ? <TickIcon size={14} /> : null}
@@ -112,7 +113,7 @@ function GoalCard({ goal, fill }: { goal: Goal; fill: (typeof FILLS)[number] }) 
               className="text-btn"
               onClick={() => deleteMilestone(goal.id, milestone.id)}
             >
-              Remove
+              {t("Remove")}
             </button>
           </li>
         ))}
@@ -122,13 +123,13 @@ function GoalCard({ goal, fill }: { goal: Goal; fill: (typeof FILLS)[number] }) 
               type="button"
               className={cx('check', task.completed && 'on')}
               aria-pressed={task.completed}
-              aria-label={task.completed ? `Mark ${task.title} not done` : `Mark ${task.title} complete`}
+              aria-label={task.completed ? t("Mark {0} not done", { 0: task.title }) : t("Mark {0} complete", { 0: task.title })}
               onClick={() => toggleTask(task.id)}
             >
               {task.completed ? <TickIcon size={14} /> : null}
             </button>
             <span>{task.title}</span>
-            <small>Task</small>
+            <small>{t("Task")}</small>
           </li>
         ))}
       </ul>
@@ -142,24 +143,24 @@ function GoalCard({ goal, fill }: { goal: Goal; fill: (typeof FILLS)[number] }) 
         }}
       >
         <label>
-          <span className="visually-hidden">Add a step to {goal.title}</span>
-          <input value={step} onChange={(event) => setStep(event.target.value)} placeholder="Add a step" maxLength={140} />
+          <span className="visually-hidden">{t("Add a step to")} {goal.title}</span>
+          <input value={step} onChange={(event) => setStep(event.target.value)} placeholder={t("Add a step")} maxLength={140} />
         </label>
-        <button type="submit" className="btn btn-tiny">Add</button>
+        <button type="submit" className="btn btn-tiny">{t("Add")}</button>
       </form>
       <div className="row-actions">
         <button type="button" className="btn btn-tiny" onClick={() => openComposer({ mode: 'edit', type: 'goal', id: goal.id })}>
-          Edit
+          {t("Edit")}
         </button>
         <button
           type="button"
           className="btn btn-tiny danger"
           onClick={() => {
             deleteGoal(goal.id);
-            flash(`Goal “${goal.title}” removed.`, { label: 'Undo', run: undo });
+            flash(t("Goal “{0}” removed.", { 0: goal.title }), { label: t("Undo"), run: undo });
           }}
         >
-          Remove
+          {t("Remove")}
         </button>
       </div>
       </article>

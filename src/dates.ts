@@ -1,4 +1,5 @@
 import { MOTIVATION } from './constants';
+import { t } from './i18n';
 
 export function toISODate(date: Date): string {
   const year = date.getFullYear();
@@ -138,8 +139,8 @@ export function dayPart(time: string): DayPart {
 }
 
 export function dayPartLabel(part: DayPart): string {
-  if (part === 'Early') return 'Early hours';
-  return part;
+  if (part === 'Early') return t('Early hours');
+  return t(part);
 }
 
 // ── Display preferences: date language and 12/24-hour clock ──────────────
@@ -170,7 +171,7 @@ function fmt(name: string, options: Intl.DateTimeFormatOptions): Intl.DateTimeFo
   formatters[name] ??= (() => {
     try {
       // Latin digits keep the planner's layout consistent across languages.
-      return new Intl.DateTimeFormat(resolvedLocale(), { numberingSystem: 'latn', ...options });
+      return new Intl.DateTimeFormat(resolvedLocale(), { numberingSystem: 'latn', calendar: 'gregory', ...options });
     } catch {
       return new Intl.DateTimeFormat('en-GB', options);
     }
@@ -229,7 +230,7 @@ export function formatWeekdayLong(iso: string): string {
 }
 
 export function dayRelation(date: string, today: string): string {
-  if (date === addDays(today, 1)) return 'Tomorrow';
+  if (date === addDays(today, 1)) return t('Tomorrow');
   return formatWeekdayLong(date);
 }
 
@@ -288,7 +289,7 @@ export function motivationFor(iso: string): string {
   const date = parseISODate(iso);
   const start = new Date(date.getFullYear(), 0, 0);
   const day = Math.floor((date.getTime() - start.getTime()) / 86400000);
-  return MOTIVATION[Math.abs(day) % MOTIVATION.length] ?? MOTIVATION[0];
+  return t(MOTIVATION[Math.abs(day) % MOTIVATION.length] ?? MOTIVATION[0]);
 }
 
 export function localDateFromTimestamp(iso: string): string {
@@ -302,11 +303,11 @@ export function weekdayIndex(iso: string): number {
 }
 
 export const WEEKDAY_TOGGLES = [
-  { day: 1, label: 'Mon' },
-  { day: 2, label: 'Tue' },
-  { day: 3, label: 'Wed' },
-  { day: 4, label: 'Thu' },
-  { day: 5, label: 'Fri' },
-  { day: 6, label: 'Sat' },
-  { day: 0, label: 'Sun' },
+  { day: 1, get label() { return t('Mon'); } },
+  { day: 2, get label() { return t('Tue'); } },
+  { day: 3, get label() { return t('Wed'); } },
+  { day: 4, get label() { return t('Thu'); } },
+  { day: 5, get label() { return t('Fri'); } },
+  { day: 6, get label() { return t('Sat'); } },
+  { day: 0, get label() { return t('Sun'); } },
 ] as const;

@@ -19,6 +19,7 @@ import {
 } from '../icons';
 import { parseQuickAdd } from '../quickAdd';
 import { searchHits, type SearchHit } from '../logic';
+import { t } from '../i18n';
 
 interface PaletteItem {
   id: string;
@@ -82,8 +83,8 @@ function PaletteInner() {
         list.push({
           id: 'quick-add',
           icon: PlusIcon,
-          label: `Add ${parse.kind}: “${parse.title}”`,
-          sub: parse.kind === 'event' ? 'Creates an event from what you typed' : 'Creates a task from what you typed',
+          label: t("Add {0}: “{1}”", { 0: parse.kind, 1: parse.title }),
+          sub: parse.kind === 'event' ? t("Creates an event from what you typed") : t("Creates a task from what you typed"),
           chips: parse.chips,
           run: close(() => {
             if (parse.kind === 'event') {
@@ -108,7 +109,7 @@ function PaletteInner() {
                 repeat: parse.repeat,
               });
             }
-            flash(`${parse.kind === 'event' ? 'Event' : 'Task'} “${parse.title}” added.`, { label: 'Undo', run: undo });
+            flash(t("{0} “{1}” added.", { 0: parse.kind === 'event' ? t("Event") : t("Task"), 1: parse.title }), { label: t("Undo"), run: undo });
           }),
         });
       }
@@ -119,11 +120,11 @@ function PaletteInner() {
       }
     } else {
       const creates: Array<[string, string]> = [
-        ['task', 'New task'],
-        ['event', 'New event'],
-        ['habit', 'New habit'],
-        ['goal', 'New goal'],
-        ['note', 'New note'],
+        ['task', t("New task")],
+        ['event', t("New event")],
+        ['habit', t("New habit")],
+        ['goal', t("New goal")],
+        ['note', t("New note")],
       ];
       for (const [type, label] of creates) {
         list.push({
@@ -136,25 +137,25 @@ function PaletteInner() {
     }
 
     const commands: PaletteItem[] = [
-      { id: 'go-today', icon: SunIcon, label: 'Go to Today', run: close(() => navigate({ name: 'today' })) },
-      { id: 'go-calendar', icon: CalendarIcon, label: 'Go to Calendar', sub: 'Week, month, and what’s ahead', run: close(() => navigate({ name: 'calendar', tab: 'week', date: today })) },
-      { id: 'go-tasks', icon: CheckIcon, label: 'Go to Tasks', run: close(() => navigate({ name: 'tasks' })) },
-      { id: 'go-habits', icon: DotsIcon, label: 'Go to Habits', run: close(() => navigate({ name: 'habits' })) },
-      { id: 'go-goals', icon: FlagIcon, label: 'Go to Goals', run: close(() => navigate({ name: 'goals' })) },
-      { id: 'go-notes', icon: NoteIcon, label: 'Go to Notes', run: close(() => navigate({ name: 'notes' })) },
-      { id: 'go-insights', icon: ArcIcon, label: 'Go to Insights', sub: 'Your week at a glance', run: close(() => navigate({ name: 'insights' })) },
-      { id: 'focus', icon: StopwatchIcon, label: 'Start a focus session', sub: 'A quiet timer for one thing', run: close(() => startFocus({ taskId: null, title: 'Focus session', minutes: 25 })) },
+      { id: 'go-today', icon: SunIcon, label: t("Go to Today"), run: close(() => navigate({ name: 'today' })) },
+      { id: 'go-calendar', icon: CalendarIcon, label: t("Go to Calendar"), sub: 'Week, month, and what’s ahead', run: close(() => navigate({ name: 'calendar', tab: 'week', date: today })) },
+      { id: 'go-tasks', icon: CheckIcon, label: t("Go to Tasks"), run: close(() => navigate({ name: 'tasks' })) },
+      { id: 'go-habits', icon: DotsIcon, label: t("Go to Habits"), run: close(() => navigate({ name: 'habits' })) },
+      { id: 'go-goals', icon: FlagIcon, label: t("Go to Goals"), run: close(() => navigate({ name: 'goals' })) },
+      { id: 'go-notes', icon: NoteIcon, label: t("Go to Notes"), run: close(() => navigate({ name: 'notes' })) },
+      { id: 'go-insights', icon: ArcIcon, label: t("Go to Insights"), sub: 'Your week at a glance', run: close(() => navigate({ name: 'insights' })) },
+      { id: 'focus', icon: StopwatchIcon, label: t("Start a focus session"), sub: 'A quiet timer for one thing', run: close(() => startFocus({ taskId: null, title: t("Focus session"), minutes: 25 })) },
       {
         id: 'theme',
         icon: isDark ? SunIcon : MoonIcon,
-        label: isDark ? 'Switch to light mode' : 'Switch to dark mode',
+        label: isDark ? t("Switch to light mode") : t("Switch to dark mode"),
         sub: `Currently following ${themeMode === 'system' ? 'your system' : themeMode}`,
         run: close(() => setThemeMode(isDark ? 'light' : 'dark')),
       },
-      { id: 'export', icon: DownloadIcon, label: 'Export backup', run: close(() => exportData()) },
+      { id: 'export', icon: DownloadIcon, label: t("Export backup"), run: close(() => exportData()) },
     ];
     if (canUndo) {
-      commands.push({ id: 'undo', icon: WeekIcon, label: 'Undo last change', run: close(() => undo()) });
+      commands.push({ id: 'undo', icon: WeekIcon, label: t("Undo last change"), run: close(() => undo()) });
     }
 
     const needle = trimmed.toLowerCase();
@@ -213,7 +214,7 @@ function PaletteInner() {
         if (event.target === event.currentTarget) closePalette();
       }}
     >
-      <div className="palette" role="dialog" aria-modal="true" aria-label="Search and quick add">
+      <div className="palette" role="dialog" aria-modal="true" aria-label={t("Search and quick add")}>
         <div className="palette-input-row">
           <SearchIcon size={18} />
           <input
@@ -221,16 +222,16 @@ function PaletteInner() {
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={onKey}
-            placeholder="Search or add anything…"
-            aria-label="Search or add anything"
+            placeholder={t("Search or add anything…")}
+            aria-label={t("Search or add anything")}
             maxLength={200}
           />
-          <kbd className="kbd">esc</kbd>
+          <kbd className="kbd">{t('esc')}</kbd>
         </div>
         {items.length === 0 ? (
-          <p className="palette-empty">Nothing found. Press Enter after typing to add it as a task.</p>
+          <p className="palette-empty">{t("Nothing found. Press Enter after typing to add it as a task.")}</p>
         ) : (
-          <ul className="palette-list" ref={listRef} role="listbox" aria-label="Results">
+          <ul className="palette-list" ref={listRef} role="listbox" aria-label={t("Results")}>
             {items.map((item, itemIndex) => {
               const Icon = item.icon;
               return (
@@ -267,9 +268,9 @@ function PaletteInner() {
           </ul>
         )}
         <footer className="palette-foot">
-          <span><kbd className="kbd">↑</kbd><kbd className="kbd">↓</kbd> move</span>
-          <span><kbd className="kbd">↵</kbd> select</span>
-          <span className="palette-foot-hint">Smart add understands “tomorrow 5pm #work !high”</span>
+          <span><kbd className="kbd">↑</kbd><kbd className="kbd">↓</kbd> {t('move')}</span>
+          <span><kbd className="kbd">↵</kbd> {t('select')}</span>
+          <span className="palette-foot-hint">{t("Smart add understands “tomorrow 5pm #work !high”")}</span>
         </footer>
       </div>
     </div>
@@ -298,7 +299,7 @@ function hitItem(hit: SearchHit, close: (run: () => void) => () => void, planner
       sub: `${hit.sub} — Enter toggles it`,
       run: close(() => {
         planner.toggleTask(hit.id);
-        planner.flash('Task toggled.', { label: 'Undo', run: planner.undo });
+        planner.flash(t("Task toggled."), { label: t("Undo"), run: planner.undo });
       }),
     };
   }
@@ -320,7 +321,7 @@ function hitItem(hit: SearchHit, close: (run: () => void) => () => void, planner
       sub: `${hit.sub} — Enter checks it off today`,
       run: close(() => {
         planner.toggleHabit(hit.id, todayISO());
-        planner.flash('Habit toggled.', { label: 'Undo', run: planner.undo });
+        planner.flash(t("Habit toggled."), { label: t("Undo"), run: planner.undo });
       }),
     };
   }

@@ -2,9 +2,10 @@ import { ACCENTS, HABIT_ICONS, NOTE_KINDS, PRIORITIES } from './constants';
 import { isValidISODate, isValidTime, localDateFromTimestamp, timeToMinutes } from './dates';
 import { REPEAT_SET } from './recurrence';
 import { createEmptyState, type FixedCommitment, type FocusLog, type Subtask, type TaskRepeat, type Goal, type Habit, type HabitFrequency, type Note, type PlannerEvent, type PlannerState, type Task } from './types';
+import { t } from './i18n';
 
 export const STORAGE_KEY = 'personal-planner.v1';
-export const STORAGE_FULL = 'Browser storage is full, so that change was not saved.';
+export const STORAGE_FULL = t("Browser storage is full, so that change was not saved.");
 const MAX_BACKUP = 2_000_000;
 const PRIORITY_SET = new Set<string>(PRIORITIES.map((item) => item.id));
 const ACCENT_SET = new Set<string>(ACCENTS);
@@ -95,7 +96,7 @@ function sanitizeFocusLog(value: unknown): FocusLog[] {
     return [{
       id,
       taskId: asString(raw.taskId, 80),
-      title: asString(raw.title, 140) || 'Focus',
+      title: asString(raw.title, 140) || t("Focus"),
       minutes: Math.min(minutes, 600),
       date,
       endedAt: asString(raw.endedAt, 40) || new Date(0).toISOString(),
@@ -217,7 +218,7 @@ function sanitizeNote(value: unknown): Note | null {
   const kind = asString(raw.kind, 20) || 'quick';
   return {
     id,
-    title: title || 'Untitled note',
+    title: title || t("Untitled note"),
     body,
     kind: KIND_SET.has(kind) ? (kind as Note['kind']) : 'quick',
     date: date && isValidISODate(date) ? date : null,
@@ -344,7 +345,7 @@ export function saveTo(storage: Pick<Storage, 'setItem'>, state: PlannerState): 
   } catch (error) {
     const name = error && typeof error === 'object' && 'name' in error ? String(error.name) : '';
     if (name === 'QuotaExceededError') return STORAGE_FULL;
-    return 'That change could not be saved in this browser.';
+    return t("That change could not be saved in this browser.");
   }
 }
 

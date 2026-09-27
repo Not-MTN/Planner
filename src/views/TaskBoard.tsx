@@ -5,6 +5,7 @@ import { cx } from '../cx';
 import { addDays, dayNumber, formatMonthShort, formatWeekdayShort, displayTime } from '../dates';
 import { TickIcon } from '../icons';
 import type { Task, TaskInput } from '../types';
+import { t } from '../i18n';
 
 export type BoardGroup = 'when' | 'priority' | 'category';
 
@@ -20,25 +21,25 @@ function whenColumns(tasks: Task[], today: string): Column[] {
   const weekEnd = addDays(today, 7);
   const open = tasks.filter((task) => !task.completed);
   return [
-    { id: 'overdue', label: 'Overdue', tasks: open.filter((task) => task.dueDate !== null && task.dueDate < today), patch: null },
-    { id: 'today', label: 'Today', tasks: open.filter((task) => task.dueDate === today), patch: { dueDate: today } },
-    { id: 'tomorrow', label: 'Tomorrow', tasks: open.filter((task) => task.dueDate === addDays(today, 1)), patch: { dueDate: addDays(today, 1) } },
+    { id: 'overdue', label: t("Overdue"), tasks: open.filter((task) => task.dueDate !== null && task.dueDate < today), patch: null },
+    { id: 'today', label: t("Today"), tasks: open.filter((task) => task.dueDate === today), patch: { dueDate: today } },
+    { id: 'tomorrow', label: t("Tomorrow"), tasks: open.filter((task) => task.dueDate === addDays(today, 1)), patch: { dueDate: addDays(today, 1) } },
     {
       id: 'week',
-      label: 'This week',
+      label: t("This week"),
       tasks: open.filter((task) => task.dueDate !== null && task.dueDate > addDays(today, 1) && task.dueDate <= weekEnd),
       patch: { dueDate: addDays(today, 3) },
     },
-    { id: 'later', label: 'Later', tasks: open.filter((task) => task.dueDate !== null && task.dueDate > weekEnd), patch: { dueDate: addDays(today, 14) } },
-    { id: 'anytime', label: 'Anytime', tasks: open.filter((task) => !task.dueDate), patch: { dueDate: null } },
-    { id: 'done', label: 'Done', tasks: tasks.filter((task) => task.completed), patch: 'done' },
+    { id: 'later', label: t("Later"), tasks: open.filter((task) => task.dueDate !== null && task.dueDate > weekEnd), patch: { dueDate: addDays(today, 14) } },
+    { id: 'anytime', label: t("Anytime"), tasks: open.filter((task) => !task.dueDate), patch: { dueDate: null } },
+    { id: 'done', label: t("Done"), tasks: tasks.filter((task) => task.completed), patch: 'done' },
   ];
 }
 
 export function boardColumns(tasks: Task[], group: BoardGroup, today: string): Column[] {
   if (group === 'when') return whenColumns(tasks, today);
   const open = tasks.filter((task) => !task.completed);
-  const done: Column = { id: 'done', label: 'Done', tasks: tasks.filter((task) => task.completed), patch: 'done' };
+  const done: Column = { id: 'done', label: t("Done"), tasks: tasks.filter((task) => task.completed), patch: 'done' };
   if (group === 'priority') {
     return [
       ...[...PRIORITIES].reverse().map((item) => ({
@@ -90,12 +91,12 @@ export function TaskBoard({ tasks, group, today }: { tasks: Task[]; group: Board
   return (
     <>
     <p className="visually-hidden" role="status" aria-live="polite">{announce}</p>
-    <div className="board" role="list" aria-label="Task board">
+    <div className="board" role="list" aria-label={t("Task board")}>
       {columns.map((column) => (
         <section
           key={column.id}
           role="listitem"
-          aria-label={`${column.label}, ${column.tasks.length} tasks`}
+          aria-label={t("{0}, {1} tasks", { 0: column.label, 1: column.tasks.length })}
           className={cx('board-col', `board-${column.id}`, over === column.id && 'is-drop', !column.patch && 'no-drop')}
           onDragOver={(event) => {
             if (!column.patch) return;
@@ -136,7 +137,7 @@ export function TaskBoard({ tasks, group, today }: { tasks: Task[]; group: Board
                     for (let next = index + step; next >= 0 && next < columns.length; next += step) {
                       if (columns[next].patch) {
                         drop(columns[next], task.id);
-                        setAnnounce(`${task.title} moved to ${columns[next].label}`);
+                        setAnnounce(t("{0} moved to {1}", { 0: task.title, 1: columns[next].label }));
                         window.setTimeout(() => {
                           document.querySelector<HTMLElement>(`[data-card="${task.id}"]`)?.focus();
                         }, 0);
@@ -153,7 +154,7 @@ export function TaskBoard({ tasks, group, today }: { tasks: Task[]; group: Board
                   <button
                     type="button"
                     className={cx('mini-check', task.completed && 'on')}
-                    aria-label={task.completed ? `Mark ${task.title} not done` : `Mark ${task.title} complete`}
+                    aria-label={task.completed ? t("Mark {0} not done", { 0: task.title }) : t("Mark {0} complete", { 0: task.title })}
                     onClick={() => toggleTask(task.id)}
                   >
                     {task.completed ? <TickIcon size={12} /> : null}
@@ -161,7 +162,7 @@ export function TaskBoard({ tasks, group, today }: { tasks: Task[]; group: Board
                   <button type="button" className="board-card-body" onClick={() => openComposer({ mode: 'edit', type: 'task', id: task.id })}>
                     <strong>{task.title}</strong>
                     <small>
-                      {task.dueDate ? `${formatWeekdayShort(task.dueDate)} ${dayNumber(task.dueDate)} ${formatMonthShort(task.dueDate)}` : 'No date'}
+                      {task.dueDate ? `${formatWeekdayShort(task.dueDate)} ${dayNumber(task.dueDate)} ${formatMonthShort(task.dueDate)}` : t("No date")}
                       {task.dueTime ? ` · ${displayTime(task.dueTime)}` : ''}
                       {task.repeat ? ' · ↻' : ''}
                       {steps ? ` · ${stepsDone}/${steps}` : ''}
@@ -170,7 +171,7 @@ export function TaskBoard({ tasks, group, today }: { tasks: Task[]; group: Board
                 </li>
               );
             })}
-            {column.tasks.length === 0 ? <li className="board-empty">{column.patch ? 'Drop here' : 'Nothing overdue'}</li> : null}
+            {column.tasks.length === 0 ? <li className="board-empty">{column.patch ? t("Drop here") : t("Nothing overdue")}</li> : null}
           </ul>
         </section>
       ))}
