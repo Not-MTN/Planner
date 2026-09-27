@@ -3,7 +3,7 @@ import { displayTime, formatMonthLong, monthGrid, setDisplayPrefs, setWeekStart,
 import { parseICS, toBusyICS, toICS } from './ics';
 import { focusSummary, habitLinks, productiveHours, weeklyReport } from './insights';
 import { extractTags } from './components/Markdown';
-import { addEvent, addFixedCommitment, addHabit, addNote, addTask, logFocus, resizeEvent, toggleHabit, toggleSubtask, toggleTask, updateNote, updateTask } from './mutate';
+import { addAIMemory, addEvent, addFixedCommitment, addHabit, addNote, addTask, clearAIMemory, deleteAIMemory, logFocus, resizeEvent, toggleHabit, toggleSubtask, toggleTask, updateAIMemory, updateNote, updateTask } from './mutate';
 import { parseQuickAdd } from './quickAdd';
 import { nextDueAfterCompletion, nextOccurrence } from './recurrence';
 import { dueReminders, DEFAULT_REMINDERS } from './reminders';
@@ -75,6 +75,7 @@ describe('storage migration', () => {
     const old = sanitizeState({ tasks: [{ id: 'a', title: 'Old', priority: 'low' }] }) as PlannerState;
     expect(old.tasks[0]).toMatchObject({ repeat: null, subtasks: [] });
     expect(old.focusLog).toEqual([]);
+    expect(old.aiMemory).toEqual([]);
     let state = addTask(createEmptyState(), { ...baseTask, repeat: 'monthly', subtasks: [{ id: 's', title: 'Step', completed: true }] }, 't');
     state = logFocus(state, { taskId: 't', title: 'Water plants', minutes: 25 }, 'f', '2026-09-27T09:00:00.000Z', '2026-09-27');
     state = addNote(state, { title: 'N', body: 'b', kind: 'idea', date: null, pinned: true }, 'n');
@@ -86,6 +87,17 @@ describe('storage migration', () => {
 
   it('rejects silly focus entries', () => {
     expect(logFocus(createEmptyState(), { taskId: null, title: 'x', minutes: 0 }).focusLog).toHaveLength(0);
+  });
+
+  it('keeps explicit AI memory editable, deduplicated, and removable', () => {
+    let state = addAIMemory(createEmptyState(), { text: '  Mornings are best for deep work.  ', category: 'preference' }, 'm1', '2026-09-27T09:00:00.000Z');
+    state = addAIMemory(state, { text: 'mornings are best for deep work.', category: 'routine' }, 'duplicate', '2026-09-27T09:01:00.000Z');
+    expect(state.aiMemory).toHaveLength(1);
+    expect(state.aiMemory[0]).toMatchObject({ id: 'm1', text: 'Mornings are best for deep work.', category: 'preference' });
+    state = updateAIMemory(state, 'm1', { category: 'routine', text: 'I protect Sunday evenings for family.' }, '2026-09-27T10:00:00.000Z');
+    expect(state.aiMemory[0]).toMatchObject({ category: 'routine', text: 'I protect Sunday evenings for family.' });
+    expect(deleteAIMemory(state, 'm1').aiMemory).toEqual([]);
+    expect(clearAIMemory(state).aiMemory).toEqual([]);
   });
 });
 

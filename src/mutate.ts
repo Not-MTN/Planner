@@ -1,6 +1,8 @@
 import { addDays, isValidISODate, isValidTime, timeToMinutes, todayISO, weekDates } from './dates';
 import { nextDueAfterCompletion, REPEAT_SET } from './recurrence';
 import type {
+  AIMemoryCategory,
+  AIMemoryInput,
   EventInput,
   Subtask,
   TaskRepeat,
@@ -30,6 +32,12 @@ function clean(value: string, max: number): string {
 
 function cleanRepeat(value: TaskRepeat | null | undefined): TaskRepeat | null {
   return value && REPEAT_SET.has(value) ? value : null;
+}
+
+const AI_MEMORY_CATEGORIES = new Set<AIMemoryCategory>(['preference', 'person', 'routine', 'boundary', 'context']);
+
+function cleanAIMemoryCategory(value: AIMemoryCategory): AIMemoryCategory {
+  return AI_MEMORY_CATEGORIES.has(value) ? value : 'context';
 }
 
 export function cleanSubtasks(items: Subtask[] | undefined): Subtask[] {
@@ -191,6 +199,47 @@ export function logFocus(
   if (!Number.isFinite(minutes) || minutes < 1) return state;
   const log = [...state.focusLog, { id, taskId: entry.taskId, title: clean(entry.title, 140) || 'Focus', minutes: Math.min(minutes, 600), date, endedAt: now }];
   return { ...state, focusLog: log.slice(-2000) };
+}
+
+export function addAIMemory(state: PlannerState, input: AIMemoryInput, id = uid(), now = nowIso()): PlannerState {
+  const text = clean(input.text, 500);
+  if (!text) return state;
+  const duplicate = state.aiMemory.some((item) => item.text.toLowerCase() === text.toLowerCase());
+  if (duplicate) return state;
+  const memory = {
+    id,
+    text,
+    category: cleanAIMemoryCategory(input.category),
+    createdAt: now,
+    updatedAt: now,
+  };
+  return { ...state, aiMemory: [...state.aiMemory, memory].slice(-100) };
+}
+
+export function updateAIMemory(state: PlannerState, id: string, patch: Partial<AIMemoryInput>, now = nowIso()): PlannerState {
+  return {
+    ...state,
+    aiMemory: state.aiMemory.map((item) => {
+      if (item.id !== id) return item;
+      const text = patch.text === undefined ? item.text : clean(patch.text, 500);
+      if (!text) return item;
+      return {
+        ...item,
+        ...patch,
+        text,
+        category: patch.category === undefined ? item.category : cleanAIMemoryCategory(patch.category),
+        updatedAt: now,
+      };
+    }),
+  };
+}
+
+export function deleteAIMemory(state: PlannerState, id: string): PlannerState {
+  return { ...state, aiMemory: state.aiMemory.filter((item) => item.id !== id) };
+}
+
+export function clearAIMemory(state: PlannerState): PlannerState {
+  return state.aiMemory.length === 0 ? state : { ...state, aiMemory: [] };
 }
 
 export function swapTasks(state: PlannerState, aId: string, bId: string, now = nowIso()): PlannerState {

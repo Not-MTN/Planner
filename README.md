@@ -2,7 +2,7 @@
 
 A calm, local-first planner for your day, your week, and the days ahead — tasks, habits, goals, and notes in one beautiful place.
 
-Planner data is saved in this browser (`localStorage`, mirrored to IndexedDB). Optional **end-to-end encrypted sync** keeps devices in step through your own Neon database — there are no accounts, and the server only stores ciphertext. If you choose to use AI, the current prompt and the minimum schedule/check-in details needed for that request pass through the server-side proxy to xAI. Use **Settings → Export** for a backup file, and **Settings → Import** to bring one back.
+Planner data is saved in this browser (`localStorage`, mirrored to IndexedDB). Optional **end-to-end encrypted sync** keeps devices in step through your own Neon database — there are no accounts, and the server only stores ciphertext. If you choose to use AI, the current prompt, any AI memory you explicitly saved, and the minimum schedule/check-in details needed for that request pass through the server-side proxy to xAI. Planner notes are not sent. Use **Settings → Export** for a backup file, and **Settings → Import** to bring one back.
 
 ```bash
 npm install
@@ -52,7 +52,7 @@ Settings → **Language** switches the whole interface to Persian with a right-t
 - **Habits** — streaks (current & best), a week strip, and a 12-week heatmap you can tap to fill in any day.
 - **Calendar** — drag events between days in Week view, see the month at a glance, and scroll the days ahead in Upcoming (7 / 14 / 30 / 90 days). A load strip shows quiet vs full days; undated tasks sit in **Someday** and can park on the quietest day.
 - **Insights** — day streak, weekly bars, a 7/30/90-day completion trend, a task/event/habit completion donut, habit consistency, and goal progress.
-- **AI Coach (xAI / Grok)** — describe a day, week, month (30 days), or custom plan; get draft tasks, timed events, habits, and gentle wellbeing ideas. Upload a PNG/JPG (up to 3 MB) of a written plan for image reading. Review the draft before adding it; one undo reverses the whole batch.
+- **AI Coach (xAI / Grok)** — describe a day, week, month (30 days), or custom plan; get draft tasks, timed events, habits, and gentle wellbeing ideas. Upload a PNG/JPG (up to 3 MB) of a written plan for image reading. Review the draft before adding it; one undo reverses the whole batch. **AI memory** lets you save the life context you choose — preferences, people, routines, boundaries, and other helpful facts — so future plans and reviews can fit you better. Memory is local-first, included in encrypted sync/backups, editable and forgettable at any time; it is sent to xAI only when you ask the coach to plan or review.
 - **Protected weekly times** — add a repeating class, shift, or appointment (for example Tuesday 08:00–09:00). It appears on the calendar and the AI rejects overlapping events.
 - **AI review** — ask for a daily, weekly, monthly, or custom reflection on completed tasks, events, and habit check-ins. Select unfinished tasks and dates to carry them forward; nothing is rescheduled without your action.
 - **Themes** — light, dark, or follow your system, plus five accent colours. All in Settings.

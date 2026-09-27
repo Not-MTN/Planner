@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { generateAIPlan, generateAIReview, XAI_CHAT_URL, XAI_TEXT_MODEL, XAI_VISION_MODEL } from './ai';
-import { addEvent, addFixedCommitment, addTask, toggleTask } from './mutate';
+import { buildAIPlannerContext, generateAIPlan, generateAIReview, XAI_CHAT_URL, XAI_TEXT_MODEL, XAI_VISION_MODEL } from './ai';
+import { addAIMemory, addEvent, addFixedCommitment, addTask, logFocus, toggleTask } from './mutate';
 import { createEmptyState } from './types';
 
 function mockXAI(content: unknown) {
@@ -19,6 +19,27 @@ afterEach(() => {
 });
 
 describe('xAI planning assistant', () => {
+  it('sends explicit memory and soft planner patterns as context without sending notes', async () => {
+    let state = addAIMemory(createEmptyState(), { text: 'I need a quiet hour after lunch.', category: 'boundary' }, 'memory-1', '2026-09-27T08:00:00.000Z');
+    state = addTask(state, {
+      title: 'Ship the project', priority: 'high', dueDate: '2026-09-27', dueTime: null,
+      category: 'work', note: 'private note should stay local', goalId: null,
+    }, 'task-1', '2026-09-27T08:00:00.000Z');
+    state = toggleTask(state, 'task-1', '2026-09-27T09:00:00.000Z');
+    state = logFocus(state, { taskId: 'task-1', title: 'Ship the project', minutes: 25 }, 'focus-1', '2026-09-27T09:30:00.000Z');
+    expect(buildAIPlannerContext(state)).toMatchObject({
+      memory: [{ category: 'boundary', text: 'I need a quiet hour after lunch.' }],
+      patterns: { focusHours: ['09:00'], completedTaskCategories: [{ category: 'work', count: 1 }] },
+    });
+    const fetchMock = mockXAI({ summary: 'A calm plan.', tasks: [], events: [], habits: [], wellbeing: [] });
+    await generateAIPlan({ prompt: 'Plan a calm day.', range: { startDate: '2026-09-27', days: 1 }, state });
+    const request = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as { messages: Array<{ role: string; content: string }> };
+    const userMessage = request.messages.find((message) => message.role === 'user')?.content ?? '';
+    expect(userMessage).toContain('I need a quiet hour after lunch.');
+    expect(userMessage).toContain('focusHours');
+    expect(userMessage).not.toContain('private note should stay local');
+  });
+
   it('keeps protected weekly times and existing events clear when normalizing an AI plan', async () => {
     const now = '2026-09-27T12:00:00.000Z';
     let state = addFixedCommitment(createEmptyState(), {

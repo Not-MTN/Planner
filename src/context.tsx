@@ -3,6 +3,10 @@ import { parseHash, toHash, type Route } from './route';
 import { downloadState, loadFrom, parseBackup, sanitizeState, saveTo, serialize, STORAGE_FULL, STORAGE_KEY } from './storage';
 import { idbRead, idbWrite, savedAt } from './idb';
 import {
+  addAIMemory as addAIMemoryTo,
+  clearAIMemory as clearAIMemoryIn,
+  deleteAIMemory as deleteAIMemoryFrom,
+  updateAIMemory as updateAIMemoryIn,
   addEvent as addEventTo,
   addFixedCommitment as addFixedCommitmentTo,
   deleteFixedCommitment as deleteFixedCommitmentFrom,
@@ -48,7 +52,7 @@ import { buildSampleState } from './sample';
 import { deleteRemote, EMPTY_SYNC, generateCode, loadSyncSettings, mergeStates, normalizeCode, saveSyncSettings, SyncError, syncConfigured, syncOnce, type SyncSettings } from './sync';
 import { applyTheme, loadAccent, loadThemeMode, resolvedMode, type ThemeMode } from './theme';
 import type { Accent } from './constants';
-import { createEmptyState, type ComposerState, type EventInput, type FixedCommitmentInput, type GoalInput, type HabitInput, type NoteInput, type PlannerState, type TaskInput } from './types';
+import { createEmptyState, type AIMemoryInput, type ComposerState, type EventInput, type FixedCommitmentInput, type GoalInput, type HabitInput, type NoteInput, type PlannerState, type TaskInput } from './types';
 import { t } from './i18n';
 
 export interface NoticeAction {
@@ -146,6 +150,10 @@ interface PlannerContextValue {
   addFixedCommitment: (input: FixedCommitmentInput) => void;
   updateFixedCommitment: (id: string, patch: Partial<FixedCommitmentInput>) => void;
   deleteFixedCommitment: (id: string) => void;
+  addAIMemory: (input: AIMemoryInput) => void;
+  updateAIMemory: (id: string, patch: Partial<AIMemoryInput>) => void;
+  deleteAIMemory: (id: string) => void;
+  clearAIMemory: () => void;
   applyAIPlan: (draft: { tasks: TaskInput[]; events: EventInput[]; habits: HabitInput[] }) => void;
   rescheduleTasks: (moves: Array<{ id: string; date: string }>) => void;
   applySchedule: (plan: Array<{ id: string; date: string; time: string }>) => void;
@@ -672,6 +680,10 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     addFixedCommitment: (input) => commit((current) => addFixedCommitmentTo(current, input)),
     updateFixedCommitment: (id, patch) => commit((current) => updateFixedCommitmentIn(current, id, patch)),
     deleteFixedCommitment: (id) => commit((current) => deleteFixedCommitmentFrom(current, id)),
+    addAIMemory: (input) => commit((current) => addAIMemoryTo(current, input)),
+    updateAIMemory: (id, patch) => commit((current) => updateAIMemoryIn(current, id, patch)),
+    deleteAIMemory: (id) => commit((current) => deleteAIMemoryFrom(current, id)),
+    clearAIMemory: () => commit(clearAIMemoryIn),
     applyAIPlan: (draft) => commit((current) => {
       let next = current;
       for (const input of draft.tasks) next = addTaskTo(next, input);

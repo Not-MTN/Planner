@@ -47,6 +47,22 @@ export interface FocusLog {
   endedAt: string;
 }
 
+/** A user-written fact or preference that the AI may use when planning. */
+export type AIMemoryCategory = 'preference' | 'person' | 'routine' | 'boundary' | 'context';
+
+export interface AIMemory {
+  id: string;
+  text: string;
+  category: AIMemoryCategory;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AIMemoryInput {
+  text: string;
+  category: AIMemoryCategory;
+}
+
 export interface PlannerEvent {
   id: string;
   title: string;
@@ -139,6 +155,8 @@ export interface PlannerState {
   tasks: Task[];
   events: PlannerEvent[];
   fixedCommitments: FixedCommitment[];
+  /** Explicit, user-controlled context for the AI. */
+  aiMemory: AIMemory[];
   habits: Habit[];
   completions: HabitCompletion[];
   goals: Goal[];
@@ -219,6 +237,7 @@ export function createEmptyState(): PlannerState {
     tasks: [],
     events: [],
     fixedCommitments: [],
+    aiMemory: [],
     habits: [],
     completions: [],
     goals: [],

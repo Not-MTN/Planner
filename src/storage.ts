@@ -1,7 +1,7 @@
 import { ACCENTS, HABIT_ICONS, NOTE_KINDS, PRIORITIES } from './constants';
 import { isValidISODate, isValidTime, localDateFromTimestamp, timeToMinutes } from './dates';
 import { REPEAT_SET } from './recurrence';
-import { createEmptyState, type FixedCommitment, type FocusLog, type Subtask, type TaskRepeat, type Goal, type Habit, type HabitFrequency, type Note, type PlannerEvent, type PlannerState, type Task } from './types';
+import { createEmptyState, type AIMemory, type AIMemoryCategory, type FixedCommitment, type FocusLog, type Subtask, type TaskRepeat, type Goal, type Habit, type HabitFrequency, type Note, type PlannerEvent, type PlannerState, type Task } from './types';
 import { t } from './i18n';
 
 export const STORAGE_KEY = 'personal-planner.v1';
@@ -11,6 +11,7 @@ const PRIORITY_SET = new Set<string>(PRIORITIES.map((item) => item.id));
 const ACCENT_SET = new Set<string>(ACCENTS);
 const KIND_SET = new Set<string>(NOTE_KINDS.map((item) => item.id));
 const ICON_SET = new Set<string>(HABIT_ICONS.map((item) => item.id));
+const AI_MEMORY_CATEGORY_SET = new Set<AIMemoryCategory>(['preference', 'person', 'routine', 'boundary', 'context']);
 
 export interface LoadResult {
   state: PlannerState;
@@ -103,6 +104,28 @@ function sanitizeFocusLog(value: unknown): FocusLog[] {
       endedAt: asString(raw.endedAt, 40) || new Date(0).toISOString(),
     }];
   }).slice(-2000);
+}
+
+function sanitizeAIMemory(value: unknown): AIMemory[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const raw = item as Record<string, unknown>;
+    const id = asString(raw.id, 80);
+    const text = asString(raw.text, 500)?.trim();
+    const category = asString(raw.category, 20);
+    if (!id || !text || !category || !AI_MEMORY_CATEGORY_SET.has(category as AIMemoryCategory) || seen.has(id)) return [];
+    seen.add(id);
+    const createdAt = asString(raw.createdAt, 40) || new Date(0).toISOString();
+    return [{
+      id,
+      text,
+      category: category as AIMemoryCategory,
+      createdAt,
+      updatedAt: asString(raw.updatedAt, 40) || createdAt,
+    }];
+  }).slice(-100);
 }
 
 function sanitizeEvent(value: unknown): PlannerEvent | null {
@@ -256,6 +279,7 @@ export function sanitizeState(raw: unknown): PlannerState | null {
     const commitment = sanitizeFixedCommitment(item);
     return commitment ? [commitment] : [];
   }) : [], (item) => item.id);
+  const aiMemory = sanitizeAIMemory(source.aiMemory);
   const habits = uniqueBy(Array.isArray(source.habits) ? source.habits.flatMap((item) => {
     const habit = sanitizeHabit(item);
     return habit ? [habit] : [];
@@ -295,6 +319,7 @@ export function sanitizeState(raw: unknown): PlannerState | null {
     tasks: tasks.map((task) => ({ ...task, goalId: task.goalId && goalIds.has(task.goalId) ? task.goalId : null })),
     events,
     fixedCommitments,
+    aiMemory,
     habits,
     completions,
     goals,

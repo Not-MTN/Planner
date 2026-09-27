@@ -6,7 +6,7 @@ import { MAX_PLAN_IMAGE_BYTES, XAI_KEY_MISSING_MESSAGE, checkXAIConfiguration, f
 import type { AIReview, AIDraft, PlanRange } from '../ai';
 import { cx } from '../cx';
 import { CalendarIcon, CheckIcon, LeafIcon, PlusIcon, SparklesIcon, UploadIcon } from '../icons';
-import type { FixedCommitmentInput } from '../types';
+import type { AIMemory, AIMemoryCategory, FixedCommitmentInput } from '../types';
 import { t } from '../i18n';
 
 const WEEKDAYS = [
@@ -21,6 +21,14 @@ const WEEKDAYS = [
 
 type PlanningPeriod = 'day' | 'week' | 'month' | 'custom';
 type AISection = 'plan' | 'review';
+
+const MEMORY_CATEGORIES: Array<{ value: AIMemoryCategory; label: string }> = [
+  { value: 'preference', label: t("Preferences") },
+  { value: 'person', label: t("People & relationships") },
+  { value: 'routine', label: t("Routines") },
+  { value: 'boundary', label: t("Boundaries") },
+  { value: 'context', label: t("Life context") },
+];
 
 function periodDays(period: PlanningPeriod, customDays: string): number {
   if (period === 'day') return 1;
@@ -47,7 +55,23 @@ function readFile(file: File): Promise<string> {
 
 export function AIView() {
   const planner = usePlanner();
-  const { state, route, navigate, openSettings, addFixedCommitment, updateFixedCommitment, deleteFixedCommitment, applyAIPlan, rescheduleTasks, flash } = planner;
+  const {
+    state,
+    route,
+    navigate,
+    openSettings,
+    addFixedCommitment,
+    updateFixedCommitment,
+    deleteFixedCommitment,
+    addAIMemory,
+    updateAIMemory,
+    deleteAIMemory,
+    clearAIMemory,
+    requestConfirm,
+    applyAIPlan,
+    rescheduleTasks,
+    flash,
+  } = planner;
   const today = todayISO();
   const currentTab: AISection = route.name === 'ai' ? route.tab ?? 'plan' : 'plan';
   const [xaiConfigured, setXaiConfigured] = useState<boolean | null>(null);
@@ -266,8 +290,18 @@ export function AIView() {
 
       <section className="ai-privacy card">
         <span className="ai-privacy-icon"><LeafIcon size={18} /></span>
-        <p><strong>{t("Your data, your choice.")}</strong> {t("Your prompt and relevant schedule/check-in details go to xAI through the server proxy. The API key stays on the server, and planner notes are not included. AI suggestions never change your planner until you review and add them.")}</p>
+        <p><strong>{t("Your data, your choice.")}</strong> {t("Your prompt, saved AI memory, and relevant schedule/check-in details go to xAI through the server proxy. The API key stays on the server, planner notes are not included, and you can forget memory at any time. AI suggestions never change your planner until you review and add them.")}</p>
       </section>
+
+      <MemoryCard
+        memories={state.aiMemory}
+        addMemory={addAIMemory}
+        updateMemory={updateAIMemory}
+        deleteMemory={deleteAIMemory}
+        clearMemory={clearAIMemory}
+        requestConfirm={requestConfirm}
+        flash={flash}
+      />
 
       {error ? <div className="banner ai-error" role="alert"><p>{error}</p></div> : null}
 
@@ -459,6 +493,133 @@ export function AIView() {
       </section>
     </div>
   );
+}
+
+function MemoryCard({
+  memories,
+  addMemory,
+  updateMemory,
+  deleteMemory,
+  clearMemory,
+  requestConfirm,
+  flash,
+}: {
+  memories: AIMemory[];
+  addMemory: (input: { text: string; category: AIMemoryCategory }) => void;
+  updateMemory: (id: string, patch: { text?: string; category?: AIMemoryCategory }) => void;
+  deleteMemory: (id: string) => void;
+  clearMemory: () => void;
+  requestConfirm: (request: { title: string; body: string; confirmLabel?: string; onConfirm: () => void }) => void;
+  flash: (message: string) => void;
+}) {
+  const [text, setText] = useState('');
+  const [category, setCategory] = useState<AIMemoryCategory>('context');
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const reset = () => {
+    setText('');
+    setCategory('context');
+    setEditingId(null);
+  };
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!text.trim()) return;
+    if (editingId) {
+      updateMemory(editingId, { text: text.trim(), category });
+      flash(t("AI memory updated."));
+    } else {
+      addMemory({ text: text.trim(), category });
+      flash(t("AI will remember that."));
+    }
+    reset();
+  };
+
+  const edit = (memory: AIMemory) => {
+    setEditingId(memory.id);
+    setText(memory.text);
+    setCategory(memory.category);
+  };
+
+  const forgetAll = () => {
+    if (memories.length === 0) return;
+    requestConfirm({
+      title: t("Forget all AI memory?"),
+      body: t("This removes the facts and preferences you saved for AI. Your tasks, notes, and calendar stay unchanged."),
+      confirmLabel: t("Forget all"),
+      onConfirm: () => {
+        clearMemory();
+        reset();
+        flash(t("AI memory forgotten."));
+      },
+    });
+  };
+
+  return (
+    <section className="card ai-memory-card">
+      <header className="card-head">
+        <div>
+          <p className="kicker">{t("Teach it what matters")}</p>
+          <h2 className="card-title">{t("AI memory")}</h2>
+          <p className="meta">{t("Save the parts of your life you want future plans to understand. Write them in your own words; you stay in control.")}</p>
+          <p className="ai-memory-safety">{t("Only save details you are comfortable sending to xAI when you ask for help.")}</p>
+        </div>
+        <span className="ai-memory-count">{memories.length} {t("remembered")}</span>
+      </header>
+      <form className="ai-memory-form" onSubmit={submit}>
+        <label className="field ai-memory-text">
+          <span>{editingId ? t("Edit memory") : t("Something for AI to remember")}</span>
+          <textarea
+            rows={2}
+            maxLength={500}
+            value={text}
+            placeholder={t("Example: I do my best thinking before noon, and I keep Sunday evenings for family.")}
+            onChange={(event) => setText(event.target.value)}
+          />
+        </label>
+        <label className="field ai-memory-category">
+          <span>{t("Memory type")}</span>
+          <select value={category} onChange={(event) => setCategory(event.target.value as AIMemoryCategory)}>
+            {MEMORY_CATEGORIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+          </select>
+        </label>
+        <div className="ai-memory-actions">
+          {editingId ? <button type="button" className="btn btn-ghost btn-small" onClick={reset}>{t("Cancel")}</button> : null}
+          <button type="submit" className="btn btn-soft btn-small" disabled={!text.trim()}>
+            <PlusIcon size={15} /> {editingId ? t("Save memory") : t("Remember this")}
+          </button>
+        </div>
+      </form>
+      {memories.length > 0 ? (
+        <>
+          <ul className="ai-memory-list">
+            {memories.map((memory) => (
+              <li key={memory.id}>
+                <div className="ai-memory-copy">
+                  <span className="ai-memory-kind">{memoryCategoryLabel(memory.category)}</span>
+                  <p>{memory.text}</p>
+                </div>
+                <div className="ai-memory-item-actions">
+                  <button type="button" className="text-btn" onClick={() => edit(memory)}>{t("Edit")}</button>
+                  <button type="button" className="icon-btn" aria-label={t("Forget {0}", { 0: memory.text })} onClick={() => { deleteMemory(memory.id); if (editingId === memory.id) reset(); }}>{t("Forget")}</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <div className="ai-memory-foot">
+            <span>{t("Only these saved memories are added to AI planning and reviews. They are stored with your planner.")}</span>
+            <button type="button" className="text-btn danger-text" onClick={forgetAll}>{t("Forget all")}</button>
+          </div>
+        </>
+      ) : (
+        <p className="empty-inline ai-memory-empty">{t("Nothing saved yet. Add a preference, person, routine, or boundary when you are ready.")}</p>
+      )}
+    </section>
+  );
+}
+
+function memoryCategoryLabel(category: AIMemoryCategory): string {
+  return MEMORY_CATEGORIES.find((item) => item.value === category)?.label ?? t("Life context");
 }
 
 function filterPlanAgainstCurrentState(draft: AIDraft, state: ReturnType<typeof usePlanner>['state']): AIDraft {
