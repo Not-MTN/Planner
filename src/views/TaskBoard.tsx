@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { CATEGORIES, categoryById, PRIORITIES } from '../constants';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
-import { addDays, dayNumber, formatMonthShort, formatWeekdayShort } from '../dates';
+import { addDays, dayNumber, formatMonthShort, formatWeekdayShort, displayTime } from '../dates';
 import { TickIcon } from '../icons';
 import type { Task, TaskInput } from '../types';
 
@@ -73,6 +73,7 @@ function sortForBoard(tasks: Task[]): Task[] {
 export function TaskBoard({ tasks, group, today }: { tasks: Task[]; group: BoardGroup; today: string }) {
   const { state, toggleTask, updateTask, openComposer } = usePlanner();
   const [over, setOver] = useState<string | null>(null);
+  const [announce, setAnnounce] = useState('');
   const columns = boardColumns(tasks, group, today);
 
   const drop = (column: Column, id: string) => {
@@ -87,6 +88,8 @@ export function TaskBoard({ tasks, group, today }: { tasks: Task[]; group: Board
   };
 
   return (
+    <>
+    <p className="visually-hidden" role="status" aria-live="polite">{announce}</p>
     <div className="board" role="list" aria-label="Task board">
       {columns.map((column) => (
         <section
@@ -122,6 +125,26 @@ export function TaskBoard({ tasks, group, today }: { tasks: Task[]; group: Board
                   key={task.id}
                   className={cx('board-card', `accent-${categoryById(task.category).accent}`, task.completed && 'is-done', `prio-card-${task.priority}`)}
                   draggable
+                  tabIndex={0}
+                  aria-keyshortcuts="ArrowLeft ArrowRight"
+                  aria-label={`${task.title}. Press left or right arrow to move between columns.`}
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) return;
+                    event.preventDefault();
+                    const index = columns.findIndex((item) => item.id === column.id);
+                    const step = event.key === 'ArrowRight' ? 1 : -1;
+                    for (let next = index + step; next >= 0 && next < columns.length; next += step) {
+                      if (columns[next].patch) {
+                        drop(columns[next], task.id);
+                        setAnnounce(`${task.title} moved to ${columns[next].label}`);
+                        window.setTimeout(() => {
+                          document.querySelector<HTMLElement>(`[data-card="${task.id}"]`)?.focus();
+                        }, 0);
+                        break;
+                      }
+                    }
+                  }}
+                  data-card={task.id}
                   onDragStart={(event) => {
                     event.dataTransfer.setData('text/plain', `task:${task.id}`);
                     event.dataTransfer.effectAllowed = 'move';
@@ -139,7 +162,7 @@ export function TaskBoard({ tasks, group, today }: { tasks: Task[]; group: Board
                     <strong>{task.title}</strong>
                     <small>
                       {task.dueDate ? `${formatWeekdayShort(task.dueDate)} ${dayNumber(task.dueDate)} ${formatMonthShort(task.dueDate)}` : 'No date'}
-                      {task.dueTime ? ` · ${task.dueTime}` : ''}
+                      {task.dueTime ? ` · ${displayTime(task.dueTime)}` : ''}
                       {task.repeat ? ' · ↻' : ''}
                       {steps ? ` · ${stepsDone}/${steps}` : ''}
                     </small>
@@ -152,5 +175,6 @@ export function TaskBoard({ tasks, group, today }: { tasks: Task[]; group: Board
         </section>
       ))}
     </div>
+    </>
   );
 }

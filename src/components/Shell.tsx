@@ -72,6 +72,7 @@ export function Shell() {
     closePalette,
     settingsOpen,
     openSettings,
+    syncStatus,
     undo,
     redo,
     canUndo,
@@ -201,7 +202,14 @@ export function Shell() {
             <SlidersIcon size={16} />
             <span>Settings</span>
           </button>
-          <p className="side-note">Saved on this device</p>
+          <p className="side-note">
+            {syncStatus === 'off' ? 'Saved on this device' : (
+              <>
+                <i className={`sync-dot ${syncStatus}`} aria-hidden="true" />{' '}
+                {syncStatus === 'syncing' ? 'Syncing…' : syncStatus === 'error' ? 'Sync problem' : syncStatus === 'offline' ? 'Offline · saved here' : 'Synced'}
+              </>
+            )}
+          </p>
         </div>
       </aside>
 

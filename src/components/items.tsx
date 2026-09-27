@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { categoryById } from '../constants';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
-import { dayNumber, formatDuration, formatMonthShort, formatWeekdayShort, isValidTime } from '../dates';
+import { dayNumber, formatDuration, formatMonthShort, formatWeekdayShort, isValidTime, displayTime } from '../dates';
 import { frequencyLabel, habitStreaks } from '../logic';
 import { FlameIcon, GripIcon, HabitGlyph, PencilIcon, StopwatchIcon, TickIcon, TrashIcon } from '../icons';
 import { repeatLabel } from '../recurrence';
@@ -132,7 +132,7 @@ export function FixedEventRow({ event }: { event: PlannerEvent }) {
   return (
     <li className={cx('event', 'fixed-event', `accent-${accent}`)} title="Protected weekly time — AI plans will leave this slot clear">
       <span className="fixed-repeat" aria-hidden="true">↻</span>
-      <time className="fixed-time">{event.startTime}</time>
+      <time className="fixed-time">{displayTime(event.startTime)}</time>
       <div className="item-body">
         <span className="item-title fixed-title">{event.title}</span>
         <p className="meta">
@@ -196,7 +196,7 @@ export function TaskRow({
           </span>
           <i className={cx('dot-inline', `accent-${accent}`)} aria-hidden="true" />
           {categoryById(task.category).label}
-          {task.dueTime ? ` · ${task.dueTime}` : ''}
+          {task.dueTime ? ` · ${displayTime(task.dueTime)}` : ''}
           {showDate && task.dueDate ? ` · ${formatWeekdayShort(task.dueDate)} ${dayNumber(task.dueDate)} ${formatMonthShort(task.dueDate)}` : ''}
           {task.repeat ? <span className="repeat-chip" title={repeatLabel(task.repeat)}>↻ {repeatLabel(task.repeat).replace('Every ', '')}</span> : null}
           {task.subtasks.length ? (
@@ -302,7 +302,7 @@ export function NowMark({ time }: { time: string }) {
   return (
     <div className="now-mark">
       <span>Now</span>
-      <time dateTime={time}>{time}</time>
+      <time dateTime={time}>{displayTime(time)}</time>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { timeToMinutes, todayISO } from './dates';
+import { displayTime, timeToMinutes, todayISO } from './dates';
 import { eventsForDate, tasksForDate } from './logic';
 import type { PlannerState } from './types';
 
@@ -84,7 +84,7 @@ export function dueReminders(state: PlannerState, now: Date, settings: ReminderS
     out.push({
       key,
       title: event.title,
-      body: settings.lead > 0 ? `Starts at ${event.startTime} · in ${settings.lead} min` : `Starting now · ${event.startTime}`,
+      body: settings.lead > 0 ? `Starts at ${displayTime(event.startTime)} · in ${settings.lead} min` : `Starting now · ${displayTime(event.startTime)}`,
     });
   }
   for (const task of tasksForDate(state, today)) {
@@ -92,7 +92,7 @@ export function dueReminders(state: PlannerState, now: Date, settings: ReminderS
     const key = `${today}|task|${task.id}|${task.dueTime}`;
     if (fired.has(key)) continue;
     if (!inWindow(timeToMinutes(task.dueTime) - settings.lead)) continue;
-    out.push({ key, title: task.title, body: `Task due at ${task.dueTime}` });
+    out.push({ key, title: task.title, body: `Task due at ${displayTime(task.dueTime)}` });
   }
   if (settings.digest) {
     const key = `${today}|digest`;

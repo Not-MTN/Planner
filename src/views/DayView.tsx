@@ -10,8 +10,7 @@ import {
   formatWeekdayLong,
   motivationFor,
   timeToMinutes,
-  todayISO,
-} from '../dates';
+  todayISO, displayTime } from '../dates';
 import { useNow } from '../hooks';
 import {
   dayScore,
@@ -102,7 +101,7 @@ export function DayView({ date }: { date: string }) {
           <h1 className="hero-title">{formatWeekdayLong(date)}</h1>
           <p className="hero-date">
             <span className="hero-date-num">{dayNumber(date)}</span> {formatMonthLong(date)}
-            {isToday ? <span className="clock">{clock}</span> : null}
+            {isToday ? <span className="clock">{displayTime(clock)}</span> : null}
           </p>
           {isToday ? <p className="quote">{motivationFor(date)}</p> : null}
           <QuickAddBar defaultDate={date} />

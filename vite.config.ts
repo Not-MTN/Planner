@@ -7,6 +7,7 @@ import { cwd, env } from 'node:process';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { NextHandleFunction } from 'connect';
 import { handleXAIChatCompletions, handleXAIStatus } from './src/server/xaiProxy';
+import { handleSync, handleSyncStatus, neonStore } from './src/server/sync';
 
 /** Convert a Node request to a Web Request so dev/preview share the Vercel Function code path. */
 function toWebRequest(request: IncomingMessage, pathname: string): Request {
@@ -67,12 +68,47 @@ function xaiProxy(apiKey: string | undefined): Plugin {
   };
 }
 
+function syncHandler(databaseUrl: string | undefined): NextHandleFunction {
+  return (request, response, next) => {
+    const pathname = (request.url ?? '').split('?')[0];
+    let run: ((webRequest: Request) => Response | Promise<Response>) | null = null;
+    if (pathname === '/status') run = (webRequest) => handleSyncStatus(webRequest, databaseUrl);
+    else if (pathname === '/' || pathname === '') run = async (webRequest) => handleSync(webRequest, await neonStore(databaseUrl));
+    if (!run) {
+      next();
+      return;
+    }
+    void Promise.resolve(run(toWebRequest(request, `/api/sync${pathname}`)))
+      .then((webResponse) => sendWebResponse(webResponse, response))
+      .catch(() => {
+        if (response.headersSent) return;
+        response.statusCode = 500;
+        response.setHeader('Content-Type', 'application/json');
+        response.end(JSON.stringify({ error: { message: 'The local sync API failed.' } }));
+      });
+  };
+}
+
+function syncApi(databaseUrl: string | undefined): Plugin {
+  const middleware = syncHandler(databaseUrl);
+  return {
+    name: 'planner-sync-api',
+    configureServer(server) {
+      server.middlewares.use('/api/sync', middleware);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use('/api/sync', middleware);
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => {
   // Read the secret only inside the Vite/Node process. It is never defined into the browser bundle.
   const fileEnv = loadEnv(mode, cwd(), '');
   const apiKey = env.XAI_API_KEY || fileEnv.XAI_API_KEY;
+  const databaseUrl = env.DATABASE_URL || fileEnv.DATABASE_URL;
   return {
-    plugins: [react(), xaiProxy(apiKey)],
+    plugins: [react(), xaiProxy(apiKey), syncApi(databaseUrl)],
     server: {
       host: '0.0.0.0',
       port: 5173,

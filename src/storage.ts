@@ -4,6 +4,7 @@ import { REPEAT_SET } from './recurrence';
 import { createEmptyState, type FixedCommitment, type FocusLog, type Subtask, type TaskRepeat, type Goal, type Habit, type HabitFrequency, type Note, type PlannerEvent, type PlannerState, type Task } from './types';
 
 export const STORAGE_KEY = 'personal-planner.v1';
+export const STORAGE_FULL = 'Browser storage is full, so that change was not saved.';
 const MAX_BACKUP = 2_000_000;
 const PRIORITY_SET = new Set<string>(PRIORITIES.map((item) => item.id));
 const ACCENT_SET = new Set<string>(ACCENTS);
@@ -342,7 +343,7 @@ export function saveTo(storage: Pick<Storage, 'setItem'>, state: PlannerState): 
     return null;
   } catch (error) {
     const name = error && typeof error === 'object' && 'name' in error ? String(error.name) : '';
-    if (name === 'QuotaExceededError') return 'Browser storage is full, so that change was not saved.';
+    if (name === 'QuotaExceededError') return STORAGE_FULL;
     return 'That change could not be saved in this browser.';
   }
 }

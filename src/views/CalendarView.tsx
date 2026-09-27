@@ -17,8 +17,7 @@ import {
   monthGrid,
   timeToMinutes,
   todayISO,
-  weekDates,
-} from '../dates';
+  weekDates, displayTime } from '../dates';
 import { ChevronLeftIcon, ChevronRightIcon, PlusIcon, TickIcon } from '../icons';
 import {
   agendaWindow,
@@ -226,7 +225,7 @@ function WeekBoard({ anchor, today }: { anchor: string; today: string }) {
                           if (!fixed) openComposer({ mode: 'edit', type: 'event', id: item.id });
                         }}
                       >
-                        <time>{item.startTime}{item.endTime ? `–${item.endTime}` : ''}</time>
+                        <time>{displayTime(item.startTime)}{item.endTime ? `–${displayTime(item.endTime)}` : ''}</time>
                         <span>{item.title}</span>
                       </button>
                       {!fixed ? <ResizeHandle startTime={item.startTime} endTime={item.endTime} title={item.title} onResize={(end) => resizeEvent(item.id, end)} /> : null}
@@ -370,7 +369,7 @@ function ResizeHandle({ startTime, endTime, title, onResize }: { startTime: stri
         if (next !== base) onResize(clockFrom(next));
       }}
     >
-      {preview !== null ? <em>until {clockFrom(preview)}</em> : null}
+      {preview !== null ? <em>until {displayTime(clockFrom(preview))}</em> : null}
     </span>
   );
 }
@@ -482,7 +481,7 @@ function MonthBoard({ anchor, today }: { anchor: string; today: string }) {
                         if (!event.fixedCommitmentId) openComposer({ mode: 'edit', type: 'event', id: event.id });
                       }}
                     >
-                      <time>{event.startTime}</time>
+                      <time>{displayTime(event.startTime)}</time>
                       <span>{event.title}</span>
                       {event.fixedCommitmentId ? <small>Fixed</small> : null}
                     </button>
@@ -663,7 +662,7 @@ function DayCard({
                   {event.completed ? <TickIcon size={12} /> : null}
                 </button>
               )}
-              <time>{event.startTime}</time>
+              <time>{displayTime(event.startTime)}</time>
               {event.fixedCommitmentId ? <span className="item-title">{event.title}</span> : (
                 <button type="button" className="item-title" onClick={() => openComposer({ mode: 'edit', type: 'event', id: event.id })}>{event.title}</button>
               )}

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { monthGrid, setWeekStart, startOfWeek, weekdayHeaders } from './dates';
+import { displayTime, formatMonthLong, monthGrid, setDisplayPrefs, setWeekStart, startOfWeek, weekdayHeaders } from './dates';
 import { parseICS, toICS } from './ics';
 import { focusSummary, habitLinks, productiveHours, weeklyReport } from './insights';
 import { extractTags } from './components/Markdown';
@@ -196,5 +196,19 @@ describe('notes', () => {
     expect(state.notes[0].pinned).toBe(true);
     state = updateNote(state, 'n', { title: 'Renamed' });
     expect(state.notes[0].pinned).toBe(true);
+  });
+});
+
+describe('display preferences', () => {
+  afterEach(() => setDisplayPrefs({ dateLanguage: 'en-GB', timeFormat: '24h' }));
+  it('formats 12-hour times and localised dates', () => {
+    expect(displayTime('14:05')).toBe('14:05');
+    setDisplayPrefs({ dateLanguage: 'fi', timeFormat: '12h' });
+    expect(displayTime('14:05')).toBe('2:05 pm');
+    expect(displayTime('00:00')).toBe('12 am');
+    expect(displayTime('12:30')).toBe('12:30 pm');
+    expect(formatMonthLong('2026-09-27').toLowerCase()).toContain('syys');
+    setDisplayPrefs({ dateLanguage: 'en-GB', timeFormat: '24h' });
+    expect(weekdayHeaders()).toEqual(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
   });
 });

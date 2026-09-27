@@ -2,14 +2,32 @@
 
 A calm, local-first planner for your day, your week, and the days ahead — tasks, habits, goals, and notes in one beautiful place.
 
-Planner data stays in this browser (`localStorage`); there is no planner account or database. If you choose to use AI, the current prompt and the minimum schedule/check-in details needed for that request pass through the server-side proxy to xAI. Use **Settings → Export** for a backup file, and **Settings → Import** to bring one back.
+Planner data is saved in this browser (`localStorage`, mirrored to IndexedDB). Optional **end-to-end encrypted sync** keeps devices in step through your own Neon database — there are no accounts, and the server only stores ciphertext. If you choose to use AI, the current prompt and the minimum schedule/check-in details needed for that request pass through the server-side proxy to xAI. Use **Settings → Export** for a backup file, and **Settings → Import** to bring one back.
 
 ```bash
 npm install
 npm run dev
 ```
 
-Other scripts: `npm run typecheck`, `npm test`, `npm run build`.
+Other scripts: `npm run typecheck`, `npm test`, `npm run build`, `npm run test:e2e` (browser tests — run `npx playwright install chromium` once first).
+
+## Sync across devices (Neon)
+
+1. Create a project at [neon.tech](https://neon.tech) and copy the connection string (Dashboard → **Connect**).
+2. Set it as `DATABASE_URL`:
+   - **Vercel:** Project Settings → Environment Variables → `DATABASE_URL`, then redeploy. (Or use Vercel's Neon integration, which adds it for you.)
+   - **Locally:** add `DATABASE_URL=...` to `.env.local` and restart `npm run dev`.
+3. In Planner: **Settings → Sync across devices → Turn on sync**. Copy the 20-character code, then on your other device choose **I have a code**.
+
+The table is created automatically on first use (`db/schema.sql` has the same SQL if you'd rather run it yourself).
+
+How it works: the sync code never leaves your devices. The browser derives an AES-GCM-256 key from it (PBKDF2, 150k rounds) and encrypts the whole planner before upload; the database row is keyed by a SHA-256 hash of the code. Uploads use version numbers, so two devices can't silently overwrite each other — if both changed, items are merged by id and the most recently edited copy wins. Anyone with the code can read your planner, so keep it private; **Delete cloud copy** removes the row.
+
+| Endpoint | Method | Purpose |
+| --- | --- | --- |
+| `/api/sync/status` | GET | `{ configured: boolean }` |
+| `/api/sync` | GET / PUT / DELETE | Read, compare-and-swap write, or delete the encrypted blob (`X-Sync-Id` header) |
+
 
 ## What's inside
 
@@ -41,7 +59,9 @@ Other scripts: `npm run typecheck`, `npm test`, `npm run build`.
 - **Pomodoro focus** — short and long breaks between rounds; every focused minute (even when you end early) is logged.
 - **Rhythm insights** — focus time for the last 7 days, the hour you usually get things done, habit links ("on days you run you finish 40% more tasks"), and a copyable Markdown weekly report.
 - **Markdown notes** — headings, bold/italic, lists, checkboxes, links, and `#tags` (tap a tag to filter). Pin important notes to the top. Rendered safely without raw HTML.
-- **Week start** — Monday, Sunday, or Saturday (Settings → Calendar).
+- **Week start, clock & date language** — Monday/Sunday/Saturday weeks, 24-hour or 12-hour times, and day/month names in English, your device language, Finnish, Swedish, German, French, Spanish, or Persian (Settings → Calendar, dates & time).
+- **Larger storage** — every save is mirrored to IndexedDB; if `localStorage` fills up, Planner keeps saving there and loads the newest copy on start.
+- **Keyboard-friendly board** — focus a card and press ←/→ to move it between columns.
 - **Keyboard shortcuts** — `⌘K` search & add · `N` new task · `T` today · `⌘Z` undo · `esc` close.
 
 ## xAI (Grok) setup

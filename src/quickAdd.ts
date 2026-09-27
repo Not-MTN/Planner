@@ -1,7 +1,7 @@
 import { CATEGORIES, PRIORITIES, type Priority } from './constants';
 import { repeatLabel } from './recurrence';
 import type { TaskRepeat } from './types';
-import { addDays, formatMonthShort, formatWeekdayShort, isValidISODate, parseISODate, todayISO } from './dates';
+import { displayTime, addDays, formatMonthShort, formatWeekdayShort, isValidISODate, parseISODate, todayISO } from './dates';
 
 export interface QuickAddParse {
   kind: 'task' | 'event';
@@ -281,7 +281,7 @@ export function parseQuickAdd(input: string, defaultDate: string | null): QuickA
 
   const chips: string[] = [kind === 'event' ? 'Event' : 'Task'];
   if (resolvedDate) chips.push(describeDate(resolvedDate, today));
-  if (startTime) chips.push(endTime ? `${startTime} – ${endTime}` : startTime);
+  if (startTime) chips.push(endTime ? `${displayTime(startTime)} – ${displayTime(endTime)}` : displayTime(startTime));
   if (priority) chips.push(labelPriority(priority));
   if (category) chips.push(labelCategory(category));
   if (repeat && kind === 'task') chips.push(`↻ ${repeatLabel(repeat)}`);

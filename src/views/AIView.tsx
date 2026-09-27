@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { CATEGORIES, categoryById } from '../constants';
 import { usePlanner } from '../context';
-import { addDays, formatFullDate, timeToMinutes, todayISO, weekdayIndex } from '../dates';
+import { addDays, formatFullDate, timeToMinutes, todayISO, weekdayIndex, displayTime } from '../dates';
 import { MAX_PLAN_IMAGE_BYTES, XAI_KEY_MISSING_MESSAGE, checkXAIConfiguration, friendlyXAIError, generateAIPlan, generateAIReview, hasReviewActivity } from '../ai';
 import type { AIReview, AIDraft, PlanRange } from '../ai';
 import { cx } from '../cx';
@@ -385,7 +385,7 @@ export function AIView() {
                     <span className={cx('fixed-list-dot', `accent-${categoryById(block.category).accent}`)} />
                     <div className="fixed-list-copy">
                       <strong>{block.title}</strong>
-                      <span>{WEEKDAYS.find((day) => day.value === block.weekday)?.label} · {block.startTime}–{block.endTime} · Protected every week</span>
+                      <span>{WEEKDAYS.find((day) => day.value === block.weekday)?.label} · {displayTime(block.startTime)}–{displayTime(block.endTime)} · Protected every week</span>
                     </div>
                     <button type="button" className="text-btn" onClick={() => editBlock(block.id)}>Edit</button>
                     <button type="button" className="icon-btn" aria-label={`Remove ${block.title}`} onClick={() => { deleteFixedCommitment(block.id); if (editingBlockId === block.id) { setEditingBlockId(null); setBlockTitle(''); } }}>×</button>
@@ -536,7 +536,7 @@ function PlanDraft({ draft, onAdd, onDiscard }: { draft: AIDraft; onAdd: () => v
       ) : null}
       {draft.tasks.length + draft.events.length + draft.habits.length === 0 ? <p className="empty-inline">The AI did not find new items to add. Try a more specific request.</p> : null}
       {draft.events.length > 0 ? <DraftGroup title="Timed plans" count={draft.events.length}>
-        {draft.events.map((item, index) => <li key={`e-${index}`}><span className="draft-kind event-kind">Event</span><span>{item.title}</span><small>{formatFullDate(item.date)} · {item.startTime}–{item.endTime}</small></li>)}
+        {draft.events.map((item, index) => <li key={`e-${index}`}><span className="draft-kind event-kind">Event</span><span>{item.title}</span><small>{formatFullDate(item.date)} · {displayTime(item.startTime)}–{displayTime(item.endTime)}</small></li>)}
       </DraftGroup> : null}
       {draft.tasks.length > 0 ? <DraftGroup title="Tasks" count={draft.tasks.length}>
         {draft.tasks.map((item, index) => <li key={`t-${index}`}><span className="draft-kind task-kind">Task</span><span>{item.title}</span><small>{item.dueDate ? formatFullDate(item.dueDate) : ''}</small></li>)}
