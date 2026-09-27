@@ -1,13 +1,25 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { usePlanner } from '../context';
 import { suggestTime, todayISO } from '../dates';
-import { PlusIcon } from '../icons';
+import { cx } from '../cx';
+import { MicIcon, PlusIcon } from '../icons';
 import { parseQuickAdd } from '../quickAdd';
+import { useSpeechInput } from '../speech';
 import { t } from '../i18n';
 
 export function QuickAddBar({ defaultDate, placeholder }: { defaultDate?: string | null; placeholder?: string }) {
   const { addTask, addEvent, flash, undo } = usePlanner();
   const [text, setText] = useState('');
+  const speech = useSpeechInput();
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    // PWA shortcut / deep link (#/today?qa=1) lands here: put the caret in the box.
+    if (typeof window !== 'undefined' && /(#\/)?today\?qa=1/.test(window.location.hash)) {
+      inputRef.current?.focus();
+      window.history.replaceState(null, '', '#/today');
+    }
+  }, []);
   const fallback = defaultDate ?? todayISO();
   const parse = useMemo(() => (text.trim() ? parseQuickAdd(text, defaultDate ?? null) : null), [text, defaultDate]);
 
@@ -49,6 +61,7 @@ export function QuickAddBar({ defaultDate, placeholder }: { defaultDate?: string
           <PlusIcon size={16} />
         </span>
         <input
+          ref={inputRef}
           value={text}
           dir="auto"
           enterKeyHint="done"
@@ -60,6 +73,26 @@ export function QuickAddBar({ defaultDate, placeholder }: { defaultDate?: string
           aria-label={t("Quick add")}
           maxLength={200}
         />
+        {speech.available ? (
+          <button
+            type="button"
+            className={cx('icon-btn', 'quick-add-mic', speech.listening && 'listening')}
+            aria-label={speech.listening ? t("Stop dictation") : t("Dictate")}
+            aria-pressed={speech.listening}
+            title={t("Dictate — tap, speak, done")}
+            onClick={() => {
+              if (speech.listening) {
+                speech.stop();
+              } else {
+                speech.start((spoken) => {
+                  setText((current) => (current.trim() ? `${current.replace(/\s+$/, '')} ${spoken}` : spoken));
+                });
+              }
+            }}
+          >
+            <MicIcon size={16} />
+          </button>
+        ) : null}
         <button type="submit" className="btn btn-primary btn-small" disabled={!parse}>
           {t("Add")}
         </button>

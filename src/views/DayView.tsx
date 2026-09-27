@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
 import {
@@ -6,6 +6,7 @@ import {
   dayNumber,
   dayRelation,
   formatClock,
+  formatJalaliLong,
   formatMonthLong,
   formatWeekdayLong,
   motivationFor,
@@ -18,12 +19,14 @@ import {
   eventsForDate,
   habitsDueOn,
   isEmptyState,
+  journalForDate,
   overdueTasks,
   progressPhrase,
   tasksForDate,
   upcomingFocus,
   weekLeftovers,
 } from '../logic';
+import { fetchWeather, weatherInfo, type WeatherNow } from '../weather';
 import { QuickAddBar } from '../components/QuickAddBar';
 import { WelcomeCard } from '../components/WelcomeCard';
 import { EventRow, FixedEventRow, HabitRow, IntentionField, NowMark, TaskRow } from '../components/items';
@@ -35,7 +38,7 @@ import { t } from '../i18n';
 
 export function DayView({ date }: { date: string }) {
   const planner = usePlanner();
-  const { state, openComposer, navigate, swapEventTimes, swapTasks, moveTask, flash, celebrate, startFocus, carryWeekLeftovers, undo } = planner;
+  const { state, display, openComposer, navigate, swapEventTimes, swapTasks, moveTask, flash, celebrate, startFocus, carryWeekLeftovers, undo } = planner;
   const now = useNow(20000);
   const today = todayISO(now);
   const isToday = date === today;
@@ -105,6 +108,7 @@ export function DayView({ date }: { date: string }) {
             <span className="hero-date-num">{dayNumber(date)}</span> {formatMonthLong(date)}
             {isToday ? <span className="clock">{displayTime(clock)}</span> : null}
           </p>
+          {display.jalali ? <p className="jalali-line">{formatJalaliLong(date)}</p> : null}
           {isToday ? <p className="quote">{motivationFor(date)}</p> : null}
           <QuickAddBar defaultDate={date} />
           {upcoming.length > 0 ? (
@@ -190,6 +194,7 @@ export function DayView({ date }: { date: string }) {
       </header>
 
       {fresh && isToday ? <WelcomeCard /> : null}
+      {isToday ? <WeatherCard /> : null}
       {essentials.length > 0 ? <EssentialsCard date={date} habits={essentials} /> : null}
 
       <IntentionField key={date} date={date} />
@@ -334,10 +339,109 @@ export function DayView({ date }: { date: string }) {
             )}
           </section>
 
+          <JournalCard key={`journal-${date}`} date={date} />
+
           <DayNotes date={date} />
         </div>
       </div>
     </div>
+  );
+}
+
+/** One quiet line (or more) a day: the dated journal note, edited inline. */
+function JournalCard({ date }: { date: string }) {
+  const { state, addNote, updateNote, openComposer } = usePlanner();
+  const note = journalForDate(state.notes, date);
+  const [body, setBody] = useState(note?.body ?? '');
+  const [saved, setSaved] = useState(false);
+  const timer = useRef<number | null>(null);
+
+  const save = (value: string) => {
+    if (!value.trim() && !note) return;
+    if (note) {
+      if (value !== note.body) updateNote(note.id, { body: value });
+    } else {
+      addNote({ title: formatWeekdayLong(date), body: value, kind: 'journal', date });
+    }
+    setSaved(true);
+    if (timer.current) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setSaved(false), 1600);
+  };
+
+  return (
+    <section className="card journal-card">
+      <header className="card-head">
+        <div>
+          <p className="kicker">{t("Journal")}</p>
+          <h2 className="card-title">{t("A few lines for this day")}</h2>
+        </div>
+        <div className="journal-side">
+          {saved ? <span className="journal-saved" role="status">{t("Saved")}</span> : null}
+          {note ? (
+            <button type="button" className="btn btn-tiny" onClick={() => openComposer({ mode: 'edit', type: 'note', id: note.id })}>
+              {t("Open")}
+            </button>
+          ) : null}
+        </div>
+      </header>
+      <textarea
+        className={cx('journal-entry', 'journal-inline')}
+        dir="auto"
+        value={body}
+        rows={4}
+        maxLength={20000}
+        placeholder={t("What do you want to remember about this day?")}
+        aria-label={t("Journal entry for this day")}
+        onChange={(event) => setBody(event.target.value)}
+        onBlur={() => save(body)}
+      />
+    </section>
+  );
+}
+
+/** Weather for today, only when enabled in Settings (Open-Meteo, no key). */
+function WeatherCard() {
+  const { weather } = usePlanner();
+  const [data, setData] = useState<WeatherNow | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!weather.enabled || weather.lat === null || weather.lon === null) return;
+    let cancelled = false;
+    void fetchWeather(weather.lat, weather.lon)
+      .then((now) => {
+        if (!cancelled) setData(now);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [weather.enabled, weather.lat, weather.lon]);
+
+  if (!weather.enabled || weather.lat === null || weather.lon === null) return null;
+  if (failed) return null;
+  if (!data) {
+    return (
+      <section className="card weather-card is-loading" aria-hidden="true">
+        <span className="weather-icon">☁️</span>
+      </section>
+    );
+  }
+  const info = weatherInfo(data.code);
+  return (
+    <section className="card weather-card" aria-label={t("Weather for today")}>
+      <span className="weather-icon" aria-hidden="true">{info.icon}</span>
+      <div className="weather-body">
+        <strong>{data.temp}°</strong>
+        <span className="weather-label">{info.label}</span>
+      </div>
+      <p className="meta weather-meta">
+        {t("Feels like {0}°", { 0: data.feels })} · {t("High {0}° · Low {1}°", { 0: data.hi, 1: data.lo })}
+        {weather.place ? ` · ${weather.place}` : ''}
+      </p>
+    </section>
   );
 }
 

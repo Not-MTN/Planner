@@ -53,6 +53,13 @@ function readFile(file: File): Promise<string> {
   });
 }
 
+const PLAN_CHIPS = [
+  "Plan my days around my unfinished tasks",
+  "Add a small workout, three times next week",
+  "Keep mornings light. Push deep work after lunch.",
+  "Weekly reset: review what slipped and re-plan it",
+];
+
 export function AIView() {
   const planner = usePlanner();
   const {
@@ -337,6 +344,13 @@ export function AIView() {
               ) : null}
             </div>
             <p className="ai-range-note">{formatFullDate(planRange.startDate)} — {formatFullDate(planEnd)}{t(". Fixed weekly times and existing events are treated as busy, protected slots.")}</p>
+            <div className="chip-row ai-chips" role="group" aria-label={t("Start from a suggestion")}>
+              {PLAN_CHIPS.map((chip) => (
+                <button key={chip} type="button" className="chip" onClick={() => setPrompt(chip)}>
+                  {chip}
+                </button>
+              ))}
+            </div>
             <label className="field ai-prompt-field">
               <span>{t("Your plan request")}</span>
               <textarea

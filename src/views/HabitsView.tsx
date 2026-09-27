@@ -22,7 +22,7 @@ import { t } from '../i18n';
 const HEAT_WEEKS = 12;
 
 export function HabitsView() {
-  const { state, openComposer, setHabitArchived, deleteHabit, toggleHabit, addHabit, addHabits, flash, undo } = usePlanner();
+  const { state, openComposer, setHabitArchived, deleteHabit, toggleHabit, skipHabit, addHabit, addHabits, flash, undo } = usePlanner();
   const today = todayISO();
   const [cursor, setCursor] = useState(() => {
     const now = new Date();
@@ -130,7 +130,10 @@ export function HabitsView() {
                     </span>
                     <div>
                       <h2>{habit.name}</h2>
-                      <p className="meta">{frequencyLabel(habit)}</p>
+                      <p className="meta">
+                        {frequencyLabel(habit)}
+                        {habit.unit ? t(" · {0} {1} a day", { 0: habit.unit.target, 1: habit.unit.label }) : ''}
+                      </p>
                       {habit.essential ? (
                         <p className="essential-tag">
                           <SunIcon size={12} /> {t("Daily must-do")}
@@ -161,11 +164,17 @@ export function HabitsView() {
                           key={`${date}-dot`}
                           type="button"
                           className={cx('dot', 'dot-btn', status, `accent-${habit.accent}`)}
+                          title={t("Tap to check · Shift-tap for a rest day")}
                           aria-label={t("{0} on {1} {2}, {3}", { 0: habit.name, 1: formatWeekdayShort(date), 2: dayNumber(date), 3: status })}
                           aria-pressed={status === 'done'}
                           disabled={status === 'off'}
-                          onClick={() => toggleHabit(habit.id, date)}
-                        />
+                          onClick={(event) => {
+                            if (event.shiftKey) skipHabit(habit.id, date);
+                            else toggleHabit(habit.id, date);
+                          }}
+                        >
+                          {status === 'skipped' ? 'z' : null}
+                        </button>
                       );
                     })}
                   </div>
@@ -185,11 +194,14 @@ export function HabitsView() {
                                 key={date}
                                 type="button"
                                 className={cx('heat-cell', status, `accent-${habit.accent}`)}
-                                title={`${formatWeekdayShort(date)} ${dayNumber(date)} ${formatMonthShort(date)} — ${status === 'done' ? 'done' : status === 'open' ? 'missed' : status === 'future' ? 'upcoming' : status === 'optional' ? 'optional' : 'not planned'}`}
+                                title={`${formatWeekdayShort(date)} ${dayNumber(date)} ${formatMonthShort(date)} — ${status}`}
                                 aria-label={t("{0} on {1}: {2}", { 0: habit.name, 1: date, 2: status })}
                                 aria-pressed={status === 'done'}
                                 disabled={status === 'off' || status === 'future'}
-                                onClick={() => toggleHabit(habit.id, date)}
+                                onClick={(event) => {
+                                  if (event.shiftKey) skipHabit(habit.id, date);
+                                  else toggleHabit(habit.id, date);
+                                }}
                               />
                             );
                           })}

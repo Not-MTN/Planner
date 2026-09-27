@@ -6,6 +6,7 @@ import { isValidTime, suggestTime, timeToMinutes, todayISO, WEEKDAY_TOGGLES } fr
 import { HabitGlyph } from '../icons';
 import { REPEAT_CHOICES } from '../recurrence';
 import { uid } from '../mutate';
+import { addTemplate, loadTemplates, saveTemplates } from '../templates';
 import type { Subtask, TaskRepeat, ComposerState, EventInput, GoalHorizon, HabitFrequency, HabitInput, NoteInput, PlannerState, TaskInput } from '../types';
 import { Field, Modal } from './ui';
 import { Markdown } from './Markdown';
@@ -128,15 +129,42 @@ function TaskForm({
   const [note, setNote] = useState(existing?.note ?? '');
   const [repeat, setRepeat] = useState<TaskRepeat | ''>(existing?.repeat ?? '');
   const [waiting, setWaiting] = useState(existing?.waiting ?? '');
+  const [estimate, setEstimate] = useState(existing?.estimatedMinutes ? String(existing.estimatedMinutes) : '');
   const [subtasks, setSubtasks] = useState<Subtask[]>(existing?.subtasks ?? []);
   const [draftStep, setDraftStep] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [templates, setTemplates] = useState(() => loadTemplates().filter((item) => item.type === 'task'));
 
   const addStep = () => {
     const text = draftStep.trim();
     if (!text) return;
     setSubtasks((items) => [...items, { id: uid(), title: text.slice(0, 140), completed: false }]);
     setDraftStep('');
+  };
+
+  const applyTemplate = (id: string) => {
+    const template = templates.find((item) => item.id === id);
+    if (!template) return;
+    setTitle(template.title);
+    setPriority(template.priority);
+    setCategory(template.category);
+    setNote(template.body);
+    setSubtasks(template.subtasks.map((step) => ({ id: uid(), title: step, completed: false })));
+  };
+
+  const saveAsTemplate = () => {
+    if (!title.trim()) return;
+    const next = addTemplate(templates, {
+      title: title.trim().slice(0, 140),
+      type: 'task',
+      body: note,
+      subtasks: subtasks.map((step) => step.title),
+      priority,
+      category,
+      kind: 'quick',
+    });
+    saveTemplates(next);
+    setTemplates(next);
   };
 
   const submit = (event: FormEvent) => {
@@ -147,6 +175,10 @@ function TaskForm({
     }
     if (dueTime && !isValidTime(dueTime)) {
       setError(t("Use a valid time."));
+      return;
+    }
+    if (estimate && (!/^\d+$/.test(estimate) || Number(estimate) < 1 || Number(estimate) > 1440)) {
+      setError(t("Estimate should be whole minutes, 1 to 1440."));
       return;
     }
     const input: TaskInput = {
@@ -160,6 +192,7 @@ function TaskForm({
       repeat: repeat || null,
       waiting: waiting.trim() || null,
       subtasks: draftStep.trim() ? [...subtasks, { id: uid(), title: draftStep.trim(), completed: false }] : subtasks,
+      estimatedMinutes: estimate ? Number(estimate) : null,
     };
     if (existing) updateTask(existing.id, input);
     else addTask(input);
@@ -168,6 +201,17 @@ function TaskForm({
 
   return (
     <form className="form" onSubmit={submit}>
+      {!existing && templates.length > 0 ? (
+        <div className="template-row">
+          <label className="visually-hidden" htmlFor="tpl-pick-task">{t("Use a template")}</label>
+          <select id="tpl-pick-task" value="" onChange={(event) => event.target.value && applyTemplate(event.target.value)} aria-label={t("Use a template")}>
+            <option value="">{t("Use a template…")}</option>
+            {templates.map((template) => (
+              <option key={template.id} value={template.id}>{template.title}</option>
+            ))}
+          </select>
+        </div>
+      ) : null}
       <Field label={t("Title")} error={error}>
         <input data-autofocus dir="auto" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={140} />
       </Field>
@@ -196,6 +240,17 @@ function TaskForm({
           <input type="time" value={dueTime} onChange={(event) => setDueTime(event.target.value)} />
         </Field>
       </div>
+      <Field label={t("Estimate (minutes)")} hint={t("Optional. Plan my day uses it, and Insights compares it with focus time.")}>
+        <input
+          inputMode="numeric"
+          pattern="[0-9]*"
+          min={1}
+          max={1440}
+          value={estimate}
+          placeholder={t("e.g. 45")}
+          onChange={(event) => setEstimate(event.target.value.replace(/[^\d]/g, '').slice(0, 4))}
+        />
+      </Field>
       <Field label={t("Waiting on")} hint={t("Keeps it off the overdue list until this is clear.")}>
         <input value={waiting} onChange={(event) => setWaiting(event.target.value)} maxLength={140} placeholder={t("A person, a reply, a delivery…")} />
       </Field>
@@ -269,6 +324,11 @@ function TaskForm({
       <Field label={t("Note")}>
         <textarea dir="auto" value={note} onChange={(event) => setNote(event.target.value)} rows={3} maxLength={4000} />
       </Field>
+      {!existing && title.trim() ? (
+        <button type="button" className="text-btn inline" onClick={saveAsTemplate}>
+          {t("Save as template")}
+        </button>
+      ) : null}
       <Actions editing={Boolean(existing)} label={t("Add task")} onClose={onClose} onRemove={onRemove} />
     </form>
   );
@@ -376,6 +436,9 @@ function HabitForm({ composer, onClose, onRemove }: { composer: ComposerState; o
   const [days, setDays] = useState<number[]>(initial.type === 'custom' ? initial.days : [1, 3, 5]);
   const [times, setTimes] = useState(initial.type === 'weekly' ? initial.times : 3);
   const [essential, setEssential] = useState(existing?.essential ?? false);
+  const [trackAmount, setTrackAmount] = useState(Boolean(existing?.unit));
+  const [unitLabel, setUnitLabel] = useState(existing?.unit?.label ?? '');
+  const [unitTarget, setUnitTarget] = useState(existing?.unit ? String(existing.unit.target) : '8');
   const [error, setError] = useState<string | null>(null);
 
   const frequency: HabitFrequency = useMemo(() => {
@@ -395,7 +458,19 @@ function HabitForm({ composer, onClose, onRemove }: { composer: ComposerState; o
       setError(t("Choose at least one day."));
       return;
     }
-    const input: HabitInput = { name, icon, accent, frequency, essential };
+    const target = Number(unitTarget);
+    if (trackAmount && (!unitLabel.trim() || !Number.isInteger(target) || target < 1 || target > 999)) {
+      setError(t("Give the amount a label and a daily target between 1 and 999."));
+      return;
+    }
+    const input: HabitInput = {
+      name,
+      icon,
+      accent,
+      frequency,
+      essential,
+      unit: trackAmount ? { label: unitLabel.trim().toLowerCase().slice(0, 20), target } : null,
+    };
     if (existing) updateHabit(existing.id, input);
     else addHabit(input);
     onClose();
@@ -475,6 +550,25 @@ function HabitForm({ composer, onClose, onRemove }: { composer: ComposerState; o
             onChange={(event) => setTimes(Math.min(7, Math.max(1, Number(event.target.value) || 1)))}
           />
         </Field>
+      ) : null}
+      <label className="check-line">
+        <input type="checkbox" checked={trackAmount} onChange={(event) => setTrackAmount(event.target.checked)} />
+        <span>{t("Count an amount instead of a daily yes/no")}</span>
+      </label>
+      {trackAmount ? (
+        <div className="form-row two">
+          <Field label={t("Amount label")} hint={t("glasses, km, minutes…")}>
+            <input value={unitLabel} maxLength={20} onChange={(event) => setUnitLabel(event.target.value)} placeholder={t("glasses")} />
+          </Field>
+          <Field label={t("Daily target")}>
+            <input
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={unitTarget}
+              onChange={(event) => setUnitTarget(event.target.value.replace(/[^\d]/g, '').slice(0, 3))}
+            />
+          </Field>
+        </div>
       ) : null}
       <label className="check-line">
         <input type="checkbox" checked={essential} onChange={(event) => setEssential(event.target.checked)} />
@@ -566,6 +660,7 @@ function NoteForm({ composer, onClose, onRemove }: { composer: ComposerState; on
   const [pinned, setPinned] = useState(existing?.pinned === true);
   const [preview, setPreview] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [templates, setTemplates] = useState(() => loadTemplates().filter((item) => item.type === 'note'));
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -579,8 +674,34 @@ function NoteForm({ composer, onClose, onRemove }: { composer: ComposerState; on
     onClose();
   };
 
+  const applyTemplate = (id: string) => {
+    const template = templates.find((item) => item.id === id);
+    if (!template) return;
+    setTitle(template.title);
+    setBody(template.body);
+    setKind(template.kind);
+  };
+
+  const saveAsTemplate = () => {
+    if (!title.trim()) return;
+    const next = addTemplate(templates, { title: title.trim().slice(0, 140), type: 'note', body, subtasks: [], priority: 'medium', category: 'personal', kind });
+    saveTemplates(next);
+    setTemplates(next);
+  };
+
   return (
     <form className="form" onSubmit={submit}>
+      {!existing && templates.length > 0 ? (
+        <div className="template-row">
+          <label className="visually-hidden" htmlFor="tpl-pick-note">{t("Use a template")}</label>
+          <select id="tpl-pick-note" value="" onChange={(event) => event.target.value && applyTemplate(event.target.value)} aria-label={t("Use a template")}>
+            <option value="">{t("Use a template…")}</option>
+            {templates.map((template) => (
+              <option key={template.id} value={template.id}>{template.title}</option>
+            ))}
+          </select>
+        </div>
+      ) : null}
       <Field label={t("Title")} error={error}>
         <input data-autofocus dir="auto" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={140} />
       </Field>
@@ -614,7 +735,7 @@ function NoteForm({ composer, onClose, onRemove }: { composer: ComposerState; on
       {preview ? (
         <div className="md-body md-preview">{body.trim() ? <Markdown text={body} /> : <p className="meta">{t("Nothing to preview yet.")}</p>}</div>
       ) : null}
-      <Field label={kind === 'journal' ? t("Entry") : t("Note")} hint={t("Markdown works: **bold**, *italic*, - lists, - [ ] checkboxes, # headings, #tags, links.")}>
+      <Field label={kind === 'journal' ? t("Entry") : t("Note")} hint={t("Markdown works: **bold**, *italic*, - lists, - [ ] checkboxes, # headings, #tags, links. [[Note title]] links notes together.")}>
         <textarea
           hidden={preview}
           dir="auto"
@@ -626,6 +747,11 @@ function NoteForm({ composer, onClose, onRemove }: { composer: ComposerState; on
           placeholder={kind === 'journal' ? t("What do you want to remember about this day?") : t("A few words is enough.")}
         />
       </Field>
+      {!existing && title.trim() ? (
+        <button type="button" className="text-btn inline" onClick={saveAsTemplate}>
+          {t("Save as template")}
+        </button>
+      ) : null}
       <Actions editing={Boolean(existing)} label={t("Add note")} onClose={onClose} onRemove={onRemove} />
     </form>
   );

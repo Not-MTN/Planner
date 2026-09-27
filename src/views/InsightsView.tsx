@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { addDays, dayNumber, formatMonthShort, formatWeekdayShort, startOfWeek, todayISO, weekDates } from '../dates';
-import { dayScore, formatPercent, goalProgress, habitStreaks, habitStats, insightTotals, weekDoneCount, weekNarrative } from '../logic';
+import { dayScore, formatPercent, goalProgress, habitStreaks, habitStats, insightTotals, planVsFocus, weekDoneCount, weekNarrative, yearPixels } from '../logic';
+import { formatEstimate } from '../quickAdd';
 import { FlameIcon, SparklesIcon } from '../icons';
 import { Meter } from '../components/ui';
 import type { PlannerState } from '../types';
@@ -166,8 +167,81 @@ export function InsightsView() {
             </ul>
           )}
         </section>
+        <PlanVsFocusCard state={state} today={today} />
+        <YearPixelsCard state={state} today={today} />
       </div>
     </div>
+  );
+}
+
+/** Estimated minutes planned vs focus minutes actually logged, last 30 days. */
+function PlanVsFocusCard({ state, today }: { state: PlannerState; today: string }) {
+  const data = useMemo(() => planVsFocus(state, today, 30), [state, today]);
+  const plannedTotal = data.reduce((sum, item) => sum + item.planned, 0);
+  const focusedTotal = data.reduce((sum, item) => sum + item.focused, 0);
+  if (plannedTotal === 0 && focusedTotal === 0) return null;
+  const height = 120;
+  const top = 10;
+  const bottom = 6;
+  const max = Math.max(10, ...data.flatMap((item) => [item.planned, item.focused]));
+  const bar = (value: number) => Math.max(1, (value / max) * (height - top - bottom));
+  return (
+    <section className="card wide-card">
+      <header className="card-head">
+        <div>
+          <p className="kicker">{t("Estimates vs reality")}</p>
+          <h2 className="card-title">{t("Plan vs focus, last 30 days")}</h2>
+        </div>
+        <p className="meta">
+          {t("{0} planned · {1} focused", { 0: formatEstimate(plannedTotal), 1: formatEstimate(focusedTotal) })}
+        </p>
+      </header>
+      <div className="pvf-chart" role="img" aria-label={t("Estimated minutes versus focus minutes for the last 30 days")} style={{ height }}>
+        {data.map((item) => (
+          <div key={item.date} className="pvf-day" title={`${formatWeekdayShort(item.date)} ${dayNumber(item.date)} ≈ ${item.planned}m / ${item.focused}m`}>
+            <span className="pvf-bar planned" style={{ height: bar(item.planned) }} />
+            <span className="pvf-bar focused" style={{ height: bar(item.focused) }} />
+          </div>
+        ))}
+      </div>
+      <p className="meta pvf-legend">
+        <span className="pvf-key planned" /> {t("Planned (estimates)")} <span className="pvf-key focused" /> {t("Focused")}
+      </p>
+    </section>
+  );
+}
+
+/** A GitHub-style “year in pixels”: one cell per day of the current year. */
+function YearPixelsCard({ state, today }: { state: PlannerState; today: string }) {
+  const year = Number(today.slice(0, 4));
+  const days = useMemo(() => yearPixels(state, year), [state, year]);
+  const start = new Date(Date.UTC(year, 0, 1)).getUTCDay();
+  const tally = days.filter((day) => (day.score.ratio ?? 0) > 0).length;
+  const firstOfYear = `${year}-01-01`;
+  const level = (ratio: number | null) => (ratio === null ? 0 : ratio >= 0.9 ? 4 : ratio >= 0.6 ? 3 : ratio >= 0.3 ? 2 : ratio > 0 ? 1 : 0);
+  return (
+    <section className="card wide-card">
+      <header className="card-head">
+        <div>
+          <p className="kicker">{t("Year in pixels")}</p>
+          <h2 className="card-title">{year}</h2>
+        </div>
+        <span className="streak-chip big">{t("{0} lived days", { 0: tally })}</span>
+      </header>
+      <div className="year-scroll">
+        <div className="year-grid" role="img" aria-label={t("Completion level for every day of {0}", { 0: year })}>
+          {days.map((day) => (
+            <span
+              key={day.date}
+              className="year-cell"
+              data-level={level(day.score.ratio)}
+              style={day.date === firstOfYear ? { gridColumnStart: start + 1 } : undefined}
+              title={`${day.date}${day.score.total ? ` — ${day.score.done}/${day.score.total}` : ''}`}
+            />
+          ))}
+        </div>
+      </div>
+    </section>
   );
 }
 
