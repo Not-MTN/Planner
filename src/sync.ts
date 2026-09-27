@@ -151,6 +151,7 @@ export function mergeStates(local: PlannerState, remote: PlannerState): PlannerS
     tasks: mergeById(local.tasks, remote.tasks),
     events: mergeById(local.events, remote.events),
     fixedCommitments: mergeById(local.fixedCommitments, remote.fixedCommitments),
+    aiMemory: mergeById(local.aiMemory, remote.aiMemory),
     habits,
     completions: [...completions.values()].filter((item) => habitIds.has(item.habitId)),
     goals: mergeById(local.goals, remote.goals),

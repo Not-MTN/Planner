@@ -14,6 +14,7 @@ import {
   PlusIcon,
   SearchIcon,
   StopwatchIcon,
+  SparklesIcon,
   SunIcon,
   WeekIcon,
 } from '../icons';
@@ -36,6 +37,7 @@ const KIND_ICON = {
   note: NoteIcon,
   goal: FlagIcon,
   habit: DotsIcon,
+  memory: SparklesIcon,
 } as const;
 
 export function Palette() {
@@ -317,6 +319,15 @@ function hitItem(hit: SearchHit, close: (run: () => void) => () => void, planner
       run: close(() => planner.navigate({ name: 'day', date: event?.date ?? planner.route.name === 'today' ? todayISO() : todayISO() })),
     };
   }
+  if (hit.kind === 'memory') {
+    return {
+      id: `memory-${hit.id}`,
+      icon,
+      label,
+      sub: t("Saved for AI planning"),
+      run: close(() => planner.navigate({ name: 'ai', tab: 'plan' })),
+    };
+  }
   if (hit.kind === 'habit') {
     return {
       id: `habit-${hit.id}`,
@@ -334,6 +345,6 @@ function hitItem(hit: SearchHit, close: (run: () => void) => () => void, planner
     icon,
     label,
     sub: hit.sub,
-    run: close(() => planner.openComposer({ mode: 'edit', type: hit.kind, id: hit.id })),
+    run: close(() => planner.openComposer({ mode: 'edit', type: hit.kind as 'note' | 'goal', id: hit.id })),
   };
 }

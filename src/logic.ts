@@ -421,7 +421,7 @@ export function habitStreaks(state: PlannerState, habit: Habit, today: string): 
   return { current: run, best };
 }
 
-export type SearchKind = 'task' | 'event' | 'note' | 'goal' | 'habit';
+export type SearchKind = 'task' | 'event' | 'note' | 'goal' | 'habit' | 'memory';
 
 export interface SearchHit {
   kind: SearchKind;
@@ -453,6 +453,10 @@ export function searchHits(state: PlannerState, query: string, perKind = 4): Sea
   for (const habit of state.habits) {
     if (habit.archived) continue;
     push('habit', habit.id, habit.name, frequencyLabel(habit), [habit.name]);
+  }
+  for (const memory of state.aiMemory ?? []) {
+    const title = memory.text.length > 140 ? `${memory.text.slice(0, 137)}…` : memory.text;
+    push('memory', memory.id, title, t("AI memory"), [memory.text, memory.category]);
   }
   return hits;
 }
@@ -509,6 +513,7 @@ export function isEmptyState(state: PlannerState): boolean {
     state.tasks.length === 0 &&
     state.events.length === 0 &&
     state.fixedCommitments.length === 0 &&
+    (state.aiMemory?.length ?? 0) === 0 &&
     state.habits.length === 0 &&
     state.goals.length === 0 &&
     state.notes.length === 0

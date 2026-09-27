@@ -390,7 +390,7 @@ export function SettingsSheet() {
         <pre className="env-code"><code>{t("XAI_API_KEY=your_xai_api_key")}</code></pre>
         <p className="set-hint"><strong>{t("On Vercel:")}</strong> {t("Project Settings → Environment Variables → add")} <code>{t("XAI_API_KEY")}</code> {t("with your key as the value, then redeploy. Vercel Functions in")} <code>{t("api/xai")}</code> {t("handle the requests.")}</p>
         <p className="set-hint"><strong>{t("Locally:")}</strong> {t("put that line in")} <code>{t(".env.local")}</code> {t("at the project root, then restart the dev server.")}</p>
-        <p className="ai-privacy-note">{t("Never use a")} <code>{t("VITE_")}</code> {t("prefix for the key. The AI sends your prompt and relevant schedule/check-in details to xAI; planner notes are not included.")}</p>
+        <p className="ai-privacy-note">{t("Never use a")} <code>{t("VITE_")}</code> {t("prefix for the key. The AI sends your prompt, saved AI memory, and relevant schedule/check-in details to xAI; planner notes are not included. Forget memory from the AI coach at any time.")}</p>
       </section>
 
       <section className="set-section">

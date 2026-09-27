@@ -7,6 +7,7 @@
  */
 
 import { isSameOriginRequest } from './xaiProxy.js';
+import { API_SECURITY_HEADERS, BodyTooLargeError, rateLimitResponse, readLimitedBody } from './security.js';
 
 export const MAX_SYNC_BYTES = 3_000_000;
 const ID_PATTERN = /^[a-f0-9]{64}$/;
@@ -34,7 +35,7 @@ function json(status: number, body: unknown): Response {
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store',
-      'X-Content-Type-Options': 'nosniff',
+      ...API_SECURITY_HEADERS,
     },
   });
 }
@@ -54,6 +55,9 @@ export async function handleSync(request: Request, store: SyncStore | null): Pro
   if (!store) return json(503, { error: { message: MISSING_DB_MESSAGE, code: 'not_configured' } });
   const id = request.headers.get('x-sync-id')?.trim().toLowerCase() ?? '';
   if (!ID_PATTERN.test(id)) return json(400, { error: { message: 'Missing or invalid sync id.' } });
+  const rateLimit = request.method === 'DELETE' ? 10 : request.method === 'PUT' ? 60 : 120;
+  const limited = rateLimitResponse(request, `sync-${request.method.toLowerCase()}`, rateLimit, 60_000);
+  if (limited) return limited;
 
   try {
     if (request.method === 'GET') {
@@ -67,10 +71,13 @@ export async function handleSync(request: Request, store: SyncStore | null): Pro
     }
 
     if (request.method === 'PUT') {
-      const length = Number(request.headers.get('content-length') ?? 0);
-      if (length > MAX_SYNC_BYTES) return json(413, { error: { message: 'Planner data is too large to sync.' } });
-      const text = await request.text();
-      if (text.length > MAX_SYNC_BYTES) return json(413, { error: { message: 'Planner data is too large to sync.' } });
+      let text: string;
+      try {
+        text = await readLimitedBody(request, MAX_SYNC_BYTES);
+      } catch (error) {
+        if (error instanceof BodyTooLargeError) return json(413, { error: { message: 'Planner data is too large to sync.' } });
+        return json(400, { error: { message: 'Body could not be read.' } });
+      }
       let body: { baseVersion?: unknown; ciphertext?: unknown };
       try {
         body = JSON.parse(text) as typeof body;

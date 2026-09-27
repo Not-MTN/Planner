@@ -8,7 +8,10 @@
  * this module.
  */
 
+import { API_SECURITY_HEADERS, BodyTooLargeError, rateLimitResponse, readLimitedBody } from './security.js';
+
 export const XAI_UPSTREAM_CHAT_COMPLETIONS = 'https://api.x.ai/v1/chat/completions';
+export const XAI_ALLOWED_MODEL = 'grok-4.7';
 
 /**
  * Vercel rejects function request bodies over 4.5 MB before our code runs, so
@@ -16,6 +19,7 @@ export const XAI_UPSTREAM_CHAT_COMPLETIONS = 'https://api.x.ai/v1/chat/completio
  * error locally and on Vercel.
  */
 export const MAX_PROXY_BODY_BYTES = 4_400_000;
+export const MAX_UPSTREAM_RESPONSE_BYTES = 2_000_000;
 
 /** Must stay below the Vercel function max duration (300s default with Fluid compute). */
 export const UPSTREAM_TIMEOUT_MS = 180_000;
@@ -35,7 +39,7 @@ function json(status: number, body: unknown, extraHeaders: Record<string, string
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store',
-      'X-Content-Type-Options': 'nosniff',
+      ...API_SECURITY_HEADERS,
       ...extraHeaders,
     },
   });
@@ -57,15 +61,17 @@ function hostOf(value: string | null): string {
 /**
  * Browsers attach `Origin` to cross-origin requests and to same-origin POSTs.
  * Requests without an Origin (curl, server-to-server, same-origin GET) are allowed;
- * a present Origin must match the host the request was addressed to.
+ * a present Origin must match the Host/URL the request was addressed to. Forwarded
+ * host headers are deliberately ignored so a caller cannot spoof an allowlisted host.
  */
 export function isSameOriginRequest(request: Request): boolean {
+  const fetchSite = request.headers.get('sec-fetch-site')?.toLowerCase();
+  if (fetchSite && !['same-origin', 'same-site', 'none'].includes(fetchSite)) return false;
   const origin = request.headers.get('origin');
   if (!origin) return true;
   const originHost = hostOf(origin);
   if (!originHost) return false;
   const candidates = [
-    request.headers.get('x-forwarded-host'),
     request.headers.get('host'),
     hostOf(request.url),
   ]
@@ -88,13 +94,69 @@ export function handleXAIStatus(request: Request, apiKey: string | undefined): R
   return json(200, { configured: Boolean(apiKey && apiKey.trim()) });
 }
 
-class BodyTooLargeError extends Error {}
+const MAX_MESSAGES = 10;
+const MAX_MESSAGE_TEXT_BYTES = 80_000;
+const ALLOWED_CHAT_KEYS = new Set(['model', 'messages', 'temperature', 'max_tokens', 'response_format']);
 
-async function readLimitedBody(request: Request, maxBytes: number): Promise<string> {
-  const declared = Number(request.headers.get('content-length'));
-  if (Number.isFinite(declared) && declared > maxBytes) throw new BodyTooLargeError();
-  if (!request.body) return '';
-  const reader = request.body.getReader();
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function validImageDataUrl(value: unknown): boolean {
+  return typeof value === 'string' && /^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/=\s]+$/.test(value);
+}
+
+function validMessageContent(value: unknown): { valid: boolean; textBytes: number } {
+  if (typeof value === 'string') return { valid: true, textBytes: new TextEncoder().encode(value).byteLength };
+  if (!Array.isArray(value) || value.length === 0 || value.length > 12) return { valid: false, textBytes: 0 };
+  let textBytes = 0;
+  for (const part of value) {
+    if (!isRecord(part) || (part.type !== 'text' && part.type !== 'image_url')) return { valid: false, textBytes: 0 };
+    if (part.type === 'text') {
+      if (typeof part.text !== 'string') return { valid: false, textBytes: 0 };
+      textBytes += new TextEncoder().encode(part.text).byteLength;
+    } else {
+      const image = isRecord(part.image_url) ? part.image_url : null;
+      if (!image || !validImageDataUrl(image.url)) return { valid: false, textBytes: 0 };
+      if (image.detail !== undefined && !['auto', 'low', 'high'].includes(String(image.detail))) return { valid: false, textBytes: 0 };
+    }
+  }
+  return { valid: true, textBytes };
+}
+
+/** Only the narrow JSON shape used by Planner is allowed through the API-key proxy. */
+export function validateChatPayload(value: unknown): string | null {
+  if (!isRecord(value)) return 'The request body must be a JSON object.';
+  if ([...Object.keys(value)].some((key) => !ALLOWED_CHAT_KEYS.has(key))) return 'The request contains an unsupported field.';
+  if (value.model !== XAI_ALLOWED_MODEL) return 'That AI model is not available through this endpoint.';
+  if (!Array.isArray(value.messages) || value.messages.length < 1 || value.messages.length > MAX_MESSAGES) return 'The request must contain a short messages list.';
+  let textBytes = 0;
+  for (const message of value.messages) {
+    if (!isRecord(message) || !['system', 'user', 'assistant'].includes(String(message.role))) return 'The request contains an invalid message.';
+    const content = validMessageContent(message.content);
+    if (!content.valid) return 'The request contains invalid message content.';
+    textBytes += content.textBytes;
+  }
+  if (textBytes > MAX_MESSAGE_TEXT_BYTES) return 'The text in this request is too long.';
+  if (value.temperature !== undefined && (typeof value.temperature !== 'number' || !Number.isFinite(value.temperature) || value.temperature < 0 || value.temperature > 1)) {
+    return 'The temperature value is invalid.';
+  }
+  if (value.max_tokens !== undefined && (typeof value.max_tokens !== 'number' || !Number.isInteger(value.max_tokens) || value.max_tokens < 1 || value.max_tokens > 4_000)) {
+    return 'The token limit is invalid.';
+  }
+  if (value.response_format !== undefined && (!isRecord(value.response_format) || value.response_format.type !== 'json_object')) {
+    return 'The response format is invalid.';
+  }
+  return null;
+}
+
+async function readLimitedResponse(response: Response, maxBytes: number): Promise<string> {
+  if (!response.body) {
+    const text = await response.text();
+    if (new TextEncoder().encode(text).byteLength > maxBytes) throw new BodyTooLargeError();
+    return text;
+  }
+  const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
   for (;;) {
@@ -122,6 +184,8 @@ export async function handleXAIChatCompletions(
   }
   const key = apiKey?.trim();
   if (!key) return errorResponse(503, MISSING_KEY_MESSAGE);
+  const limited = rateLimitResponse(request, 'xai-chat', 20, 60_000);
+  if (limited) return limited;
 
   let body: string;
   try {
@@ -132,11 +196,14 @@ export async function handleXAIChatCompletions(
     }
     return errorResponse(400, 'The request body could not be read.');
   }
+  let parsed: unknown;
   try {
-    JSON.parse(body);
+    parsed = JSON.parse(body) as unknown;
   } catch {
     return errorResponse(400, 'The request body must be JSON.');
   }
+  const validationError = validateChatPayload(parsed);
+  if (validationError) return errorResponse(400, validationError);
 
   const fetchImpl = options.fetchImpl ?? fetch;
   try {
@@ -150,15 +217,17 @@ export async function handleXAIChatCompletions(
       body,
       signal: AbortSignal.timeout(options.timeoutMs ?? UPSTREAM_TIMEOUT_MS),
     });
-    return new Response(await upstream.text(), {
+    const responseBody = await readLimitedResponse(upstream, MAX_UPSTREAM_RESPONSE_BYTES);
+    return new Response(responseBody, {
       status: upstream.status,
       headers: {
-        'Content-Type': upstream.headers.get('content-type') ?? 'application/json; charset=utf-8',
+        'Content-Type': 'application/json; charset=utf-8',
         'Cache-Control': 'no-store',
-        'X-Content-Type-Options': 'nosniff',
+        ...API_SECURITY_HEADERS,
       },
     });
   } catch (error) {
+    if (error instanceof BodyTooLargeError) return errorResponse(502, 'The xAI response was too large.');
     const timedOut = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
     return timedOut
       ? errorResponse(504, 'The xAI request timed out. Please try again.')

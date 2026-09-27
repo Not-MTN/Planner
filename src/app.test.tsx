@@ -32,6 +32,14 @@ function setInputValue(input: HTMLInputElement, value: string): void {
   });
 }
 
+function setTextAreaValue(textarea: HTMLTextAreaElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+  setter?.call(textarea, value);
+  act(() => {
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
 function pressKey(key: string, options?: KeyboardEventInit): void {
   act(() => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, ...options }));
@@ -196,6 +204,34 @@ describe('app smoke', () => {
     expect(document.querySelector('.fixed-list-item')?.textContent).toContain('Tuesday · 08:00–09:00');
     const saved = JSON.parse(window.localStorage.getItem('personal-planner.v1') ?? '{}') as { fixedCommitments?: Array<{ title: string }> };
     expect(saved.fixedCommitments?.[0]?.title).toBe('Class');
+  });
+
+  it('saves life context in AI memory and keeps it after the view changes', async () => {
+    mountApp();
+    const aiNav = [...document.querySelectorAll<HTMLButtonElement>('.nav-link')].find((button) => button.textContent?.includes('AI coach'));
+    await act(async () => {
+      aiNav?.click();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    expect(text()).toContain('AI memory');
+    const memory = document.querySelector<HTMLTextAreaElement>('.ai-memory-form textarea');
+    expect(memory).toBeTruthy();
+    setTextAreaValue(memory as HTMLTextAreaElement, 'I keep Sunday evenings for family.');
+    const form = document.querySelector<HTMLFormElement>('.ai-memory-form');
+    act(() => {
+      form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    expect(text()).toContain('I keep Sunday evenings for family.');
+    const saved = JSON.parse(window.localStorage.getItem('personal-planner.v1') ?? '{}') as { aiMemory?: Array<{ text: string; category: string }> };
+    expect(saved.aiMemory).toEqual([expect.objectContaining({ text: 'I keep Sunday evenings for family.', category: 'context' })]);
+    const today = [...document.querySelectorAll<HTMLButtonElement>('.nav-link')].find((button) => button.textContent?.includes('Today'));
+    act(() => today?.click());
+    const aiAgain = [...document.querySelectorAll<HTMLButtonElement>('.nav-link')].find((button) => button.textContent?.includes('AI coach'));
+    await act(async () => {
+      aiAgain?.click();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    expect(text()).toContain('I keep Sunday evenings for family.');
   });
 
   it('explains how to configure the server-side xAI key', async () => {
