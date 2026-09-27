@@ -885,4 +885,13 @@ export const fa: Record<string, string> = {
   "Snow showers": "رگبار برف",
   "Thunderstorm": "توفان رعدوبرق",
   "Cloudy": "ابری",
+  "{0} new {1} merged from your other devices.": "{0} {1} جدید از دستگاه‌های دیگرتان ادغام شد.",
+  "{0} {1} imported.": "{0} {1} وارد شد.",
+  "item": "مورد",
+  "items": "مورد",
+  "Shared space failed to sync. It will try again.": "فضای مشترک همگام نشد؛ دوباره تلاش می‌کند.",
+  "The calendar could not be refreshed.": "تقویم تازه‌سازی نشد.",
+  "Enter the calendar address starting with https.": "نشانی تقویم را با https وارد کنید.",
+  "That calendar is already subscribed.": "این تقویم از قبل مشترک شده است.",
+  "The calendar could not be added.": "تقویم افزوده نشد.",
 };

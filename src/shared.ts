@@ -14,7 +14,12 @@
  */
 import { sanitizeState } from './storage';
 import { createEmptyState, type Note, type PlannerEvent, type PlannerState, type Task } from './types';
-import { SyncError } from './sync';
+import { SyncError, normalizeCode } from './sync';
+
+/** Same 20-character format as device sync, kept as its own export for clarity. */
+export function normalizeSharedCode(input: string): string | null {
+  return normalizeCode(input);
+}
 
 const SETTINGS_KEY = 'planner-shared';
 const TOMBSTONES_KEY = 'planner-shared-tombstones';

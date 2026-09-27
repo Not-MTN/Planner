@@ -45,7 +45,7 @@ describe('bulk task actions', () => {
   it('completes, moves, updates and deletes many tasks in one step', () => {
     let state = withTask(createEmptyState(), {}, 'a');
     state = withTask(state, { title: 'B' }, 'b');
-    state = withTask(state, { title: 'C', completed: undefined }, 'c');
+    state = withTask(state, { title: 'C' }, 'c');
 
     state = completeTasks(state, ['a', 'b'], true, 'now', '2026-09-28');
     expect(state.tasks.filter((item) => item.completed)).toHaveLength(2);
@@ -120,7 +120,7 @@ describe('time estimates', () => {
 
 describe('habit units and rest days', () => {
   function waterState(): PlannerState {
-    return addHabit(createEmptyState(), { ...habit, unit: { label: 'glasses', target: 8 } }, 'h1', '2026-09-01T09:00:00.000Z', '2026-09-01', '2026-09-01');
+    return addHabit(createEmptyState(), { ...habit, unit: { label: 'glasses', target: 8 } }, 'h1', '2026-09-01T09:00:00.000Z', '2026-09-01');
   }
 
   it('toggle fills the target; setHabitValue tracks partial amounts', () => {
@@ -146,7 +146,7 @@ describe('habit units and rest days', () => {
   });
 
   it('rest days are neutral for streaks, dots and the day score', () => {
-    let state = addHabit(createEmptyState(), habit, 'h1', '2026-09-01T09:00:00.000Z', '2026-09-01', '2026-09-01');
+    let state = addHabit(createEmptyState(), habit, 'h1', '2026-09-01T09:00:00.000Z', '2026-09-01');
     for (const date of ['2026-09-25', '2026-09-26', '2026-09-27']) state = toggleHabit(state, 'h1', date);
     state = skipHabit(state, 'h1', '2026-09-28');
     expect(isSkipped(state, 'h1', '2026-09-28')).toBe(true);

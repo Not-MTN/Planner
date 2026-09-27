@@ -136,7 +136,7 @@ export function saveTemplates(templates: PlannerTemplate[]): void {
 export function addTemplate(
   list: PlannerTemplate[],
   input: Omit<PlannerTemplate, 'id' | 'createdAt'>,
-  id = crypto.randomUUID(),
+  id: string = crypto.randomUUID(),
   now = new Date().toISOString(),
 ): PlannerTemplate[] {
   const template = sanitizeTemplate({ ...input, id, createdAt: now });

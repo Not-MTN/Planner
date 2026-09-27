@@ -1,9 +1,15 @@
 /* Planner service worker — offline app shell. Planner data lives in localStorage, never here. */
-const CACHE = 'planner-shell-v2';
+const CACHE = 'planner-shell-v3';
 const SHELL = ['/', '/index.html', '/theme-init.js', '/manifest.webmanifest', '/favicon.svg'];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting()));
+  // No automatic skipWaiting: the page offers "refresh to update" and tells us
+  // via SKIP_WAITING when the user is ready, so a hard swap never hits mid-session.
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
