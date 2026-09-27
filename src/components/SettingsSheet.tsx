@@ -429,6 +429,7 @@ export function SettingsSheet() {
           <li><span>{t("Go to Today")}</span><span><kbd className="kbd">T</kbd></span></li>
           <li><span>{t("Undo / redo")}</span><span><kbd className="kbd">⌘</kbd><kbd className="kbd">Z</kbd></span></li>
           <li><span>{t("Close anything")}</span><span><kbd className="kbd">{t('esc')}</kbd></span></li>
+          <li><span>{t("Open shortcuts")}</span><span><kbd className="kbd">?</kbd></span></li>
         </ul>
       </section>
 

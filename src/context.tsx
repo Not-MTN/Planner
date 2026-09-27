@@ -13,6 +13,7 @@ import {
   addMilestone as addMilestoneTo,
   addNote as addNoteTo,
   addTask as addTaskTo,
+  duplicateTask as duplicateTaskIn,
   clearCompletedTasks as clearCompletedTasksIn,
   deleteEvent as deleteEventFrom,
   deleteGoal as deleteGoalFrom,
@@ -129,6 +130,7 @@ interface PlannerContextValue {
   setReminders: (settings: ReminderSettings) => void;
   celebrate: () => void;
   addTask: (input: TaskInput) => void;
+  duplicateTask: (id: string) => void;
   updateTask: (id: string, patch: Partial<TaskInput>) => void;
   deleteTask: (id: string) => void;
   clearCompletedTasks: () => void;
@@ -647,6 +649,7 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     syncNow: () => void runSync(),
     deleteCloudCopy,
     addTask: (input) => commit((current) => addTaskTo(current, input)),
+    duplicateTask: (id) => commit((current) => duplicateTaskIn(current, id)),
     updateTask: (id, patch) => commit((current) => updateTaskIn(current, id, patch)),
     deleteTask: (id) => commit((current) => deleteTaskFrom(current, id)),
     clearCompletedTasks,

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { categoryById } from '../constants';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
-import { dayNumber, formatDuration, formatMonthShort, formatWeekdayShort, isValidTime, displayTime } from '../dates';
+import { addDays, dayNumber, formatDuration, formatMonthShort, formatWeekdayShort, isValidTime, displayTime, todayISO } from '../dates';
 import { frequencyLabel, habitStreaks } from '../logic';
 import { FlameIcon, GripIcon, HabitGlyph, PencilIcon, StopwatchIcon, TickIcon, TrashIcon } from '../icons';
 import { repeatLabel } from '../recurrence';
@@ -159,10 +159,12 @@ export function TaskRow({
   onReschedule?: () => void;
   rescheduleLabel?: string;
 }) {
-  const { toggleTask, toggleSubtask, openComposer, deleteTask, flash, undo, startFocus } = usePlanner();
+  const { toggleTask, toggleSubtask, openComposer, deleteTask, flash, undo, startFocus, duplicateTask, moveTask } = usePlanner();
   const accent = categoryById(task.category).accent;
   const [open, setOpen] = useState(false);
   const stepsDone = task.subtasks.filter((item) => item.completed).length;
+  const today = todayISO();
+  const overdue = !task.completed && task.dueDate !== null && task.dueDate < today;
   return (
     <li
       className={cx('task', task.completed && 'is-done')}
@@ -226,7 +228,19 @@ export function TaskRow({
             ))}
           </ul>
         ) : null}
-        {onReschedule ? (
+        {overdue ? (
+          <div className="snooze-row" role="group" aria-label={t("Snooze")}>
+            <button type="button" className="text-btn inline" onClick={() => moveTask(task.id, today)}>
+              {t("Move to today")}
+            </button>
+            <button type="button" className="text-btn inline" onClick={() => (onReschedule ? onReschedule() : moveTask(task.id, addDays(today, 1)))}>
+              {t("Move to tomorrow")}
+            </button>
+            <button type="button" className="text-btn inline" onClick={() => moveTask(task.id, addDays(today, 7))}>
+              {t("Next week")}
+            </button>
+          </div>
+        ) : onReschedule ? (
           <button type="button" className="text-btn inline" onClick={onReschedule}>
             {rescheduleLabel}
           </button>
@@ -244,6 +258,18 @@ export function TaskRow({
       >
         <GripIcon size={14} />
       </span>
+      <button
+        type="button"
+        className="icon-btn"
+        aria-label={t("Duplicate {0}", { 0: task.title })}
+        title={t("Duplicate")}
+        onClick={() => {
+          duplicateTask(task.id);
+          flash(t("Task “{0}” duplicated.", { 0: task.title }), { label: t("Undo"), run: undo });
+        }}
+      >
+        <span aria-hidden="true">⧉</span>
+      </button>
       {!task.completed ? (
         <button
           type="button"

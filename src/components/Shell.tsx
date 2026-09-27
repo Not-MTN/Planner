@@ -127,11 +127,14 @@ export function Shell() {
         openComposer({ mode: 'create', type: 'task', date: today });
       } else if (event.key.toLowerCase() === 't') {
         navigate({ name: 'today' });
+      } else if (event.key === '?' || (event.shiftKey && event.key === '/')) {
+        event.preventDefault();
+        openSettings();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [paletteOpen, composer, confirm, settingsOpen, moreOpen, openPalette, closePalette, openComposer, navigate, undo, redo, today]);
+  }, [paletteOpen, composer, confirm, settingsOpen, moreOpen, openPalette, closePalette, openComposer, openSettings, navigate, undo, redo, today]);
 
   const go = (name: string) => {
     if (name === 'calendar') navigate({ name: 'calendar', tab: 'week', date: today });

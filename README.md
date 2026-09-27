@@ -70,7 +70,8 @@ Settings → **Language** switches the whole interface to Persian with a right-t
 - **Week start, clock & date language** — Monday/Sunday/Saturday weeks, 24-hour or 12-hour times, and day/month names in English, your device language, Finnish, Swedish, German, French, Spanish, or Persian (Settings → Calendar, dates & time).
 - **Larger storage** — every save is mirrored to IndexedDB; if `localStorage` fills up, Planner keeps saving there and loads the newest copy on start.
 - **Keyboard-friendly board** — focus a card and press ←/→ to move it between columns.
-- **Keyboard shortcuts** — `⌘K` search & add · `N` new task · `T` today · `⌘Z` undo · `esc` close.
+- **Keyboard shortcuts** — `⌘K` search & add · `N` new task · `T` today · `⌘Z` undo · `?` shortcuts · `esc` close.
+- **Snooze & duplicate** — overdue tasks offer Today / Tomorrow / Next week; duplicate any task in one tap. Tasks has an Overdue filter.
 
 ## xAI (Grok) setup
 

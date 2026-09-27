@@ -105,6 +105,27 @@ export function updateTask(state: PlannerState, id: string, patch: Partial<TaskI
   };
 }
 
+export function duplicateTask(state: PlannerState, id: string, now = nowIso(), nextId = uid()): PlannerState {
+  const task = state.tasks.find((item) => item.id === id);
+  if (!task) return state;
+  return addTask(
+    state,
+    {
+      title: task.title,
+      priority: task.priority,
+      dueDate: task.dueDate,
+      dueTime: task.dueTime,
+      category: task.category,
+      note: task.note,
+      goalId: task.goalId,
+      repeat: task.repeat,
+      subtasks: task.subtasks.map((step) => ({ ...step, id: '', completed: false })),
+    },
+    nextId,
+    now,
+  );
+}
+
 export function deleteTask(state: PlannerState, id: string): PlannerState {
   return { ...state, tasks: state.tasks.filter((task) => task.id !== id) };
 }

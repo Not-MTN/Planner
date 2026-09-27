@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { monthGrid, startOfWeek, addDays, isValidISODate, weekDates } from './dates';
 import { agendaWindow, dayScore, essentialHabits, eventsForDate, fixedEventsForDate, goalProgress, habitStats, habitStreaks, hasAgendaPlans, insightTotals, isDueOn, isPlannedDay, laterAgenda } from './logic';
-import { addEvent, addFixedCommitment, addGoal, addHabit, addHabits, addMilestone, addNote, addTask, clearCompletedTasks, moveTask, swapEventTimes, toggleHabit, toggleMilestone, toggleTask, updateEvent } from './mutate';
+import { addEvent, addFixedCommitment, addGoal, addHabit, addHabits, addMilestone, addNote, addTask, clearCompletedTasks, duplicateTask, moveTask, swapEventTimes, toggleHabit, toggleMilestone, toggleTask, updateEvent } from './mutate';
 import { parseQuickAdd } from './quickAdd';
 import { parseHash, toHash } from './route';
 import { loadFrom, parseBackup, sanitizeState, saveTo, serialize } from './storage';
@@ -353,6 +353,24 @@ describe('streaks and totals', () => {
     state = clearCompletedTasks(state);
     expect(state.tasks).toHaveLength(1);
     expect(state.tasks[0].title).toBe('Open thing');
+  });
+
+  it('duplicates a task with a fresh id and unchecked steps', () => {
+    let state = addTask(createEmptyState(), {
+      title: 'Pack',
+      priority: 'high',
+      dueDate: '2026-09-27',
+      dueTime: '08:00',
+      category: 'home',
+      note: 'bags',
+      goalId: null,
+      subtasks: [{ id: 's1', title: 'Shoes', completed: true }],
+    }, 't1', now);
+    state = duplicateTask(state, 't1', now, 't2');
+    expect(state.tasks).toHaveLength(2);
+    expect(state.tasks[1]).toMatchObject({ id: 't2', title: 'Pack', dueDate: '2026-09-27', note: 'bags' });
+    expect(state.tasks[1].subtasks[0]).toMatchObject({ title: 'Shoes', completed: false });
+    expect(state.tasks[1].subtasks[0].id).not.toBe('s1');
   });
 
   it('sums insight totals including the day streak', () => {

@@ -23,7 +23,10 @@ export function NotesView() {
             matchesQuery([note.title, note.body, note.kind], query) &&
             (!tag || extractTags(`${note.title} ${note.body}`).includes(tag)),
         )
-        .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned))),
+        .sort(
+          (a, b) =>
+            Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt.localeCompare(a.updatedAt),
+        ),
     [state.notes, kind, query, tag],
   );
 

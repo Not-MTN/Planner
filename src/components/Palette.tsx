@@ -63,6 +63,7 @@ function PaletteInner() {
     themeMode,
     setThemeMode,
     isDark,
+    openSettings,
   } = planner;
   const [query, setQuery] = useState('');
   const [index, setIndex] = useState(0);
@@ -153,6 +154,7 @@ function PaletteInner() {
         run: close(() => setThemeMode(isDark ? 'light' : 'dark')),
       },
       { id: 'export', icon: DownloadIcon, label: t("Export backup"), run: close(() => exportData()) },
+      { id: 'shortcuts', icon: SearchIcon, label: t("Open shortcuts"), sub: t("Keyboard cheat sheet"), run: close(() => openSettings()) },
     ];
     if (canUndo) {
       commands.push({ id: 'undo', icon: WeekIcon, label: t("Undo last change"), run: close(() => undo()) });
@@ -170,7 +172,7 @@ function PaletteInner() {
       return [exact, ...list, ...rest].slice(0, 30);
     }
     return [...list, ...matching].slice(0, 30);
-  }, [query, state, today, planner, closePalette, openComposer, navigate, addTask, addEvent, toggleTask, toggleHabit, flash, undo, canUndo, exportData, startFocus, setThemeMode, isDark, themeMode]);
+  }, [query, state, today, planner, closePalette, openComposer, navigate, addTask, addEvent, toggleTask, toggleHabit, flash, undo, canUndo, exportData, startFocus, setThemeMode, isDark, themeMode, openSettings]);
 
   useEffect(() => {
     setIndex(0);

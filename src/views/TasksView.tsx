@@ -26,6 +26,7 @@ function loadLayout(): { layout: 'list' | 'board'; group: BoardGroup } {
 
 const FILTERS = [
   { id: 'open', label: t("Open") },
+  { id: 'overdue', label: t("Overdue") },
   { id: 'today', label: t("Today") },
   { id: 'upcoming', label: t("Upcoming") },
   { id: 'done', label: t("Done") },
@@ -55,6 +56,7 @@ export function TasksView() {
   const counts = useMemo(
     () => ({
       open: state.tasks.filter((task) => !task.completed).length,
+      overdue: state.tasks.filter((task) => !task.completed && task.dueDate !== null && task.dueDate < today).length,
       today: state.tasks.filter((task) => task.dueDate === today).length,
       upcoming: state.tasks.filter((task) => !task.completed && task.dueDate !== null && task.dueDate > today).length,
       done: state.tasks.filter((task) => task.completed).length,
@@ -66,10 +68,12 @@ export function TasksView() {
     const matched = searched;
     const visible = matched.filter((task) => {
       if (filter === 'done') return task.completed;
+      if (filter === 'overdue') return !task.completed && task.dueDate !== null && task.dueDate < today;
       if (filter === 'today') return task.dueDate === today;
       if (filter === 'upcoming') return !task.completed && task.dueDate !== null && task.dueDate > today;
       return !task.completed;
     });
+    if (filter === 'overdue') return [{ id: 'carried', label: t("Overdue"), tasks: sortTasks(visible) }];
     if (filter === 'done') return [{ id: 'done', label: t("Completed"), tasks: sortTasks(visible) }];
     if (filter === 'upcoming') {
       const byDate = new Map<string, Task[]>();
