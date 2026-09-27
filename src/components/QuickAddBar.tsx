@@ -33,6 +33,7 @@ export function QuickAddBar({ defaultDate, placeholder }: { defaultDate?: string
         category: parse.category ?? 'personal',
         note: '',
         goalId: null,
+        repeat: parse.repeat,
       });
       flash(`Task “${parse.title}” added.`, { label: 'Undo', run: undo });
     }

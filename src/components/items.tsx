@@ -5,6 +5,7 @@ import { cx } from '../cx';
 import { dayNumber, formatDuration, formatMonthShort, formatWeekdayShort, isValidTime } from '../dates';
 import { frequencyLabel, habitStreaks } from '../logic';
 import { FlameIcon, GripIcon, HabitGlyph, PencilIcon, StopwatchIcon, TickIcon, TrashIcon } from '../icons';
+import { repeatLabel } from '../recurrence';
 import type { Habit, PlannerEvent, Task } from '../types';
 
 export function IntentionField({ date }: { date: string }) {
@@ -157,8 +158,10 @@ export function TaskRow({
   onReschedule?: () => void;
   rescheduleLabel?: string;
 }) {
-  const { toggleTask, openComposer, deleteTask, flash, undo, startFocus } = usePlanner();
+  const { toggleTask, toggleSubtask, openComposer, deleteTask, flash, undo, startFocus } = usePlanner();
   const accent = categoryById(task.category).accent;
+  const [open, setOpen] = useState(false);
+  const stepsDone = task.subtasks.filter((item) => item.completed).length;
   return (
     <li
       className={cx('task', task.completed && 'is-done')}
@@ -195,8 +198,33 @@ export function TaskRow({
           {categoryById(task.category).label}
           {task.dueTime ? ` · ${task.dueTime}` : ''}
           {showDate && task.dueDate ? ` · ${formatWeekdayShort(task.dueDate)} ${dayNumber(task.dueDate)} ${formatMonthShort(task.dueDate)}` : ''}
+          {task.repeat ? <span className="repeat-chip" title={repeatLabel(task.repeat)}>↻ {repeatLabel(task.repeat).replace('Every ', '')}</span> : null}
+          {task.subtasks.length ? (
+            <button type="button" className="steps-chip" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+              <span className="steps-bar" aria-hidden="true"><i style={{ width: `${(stepsDone / task.subtasks.length) * 100}%` }} /></span>
+              {stepsDone}/{task.subtasks.length} steps
+            </button>
+          ) : null}
         </p>
         {task.note ? <p className="item-note">{task.note}</p> : null}
+        {open && task.subtasks.length ? (
+          <ul className="subtask-list">
+            {task.subtasks.map((item) => (
+              <li key={item.id} className={cx(item.completed && 'is-done')}>
+                <button
+                  type="button"
+                  className={cx('check', 'mini', item.completed && 'on')}
+                  aria-pressed={item.completed}
+                  aria-label={item.completed ? `Mark step ${item.title} not done` : `Mark step ${item.title} done`}
+                  onClick={() => toggleSubtask(task.id, item.id)}
+                >
+                  {item.completed ? <TickIcon size={10} /> : null}
+                </button>
+                <span>{item.title}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
         {onReschedule ? (
           <button type="button" className="text-btn inline" onClick={onReschedule}>
             {rescheduleLabel}

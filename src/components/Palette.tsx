@@ -105,6 +105,7 @@ function PaletteInner() {
                 category: parse.category ?? 'personal',
                 note: '',
                 goalId: null,
+                repeat: parse.repeat,
               });
             }
             flash(`${parse.kind === 'event' ? 'Event' : 'Task'} “${parse.title}” added.`, { label: 'Undo', run: undo });

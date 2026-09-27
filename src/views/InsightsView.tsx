@@ -6,6 +6,7 @@ import { dayScore, formatPercent, goalProgress, habitStreaks, habitStats, insigh
 import { FlameIcon, SparklesIcon } from '../icons';
 import { Meter } from '../components/ui';
 import type { PlannerState } from '../types';
+import { RhythmCard } from './RhythmCard';
 
 export function InsightsView() {
   const { state, navigate } = usePlanner();
@@ -95,6 +96,8 @@ export function InsightsView() {
         </ul>
         <p className="meta">Bars show finished plans for each day. An open day stays short — that is allowed.</p>
       </section>
+
+      <RhythmCard today={today} />
 
       <section className="chart-grid" aria-label="Progress charts">
         <TrendChart state={state} today={today} days={historyDays} onDaysChange={setHistoryDays} />

@@ -29,13 +29,17 @@ import {
   toggleHabit as toggleHabitIn,
   toggleMilestone as toggleMilestoneIn,
   toggleTask as toggleTaskIn,
+  toggleSubtask as toggleSubtaskIn,
+  resizeEvent as resizeEventIn,
+  logFocus as logFocusIn,
   updateEvent as updateEventIn,
   updateGoal as updateGoalIn,
   updateHabit as updateHabitIn,
   updateNote as updateNoteIn,
   updateTask as updateTaskIn,
 } from './mutate';
-import { todayISO } from './dates';
+import { loadWeekStart, setWeekStart as storeWeekStart, todayISO, type WeekStart } from './dates';
+import { dueReminders, loadFired, loadReminderSettings, saveFired, saveReminderSettings, showNotification, type ReminderSettings } from './reminders';
 import { buildSampleState } from './sample';
 import { applyTheme, loadAccent, loadThemeMode, resolvedMode, type ThemeMode } from './theme';
 import type { Accent } from './constants';
@@ -104,12 +108,20 @@ interface PlannerContextValue {
   startFocus: (session: FocusSession) => void;
   stopFocus: () => void;
   confettiSeed: number;
+  reminders: ReminderSettings;
+  weekStart: WeekStart;
+  setWeekStart: (value: WeekStart) => void;
+  setReminders: (settings: ReminderSettings) => void;
   celebrate: () => void;
   addTask: (input: TaskInput) => void;
   updateTask: (id: string, patch: Partial<TaskInput>) => void;
   deleteTask: (id: string) => void;
   clearCompletedTasks: () => void;
   toggleTask: (id: string) => void;
+  toggleSubtask: (taskId: string, subtaskId: string) => void;
+  resizeEvent: (id: string, endTime: string) => void;
+  logFocus: (entry: { taskId: string | null; title: string; minutes: number }) => void;
+  importCalendar: (data: { events: EventInput[]; tasks: TaskInput[] }) => void;
   swapTasks: (aId: string, bId: string) => void;
   addEvent: (input: EventInput) => void;
   addFixedCommitment: (input: FixedCommitmentInput) => void;
@@ -117,6 +129,7 @@ interface PlannerContextValue {
   deleteFixedCommitment: (id: string) => void;
   applyAIPlan: (draft: { tasks: TaskInput[]; events: EventInput[]; habits: HabitInput[] }) => void;
   rescheduleTasks: (moves: Array<{ id: string; date: string }>) => void;
+  applySchedule: (plan: Array<{ id: string; date: string; time: string }>) => void;
   updateEvent: (id: string, patch: Partial<EventInput>) => void;
   deleteEvent: (id: string) => void;
   toggleEvent: (id: string) => void;
@@ -163,6 +176,8 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [focus, setFocus] = useState<FocusSession | null>(null);
   const [confettiSeed, setConfettiSeed] = useState(0);
+  const [weekStart, setWeekStartState] = useState<WeekStart>(() => loadWeekStart());
+  const [reminders, setRemindersState] = useState<ReminderSettings>(() => loadReminderSettings());
   const stateRef = useRef(state);
   stateRef.current = state;
   const historyRef = useRef<PlannerState[]>([]);
@@ -278,6 +293,36 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     return () => media.removeEventListener('change', onChange);
   }, [themeMode, accent]);
 
+  const setWeekStart = useCallback((value: WeekStart) => {
+    storeWeekStart(value);
+    setWeekStartState(value);
+  }, []);
+
+  const setReminders = useCallback((settings: ReminderSettings) => {
+    setRemindersState(settings);
+    saveReminderSettings(settings);
+  }, []);
+
+  useEffect(() => {
+    if (!reminders.enabled) return;
+    const check = () => {
+      const now = new Date();
+      const fired = loadFired(todayISO(now));
+      const due = dueReminders(stateRef.current, now, reminders, fired);
+      if (due.length === 0) return;
+      for (const reminder of due) {
+        fired.add(reminder.key);
+        void showNotification(reminder).then((shown) => {
+          if (!shown) flash(`🔔 ${reminder.title} — ${reminder.body}`);
+        });
+      }
+      saveFired(fired);
+    };
+    check();
+    const id = window.setInterval(check, 20000);
+    return () => window.clearInterval(id);
+  }, [reminders, flash]);
+
   const startFresh = useCallback(() => {
     const empty = createEmptyState();
     persistRef.current = true;
@@ -376,11 +421,24 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     stopFocus: () => setFocus(null),
     confettiSeed,
     celebrate,
+    reminders,
+    setReminders,
+    weekStart,
+    setWeekStart,
     addTask: (input) => commit((current) => addTaskTo(current, input)),
     updateTask: (id, patch) => commit((current) => updateTaskIn(current, id, patch)),
     deleteTask: (id) => commit((current) => deleteTaskFrom(current, id)),
     clearCompletedTasks,
     toggleTask: (id) => commit((current) => toggleTaskIn(current, id)),
+    toggleSubtask: (taskId, subtaskId) => commit((current) => toggleSubtaskIn(current, taskId, subtaskId)),
+    resizeEvent: (id, endTime) => commit((current) => resizeEventIn(current, id, endTime)),
+    logFocus: (entry) => commit((current) => logFocusIn(current, entry)),
+    importCalendar: (data) => commit((current) => {
+      let next = current;
+      for (const input of data.events) next = addEventTo(next, input);
+      for (const input of data.tasks) next = addTaskTo(next, input);
+      return next;
+    }),
     swapTasks: (aId, bId) => commit((current) => swapTasksIn(current, aId, bId)),
     addEvent: (input) => commit((current) => addEventTo(current, input)),
     addFixedCommitment: (input) => commit((current) => addFixedCommitmentTo(current, input)),
@@ -394,6 +452,7 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
       return next;
     }),
     rescheduleTasks: (moves) => commit((current) => moves.reduce((next, move) => moveTaskIn(next, move.id, move.date), current)),
+    applySchedule: (plan) => commit((current) => plan.reduce((next, item) => updateTaskIn(next, item.id, { dueDate: item.date, dueTime: item.time }), current)),
     updateEvent: (id, patch) => commit((current) => updateEventIn(current, id, patch)),
     deleteEvent: (id) => commit((current) => deleteEventFrom(current, id)),
     toggleEvent: (id) => commit((current) => toggleEventIn(current, id)),
@@ -416,7 +475,7 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     updateNote: (id, patch) => commit((current) => updateNoteIn(current, id, patch)),
     deleteNote: (id) => commit((current) => deleteNoteFrom(current, id)),
     setIntention: (date, text) => commit((current) => setIntentionIn(current, date, text)),
-  }), [state, ready, error, notice, saveBlocked, route, navigate, composer, confirm, startFresh, exportData, importText, loadSample, flash, dismissNotice, undo, redo, canUndo, canRedo, themeMode, accent, paletteOpen, settingsOpen, focus, confettiSeed, celebrate, clearCompletedTasks, commit]);
+  }), [state, ready, error, notice, saveBlocked, route, navigate, composer, confirm, startFresh, exportData, importText, loadSample, flash, dismissNotice, undo, redo, canUndo, canRedo, themeMode, accent, paletteOpen, settingsOpen, focus, confettiSeed, celebrate, clearCompletedTasks, commit, reminders, setReminders, weekStart, setWeekStart]);
 
   return <PlannerContext.Provider value={value}>{children}</PlannerContext.Provider>;
 }

@@ -1,7 +1,10 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import { registerPWA } from './pwa';
 import './styles.css';
+
+registerPWA();
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Root element missing');

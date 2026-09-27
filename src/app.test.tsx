@@ -104,7 +104,8 @@ describe('app smoke', () => {
       input?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
     });
     expect(text()).toContain('How your days are taking shape');
-    expect(document.querySelectorAll('.chart-card')).toHaveLength(2);
+    expect(document.querySelectorAll('[aria-label="Progress charts"] .chart-card')).toHaveLength(2);
+    expect(document.querySelectorAll('[aria-label="Focus and rhythm"] .chart-card')).toHaveLength(2);
     expect(document.querySelector('.palette')).toBeFalsy();
   });
 
@@ -249,5 +250,82 @@ describe('app smoke', () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
     });
     expect(document.querySelector('.month-grid')).toBeTruthy();
+  });
+});
+
+function click(element: Element | null | undefined): void {
+  if (!element) throw new Error('element missing');
+  act(() => {
+    (element as HTMLElement).click();
+  });
+}
+
+function buttonByText(label: string): HTMLButtonElement | undefined {
+  return [...document.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === label);
+}
+
+describe('new features', () => {
+  it('quick adds a repeating task and completing it schedules the next one', () => {
+    mountApp();
+    const input = document.querySelector<HTMLInputElement>('.quick-add input');
+    if (!input) throw new Error('missing quick add');
+    setInputValue(input, 'Stretch every day');
+    expect(text()).toContain('Every day');
+    act(() => {
+      input.form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    expect(document.querySelector('.repeat-chip')).toBeTruthy();
+    click(document.querySelector('[aria-label="Mark Stretch complete"]'));
+    const saved = JSON.parse(localStorage.getItem('personal-planner.v1') ?? '{}') as { tasks: Array<{ completed: boolean; repeat: string | null }> };
+    expect(saved.tasks).toHaveLength(2);
+    expect(saved.tasks.filter((task) => task.repeat === 'daily' && !task.completed)).toHaveLength(1);
+  });
+
+  it('adds checklist steps in the composer and shows progress', () => {
+    mountApp();
+    pressKey('n');
+    const title = document.querySelector<HTMLInputElement>('[role="dialog"] input[data-autofocus]');
+    if (!title) throw new Error('missing title');
+    setInputValue(title, 'Pack');
+    const step = document.querySelector<HTMLInputElement>('[aria-label="New checklist step"]');
+    if (!step) throw new Error('missing step input');
+    setInputValue(step, 'Passport');
+    click(document.querySelector('.subtask-add button'));
+    setInputValue(step, 'Charger');
+    act(() => {
+      title.form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    expect(text()).toContain('0/2 steps');
+    click(document.querySelector('.steps-chip'));
+    click(document.querySelector('[aria-label="Mark step Passport done"]'));
+    expect(text()).toContain('1/2 steps');
+  });
+
+  it('switches Tasks to a board', () => {
+    window.history.replaceState(null, '', '#/tasks');
+    mountApp();
+    click(buttonByText('Try a sample day'));
+    click(document.querySelector('[role="radio"][aria-checked="false"]'));
+    const board = document.querySelector('.board');
+    expect(board).toBeTruthy();
+    expect(board?.textContent).toContain('Anytime');
+    expect(localStorage.getItem('planner-task-layout')).toContain('board');
+  });
+
+  it('shows reminders, calendar and install settings', () => {
+    mountApp();
+    click(document.querySelector('[aria-label="Settings"]') ?? buttonByText('Settings'));
+    expect(text()).toContain('Reminders');
+    expect(text()).toContain('Export .ics');
+    expect(text()).toContain('Week starts on');
+  });
+
+  it('renders notes as safe markdown with tags', () => {
+    window.history.replaceState(null, '', '#/notes');
+    localStorage.setItem('personal-planner.v1', JSON.stringify({ notes: [{ id: 'n', title: 'Ideas', body: '**Bold** #work <img src=x onerror=alert(1)>\n- [x] done', kind: 'idea' }] }));
+    mountApp();
+    expect(document.querySelector('.md-body strong')?.textContent).toBe('Bold');
+    expect(document.querySelector('.md-body img')).toBeNull();
+    expect(document.querySelector('.tag-row')?.textContent).toContain('#work');
   });
 });

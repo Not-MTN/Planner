@@ -30,6 +30,18 @@ Other scripts: `npm run typecheck`, `npm test`, `npm run build`.
 - **Protected weekly times** — add a repeating class, shift, or appointment (for example Tuesday 08:00–09:00). It appears on the calendar and the AI rejects overlapping events.
 - **AI review** — ask for a daily, weekly, monthly, or custom reflection on completed tasks, events, and habit check-ins. Select unfinished tasks and dates to carry them forward; nothing is rescheduled without your action.
 - **Themes** — light, dark, or follow your system, plus five accent colours. All in Settings.
+- **Repeating tasks** — daily, weekdays, weekly, monthly, or yearly. Finishing one schedules the next copy (overdue ones skip ahead to the next future date). Quick add understands `every day`, `weekdays`, `every monday`, `monthly`…
+- **Checklists** — break a task into steps; the row shows a progress bar and you can tick steps inline.
+- **Reminders** — optional notifications before events and timed tasks, plus a morning summary. Falls back to in-app toasts if notifications are blocked. (Settings → Reminders; works while Planner is open or installed.)
+- **Installable & offline** — a service worker caches the app shell, so Planner opens without a connection. Install it from Settings → App or your browser menu.
+- **Calendar files (.ics)** — export events, protected weekly times (as repeating events), and dated tasks; import from Google, Outlook, or Apple Calendar. All-day events arrive as dated tasks.
+- **Task board** — switch Tasks between List and a Kanban Board grouped by When, Priority, or Category. Drag cards between columns to reschedule, re-prioritise, or complete.
+- **Calendar editing** — in Week view, drag an event's bottom edge (or focus it and use ↑/↓) to change its length in 15-minute steps; drag tasks to other days too.
+- **Plan my day** — one tap fits today's untimed, overdue, and urgent tasks into your free time around events and protected hours. One undo reverses it.
+- **Pomodoro focus** — short and long breaks between rounds; every focused minute (even when you end early) is logged.
+- **Rhythm insights** — focus time for the last 7 days, the hour you usually get things done, habit links ("on days you run you finish 40% more tasks"), and a copyable Markdown weekly report.
+- **Markdown notes** — headings, bold/italic, lists, checkboxes, links, and `#tags` (tap a tag to filter). Pin important notes to the top. Rendered safely without raw HTML.
+- **Week start** — Monday, Sunday, or Saturday (Settings → Calendar).
 - **Keyboard shortcuts** — `⌘K` search & add · `N` new task · `T` today · `⌘Z` undo · `esc` close.
 
 ## xAI (Grok) setup

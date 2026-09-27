@@ -30,6 +30,7 @@ import { EventRow, FixedEventRow, HabitRow, IntentionField, NowMark, TaskRow } f
 import { Empty, Meter, Ring } from '../components/ui';
 import { ChevronLeftIcon, ChevronRightIcon, PlusIcon, SparklesIcon, StopwatchIcon } from '../icons';
 import type { Habit } from '../types';
+import { autoSchedule } from '../scheduler';
 
 export function DayView({ date }: { date: string }) {
   const planner = usePlanner();
@@ -162,9 +163,28 @@ export function DayView({ date }: { date: string }) {
               Focus
             </button>
           </div>
-          <button type="button" className="btn btn-soft btn-small ai-day-link" onClick={() => navigate({ name: 'ai', tab: 'plan' })}>
-            <SparklesIcon size={15} /> Plan with AI
-          </button>
+          <div className="plan-row">
+            <button
+              type="button"
+              className="btn btn-soft btn-small"
+              title="Fit untimed, overdue, and urgent tasks into today’s free time"
+              disabled={date < today}
+              onClick={() => {
+                const plan = autoSchedule(state, date, { from: isToday ? nowMin + 10 : 9 * 60 });
+                if (plan.length === 0) {
+                  flash('Nothing to fit in — no untimed tasks, or no free time left.');
+                  return;
+                }
+                planner.applySchedule(plan);
+                flash(`Planned ${plan.length} ${plan.length === 1 ? 'task' : 'tasks'}: ${plan.slice(0, 3).map((item) => `${item.time} ${item.title}`).join(', ')}${plan.length > 3 ? '…' : ''}`, { label: 'Undo', run: planner.undo });
+              }}
+            >
+              <StopwatchIcon size={15} /> Plan my day
+            </button>
+            <button type="button" className="btn btn-soft btn-small" onClick={() => navigate({ name: 'ai', tab: 'plan' })}>
+              <SparklesIcon size={15} /> Plan with AI
+            </button>
+          </div>
         </aside>
       </header>
 

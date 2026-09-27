@@ -4,6 +4,154 @@ import { cx } from '../cx';
 import { useImportFile } from '../hooks';
 import { DownloadIcon, SparklesIcon, UploadIcon } from '../icons';
 import { Modal } from './ui';
+import { useEffect, useState } from 'react';
+import { todayISO } from '../dates';
+import { downloadICS, parseICS } from '../ics';
+import { canInstall, isInstalled, onInstallChange, promptInstall } from '../pwa';
+import { LEAD_CHOICES } from '../reminders';
+
+function RemindersSection() {
+  const { reminders, setReminders, flash } = usePlanner();
+  const supported = typeof Notification !== 'undefined';
+  const [permission, setPermission] = useState(supported ? Notification.permission : 'denied');
+
+  const enable = async (on: boolean) => {
+    if (on && supported && Notification.permission === 'default') {
+      const result = await Notification.requestPermission();
+      setPermission(result);
+      if (result === 'denied') flash('Notifications are blocked — reminders will show inside the app instead.');
+    }
+    setReminders({ ...reminders, enabled: on });
+  };
+
+  return (
+    <section className="set-section">
+      <h3 className="kicker">Reminders</h3>
+      <div className="set-row">
+        <div>
+          <p className="set-label">Remind me</p>
+          <p className="set-hint">
+            {!supported
+              ? 'This browser has no notifications; reminders appear inside the app while it is open.'
+              : permission === 'denied'
+                ? 'Notifications are blocked in your browser. Reminders show inside the app while it is open.'
+                : 'Before events and timed tasks. Works while Planner is open (or installed).'}
+          </p>
+        </div>
+        <div className="segmented" role="radiogroup" aria-label="Reminders">
+          <button type="button" role="radio" aria-checked={!reminders.enabled} className={cx('seg', !reminders.enabled && 'on')} onClick={() => void enable(false)}>Off</button>
+          <button type="button" role="radio" aria-checked={reminders.enabled} className={cx('seg', reminders.enabled && 'on')} onClick={() => void enable(true)}>On</button>
+        </div>
+      </div>
+      {reminders.enabled ? (
+        <>
+          <div className="set-row">
+            <div>
+              <p className="set-label">How early</p>
+            </div>
+            <select
+              aria-label="Minutes before"
+              value={reminders.lead}
+              onChange={(event) => setReminders({ ...reminders, lead: Number(event.target.value) })}
+            >
+              {LEAD_CHOICES.map((minutes) => (
+                <option key={minutes} value={minutes}>{minutes === 0 ? 'At start time' : `${minutes} min before`}</option>
+              ))}
+            </select>
+          </div>
+          <div className="set-row">
+            <div>
+              <p className="set-label">Morning summary</p>
+              <p className="set-hint">A short “here’s your day” note.</p>
+            </div>
+            <div className="set-inline">
+              <input
+                type="checkbox"
+                aria-label="Morning summary"
+                checked={reminders.digest}
+                onChange={(event) => setReminders({ ...reminders, digest: event.target.checked })}
+              />
+              <input
+                type="time"
+                aria-label="Summary time"
+                value={reminders.digestTime}
+                disabled={!reminders.digest}
+                onChange={(event) => event.target.value && setReminders({ ...reminders, digestTime: event.target.value.slice(0, 5) })}
+              />
+            </div>
+          </div>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+function CalendarSection() {
+  const { state, importCalendar, flash, undo, weekStart, setWeekStart } = usePlanner();
+  const icsFile = useImportFile((text) => {
+    const result = parseICS(text);
+    const count = result.events.length + result.tasks.length;
+    if (count === 0) {
+      flash('No calendar events found in that file.');
+      return;
+    }
+    importCalendar(result);
+    flash(`Imported ${result.events.length} events and ${result.tasks.length} all-day items${result.skipped ? ` (${result.skipped} skipped)` : ''}.`, { label: 'Undo', run: undo });
+  });
+  return (
+    <section className="set-section">
+      <h3 className="kicker">Calendar</h3>
+      <div className="set-row">
+        <div>
+          <p className="set-label">Week starts on</p>
+        </div>
+        <div className="segmented" role="radiogroup" aria-label="Week starts on">
+          {([[1, 'Mon'], [0, 'Sun'], [6, 'Sat']] as const).map(([value, label]) => (
+            <button key={value} type="button" role="radio" aria-checked={weekStart === value} className={cx('seg', weekStart === value && 'on')} onClick={() => setWeekStart(value)}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="set-hint">Exchange plans with Google Calendar, Outlook or Apple Calendar using .ics files. Timed events come in as events; all-day ones become dated tasks.</p>
+      <div className="set-actions">
+        <button type="button" className="btn btn-soft" onClick={() => { downloadICS(state, todayISO()); flash('Calendar file downloaded.'); }}>
+          <DownloadIcon size={16} /> Export .ics
+        </button>
+        <button type="button" className="btn btn-soft" onClick={icsFile.open}>
+          <UploadIcon size={16} /> Import .ics
+        </button>
+      </div>
+      <input ref={icsFile.ref} className="visually-hidden" tabIndex={-1} aria-hidden="true" type="file" accept="text/calendar,.ics" onChange={icsFile.onChange} />
+    </section>
+  );
+}
+
+function InstallSection() {
+  const [available, setAvailable] = useState(canInstall());
+  useEffect(() => onInstallChange(() => setAvailable(canInstall())), []);
+  const installed = isInstalled();
+  return (
+    <section className="set-section">
+      <h3 className="kicker">App</h3>
+      <div className="set-row">
+        <div>
+          <p className="set-label">{installed ? 'Installed' : 'Install Planner'}</p>
+          <p className="set-hint">
+            {installed
+              ? 'Running as an app. It opens offline too.'
+              : available
+                ? 'Add Planner to your home screen or dock. It works offline.'
+                : 'Use your browser’s “Install” or “Add to Home Screen” option. Planner works offline once loaded.'}
+          </p>
+        </div>
+        {available && !installed ? (
+          <button type="button" className="btn btn-soft" onClick={() => void promptInstall()}>Install</button>
+        ) : null}
+      </div>
+    </section>
+  );
+}
 
 export function SettingsSheet() {
   const planner = usePlanner();
@@ -67,6 +215,10 @@ export function SettingsSheet() {
           </div>
         </div>
       </section>
+
+      <RemindersSection />
+      <CalendarSection />
+      <InstallSection />
 
       <section className="set-section">
         <h3 className="kicker">AI coach · xAI</h3>

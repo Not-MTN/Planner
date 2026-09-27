@@ -4,8 +4,11 @@ import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { isValidTime, suggestTime, timeToMinutes, todayISO, WEEKDAY_TOGGLES } from '../dates';
 import { HabitGlyph } from '../icons';
-import type { ComposerState, EventInput, GoalHorizon, HabitFrequency, HabitInput, NoteInput, PlannerState, TaskInput } from '../types';
+import { REPEAT_CHOICES } from '../recurrence';
+import { uid } from '../mutate';
+import type { Subtask, TaskRepeat, ComposerState, EventInput, GoalHorizon, HabitFrequency, HabitInput, NoteInput, PlannerState, TaskInput } from '../types';
 import { Field, Modal } from './ui';
+import { Markdown } from './Markdown';
 
 const TITLES: Record<ComposerState['type'], [string, string]> = {
   task: ['New task', 'Edit task'],
@@ -122,7 +125,17 @@ function TaskForm({
   const [category, setCategory] = useState(existing?.category ?? 'personal');
   const [goalId, setGoalId] = useState(existing?.goalId ?? '');
   const [note, setNote] = useState(existing?.note ?? '');
+  const [repeat, setRepeat] = useState<TaskRepeat | ''>(existing?.repeat ?? '');
+  const [subtasks, setSubtasks] = useState<Subtask[]>(existing?.subtasks ?? []);
+  const [draftStep, setDraftStep] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  const addStep = () => {
+    const text = draftStep.trim();
+    if (!text) return;
+    setSubtasks((items) => [...items, { id: uid(), title: text.slice(0, 140), completed: false }]);
+    setDraftStep('');
+  };
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -142,6 +155,8 @@ function TaskForm({
       category,
       note,
       goalId: goalId || null,
+      repeat: repeat || null,
+      subtasks: draftStep.trim() ? [...subtasks, { id: uid(), title: draftStep.trim(), completed: false }] : subtasks,
     };
     if (existing) updateTask(existing.id, input);
     else addTask(input);
@@ -177,6 +192,56 @@ function TaskForm({
         <Field label="Due time">
           <input type="time" value={dueTime} onChange={(event) => setDueTime(event.target.value)} />
         </Field>
+      </div>
+      <Field label="Repeat" hint={repeat ? 'Finishing it schedules the next one.' : undefined}>
+        <select value={repeat} onChange={(event) => setRepeat(event.target.value as TaskRepeat | '')}>
+          <option value="">Does not repeat</option>
+          {REPEAT_CHOICES.map((item) => (
+            <option key={item.id} value={item.id}>{item.label}</option>
+          ))}
+        </select>
+      </Field>
+      <div className="field">
+        <span>Checklist</span>
+        {subtasks.length ? (
+          <ul className="subtask-edit">
+            {subtasks.map((item) => (
+              <li key={item.id}>
+                <input
+                  type="checkbox"
+                  checked={item.completed}
+                  aria-label={`Mark ${item.title} done`}
+                  onChange={() => setSubtasks((items) => items.map((step) => (step.id === item.id ? { ...step, completed: !step.completed } : step)))}
+                />
+                <input
+                  value={item.title}
+                  maxLength={140}
+                  aria-label="Step title"
+                  onChange={(event) => setSubtasks((items) => items.map((step) => (step.id === item.id ? { ...step, title: event.target.value } : step)))}
+                />
+                <button type="button" className="text-btn" aria-label={`Remove step ${item.title}`} onClick={() => setSubtasks((items) => items.filter((step) => step.id !== item.id))}>
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <div className="subtask-add">
+          <input
+            value={draftStep}
+            maxLength={140}
+            placeholder="Add a step and press Enter"
+            aria-label="New checklist step"
+            onChange={(event) => setDraftStep(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                addStep();
+              }
+            }}
+          />
+          <button type="button" className="btn btn-soft" onClick={addStep}>Add</button>
+        </div>
       </div>
       <div className="form-row two">
         <Field label="Category">
@@ -474,6 +539,8 @@ function NoteForm({ composer, onClose, onRemove }: { composer: ComposerState; on
   const [kind, setKind] = useState<NoteKind>(existing?.kind ?? 'quick');
   const [date, setDate] = useState(existing?.date ?? (composer.mode === 'create' ? composer.date ?? '' : ''));
   const [body, setBody] = useState(existing?.body ?? '');
+  const [pinned, setPinned] = useState(existing?.pinned === true);
+  const [preview, setPreview] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const submit = (event: FormEvent) => {
@@ -482,7 +549,7 @@ function NoteForm({ composer, onClose, onRemove }: { composer: ComposerState; on
       setError('Write a title or a few words.');
       return;
     }
-    const input: NoteInput = { title, body, kind, date: date || null };
+    const input: NoteInput = { title, body, kind, date: date || null, pinned };
     if (existing) updateNote(existing.id, input);
     else addNote(input);
     onClose();
@@ -513,8 +580,19 @@ function NoteForm({ composer, onClose, onRemove }: { composer: ComposerState; on
       <Field label="Date" hint="Optional. Ties the note to a day.">
         <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
       </Field>
-      <Field label={kind === 'journal' ? 'Entry' : 'Note'}>
+      <div className="note-editor-bar">
+        <label className="set-inline"><input type="checkbox" checked={pinned} onChange={(event) => setPinned(event.target.checked)} /> Pin to top</label>
+        <div className="segmented" role="radiogroup" aria-label="Editor mode">
+          <button type="button" role="radio" aria-checked={!preview} className={cx('seg', !preview && 'on')} onClick={() => setPreview(false)}>Write</button>
+          <button type="button" role="radio" aria-checked={preview} className={cx('seg', preview && 'on')} onClick={() => setPreview(true)}>Preview</button>
+        </div>
+      </div>
+      {preview ? (
+        <div className="md-body md-preview">{body.trim() ? <Markdown text={body} /> : <p className="meta">Nothing to preview yet.</p>}</div>
+      ) : null}
+      <Field label={kind === 'journal' ? 'Entry' : 'Note'} hint="Markdown works: **bold**, *italic*, - lists, - [ ] checkboxes, # headings, #tags, links.">
         <textarea
+          hidden={preview}
           className={kind === 'journal' ? 'journal-entry' : undefined}
           value={body}
           onChange={(event) => setBody(event.target.value)}

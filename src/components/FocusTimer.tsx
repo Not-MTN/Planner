@@ -47,8 +47,11 @@ export function FocusTimer() {
 }
 
 function FocusOverlay({ sessionId, title, initialMinutes }: { sessionId: string | null; title: string; initialMinutes: number }) {
-  const { state, stopFocus, toggleTask, flash, celebrate, undo } = usePlanner();
+  const { state, stopFocus, toggleTask, flash, celebrate, undo, logFocus } = usePlanner();
   const [phase, setPhase] = useState<Phase>('setup');
+  const [mode, setMode] = useState<'focus' | 'break'>('focus');
+  const [rounds, setRounds] = useState(0);
+  const loggedRef = useRef(false);
   const [minutes, setMinutes] = useState(initialMinutes);
   const [remaining, setRemaining] = useState(initialMinutes * 60);
   const [total, setTotal] = useState(initialMinutes * 60);
@@ -65,11 +68,40 @@ function FocusOverlay({ sessionId, title, initialMinutes }: { sessionId: string 
       if (left <= 0) {
         setPhase('done');
         chime();
-        celebrate();
+        if (mode === 'focus') {
+          celebrate();
+          if (!loggedRef.current) {
+            loggedRef.current = true;
+            logFocus({ taskId: sessionId, title: task?.title ?? title, minutes: Math.round(total / 60) });
+            setRounds((count) => count + 1);
+          }
+        }
       }
     }, 250);
     return () => window.clearInterval(id);
-  }, [phase, celebrate]);
+  }, [phase, celebrate, mode, logFocus, sessionId, task?.title, title, total]);
+
+  /** Ending early still counts the minutes you actually focused. */
+  const end = () => {
+    if (mode === 'focus' && (phase === 'running' || phase === 'paused') && !loggedRef.current) {
+      const spent = Math.floor((total - remaining) / 60);
+      if (spent >= 1) {
+        logFocus({ taskId: sessionId, title: task?.title ?? title, minutes: spent });
+        flash(`${spent} focused ${spent === 1 ? 'minute' : 'minutes'} saved to Insights.`);
+      }
+    }
+    stopFocus();
+  };
+
+  const startBreak = () => {
+    const long = rounds > 0 && rounds % 4 === 0;
+    const seconds = (long ? 15 : 5) * 60;
+    setMode('break');
+    setTotal(seconds);
+    setRemaining(seconds);
+    endRef.current = Date.now() + seconds * 1000;
+    setPhase('running');
+  };
 
   useEffect(() => {
     if (phase === 'running' || phase === 'paused') {
@@ -84,6 +116,8 @@ function FocusOverlay({ sessionId, title, initialMinutes }: { sessionId: string 
 
   const start = () => {
     const seconds = minutes * 60;
+    setMode('focus');
+    loggedRef.current = false;
     setTotal(seconds);
     setRemaining(seconds);
     endRef.current = Date.now() + seconds * 1000;
@@ -107,6 +141,7 @@ function FocusOverlay({ sessionId, title, initialMinutes }: { sessionId: string 
   };
 
   const again = () => {
+    setMode('focus');
     setPhase('setup');
     setRemaining(minutes * 60);
   };
@@ -126,10 +161,13 @@ function FocusOverlay({ sessionId, title, initialMinutes }: { sessionId: string 
   return (
     <div className="focus-overlay" role="dialog" aria-modal="true" aria-label="Focus session">
       <div className="focus-card">
-        <button type="button" className="icon-btn focus-close" aria-label="End focus session" onClick={stopFocus}>
+        <button type="button" className="icon-btn focus-close" aria-label="End focus session" onClick={end}>
           <CloseIcon size={18} />
         </button>
-        <p className="kicker">{phase === 'done' ? 'Session complete' : 'Focus'}</p>
+        <p className="kicker">
+          {mode === 'break' ? (phase === 'done' ? 'Break over' : 'Break') : phase === 'done' ? 'Session complete' : 'Focus'}
+          {rounds > 0 ? ` · round ${rounds}${mode === 'focus' && phase !== 'done' ? ` → ${rounds + 1}` : ''}` : ''}
+        </p>
         <div className="focus-ring-wrap">
           <svg className="focus-ring" viewBox="0 0 280 280" aria-hidden="true">
             <circle className="focus-ring-track" cx="140" cy="140" r={radius} />
@@ -151,12 +189,12 @@ function FocusOverlay({ sessionId, title, initialMinutes }: { sessionId: string 
             ) : phase === 'done' ? (
               <>
                 <CheckIcon size={44} />
-                <span>done</span>
+                <span>{mode === 'break' ? 'ready?' : 'done'}</span>
               </>
             ) : (
               <>
                 <strong>{formatRemaining(remaining)}</strong>
-                <span>{phase === 'paused' ? 'paused' : 'keep going'}</span>
+                <span>{phase === 'paused' ? 'paused' : mode === 'break' ? 'breathe · stretch' : 'keep going'}</span>
               </>
             )}
           </div>
@@ -191,16 +229,26 @@ function FocusOverlay({ sessionId, title, initialMinutes }: { sessionId: string 
           <div className="focus-actions">
             <button type="button" className="btn btn-soft" onClick={extend}>+5 min</button>
             <button type="button" className="btn btn-ghost" onClick={pause}>Pause</button>
-            <button type="button" className="btn btn-danger" onClick={stopFocus}>End</button>
+            <button type="button" className="btn btn-danger" onClick={end}>End</button>
           </div>
         ) : phase === 'paused' ? (
           <div className="focus-actions">
             <button type="button" className="btn btn-soft" onClick={extend}>+5 min</button>
             <button type="button" className="btn btn-primary" onClick={resume}>Resume</button>
-            <button type="button" className="btn btn-danger" onClick={stopFocus}>End</button>
+            <button type="button" className="btn btn-danger" onClick={end}>End</button>
+          </div>
+        ) : mode === 'break' ? (
+          <div className="focus-actions">
+            <button type="button" className="btn btn-primary" onClick={start}>
+              <StopwatchIcon size={16} /> Next round · {minutes} min
+            </button>
+            <button type="button" className="btn btn-ghost" onClick={stopFocus}>Close</button>
           </div>
         ) : (
           <div className="focus-actions">
+            <button type="button" className="btn btn-soft" onClick={startBreak}>
+              {rounds > 0 && rounds % 4 === 0 ? 'Long break · 15 min' : 'Break · 5 min'}
+            </button>
             {sessionId && !task?.completed ? (
               <button type="button" className="btn btn-primary" onClick={completeTask}>
                 <CheckIcon size={16} /> Complete task

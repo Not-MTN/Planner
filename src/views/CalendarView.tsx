@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { categoryById } from '../constants';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
@@ -9,11 +9,13 @@ import {
   formatFullDate,
   formatMonthShort,
   formatMonthYear,
+  weekdayHeaders,
   formatWeekRange,
   formatWeekdayShort,
   isValidISODate,
   isWeekend,
   monthGrid,
+  timeToMinutes,
   todayISO,
   weekDates,
 } from '../dates';
@@ -41,7 +43,6 @@ const TABS: Array<{ id: CalendarTab; label: string }> = [
 ];
 
 const HORIZONS = [7, 14, 30] as const;
-const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export function CalendarView() {
   const { route, navigate } = usePlanner();
@@ -90,7 +91,7 @@ export function CalendarView() {
 }
 
 function WeekBoard({ anchor, today }: { anchor: string; today: string }) {
-  const { navigate, state, openComposer, moveEvent, swapEventTimes, toggleTask, toggleEvent, toggleHabit } = usePlanner();
+  const { navigate, state, openComposer, moveEvent, moveTask, resizeEvent, swapEventTimes, toggleTask, toggleEvent, toggleHabit } = usePlanner();
   const days = weekDates(anchor);
   const showingThisWeek = days.includes(today);
   const [picked, setPicked] = useState(anchor);
@@ -102,7 +103,7 @@ function WeekBoard({ anchor, today }: { anchor: string; today: string }) {
   return (
     <>
       <div className="cal-tools">
-        <p className="quiet-hint">Drag an event to another day. Tap a day to focus it below.</p>
+        <p className="quiet-hint">Drag events or tasks to another day, or drag an event’s bottom edge to change its length.</p>
         <div className="pager">
           <button type="button" className="icon-btn round" aria-label="Previous week" onClick={() => shift(-7)}>
             <ChevronLeftIcon />
@@ -158,6 +159,11 @@ function WeekBoard({ anchor, today }: { anchor: string; today: string }) {
                 event.preventDefault();
                 setOver(null);
                 const raw = event.dataTransfer.getData('text/plain');
+                if (raw.startsWith('task:')) {
+                  const task = state.tasks.find((item) => item.id === raw.slice(5));
+                  if (task && task.dueDate !== date) moveTask(task.id, date);
+                  return;
+                }
                 if (!raw.startsWith('event:')) return;
                 const id = raw.slice(6);
                 const source = state.events.find((item) => item.id === id);
@@ -220,9 +226,10 @@ function WeekBoard({ anchor, today }: { anchor: string; today: string }) {
                           if (!fixed) openComposer({ mode: 'edit', type: 'event', id: item.id });
                         }}
                       >
-                        <time>{item.startTime}</time>
+                        <time>{item.startTime}{item.endTime ? `–${item.endTime}` : ''}</time>
                         <span>{item.title}</span>
                       </button>
+                      {!fixed ? <ResizeHandle startTime={item.startTime} endTime={item.endTime} title={item.title} onResize={(end) => resizeEvent(item.id, end)} /> : null}
                       {fixed ? <span className="fixed-chip-tag">Fixed</span> : (
                         <button
                           type="button"
@@ -242,7 +249,16 @@ function WeekBoard({ anchor, today }: { anchor: string; today: string }) {
                   );
                 })}
                 {tasks.map((task) => (
-                  <div key={task.id} className={cx('week-task', task.completed && 'is-done')}>
+                  <div
+                    key={task.id}
+                    className={cx('week-task', task.completed && 'is-done')}
+                    draggable
+                    title="Drag to another day"
+                    onDragStart={(event) => {
+                      event.dataTransfer.setData('text/plain', `task:${task.id}`);
+                      event.dataTransfer.effectAllowed = 'move';
+                    }}
+                  >
                     <button
                       type="button"
                       className={cx('mini-check', task.completed && 'on')}
@@ -295,6 +311,70 @@ function WeekBoard({ anchor, today }: { anchor: string; today: string }) {
   );
 }
 
+const STEP = 15;
+
+function clockFrom(minutes: number): string {
+  const clamped = Math.max(0, Math.min(23 * 60 + 59, minutes));
+  return `${String(Math.floor(clamped / 60)).padStart(2, '0')}:${String(clamped % 60).padStart(2, '0')}`;
+}
+
+/** Drag down/up to lengthen or shorten an event in 15-minute steps. Arrow keys work too. */
+function ResizeHandle({ startTime, endTime, title, onResize }: { startTime: string; endTime: string | null; title: string; onResize: (end: string) => void }) {
+  const start = timeToMinutes(startTime);
+  const base = endTime ? timeToMinutes(endTime) : start + 60;
+  const [preview, setPreview] = useState<number | null>(null);
+  const drag = useRef<{ y: number } | null>(null);
+  const valueFor = (dy: number) => Math.max(start + STEP, Math.min(23 * 60 + 59, base + Math.round(dy / 6) * STEP));
+  return (
+    <span
+      className={cx('resize-handle', preview !== null && 'is-active')}
+      role="slider"
+      tabIndex={0}
+      aria-label={`End time for ${title}`}
+      aria-valuetext={clockFrom(preview ?? base)}
+      aria-valuenow={preview ?? base}
+      aria-valuemin={start + STEP}
+      aria-valuemax={23 * 60 + 59}
+      title="Drag to change the end time"
+      draggable={false}
+      onDragStart={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onPointerDown={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        drag.current = { y: event.clientY };
+        setPreview(base);
+      }}
+      onPointerMove={(event) => {
+        if (!drag.current) return;
+        setPreview(valueFor(event.clientY - drag.current.y));
+      }}
+      onPointerUp={(event) => {
+        if (!drag.current) return;
+        const next = valueFor(event.clientY - drag.current.y);
+        drag.current = null;
+        setPreview(null);
+        if (next !== base) onResize(clockFrom(next));
+      }}
+      onPointerCancel={() => {
+        drag.current = null;
+        setPreview(null);
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+        event.preventDefault();
+        const next = Math.max(start + STEP, Math.min(23 * 60 + 59, base + (event.key === 'ArrowDown' ? STEP : -STEP)));
+        if (next !== base) onResize(clockFrom(next));
+      }}
+    >
+      {preview !== null ? <em>until {clockFrom(preview)}</em> : null}
+    </span>
+  );
+}
+
 function MonthBoard({ anchor, today }: { anchor: string; today: string }) {
   const { navigate, state, openComposer } = usePlanner();
   const year = Number(anchor.slice(0, 4));
@@ -334,7 +414,7 @@ function MonthBoard({ anchor, today }: { anchor: string; today: string }) {
           </div>
         </div>
         <div className="weekday-row" aria-hidden="true">
-          {WEEKDAYS.map((day) => (
+          {weekdayHeaders().map((day) => (
             <span key={day}>{day}</span>
           ))}
         </div>

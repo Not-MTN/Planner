@@ -31,10 +31,44 @@ export function addDays(iso: string, amount: number): string {
   return toISODate(date);
 }
 
+/** 0 = Sunday, 1 = Monday (default), 6 = Saturday. */
+export type WeekStart = 0 | 1 | 6;
+const WEEK_START_KEY = 'planner-week-start';
+let weekStart: WeekStart = 1;
+
+export function loadWeekStart(): WeekStart {
+  try {
+    const raw = Number(localStorage.getItem(WEEK_START_KEY));
+    weekStart = raw === 0 || raw === 6 ? raw : 1;
+  } catch {
+    weekStart = 1;
+  }
+  return weekStart;
+}
+
+export function setWeekStart(value: WeekStart): void {
+  weekStart = value;
+  try {
+    localStorage.setItem(WEEK_START_KEY, String(value));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getWeekStart(): WeekStart {
+  return weekStart;
+}
+
+const SHORT_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/** Weekday headers in the user's chosen order. */
+export function weekdayHeaders(): string[] {
+  return Array.from({ length: 7 }, (_, index) => SHORT_DAYS[(weekStart + index) % 7]);
+}
+
 export function startOfWeek(iso: string): string {
   const date = parseISODate(iso);
-  const day = date.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
+  const diff = -((date.getDay() - weekStart + 7) % 7);
   date.setDate(date.getDate() + diff);
   return toISODate(date);
 }
@@ -55,7 +89,7 @@ export function monthDates(year: number, month: number): string[] {
 
 export function monthGrid(year: number, month: number): string[] {
   const first = new Date(year, month - 1, 1);
-  const offset = (first.getDay() + 6) % 7;
+  const offset = (first.getDay() - weekStart + 7) % 7;
   const start = new Date(year, month - 1, 1 - offset);
   const cells = Array.from({ length: 42 }, (_, index) => {
     const date = new Date(start);

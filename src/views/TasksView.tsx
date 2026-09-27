@@ -7,6 +7,21 @@ import { TaskRow } from '../components/items';
 import { Empty } from '../components/ui';
 import { SparklesIcon } from '../icons';
 import type { Task } from '../types';
+import { TaskBoard, type BoardGroup } from './TaskBoard';
+
+const LAYOUT_KEY = 'planner-task-layout';
+
+function loadLayout(): { layout: 'list' | 'board'; group: BoardGroup } {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? '{}') as { layout?: string; group?: string };
+    return {
+      layout: raw.layout === 'board' ? 'board' : 'list',
+      group: raw.group === 'priority' || raw.group === 'category' ? raw.group : 'when',
+    };
+  } catch {
+    return { layout: 'list', group: 'when' };
+  }
+}
 
 const FILTERS = [
   { id: 'open', label: 'Open' },
@@ -21,7 +36,20 @@ export function TasksView() {
   const { state, openComposer, swapTasks, moveTask, clearCompletedTasks, loadSample, isEmpty } = useTaskViewHelpers();
   const [filter, setFilter] = useState<FilterId>('open');
   const [query, setQuery] = useState('');
+  const [view, setView] = useState(loadLayout);
   const today = todayISO();
+  const changeView = (next: typeof view) => {
+    setView(next);
+    try {
+      localStorage.setItem(LAYOUT_KEY, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  };
+  const searched = useMemo(
+    () => state.tasks.filter((task) => matchesQuery([task.title, task.note, task.category, task.priority, ...task.subtasks.map((item) => item.title)], query)),
+    [state.tasks, query],
+  );
 
   const counts = useMemo(
     () => ({
@@ -34,9 +62,7 @@ export function TasksView() {
   );
 
   const groups = useMemo(() => {
-    const matched = state.tasks.filter((task) =>
-      matchesQuery([task.title, task.note, task.category, task.priority], query),
-    );
+    const matched = searched;
     const visible = matched.filter((task) => {
       if (filter === 'done') return task.completed;
       if (filter === 'today') return task.dueDate === today;
@@ -64,7 +90,7 @@ export function TasksView() {
       { id: 'today', label: 'Today', tasks: sortTasks(dueToday) },
       { id: 'inbox', label: 'Anytime', tasks: sortTasks(inbox) },
     ].filter((group) => group.tasks.length > 0);
-  }, [state.tasks, filter, query, today]);
+  }, [searched, filter, today]);
 
   return (
     <div className="view">
@@ -79,6 +105,23 @@ export function TasksView() {
         </button>
       </header>
       <div className="toolbar">
+        <div className="segmented layout-switch" role="radiogroup" aria-label="Layout">
+          {(['list', 'board'] as const).map((layout) => (
+            <button key={layout} type="button" role="radio" aria-checked={view.layout === layout} className={cx('seg', view.layout === layout && 'on')} onClick={() => changeView({ ...view, layout })}>
+              {layout === 'list' ? 'List' : 'Board'}
+            </button>
+          ))}
+        </div>
+        {view.layout === 'board' ? (
+          <label className="board-group">
+            <span>Group by</span>
+            <select value={view.group} onChange={(event) => changeView({ ...view, group: event.target.value as BoardGroup })}>
+              <option value="when">When</option>
+              <option value="priority">Priority</option>
+              <option value="category">Category</option>
+            </select>
+          </label>
+        ) : (
         <div className="filters" role="tablist" aria-label="Task filters">
           {FILTERS.map((item) => (
             <button
@@ -94,6 +137,7 @@ export function TasksView() {
             </button>
           ))}
         </div>
+        )}
         <label className="search">
           <span className="visually-hidden">Search tasks</span>
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search tasks" />
@@ -114,6 +158,8 @@ export function TasksView() {
             }
           />
         </section>
+      ) : view.layout === 'board' ? (
+        <TaskBoard tasks={searched} group={view.group} today={today} />
       ) : groups.length === 0 ? (
         <section className="card">
           <Empty title="Nothing in this view." text="Try another filter, or clear the search." />
