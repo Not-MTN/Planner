@@ -78,7 +78,25 @@ Settings → **Language** switches the whole interface to Persian with a right-t
 - **Larger storage** — every save is mirrored to IndexedDB; if `localStorage` fills up, Planner keeps saving there and loads the newest copy on start.
 - **Keyboard-friendly board** — focus a card and press ←/→ to move it between columns.
 - **Keyboard shortcuts** — `⌘K` search & add · `N` new task · `T` today · `⌘Z` undo · `?` shortcuts · `esc` close.
-- **Snooze & duplicate** — overdue tasks offer Today / Tomorrow / Next week; duplicate any task in one tap. Tasks has an Overdue filter.
+- **Snooze & duplicate** — overdue tasks offer Today / Tomorrow / This weekend / Next week / a picked date; duplicate any task in one tap. Tasks has an Overdue filter.
+- **Bulk actions** — Select mode on the Tasks list: complete, reopen, redate, re-categorise, re-prioritise, or delete many tasks in one stroke (fully undoable).
+- **Time estimates** — an optional "estimate (minutes)" on tasks feeds smarter "Plan my day" packing and the Insights **Plan vs focus** chart, which compares estimated time with logged focus minutes over 30 days.
+- **Templates** — save any task (with its checklist) or note as a template from its form; stamp it into a new item from the picker at the top of the form. Manage them in Settings → Templates.
+- **Unit habits & rest days** — a habit can count an amount (8 glasses, 20 km) with a +1 button on Today, and any habit supports a rest day (the moon or Shift-click) that pauses the day without breaking the streak.
+- **Shared space** — a second, independently coded end-to-end encrypted sync room for whatever sits in the Shared category (groceries, household plans). Settings → Shared space: create a room, copy the code, join from other devices; deletions travel via tombstones.
+- **Calendar feeds** — subscribe to any iCalendar (.ics) URL (Google's secret address, Outlook published calendars). Events mirror read-only and refresh automatically; your own categories and notes on them survive refreshes. Settings → Calendar feeds.
+- **Task import (CSV)** — import a Todoist or TickTick CSV (or any CSV with a title column); done items are skipped, dates and priorities come along. Settings → Move your tasks in.
+- **Voice quick add** — a microphone button on the quick add bar (Web Speech API) dictates straight into the parser; hidden where the browser doesn't support speech.
+- **Weather on Today** — a quiet forecast line for a place you pick once (Open-Meteo, no key, no account); never in the way, off by default. Settings → Weather on Today.
+- **[[Note links]] & backlinks** — link notes together with `[[Note title]]` (optional `[[Note title|alias]]`); clicking creates a missing note, and each note lists the notes that link to it.
+- **Today journal** — a few saved lines right on the Today page; kept as the day's journal note in Notes.
+- **Year in pixels** — Insights shows the whole year as a completion heatmap, GitHub-style.
+- **App badge** — installed app icons show the count of open tasks due today (Badging API).
+- **Persistent undo** — the last 8 states of the undo stack survive a reload (mirrored into IndexedDB).
+- **Update toast** — when a new version is deployed, a quiet "Update now" bar appears instead of a silent reload.
+- **PWA shortcuts** — long-press the app icon for Today, Quick add (`#/today?qa=1` drops the caret into quick add), Calendar, and Tasks.
+- **Faster first paint** — Calendar, Insights, and the AI coach load their code on first visit instead of in the main bundle.
+- **Jalali dates** — optionally shows the Persian (Jalali) date alongside Gregorian dates (Settings → Calendar, dates & time).
 
 ## xAI (Grok) setup
 

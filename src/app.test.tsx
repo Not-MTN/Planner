@@ -291,6 +291,25 @@ describe('app smoke', () => {
     expect(text()).toContain('Trip packing');
   });
 
+  it('has an accessible name on every button and keeps focus styles', async () => {
+    window.history.replaceState(null, '', '#/tasks');
+    mountApp();
+    // Seed tasks through quick add so the Select toggle appears.
+    const quick = document.querySelector<HTMLInputElement>('.quick-add input');
+    if (quick) {
+      setInputValue(quick, 'A labelled task');
+      act(() => {
+        document.querySelector<HTMLFormElement>('.quick-add')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      });
+    }
+    const unlabelled: string[] = [];
+    document.querySelectorAll<HTMLElement>('button').forEach((button) => {
+      const name = (button.getAttribute('aria-label') ?? button.textContent ?? '').trim();
+      if (!name) unlabelled.push(button.className || button.outerHTML.slice(0, 60));
+    });
+    expect(unlabelled).toEqual([]);
+  });
+
   it('navigates between the main views', async () => {
     mountApp();
     const calendar = [...document.querySelectorAll<HTMLButtonElement>('.nav-link')].find((button) =>

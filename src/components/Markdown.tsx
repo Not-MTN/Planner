@@ -17,15 +17,23 @@ export function renderInline(text: string, keyBase = 'i'): ReactNode[] {
     const start = match.index ?? 0;
     if (start > last) out.push(text.slice(last, start));
     const key = `${keyBase}-${index++}`;
+    // [[Note]] links render as real buttons — note cards must not nest them.
     if (token.startsWith('[[')) {
-      // A span (not a button): note cards are already one big button, and the
-      // view handles [data-notelink] clicks in the capture phase.
       const inner = token.slice(2, -2);
       const [title, alias] = inner.split('|');
+      const trim = (value?: string) => (value ?? '').trim();
       out.push(
-        <span key={key} className="note-link-pill" data-notelink={(title ?? '').trim()}>
-          {(alias ?? title ?? '').trim()}
-        </span>,
+        <button
+          key={key}
+          type="button"
+          className="note-link-pill"
+          data-notelink={trim(title)}
+          aria-label={`[[${trim(title)}]]`}
+          onClick={(event) => event.preventDefault()}
+          onKeyDown={(event) => event.stopPropagation()}
+        >
+          {trim(alias ?? title)}
+        </button>,
       );
     }
     else if (token.startsWith('**') || token.startsWith('__')) out.push(<strong key={key}>{renderInline(token.slice(2, -2), key)}</strong>);

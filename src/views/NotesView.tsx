@@ -16,12 +16,8 @@ export function NotesView() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   /** [[Title]] pills: capture-phase so they win over the card's own open button. */
-  const onLinkClick = (event: React.MouseEvent) => {
-    const pill = (event.target as HTMLElement).closest<HTMLElement>('[data-notelink]');
-    if (!pill?.dataset.notelink) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const title = pill.dataset.notelink;
+  /** [[Title]] pills: capture-phase so they win over the card's own open button. */
+  const followLink = (title: string) => {
     const found = state.notes.find((note) => note.title.trim().toLowerCase() === title.trim().toLowerCase());
     if (found) {
       setExpandedId(found.id);
@@ -30,6 +26,21 @@ export function NotesView() {
       addNote({ title: title.slice(0, 140), body: '', kind: 'quick', date: null });
       flash(t("Note “{0}” created.", { 0: title }), { label: t("Undo"), run: undo });
     }
+  };
+  const onLinkClick = (event: React.MouseEvent) => {
+    const pill = (event.target as HTMLElement).closest<HTMLElement>('[data-notelink]');
+    if (!pill?.dataset.notelink) return;
+    event.preventDefault();
+    event.stopPropagation();
+    followLink(pill.dataset.notelink);
+  };
+  const onLinkKey = (event: React.KeyboardEvent) => {
+    if ((event.key !== 'Enter' && event.key !== ' ') || event.target === event.currentTarget) return;
+    const pill = (event.target as HTMLElement).closest<HTMLElement>('[data-notelink]');
+    if (!pill?.dataset.notelink) return;
+    event.preventDefault();
+    event.stopPropagation();
+    followLink(pill.dataset.notelink);
   };
   const allTags = useMemo(() => [...new Set(state.notes.flatMap((note) => extractTags(`${note.title} ${note.body}`)))].sort(), [state.notes]);
   const notes = useMemo(
@@ -110,20 +121,33 @@ export function NotesView() {
           <Empty title={t("No notes match.")} text={t("Try another kind, or clear the search.")} />
         </section>
       ) : (
-        <div className="note-grid" onClickCapture={onLinkClick}>
+        <div className="note-grid" onClickCapture={onLinkClick} onKeyDownCapture={onLinkKey}>
           {notes.map((note) => {
             const meta = noteKindById(note.kind);
             const backlinks = noteBacklinks(state.notes, note);
             return (
               <article key={note.id} className={cx('card note-card', `accent-${meta.accent}`, note.kind === 'journal' && 'is-journal', note.pinned && 'is-pinned')}>
-                <button type="button" className="note-open" onClick={() => { setExpandedId(expandedId === note.id ? null : note.id); openComposer({ mode: 'edit', type: 'note', id: note.id }); }}>
+                <div className="note-content">
                   <span className={cx('chip-label', `accent-${meta.accent}`)}>{meta.label}</span>
                   <h2>{note.title}</h2>
-                  {note.body ? <div className="md-body"><Markdown text={note.body} limit={expandedId === note.id ? undefined : 14} /></div> : <p>{t("No words yet.")}</p>}
+                  {note.body ? (
+                    <div className="md-body">
+                      <Markdown text={note.body} limit={expandedId === note.id ? undefined : 14} />
+                    </div>
+                  ) : (
+                    <p>{t("No words yet.")}</p>
+                  )}
                   <small>
                     {formatEdited(note.updatedAt)}
                     {note.date ? ` · ${dayNumber(note.date)} ${formatMonthShort(note.date)}` : ''}
                   </small>
+                </div>
+                <button
+                  type="button"
+                  className="text-btn note-open-btn"
+                  onClick={() => { setExpandedId(expandedId === note.id ? null : note.id); openComposer({ mode: 'edit', type: 'note', id: note.id }); }}
+                >
+                  {t("Open")}
                 </button>
                 {backlinks.length > 0 && expandedId === note.id ? (
                   <div className="backlinks">
