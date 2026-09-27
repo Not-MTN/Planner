@@ -1,0 +1,299 @@
+import { categoryById } from './constants';
+import {
+  addDays,
+  isValidISODate,
+  startOfWeek,
+  timeToMinutes,
+  weekDates,
+} from './dates';
+import type { DayScore, DotState, Goal, Habit, PlannerEvent, PlannerState, Task } from './types';
+
+export function isDone(state: PlannerState, habitId: string, date: string): boolean {
+  return state.completions.some((item) => item.habitId === habitId && item.date === date);
+}
+
+export function isPlannedDay(habit: Habit, date: string): boolean {
+  if (!isValidISODate(date) || date < habit.createdOn) return false;
+  const frequency = habit.frequency;
+  if (frequency.type === 'daily' || frequency.type === 'weekly') return true;
+  const day = new Date(date + 'T00:00:00').getDay();
+  if (frequency.type === 'weekdays') return day >= 1 && day <= 5;
+  return frequency.days.includes(day);
+}
+
+export function isDueOn(state: PlannerState, habit: Habit, date: string): boolean {
+  if (habit.archived || date < habit.createdOn) return false;
+  if (habit.frequency.type === 'weekly') {
+    if (isDone(state, habit.id, date)) return true;
+    const count = weekDates(date).filter((day) => isDone(state, habit.id, day)).length;
+    return count < habit.frequency.times;
+  }
+  return isPlannedDay(habit, date);
+}
+
+export function habitDot(state: PlannerState, habit: Habit, date: string, today: string): DotState {
+  if (date < habit.createdOn) return 'off';
+  if (isDone(state, habit.id, date)) return 'done';
+  if (habit.frequency.type === 'weekly') return date > today ? 'future' : 'optional';
+  if (!isPlannedDay(habit, date)) return 'off';
+  return date > today ? 'future' : 'open';
+}
+
+export function habitStats(
+  state: PlannerState,
+  habit: Habit,
+  dates: string[],
+  today: string,
+): { done: number; expected: number; ratio: number } {
+  const inRange = dates.filter((date) => date >= habit.createdOn && date <= today).sort();
+  if (inRange.length === 0) return { done: 0, expected: 0, ratio: 0 };
+  if (habit.frequency.type === 'weekly') {
+    let expected = 0;
+    let cursor = startOfWeek(inRange[0]);
+    const last = startOfWeek(inRange[inRange.length - 1]);
+    const rangeSet = new Set(dates);
+    while (cursor <= last) {
+      const overlaps = weekDates(cursor).some(
+        (date) => date >= habit.createdOn && date <= today && rangeSet.has(date),
+      );
+      if (overlaps) expected += habit.frequency.times;
+      cursor = addDays(cursor, 7);
+    }
+    const done = inRange.filter((date) => isDone(state, habit.id, date)).length;
+    return { done, expected, ratio: expected === 0 ? 0 : Math.min(1, done / expected) };
+  }
+  const planned = inRange.filter((date) => isPlannedDay(habit, date));
+  const done = planned.filter((date) => isDone(state, habit.id, date)).length;
+  return { done, expected: planned.length, ratio: planned.length === 0 ? 0 : done / planned.length };
+}
+
+export function compareEvents(a: PlannerEvent, b: PlannerEvent): number {
+  const byTime = timeToMinutes(a.startTime) - timeToMinutes(b.startTime);
+  if (byTime !== 0) return byTime;
+  if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+  return a.createdAt.localeCompare(b.createdAt);
+}
+
+export function compareTasks(a: Task, b: Task): number {
+  const aTime = a.dueTime ? timeToMinutes(a.dueTime) : 24 * 60 + 1;
+  const bTime = b.dueTime ? timeToMinutes(b.dueTime) : 24 * 60 + 1;
+  if (aTime !== bTime) return aTime - bTime;
+  if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+  return a.createdAt.localeCompare(b.createdAt);
+}
+
+export function eventsForDate(state: PlannerState, date: string): PlannerEvent[] {
+  return state.events.filter((event) => event.date === date).sort(compareEvents);
+}
+
+export function tasksForDate(state: PlannerState, date: string): Task[] {
+  return state.tasks.filter((task) => task.dueDate === date).sort(compareTasks);
+}
+
+export function overdueTasks(state: PlannerState, today: string): Task[] {
+  return state.tasks
+    .filter((task) => !task.completed && task.dueDate !== null && task.dueDate < today)
+    .sort(compareTasks);
+}
+
+export function habitsDueOn(state: PlannerState, date: string): Habit[] {
+  return state.habits.filter((habit) => isDueOn(state, habit, date));
+}
+
+export function dayScore(state: PlannerState, date: string, includeOpenFlexible = false): DayScore {
+  const tasks = tasksForDate(state, date);
+  const events = eventsForDate(state, date);
+  const fixed = state.habits.filter(
+    (habit) => !habit.archived && habit.frequency.type !== 'weekly' && isPlannedDay(habit, date),
+  );
+  const flexibleDone = state.habits.filter(
+    (habit) => !habit.archived && habit.frequency.type === 'weekly' && isDone(state, habit.id, date),
+  );
+  const flexibleOpen = includeOpenFlexible
+    ? state.habits.filter(
+        (habit) =>
+          !habit.archived &&
+          habit.frequency.type === 'weekly' &&
+          isDueOn(state, habit, date) &&
+          !isDone(state, habit.id, date),
+      )
+    : [];
+  const habits = [...fixed, ...flexibleDone, ...flexibleOpen];
+  const tasksDone = tasks.filter((task) => task.completed).length;
+  const eventsDone = events.filter((event) => event.completed).length;
+  const habitsDone = habits.filter((habit) => isDone(state, habit.id, date)).length;
+  const done = tasksDone + eventsDone + habitsDone;
+  const total = tasks.length + events.length + habits.length;
+  return {
+    tasksDone,
+    tasksTotal: tasks.length,
+    eventsDone,
+    eventsTotal: events.length,
+    habitsDone,
+    habitsTotal: habits.length,
+    done,
+    total,
+    ratio: total === 0 ? null : done / total,
+  };
+}
+
+export function progressPhrase(ratio: number | null): string {
+  if (ratio === null) return 'Nothing scheduled yet.';
+  if (ratio === 0) return 'Whenever you are ready.';
+  if (ratio < 0.5) return 'A gentle start.';
+  if (ratio < 1) return 'Moving through the day.';
+  return 'Today is complete.';
+}
+
+export function goalProgress(goal: Goal, tasks: Task[]): { done: number; total: number; ratio: number } {
+  const linked = tasks.filter((task) => task.goalId === goal.id);
+  const total = goal.milestones.length + linked.length;
+  const done = goal.milestones.filter((step) => step.completed).length + linked.filter((task) => task.completed).length;
+  return { done, total, ratio: total === 0 ? 0 : done / total };
+}
+
+export function linkedTasks(state: PlannerState, goalId: string): Task[] {
+  return state.tasks.filter((task) => task.goalId === goalId).sort(compareTasks);
+}
+
+export interface FocusItem {
+  date: string;
+  title: string;
+  kind: 'event' | 'task';
+  time: string;
+}
+
+export function upcomingFocus(state: PlannerState, today: string, within = 3): FocusItem[] {
+  const end = addDays(today, within);
+  const events: FocusItem[] = state.events
+    .filter((event) => event.important && !event.completed && event.date > today && event.date <= end)
+    .map((event) => ({ date: event.date, title: event.title, kind: 'event', time: event.startTime }));
+  const tasks: FocusItem[] = state.tasks
+    .filter(
+      (task) =>
+        !task.completed &&
+        task.priority === 'high' &&
+        task.dueDate !== null &&
+        task.dueDate > today &&
+        task.dueDate <= end,
+    )
+    .map((task) => ({ date: task.dueDate as string, title: task.title, kind: 'task', time: task.dueTime ?? '99:99' }));
+  return [...events, ...tasks]
+    .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time))
+    .slice(0, 3);
+}
+
+export function frequencyLabel(habit: Habit): string {
+  const frequency = habit.frequency;
+  if (frequency.type === 'daily') return 'Every day';
+  if (frequency.type === 'weekdays') return 'Weekdays';
+  if (frequency.type === 'weekly') return `${frequency.times}× a week`;
+  const names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const labels = [...frequency.days].sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map((day) => names[day]);
+  return labels.join(', ');
+}
+
+export function formatPercent(ratio: number): string {
+  return `${Math.round(ratio * 100)}%`;
+}
+
+export function matchesQuery(values: Array<string | null | undefined>, query: string): boolean {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  return values.some((value) => (value ?? '').toLowerCase().includes(needle));
+}
+
+export function categoryLabel(id: string): string {
+  return categoryById(id).label;
+}
+
+export function weekNarrative(state: PlannerState, today: string): string {
+  const days = new Set(weekDates(today).filter((date) => date <= today));
+  const tasks = state.tasks.filter((task) => task.dueDate !== null && days.has(task.dueDate));
+  const events = state.events.filter((event) => days.has(event.date));
+  const done = tasks.filter((task) => task.completed).length + events.filter((event) => event.completed).length;
+  const total = tasks.length + events.length;
+  const moving = state.goals.filter((goal) => {
+    const progress = goalProgress(goal, state.tasks);
+    return progress.total === 0 || progress.ratio < 1;
+  }).length;
+  const habitDone = state.habits.filter((habit) => !habit.archived && weekDates(today).some((date) => date <= today && isDone(state, habit.id, date))).length;
+  if (total === 0 && state.goals.length === 0 && state.habits.length === 0) {
+    return 'A quiet week so far. Add only what you want to keep.';
+  }
+  const head =
+    total === 0
+      ? 'The week’s schedule is still open.'
+      : done === 0
+        ? `${total} ${total === 1 ? 'thing is' : 'things are'} on the page so far.`
+        : done === total
+          ? `Everything scheduled so far this week is done.`
+          : `${done} of ${total} scheduled things are done so far this week.`;
+  const habitLine =
+    habitDone === 0 ? '' : ` ${habitDone} ${habitDone === 1 ? 'habit was' : 'habits were'} kept this week.`;
+  const goalLine = moving === 0 ? '' : ` ${moving} ${moving === 1 ? 'goal is' : 'goals are'} still in motion.`;
+  return `${head}${habitLine}${goalLine}`.replace(/\s+/g, ' ').trim();
+}
+
+export interface AgendaDay {
+  date: string;
+  events: PlannerEvent[];
+  tasks: Task[];
+  habits: Habit[];
+  notes: { id: string; title: string }[];
+  intention: string;
+  deadlines: { id: string; title: string }[];
+}
+
+export function agendaDay(state: PlannerState, date: string): AgendaDay {
+  return {
+    date,
+    events: eventsForDate(state, date),
+    tasks: tasksForDate(state, date),
+    habits: habitsDueOn(state, date),
+    notes: state.notes.filter((note) => note.date === date).map((note) => ({ id: note.id, title: note.title })),
+    intention: state.intentions[date] ?? '',
+    deadlines: state.goals
+      .filter((goal) => goal.deadline === date && goalProgress(goal, state.tasks).ratio < 1)
+      .map((goal) => ({ id: goal.id, title: goal.title })),
+  };
+}
+
+export function hasAgendaPlans(day: AgendaDay): boolean {
+  return day.events.length + day.tasks.length + day.notes.length + day.deadlines.length > 0 || Boolean(day.intention.trim());
+}
+
+export function agendaWindow(state: PlannerState, today: string, horizon: number): AgendaDay[] {
+  const count = Math.min(60, Math.max(1, horizon));
+  return Array.from({ length: count }, (_, index) => agendaDay(state, addDays(today, index + 1)));
+}
+
+export function laterAgenda(state: PlannerState, today: string, horizon: number): {
+  events: PlannerEvent[];
+  tasks: Task[];
+  deadlines: { id: string; title: string; date: string }[];
+} {
+  const after = addDays(today, Math.min(60, Math.max(1, horizon)));
+  return {
+    events: state.events
+      .filter((event) => !event.completed && event.date > after)
+      .sort((a, b) => a.date.localeCompare(b.date) || compareEvents(a, b)),
+    tasks: state.tasks
+      .filter((task) => !task.completed && task.dueDate !== null && task.dueDate > after)
+      .sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? '') || compareTasks(a, b)),
+    deadlines: state.goals
+      .filter((goal) => goal.deadline !== null && goal.deadline > after && goalProgress(goal, state.tasks).ratio < 1)
+      .map((goal) => ({ id: goal.id, title: goal.title, date: goal.deadline as string }))
+      .sort((a, b) => a.date.localeCompare(b.date)),
+  };
+}
+
+export function calendarMarks(state: PlannerState, date: string): { events: number; tasks: number; important: boolean } {
+  const events = state.events.filter((event) => event.date === date);
+  const tasks = state.tasks.filter((task) => task.dueDate === date);
+  return {
+    events: events.length,
+    tasks: tasks.length,
+    important: events.some((event) => event.important) || tasks.some((task) => task.priority === 'high'),
+  };
+}
