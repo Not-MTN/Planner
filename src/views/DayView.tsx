@@ -22,6 +22,7 @@ import {
   progressPhrase,
   tasksForDate,
   upcomingFocus,
+  weekLeftovers,
 } from '../logic';
 import { QuickAddBar } from '../components/QuickAddBar';
 import { WelcomeCard } from '../components/WelcomeCard';
@@ -34,7 +35,7 @@ import { t } from '../i18n';
 
 export function DayView({ date }: { date: string }) {
   const planner = usePlanner();
-  const { state, openComposer, navigate, swapEventTimes, swapTasks, moveTask, flash, celebrate, startFocus } = planner;
+  const { state, openComposer, navigate, swapEventTimes, swapTasks, moveTask, flash, celebrate, startFocus, carryWeekLeftovers, undo } = planner;
   const now = useNow(20000);
   const today = todayISO(now);
   const isToday = date === today;
@@ -224,6 +225,27 @@ export function DayView({ date }: { date: string }) {
         </section>
 
         <div className="stack">
+          {isToday && weekLeftovers(state, today).length > 0 ? (
+            <section className="card">
+              <header className="card-head">
+                <div>
+                  <p className="kicker">{t("Review this week")}</p>
+                  <h2 className="card-title">{t("{0} still open", { 0: weekLeftovers(state, today).length })}</h2>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-tiny"
+                  onClick={() => {
+                    carryWeekLeftovers();
+                    flash(t("Moved unfinished work to next week."), { label: t("Undo"), run: undo });
+                  }}
+                >
+                  {t("Carry to next week")}
+                </button>
+              </header>
+              <p className="meta">{t("Shift leftovers to the same weekday next week.")}</p>
+            </section>
+          ) : null}
           <section className="card">
             <header className="card-head">
               <div>

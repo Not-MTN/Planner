@@ -67,6 +67,7 @@ function sanitizeTask(value: unknown): Task | null {
     repeat: REPEAT_SET.has(String(raw.repeat)) ? (raw.repeat as TaskRepeat) : null,
     subtasks: sanitizeSubtasks(raw.subtasks),
     completedAt: asString(raw.completedAt, 40) || null,
+    waiting: asString(raw.waiting, 140)?.trim() || null,
   };
 }
 
@@ -126,6 +127,7 @@ function sanitizeEvent(value: unknown): PlannerEvent | null {
     sortOrder: typeof raw.sortOrder === 'number' && Number.isFinite(raw.sortOrder) ? raw.sortOrder : 0,
     createdAt: asString(raw.createdAt, 40) || new Date(0).toISOString(),
     updatedAt: asString(raw.updatedAt, 40) || new Date(0).toISOString(),
+    repeat: REPEAT_SET.has(String(raw.repeat)) ? (raw.repeat as PlannerEvent['repeat']) : null,
   };
 }
 
@@ -192,7 +194,8 @@ function sanitizeGoal(value: unknown): Goal | null {
         const stepId = asString(step.id, 80);
         const stepTitle = asString(step.title, 140)?.trim();
         if (!stepId || !stepTitle) return [];
-        return [{ id: stepId, title: stepTitle, completed: step.completed === true }];
+        const due = asString(step.dueDate, 10);
+        return [{ id: stepId, title: stepTitle, completed: step.completed === true, dueDate: due && isValidISODate(due) ? due : null }];
       })
     : [];
   return {

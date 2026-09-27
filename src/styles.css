@@ -19,11 +19,11 @@
   --line-strong: rgba(35, 32, 27, 0.16);
   --danger: #a35254;
   --danger-soft: #f7e7e4;
-  --shadow: 0 1px 0 rgba(255, 255, 255, 0.85) inset, 0 16px 36px rgba(80, 58, 30, 0.07), 0 1px 2px rgba(80, 58, 30, 0.05);
-  --shadow-soft: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 6px 18px rgba(80, 58, 30, 0.05);
-  --shadow-lift: 0 2px 0 rgba(255, 255, 255, 0.6) inset, 0 22px 48px rgba(80, 58, 30, 0.13), 0 2px 4px rgba(80, 58, 30, 0.07);
-  --radius: 22px;
-  --radius-small: 14px;
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset, 0 18px 40px rgba(72, 48, 22, 0.08), 0 1px 2px rgba(72, 48, 22, 0.06);
+  --shadow-soft: 0 1px 0 rgba(255, 255, 255, 0.75) inset, 0 8px 22px rgba(72, 48, 22, 0.05);
+  --shadow-lift: 0 2px 0 rgba(255, 255, 255, 0.7) inset, 0 28px 56px rgba(72, 48, 22, 0.16), 0 2px 6px rgba(72, 48, 22, 0.08);
+  --radius: 24px;
+  --radius-small: 16px;
   --serif: "Fraunces", "Iowan Old Style", Palatino, "Palatino Linotype", serif;
   --sans: "Figtree", "Avenir Next", "Segoe UI", sans-serif;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
@@ -425,11 +425,16 @@ h1, .page-head h1 {
 
 /* ---------- Cards ---------- */
 .card {
-  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) 92%, white);
   border: 1px solid var(--line);
+  transition: transform 0.22s var(--ease), box-shadow 0.22s var(--ease), border-color 0.22s;
   border-radius: var(--radius);
   box-shadow: var(--shadow-soft);
-  padding: 20px 22px;
+  padding: 22px 24px;
+}
+.card:hover {
+  box-shadow: var(--shadow);
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--line));
 }
 .card-head {
   display: flex;
@@ -1201,6 +1206,12 @@ h1, .page-head h1 {
   font-size: 14px;
 }
 .shortcut-list li span:last-child { display: flex; gap: 4px; }
+.snooze-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 6px;
+}
 .set-foot { color: var(--muted); font-size: 12px; text-align: center; padding-top: 14px; }
 
 /* ---------- Palette ---------- */
@@ -1594,6 +1605,44 @@ h1, .page-head h1 {
   padding: 7px 10px;
 }
 .agenda-list { display: flex; flex-direction: column; gap: 12px; }
+.load-strip {
+  display: flex;
+  gap: 3px;
+  overflow-x: auto;
+  padding: 4px 0 8px;
+  scrollbar-width: thin;
+}
+.load-cell {
+  flex: 1 0 18px;
+  min-width: 18px;
+  max-width: 28px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+}
+.load-cell i {
+  display: block;
+  width: 100%;
+  height: 28px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-2));
+}
+.load-cell.is-steady i { background: color-mix(in srgb, var(--accent) 42%, var(--surface-2)); }
+.load-cell.is-full i { background: var(--accent); }
+.load-cell:hover i { outline: 2px solid var(--accent); outline-offset: 1px; }
+.someday-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
 .future-day {
   display: flex;
   gap: 18px;
@@ -2490,14 +2539,81 @@ h1, .page-head h1 {
 }
 
 
-/* ---- Right-to-left (Persian) ---- */
+/* ---- Right-to-left (Persian) + mixed typing ---- */
 :root:lang(fa) {
-  --sans: 'Vazirmatn', 'Tahoma', system-ui, sans-serif;
-  --serif: 'Vazirmatn', 'Tahoma', system-ui, sans-serif;
+  --sans: "Vazirmatn", "Tahoma", system-ui, sans-serif;
+  --serif: "Vazirmatn", "Tahoma", system-ui, sans-serif;
 }
-:root:lang(fa) body { letter-spacing: 0; }
-[dir='rtl'] .event { box-shadow: inset -3px 0 0 var(--item, var(--line-strong)); border-radius: 10px 0 0 10px; }
-[dir='rtl'] .icon-dir { transform: scaleX(-1); }
-[dir='rtl'] input[type='time'],
-[dir='rtl'] input[type='date'],
-[dir='rtl'] .kbd { direction: ltr; }
+:root:lang(fa) body,
+:root:lang(fa) h1,
+:root:lang(fa) h2,
+:root:lang(fa) h3,
+:root:lang(fa) .brand-text strong,
+:root:lang(fa) .lede,
+:root:lang(fa) .narrative {
+  letter-spacing: 0;
+  line-height: 1.7;
+}
+:root:lang(fa) body { font-size: 16px; }
+:root:lang(fa) .kicker,
+:root:lang(fa) .eyebrow,
+:root:lang(fa) .nav-label,
+:root:lang(fa) .field > span,
+:root:lang(fa) .intention span {
+  letter-spacing: 0.04em;
+  text-transform: none;
+  font-weight: 650;
+}
+input:not([type]),
+input[type="text"],
+input[type="search"],
+input[type="email"],
+textarea {
+  unicode-bidi: plaintext;
+  text-align: start;
+}
+[dir="rtl"] .event { box-shadow: inset -3px 0 0 var(--item, var(--line-strong)); border-radius: 10px 0 0 10px; }
+[dir="rtl"] .icon-dir { transform: scaleX(-1); }
+[dir="rtl"] input[type="time"],
+[dir="rtl"] input[type="date"],
+[dir="rtl"] input[type="number"],
+[dir="rtl"] .kbd,
+[dir="rtl"] .clock,
+[dir="rtl"] .sync-code { direction: ltr; unicode-bidi: isolate; }
+[dir="rtl"] .quick-add-row { padding: 6px 14px 6px 6px; }
+[dir="rtl"] .toast { font-family: var(--sans); }
+
+/* ---- Visual polish ---- */
+html { hanging-punctuation: first last; }
+body::before {
+  content: "";
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  opacity: 0.35;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='80' height='80' filter='url(%23n)' opacity='.06'/%3E%3C/svg%3E");
+}
+.app-shell { position: relative; z-index: 1; }
+.page-head h1 { text-wrap: pretty; }
+.lede { max-width: 46ch; }
+.btn-primary {
+  letter-spacing: 0.01em;
+}
+.sidebar {
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+}
+.nav-link.active {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+[dir="rtl"] .nav-link.active { box-shadow: inset -3px 0 0 var(--accent); }
+.tab.active {
+  background: color-mix(in srgb, var(--accent-soft) 80%, transparent);
+}
+.hero-title { letter-spacing: -0.04em; }
+:root:lang(fa) .hero-title { letter-spacing: 0; }
+.item-title { overflow-wrap: anywhere; }
+.quick-add-row { border-radius: 18px; }
+@media (prefers-reduced-motion: reduce) {
+  .card:hover { transform: none; }
+}

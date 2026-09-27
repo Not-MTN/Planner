@@ -28,6 +28,9 @@
         root.dataset.theme = dark ? 'dark' : 'light';
         root.dataset.accent = localStorage.getItem('planner-accent') || 'sage';
         root.style.colorScheme = dark ? 'dark' : 'light';
+        var lang = localStorage.getItem('planner-lang') === 'fa' ? 'fa' : 'en';
+        root.lang = lang;
+        root.dir = lang === 'fa' ? 'rtl' : 'ltr';
       } catch (error) {
         /* storage can be blocked; the light default is fine */
       }

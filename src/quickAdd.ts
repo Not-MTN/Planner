@@ -35,7 +35,34 @@ const WEEKDAYS: Record<string, number> = {
   friday: 5,
   sat: 6,
   saturday: 6,
+  یکشنبه: 0,
+  دوشنبه: 1,
+  سهشنبه: 2,
+  سه‌شنبه: 2,
+  چهارشنبه: 3,
+  پنجشنبه: 4,
+  پنج‌شنبه: 4,
+  جمعه: 5,
+  شنبه: 6,
 };
+
+function foldDigits(value: string): string {
+  const eastern = '٠١٢٣٤٥٦٧٨٩';
+  const persian = '۰۱۲۳۴۵۶۷۸۹';
+  return value.replace(/[0-9٠-٩۰-۹]/g, (char) => {
+    const pe = persian.indexOf(char);
+    if (pe >= 0) return String(pe);
+    const ar = eastern.indexOf(char);
+    return ar >= 0 ? String(ar) : char;
+  });
+}
+
+function normalizeWord(raw: string): string {
+  return foldDigits(raw)
+    .replace(/\u200c/g, '')
+    .replace(/[.,،]/g, '')
+    .toLowerCase();
+}
 
 const RANGE_JOINS = new Set(['to', 'till', 'until', 'through', 'thru']);
 
@@ -52,7 +79,7 @@ interface TimeParts {
 }
 
 function parseTimeToken(raw: string): TimeParts | null {
-  const text = raw.toLowerCase();
+  const text = normalizeWord(raw);
   if (text === 'noon') return { hour: 12, minute: 0, meridiem: 'pm', explicit: true };
   if (text === 'midnight') return { hour: 0, minute: 0, meridiem: 'am', explicit: true };
   const match = /^(\d{1,2})(?::(\d{2}))?(am|pm)?$/.exec(text);
@@ -81,13 +108,13 @@ function splitRange(raw: string): [string, string] | null {
 }
 
 function parsePriorityToken(raw: string): Priority | null {
-  const text = raw.toLowerCase().replace(/!+$/, '');
-  if (raw === '!!!') return 'high';
+  const text = normalizeWord(raw).replace(/!+$/, '');
+  if (raw === '!!!' || text === 'فوری' || text === 'مهم') return 'high';
   if (raw === '!!') return 'medium';
   if (raw === '!') return 'low';
   if (!text.startsWith('!')) return null;
   const word = text.slice(1);
-  if (['high', 'hi', 'important', 'urgent', 'must'].includes(word)) return 'high';
+  if (['high', 'hi', 'important', 'urgent', 'must', 'فوری', 'مهم'].includes(word)) return 'high';
   if (['medium', 'med', 'normal', 'mid'].includes(word)) return 'medium';
   if (['low', 'later', 'someday', 'lowkey'].includes(word)) return 'low';
   return null;
@@ -95,10 +122,11 @@ function parsePriorityToken(raw: string): Priority | null {
 
 function parseCategoryToken(raw: string): string | null {
   if (!raw.startsWith('#')) return null;
-  const word = raw.slice(1).toLowerCase();
+  const word = normalizeWord(raw.slice(1));
   if (!word) return null;
+  const aliases: Record<string, string> = { کار: 'work', شخصی: 'personal', سلامت: 'health', خانه: 'home', یادگیری: 'learning', اجتماعی: 'social' };
   const match = CATEGORIES.find(
-    (item) => item.id === word || item.label.toLowerCase().replace(/[^a-z]/g, '') === word,
+    (item) => item.id === word || item.id === aliases[word] || normalizeWord(item.label).replace(/[^a-z\u0600-\u06ff]/g, '') === word,
   );
   return match ? match.id : null;
 }
@@ -128,7 +156,7 @@ function labelCategory(category: string): string {
 }
 
 export function parseQuickAdd(input: string, defaultDate: string | null): QuickAddParse | null {
-  const rawTokens = input.trim().split(/\s+/).filter(Boolean);
+  const rawTokens = foldDigits(input).trim().split(/\s+/).filter(Boolean);
   if (rawTokens.length === 0) return null;
   const tokens: Token[] = rawTokens.map((text) => ({ text, used: false }));
   const today = todayISO();
@@ -167,14 +195,16 @@ export function parseQuickAdd(input: string, defaultDate: string | null): QuickA
   const AFTER_EVERY: Record<string, TaskRepeat> = { day: 'daily', weekday: 'weekdays', weekdays: 'weekdays', week: 'weekly', month: 'monthly', year: 'yearly' };
   for (let i = 0; i < tokens.length && !repeat; i += 1) {
     if (!isFree(i)) continue;
-    const word = tokens[i].text.toLowerCase().replace(/[.,]$/, '');
-    if (SOLO[word]) {
-      repeat = SOLO[word];
+    const word = normalizeWord(tokens[i].text);
+    const FA_SOLO: Record<string, TaskRepeat> = { روزانه: 'daily', هفتگی: 'weekly', ماهانه: 'monthly', سالانه: 'yearly' };
+    if (SOLO[word] || FA_SOLO[word]) {
+      repeat = SOLO[word] ?? FA_SOLO[word];
       use(i);
-    } else if (word === 'every' && isFree(i + 1)) {
-      const next = tokens[i + 1].text.toLowerCase().replace(/[.,]$/, '');
-      if (AFTER_EVERY[next]) {
-        repeat = AFTER_EVERY[next];
+    } else if ((word === 'every' || word === 'هر') && isFree(i + 1)) {
+      const next = normalizeWord(tokens[i + 1].text);
+      const AFTER_FA: Record<string, TaskRepeat> = { روز: 'daily', هفته: 'weekly', ماه: 'monthly', سال: 'yearly' };
+      if (AFTER_EVERY[next] || AFTER_FA[next]) {
+        repeat = AFTER_EVERY[next] ?? AFTER_FA[next];
         use(i);
         use(i + 1);
       } else if (WEEKDAYS[next] !== undefined) {
@@ -189,17 +219,21 @@ export function parseQuickAdd(input: string, defaultDate: string | null): QuickA
   // Date phrases.
   for (let i = 0; i < tokens.length; i += 1) {
     if (!isFree(i)) continue;
-    const word = tokens[i].text.toLowerCase().replace(/[.,]$/, '');
-    const previous = i > 0 ? tokens[i - 1].text.toLowerCase() : '';
-    const beforePrevious = i > 1 ? tokens[i - 2].text.toLowerCase() : '';
+    const word = normalizeWord(tokens[i].text);
+    const previous = i > 0 ? normalizeWord(tokens[i - 1].text) : '';
+    const beforePrevious = i > 1 ? normalizeWord(tokens[i - 2].text) : '';
     let parsed: string | null = null;
     let span = 1;
-    if (word === 'today' || word === 'tod') parsed = today;
-    else if (word === 'tomorrow' || word === 'tmr' || word === 'tmrw' || word === 'tom') parsed = addDays(today, 1);
+    if (word === 'today' || word === 'tod' || word === 'امروز') parsed = today;
+    else if (word === 'tomorrow' || word === 'tmr' || word === 'tmrw' || word === 'tom' || word === 'فردا') parsed = addDays(today, 1);
+    else if (word === 'پسفردا') parsed = addDays(today, 2);
     else if (WEEKDAYS[word] !== undefined) {
-      parsed = weekdayDate(word, today, previous === 'next');
-      if (previous === 'next' || previous === 'on') span = 2;
+      parsed = weekdayDate(word, today, previous === 'next' || previous === 'بعد');
+      if (previous === 'next' || previous === 'on' || previous === 'بعد') span = 2;
     } else if (word === 'week' && previous === 'next') {
+      parsed = addDays(today, 7);
+      span = 2;
+    } else if ((word === 'هفته' && previous === 'بعد') || (word === 'بعد' && previous === 'هفته')) {
       parsed = addDays(today, 7);
       span = 2;
     } else if (word === 'days' || word === 'day' || word === 'weeks' || word === 'week') {

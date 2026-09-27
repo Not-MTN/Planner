@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { monthGrid, startOfWeek, addDays, isValidISODate, weekDates } from './dates';
-import { agendaWindow, dayScore, essentialHabits, eventsForDate, fixedEventsForDate, goalProgress, habitStats, habitStreaks, hasAgendaPlans, insightTotals, isDueOn, isPlannedDay, laterAgenda } from './logic';
-import { addEvent, addFixedCommitment, addGoal, addHabit, addHabits, addMilestone, addNote, addTask, clearCompletedTasks, moveTask, swapEventTimes, toggleHabit, toggleMilestone, toggleTask, updateEvent } from './mutate';
+import { agendaWindow, dayLoad, dayScore, essentialHabits, eventsForDate, fixedEventsForDate, goalProgress, habitStats, habitStreaks, hasAgendaPlans, insightTotals, isDueOn, isPlannedDay, laterAgenda, loadLevel, overdueTasks, quietestDay, weekLeftovers } from './logic';
+import { addEvent, addFixedCommitment, addGoal, addHabit, addHabits, addMilestone, addNote, addTask, carryWeekLeftovers, clearCompletedTasks, copyWeek, duplicateTask, moveTask, swapEventTimes, toggleHabit, toggleMilestone, toggleTask, updateEvent } from './mutate';
+import { occursOn } from './recurrence';
 import { parseQuickAdd } from './quickAdd';
 import { parseHash, toHash } from './route';
 import { loadFrom, parseBackup, sanitizeState, saveTo, serialize } from './storage';
@@ -87,6 +88,13 @@ describe('quick add', () => {
   });
 
   it('understands tomorrow, times, categories, and priorities', () => {
+    expect(parseQuickAdd('زنگ به مامان فردا ۱۷:۰۰ #کار فوری', today)).toMatchObject({
+      title: 'زنگ به مامان',
+      date: '2026-09-28',
+      startTime: '17:00',
+      category: 'work',
+      priority: 'high',
+    });
     const parse = parseQuickAdd('Call mom tomorrow 5pm #personal !high', today);
     expect(parse?.kind).toBe('task');
     expect(parse?.title).toBe('Call mom');
@@ -292,6 +300,12 @@ describe('planner logic', () => {
     expect(hasAgendaPlans(days[1])).toBe(true);
     expect(laterAgenda(state, '2026-09-27', 1).events).toHaveLength(1);
     expect(laterAgenda(state, '2026-09-27', 7).events).toHaveLength(0);
+    expect(dayLoad(days[1])).toBeGreaterThan(0);
+    expect(loadLevel(0)).toBe('quiet');
+    expect(loadLevel(2)).toBe('steady');
+    expect(loadLevel(5)).toBe('full');
+    expect(quietestDay(days)?.date).toBe('2026-09-28');
+    expect(agendaWindow(state, '2026-09-27', 90)).toHaveLength(90);
   });
 });
 
@@ -353,6 +367,24 @@ describe('streaks and totals', () => {
     state = clearCompletedTasks(state);
     expect(state.tasks).toHaveLength(1);
     expect(state.tasks[0].title).toBe('Open thing');
+  });
+
+  it('duplicates a task with a fresh id and unchecked steps', () => {
+    let state = addTask(createEmptyState(), {
+      title: 'Pack',
+      priority: 'high',
+      dueDate: '2026-09-27',
+      dueTime: '08:00',
+      category: 'home',
+      note: 'bags',
+      goalId: null,
+      subtasks: [{ id: 's1', title: 'Shoes', completed: true }],
+    }, 't1', now);
+    state = duplicateTask(state, 't1', now, 't2');
+    expect(state.tasks).toHaveLength(2);
+    expect(state.tasks[1]).toMatchObject({ id: 't2', title: 'Pack', dueDate: '2026-09-27', note: 'bags' });
+    expect(state.tasks[1].subtasks[0]).toMatchObject({ title: 'Shoes', completed: false });
+    expect(state.tasks[1].subtasks[0].id).not.toBe('s1');
   });
 
   it('sums insight totals including the day streak', () => {
@@ -479,5 +511,92 @@ describe('storage', () => {
       },
     };
     expect(saveTo(storage, createEmptyState())).toMatch(/full/i);
+  });
+});
+
+describe('futures', () => {
+  const now = '2026-09-27T10:00:00.000Z';
+
+  it('expands repeating events onto matching days', () => {
+    expect(occursOn('2026-09-22', 'weekly', '2026-09-29')).toBe(true);
+    expect(occursOn('2026-09-22', 'weekly', '2026-09-28')).toBe(false);
+    let state = addEvent(createEmptyState(), {
+      title: 'Class',
+      date: '2026-09-22',
+      startTime: '08:00',
+      endTime: '09:00',
+      category: 'learning',
+      note: '',
+      important: false,
+      repeat: 'weekly',
+    }, 'e1', now);
+    const next = eventsForDate(state, '2026-09-29').find((event) => event.seriesEventId === 'e1');
+    expect(next?.title).toBe('Class');
+    expect(next?.startTime).toBe('08:00');
+  });
+
+  it('keeps waiting tasks off the overdue list', () => {
+    let state = addTask(createEmptyState(), {
+      title: 'Wait',
+      priority: 'high',
+      dueDate: '2026-09-20',
+      dueTime: null,
+      category: 'personal',
+      note: '',
+      goalId: null,
+      waiting: 'the lab',
+    }, 't1', now);
+    expect(overdueTasks(state, '2026-09-27')).toHaveLength(0);
+    state = addTask(state, {
+      title: 'Late',
+      priority: 'low',
+      dueDate: '2026-09-20',
+      dueTime: null,
+      category: 'personal',
+      note: '',
+      goalId: null,
+    }, 't2', now);
+    expect(overdueTasks(state, '2026-09-27').map((task) => task.id)).toEqual(['t2']);
+  });
+
+  it('copies a week and carries leftovers', () => {
+    let state = addEvent(createEmptyState(), {
+      title: 'Standup',
+      date: '2026-09-22',
+      startTime: '09:00',
+      endTime: '09:15',
+      category: 'work',
+      note: '',
+      important: false,
+    }, 'e1', now);
+    state = addTask(state, {
+      title: 'Ship',
+      priority: 'high',
+      dueDate: '2026-09-22',
+      dueTime: null,
+      category: 'work',
+      note: '',
+      goalId: null,
+    }, 't1', now);
+    const copied = copyWeek(state, '2026-09-22', now);
+    expect(copied.events.some((event) => event.date === '2026-09-29' && event.title === 'Standup')).toBe(true);
+    expect(copied.tasks.some((task) => task.dueDate === '2026-09-29' && task.title === 'Ship')).toBe(true);
+    expect(weekLeftovers(state, '2026-09-27').map((task) => task.id)).toEqual(['t1']);
+    const carried = carryWeekLeftovers(state, '2026-09-27', now);
+    expect(carried.tasks[0].dueDate).toBe('2026-09-29');
+  });
+
+  it('places a milestone on the agenda', () => {
+    let state = addGoal(createEmptyState(), {
+      title: 'Ship',
+      description: '',
+      horizon: 'short',
+      deadline: null,
+      milestone: 'Draft',
+      milestoneDue: '2026-10-01',
+    }, 'g1', 'm1', now);
+    expect(state.goals[0].milestones[0].dueDate).toBe('2026-10-01');
+    const days = agendaWindow(state, '2026-09-27', 7);
+    expect(days.find((day) => day.date === '2026-10-01')?.deadlines[0].title).toContain('Draft');
   });
 });

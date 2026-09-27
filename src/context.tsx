@@ -13,6 +13,9 @@ import {
   addMilestone as addMilestoneTo,
   addNote as addNoteTo,
   addTask as addTaskTo,
+  duplicateTask as duplicateTaskIn,
+  copyWeek as copyWeekIn,
+  carryWeekLeftovers as carryWeekLeftoversIn,
   clearCompletedTasks as clearCompletedTasksIn,
   deleteEvent as deleteEventFrom,
   deleteGoal as deleteGoalFrom,
@@ -129,6 +132,7 @@ interface PlannerContextValue {
   setReminders: (settings: ReminderSettings) => void;
   celebrate: () => void;
   addTask: (input: TaskInput) => void;
+  duplicateTask: (id: string) => void;
   updateTask: (id: string, patch: Partial<TaskInput>) => void;
   deleteTask: (id: string) => void;
   clearCompletedTasks: () => void;
@@ -150,6 +154,8 @@ interface PlannerContextValue {
   toggleEvent: (id: string) => void;
   moveEvent: (id: string, date: string) => void;
   moveTask: (id: string, date: string | null) => void;
+  copyWeek: (fromDate: string) => void;
+  carryWeekLeftovers: () => void;
   swapEventTimes: (aId: string, bId: string) => void;
   addHabit: (input: HabitInput) => void;
   addHabits: (inputs: HabitInput[]) => void;
@@ -160,7 +166,7 @@ interface PlannerContextValue {
   addGoal: (input: GoalInput) => void;
   updateGoal: (id: string, patch: Partial<Omit<GoalInput, 'milestone'>>) => void;
   deleteGoal: (id: string) => void;
-  addMilestone: (goalId: string, title: string) => void;
+  addMilestone: (goalId: string, title: string, dueDate?: string | null) => void;
   toggleMilestone: (goalId: string, milestoneId: string) => void;
   deleteMilestone: (goalId: string, milestoneId: string) => void;
   addNote: (input: NoteInput) => void;
@@ -647,6 +653,7 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     syncNow: () => void runSync(),
     deleteCloudCopy,
     addTask: (input) => commit((current) => addTaskTo(current, input)),
+    duplicateTask: (id) => commit((current) => duplicateTaskIn(current, id)),
     updateTask: (id, patch) => commit((current) => updateTaskIn(current, id, patch)),
     deleteTask: (id) => commit((current) => deleteTaskFrom(current, id)),
     clearCompletedTasks,
@@ -679,6 +686,8 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     toggleEvent: (id) => commit((current) => toggleEventIn(current, id)),
     moveEvent: (id, date) => commit((current) => moveEventIn(current, id, date)),
     moveTask: (id, date) => commit((current) => moveTaskIn(current, id, date)),
+    copyWeek: (fromDate) => commit((current) => copyWeekIn(current, fromDate)),
+    carryWeekLeftovers: () => commit((current) => carryWeekLeftoversIn(current, todayISO())),
     swapEventTimes: (aId, bId) => commit((current) => swapEventTimesIn(current, aId, bId)),
     addHabit: (input) => commit((current) => addHabitTo(current, input)),
     addHabits: (inputs) => commit((current) => addHabitsTo(current, inputs)),
@@ -689,7 +698,7 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     addGoal: (input) => commit((current) => addGoalTo(current, input)),
     updateGoal: (id, patch) => commit((current) => updateGoalIn(current, id, patch)),
     deleteGoal: (id) => commit((current) => deleteGoalFrom(current, id)),
-    addMilestone: (goalId, title) => commit((current) => addMilestoneTo(current, goalId, title)),
+    addMilestone: (goalId, title, dueDate) => commit((current) => addMilestoneTo(current, goalId, title, undefined, undefined, dueDate ?? null)),
     toggleMilestone: (goalId, milestoneId) => commit((current) => toggleMilestoneIn(current, goalId, milestoneId)),
     deleteMilestone: (goalId, milestoneId) => commit((current) => deleteMilestoneFrom(current, goalId, milestoneId)),
     addNote: (input) => commit((current) => addNoteTo(current, input)),

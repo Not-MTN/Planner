@@ -51,3 +51,35 @@ export function nextDueAfterCompletion(dueDate: string | null, repeat: TaskRepea
   // Undated tasks start from today, so their first repeat is tomorrow or later.
   return next;
 }
+
+function daysBetween(from: string, to: string): number {
+  return Math.round((parseISODate(to).getTime() - parseISODate(from).getTime()) / 86_400_000);
+}
+
+/** Whether a repeating series that starts on `start` also occupies `date`. */
+export function occursOn(start: string, repeat: TaskRepeat, date: string): boolean {
+  if (date < start) return false;
+  if (date === start) return true;
+  if (repeat === 'daily') return true;
+  if (repeat === 'weekly') return daysBetween(start, date) % 7 === 0;
+  if (repeat === 'weekdays') {
+    const day = parseISODate(date).getDay();
+    return day >= 1 && day <= 5;
+  }
+  const origin = parseISODate(start);
+  const target = parseISODate(date);
+  if (repeat === 'monthly') {
+    const last = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+    return target.getDate() === Math.min(origin.getDate(), last);
+  }
+  const last = new Date(target.getFullYear(), origin.getMonth() + 1, 0).getDate();
+  return target.getMonth() === origin.getMonth() && target.getDate() === Math.min(origin.getDate(), last);
+}
+
+export function rruleFor(repeat: TaskRepeat): string {
+  if (repeat === 'daily') return 'FREQ=DAILY';
+  if (repeat === 'weekly') return 'FREQ=WEEKLY';
+  if (repeat === 'monthly') return 'FREQ=MONTHLY';
+  if (repeat === 'yearly') return 'FREQ=YEARLY';
+  return 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR';
+}

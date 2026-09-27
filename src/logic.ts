@@ -7,6 +7,7 @@ import {
   weekDates,
   weekdayIndex,
 } from './dates';
+import { occursOn } from './recurrence';
 import type { DayScore, DotState, Goal, Habit, HabitFrequency, PlannerEvent, PlannerState, Task } from './types';
 import { t } from './i18n';
 
@@ -102,13 +103,28 @@ export function fixedEventsForDate(state: PlannerState, date: string): PlannerEv
       sortOrder: -1,
       createdAt: commitment.createdAt,
       updatedAt: commitment.updatedAt,
+      repeat: null,
       fixedCommitmentId: commitment.id,
+    }));
+}
+
+export function seriesEventsForDate(state: PlannerState, date: string): PlannerEvent[] {
+  if (!isValidISODate(date)) return [];
+  return state.events
+    .filter((event) => event.repeat && !event.completed && event.date !== date && occursOn(event.date, event.repeat, date))
+    .map((event) => ({
+      ...event,
+      id: `series:${event.id}:${date}`,
+      date,
+      completed: false,
+      seriesEventId: event.id,
     }));
 }
 
 export function eventsForDate(state: PlannerState, date: string): PlannerEvent[] {
   return [
     ...state.events.filter((event) => event.date === date),
+    ...seriesEventsForDate(state, date),
     ...fixedEventsForDate(state, date),
   ].sort(compareEvents);
 }
@@ -119,7 +135,18 @@ export function tasksForDate(state: PlannerState, date: string): Task[] {
 
 export function overdueTasks(state: PlannerState, today: string): Task[] {
   return state.tasks
-    .filter((task) => !task.completed && task.dueDate !== null && task.dueDate < today)
+    .filter((task) => !task.completed && !task.waiting && task.dueDate !== null && task.dueDate < today)
+    .sort(compareTasks);
+}
+
+export function waitingTasks(state: PlannerState): Task[] {
+  return state.tasks.filter((task) => !task.completed && Boolean(task.waiting)).sort(compareTasks);
+}
+
+export function weekLeftovers(state: PlannerState, today: string): Task[] {
+  const days = new Set(weekDates(today).filter((date) => date <= today));
+  return state.tasks
+    .filter((task) => !task.completed && !task.waiting && task.dueDate !== null && days.has(task.dueDate))
     .sort(compareTasks);
 }
 
@@ -284,9 +311,16 @@ export function agendaDay(state: PlannerState, date: string): AgendaDay {
     habits: habitsDueOn(state, date),
     notes: state.notes.filter((note) => note.date === date).map((note) => ({ id: note.id, title: note.title })),
     intention: state.intentions[date] ?? '',
-    deadlines: state.goals
-      .filter((goal) => goal.deadline === date && goalProgress(goal, state.tasks).ratio < 1)
-      .map((goal) => ({ id: goal.id, title: goal.title })),
+    deadlines: [
+      ...state.goals
+        .filter((goal) => goal.deadline === date && goalProgress(goal, state.tasks).ratio < 1)
+        .map((goal) => ({ id: goal.id, title: goal.title })),
+      ...state.goals.flatMap((goal) =>
+        goal.milestones
+          .filter((step) => !step.completed && step.dueDate === date)
+          .map((step) => ({ id: step.id, title: `${goal.title}: ${step.title}` })),
+      ),
+    ],
   };
 }
 
@@ -295,8 +329,25 @@ export function hasAgendaPlans(day: AgendaDay): boolean {
 }
 
 export function agendaWindow(state: PlannerState, today: string, horizon: number): AgendaDay[] {
-  const count = Math.min(60, Math.max(1, horizon));
+  const count = Math.min(90, Math.max(1, horizon));
   return Array.from({ length: count }, (_, index) => agendaDay(state, addDays(today, index + 1)));
+}
+
+export function dayLoad(day: AgendaDay): number {
+  return day.events.length + day.tasks.filter((task) => !task.completed).length + day.deadlines.length;
+}
+
+export type LoadLevel = 'quiet' | 'steady' | 'full';
+
+export function loadLevel(count: number): LoadLevel {
+  if (count <= 0) return 'quiet';
+  if (count <= 2) return 'steady';
+  return 'full';
+}
+
+export function quietestDay(days: AgendaDay[]): AgendaDay | null {
+  if (days.length === 0) return null;
+  return [...days].sort((a, b) => dayLoad(a) - dayLoad(b) || a.date.localeCompare(b.date))[0];
 }
 
 export function laterAgenda(state: PlannerState, today: string, horizon: number): {
@@ -304,7 +355,7 @@ export function laterAgenda(state: PlannerState, today: string, horizon: number)
   tasks: Task[];
   deadlines: { id: string; title: string; date: string }[];
 } {
-  const after = addDays(today, Math.min(60, Math.max(1, horizon)));
+  const after = addDays(today, Math.min(90, Math.max(1, horizon)));
   return {
     events: state.events
       .filter((event) => !event.completed && event.date > after)

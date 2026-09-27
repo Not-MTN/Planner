@@ -21,7 +21,7 @@ function whenColumns(tasks: Task[], today: string): Column[] {
   const weekEnd = addDays(today, 7);
   const open = tasks.filter((task) => !task.completed);
   return [
-    { id: 'overdue', label: t("Overdue"), tasks: open.filter((task) => task.dueDate !== null && task.dueDate < today), patch: null },
+    { id: 'overdue', label: t("Overdue"), tasks: open.filter((task) => !task.waiting && task.dueDate !== null && task.dueDate < today), patch: null },
     { id: 'today', label: t("Today"), tasks: open.filter((task) => task.dueDate === today), patch: { dueDate: today } },
     { id: 'tomorrow', label: t("Tomorrow"), tasks: open.filter((task) => task.dueDate === addDays(today, 1)), patch: { dueDate: addDays(today, 1) } },
     {

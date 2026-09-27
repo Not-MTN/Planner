@@ -50,17 +50,22 @@ Settings → **Language** switches the whole interface to Persian with a right-t
 - **Undo & redo** — every change is undoable (`⌘Z` / `⌘⇧Z`), and removals show a toast with an Undo button. No more confirm dialogs for small mistakes.
 - **Focus timer** — pick a task (or don't), choose 15–60 minutes, and get a full-screen breathing timer with a soft chime at the end.
 - **Habits** — streaks (current & best), a week strip, and a 12-week heatmap you can tap to fill in any day.
-- **Calendar** — drag events between days in Week view, see the month at a glance, and scroll the days ahead in Upcoming.
+- **Calendar** — drag events between days in Week view, see the month at a glance, and scroll the days ahead in Upcoming (7 / 14 / 30 / 90 days). A load strip shows quiet vs full days; undated tasks sit in **Someday** and can park on the quietest day.
 - **Insights** — day streak, weekly bars, a 7/30/90-day completion trend, a task/event/habit completion donut, habit consistency, and goal progress.
 - **AI Coach (xAI / Grok)** — describe a day, week, month (30 days), or custom plan; get draft tasks, timed events, habits, and gentle wellbeing ideas. Upload a PNG/JPG (up to 3 MB) of a written plan for image reading. Review the draft before adding it; one undo reverses the whole batch.
 - **Protected weekly times** — add a repeating class, shift, or appointment (for example Tuesday 08:00–09:00). It appears on the calendar and the AI rejects overlapping events.
 - **AI review** — ask for a daily, weekly, monthly, or custom reflection on completed tasks, events, and habit check-ins. Select unfinished tasks and dates to carry them forward; nothing is rescheduled without your action.
 - **Themes** — light, dark, or follow your system, plus five accent colours. All in Settings.
 - **Repeating tasks** — daily, weekdays, weekly, monthly, or yearly. Finishing one schedules the next copy (overdue ones skip ahead to the next future date). Quick add understands `every day`, `weekdays`, `every monday`, `monthly`…
+- **Repeating events** — birthdays, classes, and weekly meetings expand onto matching days (and export with an RRULE).
+- **Waiting** — mark a task as waiting on a person or reply; it stays off Overdue until you clear it.
+- **Week template & review** — copy this week onto the next, and carry unfinished work to the same weekday. A review card appears on Today and Calendar → Week.
+- **Milestone dates** — goal steps can have a date and show up on Upcoming.
+- **Busy calendar** — Settings can export an .ics of busy times only (titles stripped).
 - **Checklists** — break a task into steps; the row shows a progress bar and you can tick steps inline.
 - **Reminders** — optional notifications before events and timed tasks, plus a morning summary. Falls back to in-app toasts if notifications are blocked. (Settings → Reminders; works while Planner is open or installed.)
 - **Installable & offline** — a service worker caches the app shell, so Planner opens without a connection. Install it from Settings → App or your browser menu.
-- **Calendar files (.ics)** — export events, protected weekly times (as repeating events), and dated tasks; import from Google, Outlook, or Apple Calendar. All-day events arrive as dated tasks.
+- **Calendar files (.ics)** — export events, protected weekly times (as repeating events), and dated tasks; import from Google, Outlook, or Apple Calendar. All-day events arrive as dated tasks. **Export busy times** shares only Busy blocks.
 - **Task board** — switch Tasks between List and a Kanban Board grouped by When, Priority, or Category. Drag cards between columns to reschedule, re-prioritise, or complete.
 - **Calendar editing** — in Week view, drag an event's bottom edge (or focus it and use ↑/↓) to change its length in 15-minute steps; drag tasks to other days too.
 - **Plan my day** — one tap fits today's untimed, overdue, and urgent tasks into your free time around events and protected hours. One undo reverses it.
@@ -70,7 +75,8 @@ Settings → **Language** switches the whole interface to Persian with a right-t
 - **Week start, clock & date language** — Monday/Sunday/Saturday weeks, 24-hour or 12-hour times, and day/month names in English, your device language, Finnish, Swedish, German, French, Spanish, or Persian (Settings → Calendar, dates & time).
 - **Larger storage** — every save is mirrored to IndexedDB; if `localStorage` fills up, Planner keeps saving there and loads the newest copy on start.
 - **Keyboard-friendly board** — focus a card and press ←/→ to move it between columns.
-- **Keyboard shortcuts** — `⌘K` search & add · `N` new task · `T` today · `⌘Z` undo · `esc` close.
+- **Keyboard shortcuts** — `⌘K` search & add · `N` new task · `T` today · `⌘Z` undo · `?` shortcuts · `esc` close.
+- **Snooze & duplicate** — overdue tasks offer Today / Tomorrow / Next week; duplicate any task in one tap. Tasks has an Overdue filter.
 
 ## xAI (Grok) setup
 

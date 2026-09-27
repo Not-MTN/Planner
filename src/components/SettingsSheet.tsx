@@ -6,7 +6,7 @@ import { DownloadIcon, SparklesIcon, UploadIcon } from '../icons';
 import { Modal } from './ui';
 import { useEffect, useState } from 'react';
 import { DATE_LANGUAGES, todayISO, type DateLanguage } from '../dates';
-import { downloadICS, parseICS } from '../ics';
+import { downloadBusyICS, downloadICS, parseICS } from '../ics';
 import { canInstall, isInstalled, onInstallChange, promptInstall } from '../pwa';
 import { LEAD_CHOICES } from '../reminders';
 import { t, getLang, setLang, LANGUAGES, type Lang } from '../i18n';
@@ -278,6 +278,9 @@ function CalendarSection() {
         <button type="button" className="btn btn-soft" onClick={() => { downloadICS(state, todayISO()); flash(t("Calendar file downloaded.")); }}>
           <DownloadIcon size={16} /> {t("Export .ics")}
         </button>
+        <button type="button" className="btn btn-ghost" onClick={() => { downloadBusyICS(state, todayISO()); flash(t("Busy calendar downloaded.")); }}>
+          <DownloadIcon size={16} /> {t("Export busy times")}
+        </button>
         <button type="button" className="btn btn-soft" onClick={icsFile.open}>
           <UploadIcon size={16} /> {t("Import .ics")}
         </button>
@@ -429,6 +432,7 @@ export function SettingsSheet() {
           <li><span>{t("Go to Today")}</span><span><kbd className="kbd">T</kbd></span></li>
           <li><span>{t("Undo / redo")}</span><span><kbd className="kbd">⌘</kbd><kbd className="kbd">Z</kbd></span></li>
           <li><span>{t("Close anything")}</span><span><kbd className="kbd">{t('esc')}</kbd></span></li>
+          <li><span>{t("Open shortcuts")}</span><span><kbd className="kbd">?</kbd></span></li>
         </ul>
       </section>
 

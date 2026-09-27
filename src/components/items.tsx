@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { categoryById } from '../constants';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
-import { dayNumber, formatDuration, formatMonthShort, formatWeekdayShort, isValidTime, displayTime } from '../dates';
+import { addDays, dayNumber, formatDuration, formatMonthShort, formatWeekdayShort, isValidTime, displayTime, todayISO } from '../dates';
 import { frequencyLabel, habitStreaks } from '../logic';
 import { FlameIcon, GripIcon, HabitGlyph, PencilIcon, StopwatchIcon, TickIcon, TrashIcon } from '../icons';
 import { repeatLabel } from '../recurrence';
@@ -31,6 +31,7 @@ export function IntentionField({ date }: { date: string }) {
         value={text}
         maxLength={160}
         placeholder={t("One line for this day — optional")}
+        dir="auto"
         onChange={(event) => setText(event.target.value)}
         onBlur={() => {
           if (text !== saved) setIntention(date, text);
@@ -43,6 +44,8 @@ export function IntentionField({ date }: { date: string }) {
 export function EventRow({ event, onDropSwap }: { event: PlannerEvent; onDropSwap?: (sourceId: string) => void }) {
   const { toggleEvent, updateEvent, openComposer, deleteEvent, flash, undo } = usePlanner();
   const accent = categoryById(event.category).accent;
+  const series = Boolean(event.seriesEventId);
+  const editId = event.seriesEventId ?? event.id;
   const duration = formatDuration(event.startTime, event.endTime);
   return (
     <li
@@ -64,7 +67,9 @@ export function EventRow({ event, onDropSwap }: { event: PlannerEvent; onDropSwa
         className={cx('check', event.completed && 'on')}
         aria-pressed={event.completed}
         aria-label={event.completed ? t("Mark {0} not done", { 0: event.title }) : t("Mark {0} complete", { 0: event.title })}
-        onClick={() => toggleEvent(event.id)}
+        onClick={() => {
+          if (!series) toggleEvent(event.id);
+        }}
       >
         {event.completed ? <TickIcon size={14} /> : null}
       </button>
@@ -80,7 +85,7 @@ export function EventRow({ event, onDropSwap }: { event: PlannerEvent; onDropSwa
         />
       </label>
       <div className="item-body">
-        <button type="button" className="item-title" onClick={() => openComposer({ mode: 'edit', type: 'event', id: event.id })}>
+        <button type="button" className="item-title" onClick={() => openComposer({ mode: 'edit', type: 'event', id: editId })}>
           {event.title}
         </button>
         <p className="meta">
@@ -88,6 +93,7 @@ export function EventRow({ event, onDropSwap }: { event: PlannerEvent; onDropSwa
           {categoryById(event.category).label}
           {duration ? ` · ${duration}` : ''}
           {event.important ? t(" · Important") : ''}
+          {event.repeat || series ? <span className="repeat-chip">↻ {repeatLabel(event.repeat)}</span> : null}
         </p>
       </div>
       <span
@@ -108,10 +114,11 @@ export function EventRow({ event, onDropSwap }: { event: PlannerEvent; onDropSwa
         type="button"
         className="icon-btn"
         aria-label={t("Edit {0}", { 0: event.title })}
-        onClick={() => openComposer({ mode: 'edit', type: 'event', id: event.id })}
+        onClick={() => openComposer({ mode: 'edit', type: 'event', id: editId })}
       >
         <PencilIcon size={16} />
       </button>
+      {series ? null : (
       <button
         type="button"
         className="icon-btn row-delete"
@@ -123,6 +130,7 @@ export function EventRow({ event, onDropSwap }: { event: PlannerEvent; onDropSwa
       >
         <TrashIcon size={16} />
       </button>
+      )}
     </li>
   );
 }
@@ -159,10 +167,12 @@ export function TaskRow({
   onReschedule?: () => void;
   rescheduleLabel?: string;
 }) {
-  const { toggleTask, toggleSubtask, openComposer, deleteTask, flash, undo, startFocus } = usePlanner();
+  const { toggleTask, toggleSubtask, openComposer, deleteTask, flash, undo, startFocus, duplicateTask, moveTask } = usePlanner();
   const accent = categoryById(task.category).accent;
   const [open, setOpen] = useState(false);
   const stepsDone = task.subtasks.filter((item) => item.completed).length;
+  const today = todayISO();
+  const overdue = !task.completed && task.dueDate !== null && task.dueDate < today;
   return (
     <li
       className={cx('task', task.completed && 'is-done')}
@@ -199,6 +209,7 @@ export function TaskRow({
           {categoryById(task.category).label}
           {task.dueTime ? ` · ${displayTime(task.dueTime)}` : ''}
           {showDate && task.dueDate ? ` · ${formatWeekdayShort(task.dueDate)} ${dayNumber(task.dueDate)} ${formatMonthShort(task.dueDate)}` : ''}
+          {task.waiting ? <span className="repeat-chip">{t("Waiting on {0}", { 0: task.waiting })}</span> : null}
           {task.repeat ? <span className="repeat-chip" title={repeatLabel(task.repeat)}>↻ {repeatLabel(task.repeat).replace('Every ', '')}</span> : null}
           {task.subtasks.length ? (
             <button type="button" className="steps-chip" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
@@ -226,7 +237,19 @@ export function TaskRow({
             ))}
           </ul>
         ) : null}
-        {onReschedule ? (
+        {overdue ? (
+          <div className="snooze-row" role="group" aria-label={t("Snooze")}>
+            <button type="button" className="text-btn inline" onClick={() => moveTask(task.id, today)}>
+              {t("Move to today")}
+            </button>
+            <button type="button" className="text-btn inline" onClick={() => (onReschedule ? onReschedule() : moveTask(task.id, addDays(today, 1)))}>
+              {t("Move to tomorrow")}
+            </button>
+            <button type="button" className="text-btn inline" onClick={() => moveTask(task.id, addDays(today, 7))}>
+              {t("Next week")}
+            </button>
+          </div>
+        ) : onReschedule ? (
           <button type="button" className="text-btn inline" onClick={onReschedule}>
             {rescheduleLabel}
           </button>
@@ -244,6 +267,18 @@ export function TaskRow({
       >
         <GripIcon size={14} />
       </span>
+      <button
+        type="button"
+        className="icon-btn"
+        aria-label={t("Duplicate {0}", { 0: task.title })}
+        title={t("Duplicate")}
+        onClick={() => {
+          duplicateTask(task.id);
+          flash(t("Task “{0}” duplicated.", { 0: task.title }), { label: t("Undo"), run: undo });
+        }}
+      >
+        <span aria-hidden="true">⧉</span>
+      </button>
       {!task.completed ? (
         <button
           type="button"

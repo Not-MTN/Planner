@@ -1,4 +1,5 @@
 import { isValidISODate, isValidTime, toISODate } from './dates';
+import { rruleFor } from './recurrence';
 import type { EventInput, PlannerState, TaskInput } from './types';
 
 const BYDAY = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
@@ -48,6 +49,7 @@ export function toICS(state: PlannerState, now = new Date()): string {
       `SUMMARY:${escapeText(event.title)}`,
     );
     if (event.note) lines.push(`DESCRIPTION:${escapeText(event.note)}`);
+    if (event.repeat) lines.push(`RRULE:${rruleFor(event.repeat)}`);
     lines.push(`CATEGORIES:${escapeText(event.category)}`, 'END:VEVENT');
   }
   for (const block of state.fixedCommitments) {
@@ -151,14 +153,57 @@ export function parseICS(text: string): ICSImport {
   return { events, tasks, skipped };
 }
 
-export function downloadICS(state: PlannerState, date: string): void {
-  const blob = new Blob([toICS(state)], { type: 'text/calendar' });
+export function toBusyICS(state: PlannerState, now = new Date()): string {
+  const dtstamp = utcStamp(now.toISOString());
+  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Planner//Busy times//EN', 'CALSCALE:GREGORIAN'];
+  for (const event of state.events) {
+    if (event.completed) continue;
+    lines.push(
+      'BEGIN:VEVENT',
+      `UID:${event.id}@planner-busy`,
+      `DTSTAMP:${dtstamp}`,
+      `DTSTART:${stamp(event.date, event.startTime)}`,
+      `DTEND:${stamp(event.date, event.endTime ?? addHour(event.startTime))}`,
+      'SUMMARY:Busy',
+      'TRANSP:OPAQUE',
+    );
+    if (event.repeat) lines.push(`RRULE:${rruleFor(event.repeat)}`);
+    lines.push('END:VEVENT');
+  }
+  for (const block of state.fixedCommitments) {
+    const first = nextWeekday(block.weekday, now);
+    lines.push(
+      'BEGIN:VEVENT',
+      `UID:${block.id}@planner-busy-weekly`,
+      `DTSTAMP:${dtstamp}`,
+      `DTSTART:${stamp(first, block.startTime)}`,
+      `DTEND:${stamp(first, block.endTime)}`,
+      `RRULE:FREQ=WEEKLY;BYDAY=${BYDAY[block.weekday]}`,
+      'SUMMARY:Busy',
+      'TRANSP:OPAQUE',
+      'END:VEVENT',
+    );
+  }
+  lines.push('END:VCALENDAR');
+  return lines.map(fold).join('\r\n') + '\r\n';
+}
+
+function triggerDownload(body: string, name: string): void {
+  const blob = new Blob([body], { type: 'text/calendar' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `planner-${date}.ics`;
+  link.download = name;
   document.body.append(link);
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+export function downloadICS(state: PlannerState, date: string): void {
+  triggerDownload(toICS(state), `planner-${date}.ics`);
+}
+
+export function downloadBusyICS(state: PlannerState, date: string): void {
+  triggerDownload(toBusyICS(state), `planner-busy-${date}.ics`);
 }

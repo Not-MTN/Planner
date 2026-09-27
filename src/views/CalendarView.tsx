@@ -22,13 +22,17 @@ import { ChevronLeftIcon, ChevronRightIcon, PlusIcon, TickIcon } from '../icons'
 import {
   agendaWindow,
   calendarMarks,
+  dayLoad,
   dayScore,
   eventsForDate,
   habitStats,
   hasAgendaPlans,
   habitsDueOn,
   laterAgenda,
+  loadLevel,
+  quietestDay,
   tasksForDate,
+  weekLeftovers,
   type AgendaDay,
 } from '../logic';
 import { Meter } from '../components/ui';
@@ -42,7 +46,7 @@ const TABS: Array<{ id: CalendarTab; label: string }> = [
   { id: 'agenda', label: t("Upcoming") },
 ];
 
-const HORIZONS = [7, 14, 30] as const;
+const HORIZONS = [7, 14, 30, 90] as const;
 
 export function CalendarView() {
   const { route, navigate } = usePlanner();
@@ -91,7 +95,7 @@ export function CalendarView() {
 }
 
 function WeekBoard({ anchor, today }: { anchor: string; today: string }) {
-  const { navigate, state, openComposer, moveEvent, moveTask, resizeEvent, swapEventTimes, toggleTask, toggleEvent, toggleHabit } = usePlanner();
+  const { navigate, state, openComposer, moveEvent, moveTask, resizeEvent, swapEventTimes, toggleTask, toggleEvent, toggleHabit, copyWeek, flash, undo } = usePlanner();
   const days = weekDates(anchor);
   const showingThisWeek = days.includes(today);
   const [picked, setPicked] = useState(anchor);
@@ -111,11 +115,22 @@ function WeekBoard({ anchor, today }: { anchor: string; today: string }) {
           <button type="button" className="btn btn-ghost" disabled={showingThisWeek} onClick={() => navigate({ name: 'calendar', tab: 'week', date: today })}>
             {t("This week")}
           </button>
+          <button
+            type="button"
+            className="btn btn-soft"
+            onClick={() => {
+              copyWeek(anchor);
+              flash(t("Copied this week onto next week."), { label: t("Undo"), run: undo });
+            }}
+          >
+            {t("Copy to next week")}
+          </button>
           <button type="button" className="icon-btn round" aria-label={t("Next week")} onClick={() => shift(7)}>
             <ChevronRightIcon />
           </button>
         </div>
       </div>
+      <WeekReview today={today} />
 
       <div className="day-strip" role="group" aria-label={t("Days this week")}>
         {days.map((date) => (
@@ -181,7 +196,7 @@ function WeekBoard({ anchor, today }: { anchor: string; today: string }) {
               <div className="day-col-body">
                 {events.length === 0 && tasks.length === 0 ? <p className="open-label">{t("Open")}</p> : null}
                 {events.map((item) => {
-                  const fixed = Boolean(item.fixedCommitmentId);
+                  const fixed = Boolean(item.fixedCommitmentId || item.seriesEventId);
                   return (
                     <div
                       key={item.id}
@@ -223,14 +238,14 @@ function WeekBoard({ anchor, today }: { anchor: string; today: string }) {
                         disabled={fixed}
                         title={fixed ? t("Protected weekly time") : undefined}
                         onClick={() => {
-                          if (!fixed) openComposer({ mode: 'edit', type: 'event', id: item.id });
+                          if (!item.fixedCommitmentId) openComposer({ mode: 'edit', type: 'event', id: item.seriesEventId ?? item.id });
                         }}
                       >
                         <time>{displayTime(item.startTime)}{item.endTime ? `–${displayTime(item.endTime)}` : ''}</time>
                         <span>{item.title}</span>
                       </button>
                       {!fixed ? <ResizeHandle startTime={item.startTime} endTime={item.endTime} title={item.title} onResize={(end) => resizeEvent(item.id, end)} /> : null}
-                      {fixed ? <span className="fixed-chip-tag">{t("Fixed")}</span> : (
+                      {item.fixedCommitmentId ? <span className="fixed-chip-tag">{t("Fixed")}</span> : item.seriesEventId ? <span className="fixed-chip-tag">{t("Repeats")}</span> : (
                         <button
                           type="button"
                           className={cx('mini-check', item.completed && 'on')}
@@ -479,7 +494,7 @@ function MonthBoard({ anchor, today }: { anchor: string; today: string }) {
                       disabled={Boolean(event.fixedCommitmentId)}
                       className={event.fixedCommitmentId ? 'fixed-panel-item' : undefined}
                       onClick={() => {
-                        if (!event.fixedCommitmentId) openComposer({ mode: 'edit', type: 'event', id: event.id });
+                        if (!event.fixedCommitmentId) openComposer({ mode: 'edit', type: 'event', id: event.seriesEventId ?? event.id });
                       }}
                     >
                       <time>{displayTime(event.startTime)}</time>
@@ -519,13 +534,58 @@ function MonthBoard({ anchor, today }: { anchor: string; today: string }) {
   );
 }
 
+function WeekReview({ today }: { today: string }) {
+  const { state, carryWeekLeftovers, copyWeek, flash, undo } = usePlanner();
+  const left = weekLeftovers(state, today);
+  if (left.length === 0) return null;
+  return (
+    <section className="card week-review">
+      <header className="card-head">
+        <h2 className="kicker">{t("Review this week")}</h2>
+        <span className="quiet-hint">{t("{0} still open", { 0: left.length })}</span>
+      </header>
+      <ul className="panel-list">
+        {left.slice(0, 6).map((task) => (
+          <li key={task.id} className="plain">
+            <span>{task.title}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="future-actions">
+        <button
+          type="button"
+          className="btn btn-soft"
+          onClick={() => {
+            carryWeekLeftovers();
+            flash(t("Moved unfinished work to next week."), { label: t("Undo"), run: undo });
+          }}
+        >
+          {t("Carry to next week")}
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost"
+          onClick={() => {
+            copyWeek(today);
+            flash(t("Copied this week onto next week."), { label: t("Undo"), run: undo });
+          }}
+        >
+          {t("Copy the template")}
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function AgendaBoard({ today }: { today: string }) {
-  const { state, navigate, openComposer } = usePlanner();
+  const { state, navigate, openComposer, moveTask, flash, undo } = usePlanner();
   const [horizon, setHorizon] = useState<(typeof HORIZONS)[number]>(14);
   const days = agendaWindow(state, today, horizon);
   const later = laterAgenda(state, today, horizon);
   const visible = horizon === 7 ? days : days.filter((day, index) => index === 0 || hasAgendaPlans(day));
   const planned = days.filter(hasAgendaPlans).length;
+  const someday = state.tasks.filter((task) => !task.completed && !task.dueDate);
+  const quiet = quietestDay(days);
   const weekLeft = state.habits.flatMap((habit) => {
     if (habit.archived || habit.frequency.type !== 'weekly') return [];
     const stats = habitStats(state, habit, weekDates(today), today);
@@ -556,6 +616,26 @@ function AgendaBoard({ today }: { today: string }) {
         </div>
       </div>
       {weekLeft.length > 0 ? <p className="meta">{weekLeft.join(' · ')}</p> : null}
+      <div className="load-strip" role="list" aria-label={t("How full the days ahead are")}>
+        {days.slice(0, Math.min(days.length, horizon <= 14 ? horizon : 30)).map((day) => {
+          const load = dayLoad(day);
+          const level = loadLevel(load);
+          return (
+            <button
+              key={day.date}
+              type="button"
+              role="listitem"
+              className={cx('load-cell', `is-${level}`)}
+              title={`${formatFullDate(day.date)} · ${load === 0 ? t("Quiet") : t("{0} planned", { 0: load })}`}
+              aria-label={`${formatFullDate(day.date)} · ${load === 0 ? t("Quiet") : t("{0} planned", { 0: load })}`}
+              onClick={() => navigate({ name: 'day', date: day.date })}
+            >
+              <i />
+              <span>{dayNumber(day.date)}</span>
+            </button>
+          );
+        })}
+      </div>
       <label className="future-jump">
         <span>{t("Open a day")}</span>
         <input
@@ -580,6 +660,37 @@ function AgendaBoard({ today }: { today: string }) {
           />
         ))}
       </div>
+      {someday.length > 0 ? (
+        <section className="card">
+          <header className="card-head">
+            <h2 className="kicker">{t("Someday")}</h2>
+            {quiet ? (
+              <span className="quiet-hint">{t("Quietest day: {0}", { 0: formatFullDate(quiet.date) })}</span>
+            ) : null}
+          </header>
+          <ul className="panel-list">
+            {someday.slice(0, 12).map((task) => (
+              <li key={task.id} className="plain someday-row">
+                <button type="button" onClick={() => openComposer({ mode: 'edit', type: 'task', id: task.id })}>
+                  <span>{task.title}</span>
+                </button>
+                {quiet ? (
+                  <button
+                    type="button"
+                    className="btn btn-tiny"
+                    onClick={() => {
+                      moveTask(task.id, quiet.date);
+                      flash(t("Parked “{0}” on {1}.", { 0: task.title, 1: formatFullDate(quiet.date) }), { label: t("Undo"), run: undo });
+                    }}
+                  >
+                    {t("Park there")}
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       {later.events.length + later.tasks.length + later.deadlines.length > 0 ? (
         <section className="card">
           <header className="card-head">
@@ -588,7 +699,7 @@ function AgendaBoard({ today }: { today: string }) {
           <ul className="panel-list">
             {later.events.map((event: PlannerEvent) => (
               <li key={event.id}>
-                <button type="button" onClick={() => openComposer({ mode: 'edit', type: 'event', id: event.id })}>
+                <button type="button" onClick={() => openComposer({ mode: 'edit', type: 'event', id: event.seriesEventId ?? event.id })}>
                   <time>{event.date.slice(5)}</time>
                   <span>{event.title}</span>
                 </button>
@@ -649,9 +760,9 @@ function DayCard({
         {open ? <p className="open-label">{t("Open")}</p> : null}
         <ul className="plan-list">
           {day.events.map((event) => (
-            <li key={event.id} className={cx('plan-line', event.completed && 'is-done', `accent-${categoryById(event.category).accent}`, event.fixedCommitmentId && 'is-fixed')}>
-              {event.fixedCommitmentId ? (
-                <span className="fixed-plan-mark" aria-label={t("Protected weekly time")}>↻</span>
+            <li key={event.id} className={cx('plan-line', event.completed && 'is-done', `accent-${categoryById(event.category).accent}`, (event.fixedCommitmentId || event.seriesEventId) && 'is-fixed')}>
+              {event.fixedCommitmentId || event.seriesEventId ? (
+                <span className="fixed-plan-mark" aria-label={event.fixedCommitmentId ? t("Protected weekly time") : t("Repeats")}>↻</span>
               ) : (
                 <button
                   type="button"
@@ -665,9 +776,9 @@ function DayCard({
               )}
               <time>{displayTime(event.startTime)}</time>
               {event.fixedCommitmentId ? <span className="item-title">{event.title}</span> : (
-                <button type="button" className="item-title" onClick={() => openComposer({ mode: 'edit', type: 'event', id: event.id })}>{event.title}</button>
+                <button type="button" className="item-title" onClick={() => openComposer({ mode: 'edit', type: 'event', id: event.seriesEventId ?? event.id })}>{event.title}</button>
               )}
-              {event.fixedCommitmentId ? <small className="fixed-plan-tag">{t("Fixed")}</small> : null}
+              {event.fixedCommitmentId ? <small className="fixed-plan-tag">{t("Fixed")}</small> : event.seriesEventId ? <small className="fixed-plan-tag">{t("Repeats")}</small> : null}
             </li>
           ))}
           {day.tasks.map((task) => (
