@@ -50,7 +50,7 @@ Settings → **Language** switches the whole interface to Persian with a right-t
 - **Undo & redo** — every change is undoable (`⌘Z` / `⌘⇧Z`), and removals show a toast with an Undo button. No more confirm dialogs for small mistakes.
 - **Focus timer** — pick a task (or don't), choose 15–60 minutes, and get a full-screen breathing timer with a soft chime at the end.
 - **Habits** — streaks (current & best), a week strip, and a 12-week heatmap you can tap to fill in any day.
-- **Calendar** — drag events between days in Week view, see the month at a glance, and scroll the days ahead in Upcoming.
+- **Calendar** — drag events between days in Week view, see the month at a glance, and scroll the days ahead in Upcoming (7 / 14 / 30 / 90 days). A load strip shows quiet vs full days; undated tasks sit in **Someday** and can park on the quietest day.
 - **Insights** — day streak, weekly bars, a 7/30/90-day completion trend, a task/event/habit completion donut, habit consistency, and goal progress.
 - **AI Coach (xAI / Grok)** — describe a day, week, month (30 days), or custom plan; get draft tasks, timed events, habits, and gentle wellbeing ideas. Upload a PNG/JPG (up to 3 MB) of a written plan for image reading. Review the draft before adding it; one undo reverses the whole batch.
 - **Protected weekly times** — add a repeating class, shift, or appointment (for example Tuesday 08:00–09:00). It appears on the calendar and the AI rejects overlapping events.

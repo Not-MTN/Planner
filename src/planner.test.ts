@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { monthGrid, startOfWeek, addDays, isValidISODate, weekDates } from './dates';
-import { agendaWindow, dayScore, essentialHabits, eventsForDate, fixedEventsForDate, goalProgress, habitStats, habitStreaks, hasAgendaPlans, insightTotals, isDueOn, isPlannedDay, laterAgenda } from './logic';
+import { agendaWindow, dayLoad, dayScore, essentialHabits, eventsForDate, fixedEventsForDate, goalProgress, habitStats, habitStreaks, hasAgendaPlans, insightTotals, isDueOn, isPlannedDay, laterAgenda, loadLevel, quietestDay } from './logic';
 import { addEvent, addFixedCommitment, addGoal, addHabit, addHabits, addMilestone, addNote, addTask, clearCompletedTasks, duplicateTask, moveTask, swapEventTimes, toggleHabit, toggleMilestone, toggleTask, updateEvent } from './mutate';
 import { parseQuickAdd } from './quickAdd';
 import { parseHash, toHash } from './route';
@@ -292,6 +292,12 @@ describe('planner logic', () => {
     expect(hasAgendaPlans(days[1])).toBe(true);
     expect(laterAgenda(state, '2026-09-27', 1).events).toHaveLength(1);
     expect(laterAgenda(state, '2026-09-27', 7).events).toHaveLength(0);
+    expect(dayLoad(days[1])).toBeGreaterThan(0);
+    expect(loadLevel(0)).toBe('quiet');
+    expect(loadLevel(2)).toBe('steady');
+    expect(loadLevel(5)).toBe('full');
+    expect(quietestDay(days)?.date).toBe('2026-09-28');
+    expect(agendaWindow(state, '2026-09-27', 90)).toHaveLength(90);
   });
 });
 

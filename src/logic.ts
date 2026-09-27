@@ -295,8 +295,25 @@ export function hasAgendaPlans(day: AgendaDay): boolean {
 }
 
 export function agendaWindow(state: PlannerState, today: string, horizon: number): AgendaDay[] {
-  const count = Math.min(60, Math.max(1, horizon));
+  const count = Math.min(90, Math.max(1, horizon));
   return Array.from({ length: count }, (_, index) => agendaDay(state, addDays(today, index + 1)));
+}
+
+export function dayLoad(day: AgendaDay): number {
+  return day.events.length + day.tasks.filter((task) => !task.completed).length + day.deadlines.length;
+}
+
+export type LoadLevel = 'quiet' | 'steady' | 'full';
+
+export function loadLevel(count: number): LoadLevel {
+  if (count <= 0) return 'quiet';
+  if (count <= 2) return 'steady';
+  return 'full';
+}
+
+export function quietestDay(days: AgendaDay[]): AgendaDay | null {
+  if (days.length === 0) return null;
+  return [...days].sort((a, b) => dayLoad(a) - dayLoad(b) || a.date.localeCompare(b.date))[0];
 }
 
 export function laterAgenda(state: PlannerState, today: string, horizon: number): {
@@ -304,7 +321,7 @@ export function laterAgenda(state: PlannerState, today: string, horizon: number)
   tasks: Task[];
   deadlines: { id: string; title: string; date: string }[];
 } {
-  const after = addDays(today, Math.min(60, Math.max(1, horizon)));
+  const after = addDays(today, Math.min(90, Math.max(1, horizon)));
   return {
     events: state.events
       .filter((event) => !event.completed && event.date > after)

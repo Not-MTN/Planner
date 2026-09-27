@@ -22,12 +22,15 @@ import { ChevronLeftIcon, ChevronRightIcon, PlusIcon, TickIcon } from '../icons'
 import {
   agendaWindow,
   calendarMarks,
+  dayLoad,
   dayScore,
   eventsForDate,
   habitStats,
   hasAgendaPlans,
   habitsDueOn,
   laterAgenda,
+  loadLevel,
+  quietestDay,
   tasksForDate,
   type AgendaDay,
 } from '../logic';
@@ -42,7 +45,7 @@ const TABS: Array<{ id: CalendarTab; label: string }> = [
   { id: 'agenda', label: t("Upcoming") },
 ];
 
-const HORIZONS = [7, 14, 30] as const;
+const HORIZONS = [7, 14, 30, 90] as const;
 
 export function CalendarView() {
   const { route, navigate } = usePlanner();
@@ -520,12 +523,14 @@ function MonthBoard({ anchor, today }: { anchor: string; today: string }) {
 }
 
 function AgendaBoard({ today }: { today: string }) {
-  const { state, navigate, openComposer } = usePlanner();
+  const { state, navigate, openComposer, moveTask, flash, undo } = usePlanner();
   const [horizon, setHorizon] = useState<(typeof HORIZONS)[number]>(14);
   const days = agendaWindow(state, today, horizon);
   const later = laterAgenda(state, today, horizon);
   const visible = horizon === 7 ? days : days.filter((day, index) => index === 0 || hasAgendaPlans(day));
   const planned = days.filter(hasAgendaPlans).length;
+  const someday = state.tasks.filter((task) => !task.completed && !task.dueDate);
+  const quiet = quietestDay(days);
   const weekLeft = state.habits.flatMap((habit) => {
     if (habit.archived || habit.frequency.type !== 'weekly') return [];
     const stats = habitStats(state, habit, weekDates(today), today);
@@ -556,6 +561,26 @@ function AgendaBoard({ today }: { today: string }) {
         </div>
       </div>
       {weekLeft.length > 0 ? <p className="meta">{weekLeft.join(' · ')}</p> : null}
+      <div className="load-strip" role="list" aria-label={t("How full the days ahead are")}>
+        {days.slice(0, Math.min(days.length, horizon <= 14 ? horizon : 30)).map((day) => {
+          const load = dayLoad(day);
+          const level = loadLevel(load);
+          return (
+            <button
+              key={day.date}
+              type="button"
+              role="listitem"
+              className={cx('load-cell', `is-${level}`)}
+              title={`${formatFullDate(day.date)} · ${load === 0 ? t("Quiet") : t("{0} planned", { 0: load })}`}
+              aria-label={`${formatFullDate(day.date)} · ${load === 0 ? t("Quiet") : t("{0} planned", { 0: load })}`}
+              onClick={() => navigate({ name: 'day', date: day.date })}
+            >
+              <i />
+              <span>{dayNumber(day.date)}</span>
+            </button>
+          );
+        })}
+      </div>
       <label className="future-jump">
         <span>{t("Open a day")}</span>
         <input
@@ -580,6 +605,37 @@ function AgendaBoard({ today }: { today: string }) {
           />
         ))}
       </div>
+      {someday.length > 0 ? (
+        <section className="card">
+          <header className="card-head">
+            <h2 className="kicker">{t("Someday")}</h2>
+            {quiet ? (
+              <span className="quiet-hint">{t("Quietest day: {0}", { 0: formatFullDate(quiet.date) })}</span>
+            ) : null}
+          </header>
+          <ul className="panel-list">
+            {someday.slice(0, 12).map((task) => (
+              <li key={task.id} className="plain someday-row">
+                <button type="button" onClick={() => openComposer({ mode: 'edit', type: 'task', id: task.id })}>
+                  <span>{task.title}</span>
+                </button>
+                {quiet ? (
+                  <button
+                    type="button"
+                    className="btn btn-tiny"
+                    onClick={() => {
+                      moveTask(task.id, quiet.date);
+                      flash(t("Parked “{0}” on {1}.", { 0: task.title, 1: formatFullDate(quiet.date) }), { label: t("Undo"), run: undo });
+                    }}
+                  >
+                    {t("Park there")}
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       {later.events.length + later.tasks.length + later.deadlines.length > 0 ? (
         <section className="card">
           <header className="card-head">
