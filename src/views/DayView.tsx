@@ -1,0 +1,353 @@
+import { useEffect, useRef, type ReactNode } from 'react';
+import { usePlanner } from '../context';
+import { cx } from '../cx';
+import {
+  addDays,
+  dayNumber,
+  dayRelation,
+  formatClock,
+  formatMonthLong,
+  formatWeekdayLong,
+  motivationFor,
+  timeToMinutes,
+  todayISO,
+} from '../dates';
+import { useNow } from '../hooks';
+import {
+  dayScore,
+  essentialHabits,
+  eventsForDate,
+  habitsDueOn,
+  isEmptyState,
+  overdueTasks,
+  progressPhrase,
+  tasksForDate,
+  upcomingFocus,
+} from '../logic';
+import { QuickAddBar } from '../components/QuickAddBar';
+import { WelcomeCard } from '../components/WelcomeCard';
+import { EventRow, HabitRow, IntentionField, NowMark, TaskRow } from '../components/items';
+import { Empty, Meter, Ring } from '../components/ui';
+import { ChevronLeftIcon, ChevronRightIcon, PlusIcon, StopwatchIcon } from '../icons';
+import type { Habit } from '../types';
+
+export function DayView({ date }: { date: string }) {
+  const planner = usePlanner();
+  const { state, openComposer, navigate, swapEventTimes, swapTasks, moveTask, flash, celebrate, startFocus } = planner;
+  const now = useNow(20000);
+  const today = todayISO(now);
+  const isToday = date === today;
+  const events = eventsForDate(state, date);
+  const tasks = tasksForDate(state, date);
+  const openTasks = tasks.filter((task) => !task.completed);
+  const doneTasks = tasks.filter((task) => task.completed);
+  const habits = habitsDueOn(state, date).filter((habit) => !habit.essential);
+  const essentials = essentialHabits(state, date);
+  const carried = overdueTasks(state, date);
+  const score = dayScore(state, date, true);
+  const upcoming = isToday ? upcomingFocus(state, today) : [];
+  const clock = formatClock(now);
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const fresh = isEmptyState(state);
+
+  const celebrateRef = useRef(false);
+  useEffect(() => {
+    const complete = score.total > 0 && score.done === score.total;
+    if (complete && !celebrateRef.current) {
+      celebrate();
+      flash('Day complete. Beautifully done.');
+    }
+    celebrateRef.current = complete;
+  }, [score.total, score.done, celebrate, flash]);
+
+  const timeline: ReactNode[] = [];
+  let placedNow = false;
+  for (const event of events) {
+    if (isToday && !placedNow && nowMin <= timeToMinutes(event.startTime)) {
+      placedNow = true;
+      timeline.push(
+        <li key="now" className="timeline-slot">
+          <NowMark time={clock} />
+        </li>,
+      );
+    }
+    timeline.push(
+      <EventRow
+        key={event.id}
+        event={event}
+        onDropSwap={(sourceId) => {
+          if (sourceId !== event.id) swapEventTimes(sourceId, event.id);
+        }}
+      />,
+    );
+  }
+  if (isToday && !placedNow) {
+    timeline.push(
+      <li key="now" className="timeline-slot">
+        <NowMark time={clock} />
+      </li>,
+    );
+  }
+
+  return (
+    <div className="view">
+      <header className={cx('hero', !isToday && 'hero-plain')}>
+        <div className="hero-copy">
+          <p className="kicker">{isToday ? 'Personal Planner' : 'Day planner'}</p>
+          <h1 className="hero-title">{formatWeekdayLong(date)}</h1>
+          <p className="hero-date">
+            <span className="hero-date-num">{dayNumber(date)}</span> {formatMonthLong(date)}
+            {isToday ? <span className="clock">{clock}</span> : null}
+          </p>
+          {isToday ? <p className="quote">{motivationFor(date)}</p> : null}
+          <QuickAddBar defaultDate={date} />
+          {upcoming.length > 0 ? (
+            <ul className="coming-up">
+              {upcoming.map((item) => (
+                <li key={`${item.kind}-${item.date}-${item.title}`}>
+                  <span>{formatWeekdayLong(item.date).slice(0, 3)} {dayNumber(item.date)}</span>
+                  {item.title}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {isToday ? (
+            <div className="hero-links">
+              <button type="button" className="text-btn" onClick={() => navigate({ name: 'calendar', tab: 'agenda', date: today })}>
+                {dayRelation(addDays(today, 1), today)} and beyond
+              </button>
+            </div>
+          ) : (
+            <div className="pager hero-pager">
+              <button type="button" className="icon-btn round" aria-label="Previous day" onClick={() => navigate({ name: 'day', date: addDays(date, -1) })}>
+                <ChevronLeftIcon />
+              </button>
+              <button type="button" className="btn btn-ghost" disabled={date === today} onClick={() => navigate({ name: 'day', date: today })}>
+                Today
+              </button>
+              <button type="button" className="icon-btn round" aria-label="Next day" onClick={() => navigate({ name: 'day', date: addDays(date, 1) })}>
+                <ChevronRightIcon />
+              </button>
+            </div>
+          )}
+        </div>
+
+        <aside className="card hero-panel">
+          {!fresh ? <img className="postcard" src="/img/hero-day.jpg" alt="" loading="lazy" /> : null}
+          <p className="kicker">Progress</p>
+          <Ring value={score.ratio ?? 0} label={score.total ? `${score.done}/${score.total}` : 'Open'} caption="done today" />
+          <p className="progress-phrase">{progressPhrase(score.ratio)}</p>
+          <p className="meta">
+            {score.eventsDone}/{score.eventsTotal} events · {score.tasksDone}/{score.tasksTotal} tasks · {score.habitsDone}/{score.habitsTotal} habits
+          </p>
+          <div className="qa-row">
+            <button type="button" className="qa-tile accent-peach" onClick={() => openComposer({ mode: 'create', type: 'task', date })}>
+              <span className="qa-icon"><PlusIcon size={15} /></span>
+              Task
+            </button>
+            <button type="button" className="qa-tile accent-sage" onClick={() => openComposer({ mode: 'create', type: 'event', date })}>
+              <span className="qa-icon"><PlusIcon size={15} /></span>
+              Event
+            </button>
+            <button
+              type="button"
+              className="qa-tile accent-lav"
+              onClick={() => startFocus({ taskId: null, title: 'Focus session', minutes: 25 })}
+            >
+              <span className="qa-icon"><StopwatchIcon size={15} /></span>
+              Focus
+            </button>
+          </div>
+        </aside>
+      </header>
+
+      {fresh && isToday ? <WelcomeCard /> : null}
+      {essentials.length > 0 ? <EssentialsCard date={date} habits={essentials} /> : null}
+
+      <IntentionField key={date} date={date} />
+
+      <div className="today-grid">
+        <section className="card timeline-card">
+          <header className="card-head">
+            <div>
+              <p className="kicker">Schedule</p>
+              <h2 className="card-title">Timeline</h2>
+            </div>
+            <button type="button" className="btn btn-tiny" onClick={() => openComposer({ mode: 'create', type: 'event', date })}>
+              Add event
+            </button>
+          </header>
+          {events.length === 0 ? (
+            <div className="timeline timeline-empty">
+              {isToday ? <NowMark time={clock} /> : null}
+              <Empty
+                image="/img/spot-calendar.jpg"
+                title="Nothing timed yet."
+                text="Add a time only for what you want to protect."
+                action={
+                  <button type="button" className="btn btn-soft" onClick={() => openComposer({ mode: 'create', type: 'event', date })}>
+                    Add event
+                  </button>
+                }
+              />
+            </div>
+          ) : (
+            <ol className="timeline">{timeline}</ol>
+          )}
+        </section>
+
+        <div className="stack">
+          <section className="card">
+            <header className="card-head">
+              <div>
+                <p className="kicker">Checklist</p>
+                <h2 className="card-title">Tasks</h2>
+              </div>
+              <button type="button" className="btn btn-tiny" onClick={() => navigate({ name: 'tasks' })}>
+                All tasks
+              </button>
+            </header>
+            {carried.length > 0 ? (
+              <div className="carried">
+                <p>Carried over</p>
+                <ul className="item-list">
+                  {carried.slice(0, 4).map((task) => (
+                    <TaskRow
+                      key={task.id}
+                      task={task}
+                      showDate
+                      onReschedule={() => moveTask(task.id, addDays(date, 1))}
+                      rescheduleLabel="Move to tomorrow"
+                      onDropSwap={(sourceId) => sourceId !== task.id && swapTasks(sourceId, task.id)}
+                    />
+                  ))}
+                </ul>
+                {carried.length > 4 ? (
+                  <button type="button" className="text-btn" onClick={() => navigate({ name: 'tasks' })}>
+                    {carried.length - 4} more
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+            {openTasks.length === 0 && doneTasks.length === 0 ? (
+              <Empty
+                image="/img/spot-tasks.jpg"
+                title="No tasks for this day."
+                text="A short list is easier to finish."
+                action={
+                  <button type="button" className="btn btn-soft" onClick={() => openComposer({ mode: 'create', type: 'task', date })}>
+                    Add task
+                  </button>
+                }
+              />
+            ) : (
+              <ul className="item-list">
+                {[...openTasks, ...doneTasks].map((task) => (
+                  <TaskRow
+                    key={task.id}
+                    task={task}
+                    onDropSwap={(sourceId) => {
+                      if (sourceId !== task.id) swapTasks(sourceId, task.id);
+                    }}
+                  />
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="card wash-lav">
+            <header className="card-head">
+              <div>
+                <p className="kicker">Repeat</p>
+                <h2 className="card-title">Habits</h2>
+              </div>
+              <button type="button" className="btn btn-tiny" onClick={() => navigate({ name: 'habits' })}>
+                Tracker
+              </button>
+            </header>
+            {habits.length === 0 ? (
+              <Empty
+                image="/img/spot-library.jpg"
+                title="No habits for this day."
+                text="Start with one thing you want to repeat."
+                action={
+                  <button type="button" className="btn btn-soft" onClick={() => openComposer({ mode: 'create', type: 'habit' })}>
+                    Add habit
+                  </button>
+                }
+              />
+            ) : (
+              <ul className="item-list">
+                {habits.map((habit) => (
+                  <HabitRow key={habit.id} habit={habit} date={date} />
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <DayNotes date={date} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DayNotes({ date }: { date: string }) {
+  const { state, openComposer } = usePlanner();
+  const notes = state.notes.filter((note) => note.date === date);
+  return (
+    <section className="card">
+      <header className="card-head">
+        <h2 className="kicker">Notes for this day</h2>
+        <button type="button" className="btn btn-tiny" onClick={() => openComposer({ mode: 'create', type: 'note', date })}>
+          Add note
+        </button>
+      </header>
+      {notes.length === 0 ? (
+        <p className="empty-inline">Nothing tied to this day yet.</p>
+      ) : (
+        <ul className="mini-notes">
+          {notes.map((note) => (
+            <li key={note.id}>
+              <button type="button" onClick={() => openComposer({ mode: 'edit', type: 'note', id: note.id })}>
+                <strong>{note.title}</strong>
+                <span>{note.body || 'Empty note'}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function EssentialsCard({ date, habits }: { date: string; habits: Habit[] }) {
+  const { state } = usePlanner();
+  const done = habits.filter((habit) =>
+    state.completions.some((item) => item.habitId === habit.id && item.date === date),
+  ).length;
+  const complete = habits.length > 0 && done === habits.length;
+  return (
+    <section className="card essentials-card">
+      <header className="card-head">
+        <div>
+          <p className="kicker">Must-dos for every day</p>
+          <h2 className="card-title">Daily essentials</h2>
+        </div>
+        {complete ? (
+          <span className="chip essentials-done">All done ✓</span>
+        ) : (
+          <div className="essentials-progress">
+            <span className="essentials-count">{done}/{habits.length}</span>
+            <Meter value={habits.length === 0 ? 0 : done / habits.length} label="Daily essentials progress" />
+          </div>
+        )}
+      </header>
+      <ul className="item-list essentials-list">
+        {habits.map((habit) => (
+          <HabitRow key={habit.id} habit={habit} date={date} />
+        ))}
+      </ul>
+    </section>
+  );
+}

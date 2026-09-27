@@ -1,0 +1,70 @@
+import { useMemo, useState, type FormEvent } from 'react';
+import { usePlanner } from '../context';
+import { suggestTime, todayISO } from '../dates';
+import { PlusIcon } from '../icons';
+import { parseQuickAdd } from '../quickAdd';
+
+export function QuickAddBar({ defaultDate, placeholder }: { defaultDate?: string | null; placeholder?: string }) {
+  const { addTask, addEvent, flash, undo } = usePlanner();
+  const [text, setText] = useState('');
+  const fallback = defaultDate ?? todayISO();
+  const parse = useMemo(() => (text.trim() ? parseQuickAdd(text, defaultDate ?? null) : null), [text, defaultDate]);
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (!parse) return;
+    if (parse.kind === 'event') {
+      addEvent({
+        title: parse.title,
+        date: parse.date ?? fallback,
+        startTime: parse.startTime ?? suggestTime(),
+        endTime: parse.endTime,
+        category: parse.category ?? 'personal',
+        note: '',
+        important: false,
+      });
+      flash(`Event “${parse.title}” added.`, { label: 'Undo', run: undo });
+    } else {
+      addTask({
+        title: parse.title,
+        priority: parse.priority ?? 'medium',
+        dueDate: parse.date ?? defaultDate ?? null,
+        dueTime: parse.startTime,
+        category: parse.category ?? 'personal',
+        note: '',
+        goalId: null,
+      });
+      flash(`Task “${parse.title}” added.`, { label: 'Undo', run: undo });
+    }
+    setText('');
+  };
+
+  return (
+    <form className="quick-add" onSubmit={submit}>
+      <div className="quick-add-row">
+        <span className="quick-add-icon" aria-hidden="true">
+          <PlusIcon size={16} />
+        </span>
+        <input
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          placeholder={placeholder ?? 'Add anything — try “Call mom tomorrow 5pm #work !high”'}
+          aria-label="Quick add"
+          maxLength={200}
+        />
+        <button type="submit" className="btn btn-primary btn-small" disabled={!parse}>
+          Add
+        </button>
+      </div>
+      {parse ? (
+        <div className="quick-add-chips" aria-hidden="true">
+          {parse.chips.map((chip) => (
+            <span key={chip} className="chip">
+              {chip}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </form>
+  );
+}

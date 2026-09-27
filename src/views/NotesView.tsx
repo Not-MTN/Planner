@@ -7,7 +7,7 @@ import { matchesQuery } from '../logic';
 import { Empty } from '../components/ui';
 
 export function NotesView() {
-  const { state, openComposer, requestConfirm, deleteNote } = usePlanner();
+  const { state, openComposer, deleteNote, flash, undo } = usePlanner();
   const [kind, setKind] = useState<'all' | (typeof NOTE_KINDS)[number]['id']>('all');
   const [query, setQuery] = useState('');
   const notes = useMemo(
@@ -54,6 +54,7 @@ export function NotesView() {
       {state.notes.length === 0 ? (
         <section className="card">
           <Empty
+            image="/img/spot-notes.jpg"
             title="No notes yet."
             text="A quick note, an idea, a reminder, or a short journal entry."
             action={
@@ -85,13 +86,10 @@ export function NotesView() {
                 <button
                   type="button"
                   className="text-btn"
-                  onClick={() =>
-                    requestConfirm({
-                      title: 'Remove this note?',
-                      body: 'This can’t be undone.',
-                      onConfirm: () => deleteNote(note.id),
-                    })
-                  }
+                  onClick={() => {
+                    deleteNote(note.id);
+                    flash(`Note “${note.title}” removed.`, { label: 'Undo', run: undo });
+                  }}
                 >
                   Remove
                 </button>

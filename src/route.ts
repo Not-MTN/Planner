@@ -1,37 +1,47 @@
-import { isValidISODate, todayISO } from './dates';
+import { formatFullDate, isValidISODate, todayISO } from './dates';
+
+export type CalendarTab = 'week' | 'month' | 'agenda';
 
 export type Route =
   | { name: 'today' }
-  | { name: 'daily'; date: string }
-  | { name: 'weekly'; date: string }
-  | { name: 'monthly'; year: number; month: number }
+  | { name: 'day'; date: string }
+  | { name: 'calendar'; tab: CalendarTab; date: string }
   | { name: 'tasks' }
   | { name: 'habits' }
   | { name: 'goals' }
   | { name: 'notes' }
-  | { name: 'progress' }
-  | { name: 'future' };
+  | { name: 'insights' };
 
-const NAMES = new Set(['today', 'tasks', 'habits', 'goals', 'notes', 'progress', 'future']);
+const PLAIN_NAMES = new Set(['today', 'tasks', 'habits', 'goals', 'notes', 'insights']);
+const CALENDAR_TABS = new Set(['week', 'month', 'agenda']);
+
+export function calendarDateFor(year: number, month: number): string {
+  return `${year}-${String(month).padStart(2, '0')}-01`;
+}
 
 export function parseHash(hash: string, now = new Date()): Route {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
-  const [name, a, b] = parts;
-  if (name === 'daily' && a && isValidISODate(a)) return { name: 'daily', date: a };
-  if (name === 'weekly' && a && isValidISODate(a)) return { name: 'weekly', date: a };
-  if (name === 'month' || name === 'monthly') {
+  const [head, a, b] = parts;
+  const today = todayISO(now);
+  if (!head || head === 'today') return { name: 'today' };
+  if (head === 'day' && a && isValidISODate(a)) return { name: 'day', date: a };
+  if (head === 'calendar' && a && CALENDAR_TABS.has(a)) {
+    return { name: 'calendar', tab: a as CalendarTab, date: b && isValidISODate(b) ? b : today };
+  }
+  // Legacy routes from earlier versions keep working.
+  if (head === 'daily' && a && isValidISODate(a)) return { name: 'day', date: a };
+  if (head === 'weekly' && a && isValidISODate(a)) return { name: 'calendar', tab: 'week', date: a };
+  if (head === 'month' || head === 'monthly') {
     const year = Number(a);
     const month = Number(b);
     if (Number.isInteger(year) && year >= 1970 && year <= 2100 && Number.isInteger(month) && month >= 1 && month <= 12) {
-      return { name: 'monthly', year, month };
+      return { name: 'calendar', tab: 'month', date: calendarDateFor(year, month) };
     }
-    return {
-      name: 'monthly',
-      year: now.getFullYear(),
-      month: now.getMonth() + 1,
-    };
+    return { name: 'calendar', tab: 'month', date: today };
   }
-  if (name && NAMES.has(name)) return { name: name as 'today' };
+  if (head === 'future') return { name: 'calendar', tab: 'agenda', date: today };
+  if (head === 'progress') return { name: 'insights' };
+  if (PLAIN_NAMES.has(head)) return { name: head as 'today' };
   return { name: 'today' };
 }
 
@@ -39,12 +49,10 @@ export function toHash(route: Route): string {
   switch (route.name) {
     case 'today':
       return '#/today';
-    case 'daily':
-      return `#/daily/${route.date}`;
-    case 'weekly':
-      return `#/weekly/${route.date}`;
-    case 'monthly':
-      return `#/month/${route.year}/${route.month}`;
+    case 'day':
+      return `#/day/${route.date}`;
+    case 'calendar':
+      return `#/calendar/${route.tab}/${route.date}`;
     default:
       return `#/${route.name}`;
   }
@@ -58,12 +66,10 @@ export function routeTitle(route: Route): string {
   switch (route.name) {
     case 'today':
       return 'Today';
-    case 'daily':
-      return 'Daily';
-    case 'weekly':
-      return 'Week';
-    case 'monthly':
-      return 'Month';
+    case 'day':
+      return formatFullDate(route.date);
+    case 'calendar':
+      return 'Calendar';
     case 'tasks':
       return 'Tasks';
     case 'habits':
@@ -72,13 +78,7 @@ export function routeTitle(route: Route): string {
       return 'Goals';
     case 'notes':
       return 'Notes';
-    case 'progress':
-      return 'Progress';
-    case 'future':
-      return 'Future';
+    case 'insights':
+      return 'Insights';
   }
-}
-
-export function todayRouteDate(now = new Date()): string {
-  return todayISO(now);
 }

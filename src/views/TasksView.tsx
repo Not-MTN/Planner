@@ -5,6 +5,7 @@ import { addDays, formatFullDate, todayISO } from '../dates';
 import { matchesQuery } from '../logic';
 import { TaskRow } from '../components/items';
 import { Empty } from '../components/ui';
+import { SparklesIcon } from '../icons';
 import type { Task } from '../types';
 
 const FILTERS = [
@@ -17,10 +18,20 @@ const FILTERS = [
 type FilterId = (typeof FILTERS)[number]['id'];
 
 export function TasksView() {
-  const { state, openComposer, swapTasks, moveTask } = usePlanner();
+  const { state, openComposer, swapTasks, moveTask, clearCompletedTasks, loadSample, isEmpty } = useTaskViewHelpers();
   const [filter, setFilter] = useState<FilterId>('open');
   const [query, setQuery] = useState('');
   const today = todayISO();
+
+  const counts = useMemo(
+    () => ({
+      open: state.tasks.filter((task) => !task.completed).length,
+      today: state.tasks.filter((task) => task.dueDate === today).length,
+      upcoming: state.tasks.filter((task) => !task.completed && task.dueDate !== null && task.dueDate > today).length,
+      done: state.tasks.filter((task) => task.completed).length,
+    }),
+    [state.tasks, today],
+  );
 
   const groups = useMemo(() => {
     const matched = state.tasks.filter((task) =>
@@ -33,23 +44,24 @@ export function TasksView() {
       return !task.completed;
     });
     if (filter === 'done') return [{ id: 'done', label: 'Completed', tasks: sortTasks(visible) }];
-    const carried = visible.filter((task) => task.dueDate !== null && task.dueDate < today);
-    const dueToday = visible.filter((task) => task.dueDate === today);
-    const later = visible.filter((task) => task.dueDate !== null && task.dueDate > today);
-    const inbox = visible.filter((task) => !task.dueDate);
-    const byDate = new Map<string, Task[]>();
-    for (const task of later) {
-      const key = task.dueDate as string;
-      byDate.set(key, [...(byDate.get(key) ?? []), task]);
-    }
-    return [
-      { id: 'carried', label: 'Carried over', tasks: sortTasks(carried) },
-      { id: 'today', label: 'Today', tasks: sortTasks(dueToday) },
-      ...[...byDate.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, tasks]) => ({
+    if (filter === 'upcoming') {
+      const byDate = new Map<string, Task[]>();
+      for (const task of visible) {
+        const key = task.dueDate as string;
+        byDate.set(key, [...(byDate.get(key) ?? []), task]);
+      }
+      return [...byDate.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, tasks]) => ({
         id: date,
         label: formatFullDate(date),
         tasks: sortTasks(tasks),
-      })),
+      }));
+    }
+    const carried = visible.filter((task) => task.dueDate !== null && task.dueDate < today);
+    const dueToday = visible.filter((task) => task.dueDate === today);
+    const inbox = visible.filter((task) => !task.dueDate);
+    return [
+      { id: 'carried', label: 'Carried over', tasks: sortTasks(carried) },
+      { id: 'today', label: 'Today', tasks: sortTasks(dueToday) },
       { id: 'inbox', label: 'Anytime', tasks: sortTasks(inbox) },
     ].filter((group) => group.tasks.length > 0);
   }, [state.tasks, filter, query, today]);
@@ -78,6 +90,7 @@ export function TasksView() {
               onClick={() => setFilter(item.id)}
             >
               {item.label}
+              <span className="filter-count">{counts[item.id]}</span>
             </button>
           ))}
         </div>
@@ -89,12 +102,15 @@ export function TasksView() {
       {state.tasks.length === 0 ? (
         <section className="card">
           <Empty
+            image="/img/spot-tasks.jpg"
             title="Your list is clear."
             text="Add a task when something actually needs a place."
             action={
-              <button type="button" className="btn btn-primary" onClick={() => openComposer({ mode: 'create', type: 'task', date: today })}>
-                Add task
-              </button>
+              isEmpty ? (
+                <button type="button" className="btn btn-ghost" onClick={loadSample}>
+                  <SparklesIcon size={15} /> Try a sample day
+                </button>
+              ) : undefined
             }
           />
         </section>
@@ -106,13 +122,20 @@ export function TasksView() {
         <div className="stack">
           {groups.map((group) => (
             <section key={group.id} className="card">
-              <h2 className="kicker">{group.label}</h2>
+              <header className="card-head">
+                <h2 className="kicker">{group.label}</h2>
+                {group.id === 'done' && counts.done > 0 ? (
+                  <button type="button" className="btn btn-tiny danger" onClick={clearCompletedTasks}>
+                    Clear completed
+                  </button>
+                ) : null}
+              </header>
               <ul className="item-list">
                 {group.tasks.map((task) => (
                   <TaskRow
                     key={task.id}
                     task={task}
-                    showDate={filter === 'done' || group.id === 'carried'}
+                    showDate={filter === 'done' || group.id === 'carried' || filter === 'upcoming'}
                     onReschedule={group.id === 'carried' ? () => moveTask(task.id, addDays(today, 1)) : undefined}
                     rescheduleLabel="Move to tomorrow"
                     onDropSwap={(sourceId) => {
@@ -127,6 +150,20 @@ export function TasksView() {
       )}
     </div>
   );
+}
+
+function useTaskViewHelpers() {
+  const planner = usePlanner();
+  const { state } = planner;
+  return {
+    ...planner,
+    isEmpty:
+      state.tasks.length === 0 &&
+      state.events.length === 0 &&
+      state.habits.length === 0 &&
+      state.goals.length === 0 &&
+      state.notes.length === 0,
+  };
 }
 
 function sortTasks(tasks: Task[]): Task[] {

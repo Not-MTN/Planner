@@ -3,8 +3,8 @@ import { categoryById } from '../constants';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { dayNumber, formatDuration, formatMonthShort, formatWeekdayShort, isValidTime } from '../dates';
-import { frequencyLabel } from '../logic';
-import { GripIcon, HabitGlyph, PencilIcon, TickIcon, TrashIcon } from '../icons';
+import { frequencyLabel, habitStreaks } from '../logic';
+import { FlameIcon, GripIcon, HabitGlyph, PencilIcon, StopwatchIcon, TickIcon, TrashIcon } from '../icons';
 import type { Habit, PlannerEvent, Task } from '../types';
 
 export function IntentionField({ date }: { date: string }) {
@@ -39,7 +39,7 @@ export function IntentionField({ date }: { date: string }) {
 }
 
 export function EventRow({ event, onDropSwap }: { event: PlannerEvent; onDropSwap?: (sourceId: string) => void }) {
-  const { toggleEvent, updateEvent, openComposer, requestConfirm, deleteEvent } = usePlanner();
+  const { toggleEvent, updateEvent, openComposer, deleteEvent, flash, undo } = usePlanner();
   const accent = categoryById(event.category).accent;
   const duration = formatDuration(event.startTime, event.endTime);
   return (
@@ -114,13 +114,10 @@ export function EventRow({ event, onDropSwap }: { event: PlannerEvent; onDropSwa
         type="button"
         className="icon-btn row-delete"
         aria-label={`Remove ${event.title}`}
-        onClick={() =>
-          requestConfirm({
-            title: 'Remove this event?',
-            body: 'It will be taken off your schedule.',
-            onConfirm: () => deleteEvent(event.id),
-          })
-        }
+        onClick={() => {
+          deleteEvent(event.id);
+          flash(`Event “${event.title}” removed.`, { label: 'Undo', run: undo });
+        }}
       >
         <TrashIcon size={16} />
       </button>
@@ -141,7 +138,7 @@ export function TaskRow({
   onReschedule?: () => void;
   rescheduleLabel?: string;
 }) {
-  const { toggleTask, openComposer, requestConfirm, deleteTask } = usePlanner();
+  const { toggleTask, openComposer, deleteTask, flash, undo, startFocus } = usePlanner();
   const accent = categoryById(task.category).accent;
   return (
     <li
@@ -199,17 +196,25 @@ export function TaskRow({
       >
         <GripIcon size={14} />
       </span>
+      {!task.completed ? (
+        <button
+          type="button"
+          className="icon-btn row-focus"
+          aria-label={`Start a focus session for ${task.title}`}
+          title="Focus on this"
+          onClick={() => startFocus({ taskId: task.id, title: task.title, minutes: 25 })}
+        >
+          <StopwatchIcon size={16} />
+        </button>
+      ) : null}
       <button
         type="button"
         className="icon-btn row-delete"
         aria-label={`Remove ${task.title}`}
-        onClick={() =>
-          requestConfirm({
-            title: 'Remove this task?',
-            body: 'It will disappear from your lists.',
-            onConfirm: () => deleteTask(task.id),
-          })
-        }
+        onClick={() => {
+          deleteTask(task.id);
+          flash(`Task “${task.title}” removed.`, { label: 'Undo', run: undo });
+        }}
       >
         <TrashIcon size={16} />
       </button>
@@ -220,6 +225,7 @@ export function TaskRow({
 export function HabitRow({ habit, date }: { habit: Habit; date: string }) {
   const { state, toggleHabit, openComposer } = usePlanner();
   const done = state.completions.some((item) => item.habitId === habit.id && item.date === date);
+  const streak = habitStreaks(state, habit, date).current;
   return (
     <li className={cx('habit-row', `accent-${habit.accent}`, done && 'is-done')}>
       <span className={cx('icon-well', `accent-${habit.accent}`)}>
@@ -227,7 +233,10 @@ export function HabitRow({ habit, date }: { habit: Habit; date: string }) {
       </span>
       <button type="button" className="habit-name" onClick={() => openComposer({ mode: 'edit', type: 'habit', id: habit.id })}>
         <strong>{habit.name}</strong>
-        <small>{frequencyLabel(habit)}</small>
+        <small>
+          {frequencyLabel(habit)}
+          {streak >= 2 ? <span className="streak-chip"><FlameIcon size={12} />{streak}</span> : null}
+        </small>
       </button>
       <button
         type="button"

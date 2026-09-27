@@ -29,6 +29,7 @@ export function GoalsView() {
       {state.goals.length === 0 ? (
         <section className="card">
           <Empty
+            image="/img/spot-goals.jpg"
             title="No goals yet."
             text="A short-term goal can be this month. A long-term goal can stay quieter."
             action={
@@ -71,7 +72,7 @@ function GoalColumn({ title, goals, horizon }: { title: string; goals: Goal[]; h
 }
 
 function GoalCard({ goal, fill }: { goal: Goal; fill: (typeof FILLS)[number] }) {
-  const { state, toggleMilestone, toggleTask, addMilestone, deleteMilestone, openComposer, requestConfirm, deleteGoal } = usePlanner();
+  const { state, toggleMilestone, toggleTask, addMilestone, deleteMilestone, openComposer, deleteGoal, flash, undo } = usePlanner();
   const [step, setStep] = useState('');
   const progress = goalProgress(goal, state.tasks);
   const linked = linkedTasks(state, goal.id);
@@ -153,13 +154,10 @@ function GoalCard({ goal, fill }: { goal: Goal; fill: (typeof FILLS)[number] }) 
         <button
           type="button"
           className="btn btn-tiny danger"
-          onClick={() =>
-            requestConfirm({
-              title: 'Remove this goal?',
-              body: 'Steps go with it. Linked tasks stay in your task list.',
-              onConfirm: () => deleteGoal(goal.id),
-            })
-          }
+          onClick={() => {
+            deleteGoal(goal.id);
+            flash(`Goal “${goal.title}” removed.`, { label: 'Undo', run: undo });
+          }}
         >
           Remove
         </button>

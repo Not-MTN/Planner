@@ -3,27 +3,45 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#F3EEE6" />
-    <meta name="description" content="A personal planner for your day, habits, and goals." />
-    <meta name="color-scheme" content="light" />
-    <title>Personal Planner</title>
+    <meta name="description" content="A calm, local-first planner for your day, habits, and goals." />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f5f0e7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#171410" media="(prefers-color-scheme: dark)" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Planner" />
+    <title>Planner — calm daily planning</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600&family=Fraunces:ital,opsz,wght@0,9..144,460;0,9..144,560;1,9..144,460;1,9..144,520&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Fraunces:ital,opsz,wght@0,9..144,460;0,9..144,560;1,9..144,460;1,9..144,520&display=swap"
       rel="stylesheet"
     />
+    <script>
+      // Apply the saved theme before first paint to avoid a flash.
+      try {
+        var mode = localStorage.getItem('planner-theme') || 'system';
+        var dark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        var root = document.documentElement;
+        root.dataset.theme = dark ? 'dark' : 'light';
+        root.dataset.accent = localStorage.getItem('planner-accent') || 'sage';
+        root.style.colorScheme = dark ? 'dark' : 'light';
+      } catch (error) {
+        /* storage can be blocked; the light default is fine */
+      }
+    </script>
   </head>
   <body>
     <div id="root">
       <div style="max-width:720px;margin:0 auto;padding:32px 20px;font-family:Georgia,serif;color:#241f1b">
-        <p style="font-family:system-ui,sans-serif;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#5c554c">Personal Planner</p>
+        <p style="font-family:system-ui,sans-serif;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#5c554c">Planner</p>
         <div style="height:40px;width:240px;margin-top:14px;border-radius:14px;background:#efe6da"></div>
         <div style="height:160px;margin-top:18px;border-radius:20px;background:#fffaf4"></div>
       </div>
     </div>
-    <noscript>Personal Planner needs JavaScript to run in this browser.</noscript>
+    <noscript>Planner needs JavaScript to run in this browser.</noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

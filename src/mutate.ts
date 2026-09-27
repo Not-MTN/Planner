@@ -88,6 +88,10 @@ export function deleteTask(state: PlannerState, id: string): PlannerState {
   return { ...state, tasks: state.tasks.filter((task) => task.id !== id) };
 }
 
+export function clearCompletedTasks(state: PlannerState): PlannerState {
+  return { ...state, tasks: state.tasks.filter((task) => !task.completed) };
+}
+
 export function toggleTask(state: PlannerState, id: string, now = nowIso()): PlannerState {
   return {
     ...state,
@@ -220,6 +224,7 @@ export function addHabit(
         icon: input.icon || 'leaf',
         accent: input.accent,
         frequency: input.frequency,
+        essential: input.essential === true,
         archived: false,
         createdOn,
         createdAt: now,
@@ -229,6 +234,15 @@ export function addHabit(
   };
 }
 
+export function addHabits(
+  state: PlannerState,
+  inputs: HabitInput[],
+  now = nowIso(),
+  createdOn = todayISO(),
+): PlannerState {
+  return inputs.reduce((acc, input) => addHabit(acc, input, uid(), now, createdOn), state);
+}
+
 export function updateHabit(state: PlannerState, id: string, patch: Partial<HabitInput>, now = nowIso()): PlannerState {
   return {
     ...state,
@@ -236,7 +250,13 @@ export function updateHabit(state: PlannerState, id: string, patch: Partial<Habi
       if (habit.id !== id) return habit;
       const name = patch.name === undefined ? habit.name : clean(patch.name, 60);
       if (!name) return habit;
-      return { ...habit, ...patch, name, updatedAt: now };
+      return {
+        ...habit,
+        ...patch,
+        name,
+        essential: patch.essential === undefined ? habit.essential : patch.essential === true,
+        updatedAt: now,
+      };
     }),
   };
 }

@@ -1,6 +1,14 @@
 export const ACCENTS = ['sage', 'blue', 'pink', 'lav', 'peach'] as const;
 export type Accent = (typeof ACCENTS)[number];
 
+export const ACCENT_CHOICES = [
+  { id: 'sage', label: 'Sage' },
+  { id: 'blue', label: 'Ocean' },
+  { id: 'pink', label: 'Rose' },
+  { id: 'lav', label: 'Lilac' },
+  { id: 'peach', label: 'Amber' },
+] as const;
+
 export const CATEGORIES = [
   { id: 'personal', label: 'Personal', accent: 'peach' },
   { id: 'work', label: 'Work', accent: 'blue' },
@@ -31,6 +39,7 @@ export const HABIT_ICONS = [
   { id: 'leaf', label: 'Outdoors' },
   { id: 'coffee', label: 'Coffee' },
   { id: 'pencil', label: 'Writing' },
+  { id: 'home', label: 'Home' },
   { id: 'stretch', label: 'Movement' },
   { id: 'spark', label: 'Focus' },
 ] as const;

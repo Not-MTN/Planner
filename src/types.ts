@@ -44,6 +44,7 @@ export interface Habit {
   icon: HabitIconId | string;
   accent: Accent;
   frequency: HabitFrequency;
+  essential: boolean;
   archived: boolean;
   createdOn: string;
   createdAt: string;
@@ -117,6 +118,7 @@ export interface HabitInput {
   icon: string;
   accent: Accent;
   frequency: HabitFrequency;
+  essential?: boolean;
 }
 
 export interface GoalInput {
