@@ -49,6 +49,11 @@ export function QuickAddBar({ defaultDate, placeholder }: { defaultDate?: string
         </span>
         <input
           value={text}
+          dir="auto"
+          enterKeyHint="done"
+          autoCapitalize="sentences"
+          autoCorrect="on"
+          spellCheck
           onChange={(event) => setText(event.target.value)}
           placeholder={placeholder ?? t("Add anything — try “Call mom tomorrow 5pm #work !high”")}
           aria-label={t("Quick add")}

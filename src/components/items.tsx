@@ -31,6 +31,7 @@ export function IntentionField({ date }: { date: string }) {
         value={text}
         maxLength={160}
         placeholder={t("One line for this day — optional")}
+        dir="auto"
         onChange={(event) => setText(event.target.value)}
         onBlur={() => {
           if (text !== saved) setIntention(date, text);

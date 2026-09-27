@@ -88,6 +88,13 @@ describe('quick add', () => {
   });
 
   it('understands tomorrow, times, categories, and priorities', () => {
+    expect(parseQuickAdd('زنگ به مامان فردا ۱۷:۰۰ #کار فوری', today)).toMatchObject({
+      title: 'زنگ به مامان',
+      date: '2026-09-28',
+      startTime: '17:00',
+      category: 'work',
+      priority: 'high',
+    });
     const parse = parseQuickAdd('Call mom tomorrow 5pm #personal !high', today);
     expect(parse?.kind).toBe('task');
     expect(parse?.title).toBe('Call mom');

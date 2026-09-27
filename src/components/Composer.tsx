@@ -169,7 +169,7 @@ function TaskForm({
   return (
     <form className="form" onSubmit={submit}>
       <Field label={t("Title")} error={error}>
-        <input data-autofocus value={title} onChange={(event) => setTitle(event.target.value)} maxLength={140} />
+        <input data-autofocus dir="auto" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={140} />
       </Field>
       <div className="field">
         <span>{t("Priority")}</span>
@@ -267,7 +267,7 @@ function TaskForm({
         </Field>
       </div>
       <Field label={t("Note")}>
-        <textarea value={note} onChange={(event) => setNote(event.target.value)} rows={3} maxLength={4000} />
+        <textarea dir="auto" value={note} onChange={(event) => setNote(event.target.value)} rows={3} maxLength={4000} />
       </Field>
       <Actions editing={Boolean(existing)} label={t("Add task")} onClose={onClose} onRemove={onRemove} />
     </form>
@@ -323,7 +323,7 @@ function EventForm({ composer, onClose, onRemove }: { composer: ComposerState; o
   return (
     <form className="form" onSubmit={submit}>
       <Field label={t("Title")} error={error}>
-        <input data-autofocus value={title} onChange={(event) => setTitle(event.target.value)} maxLength={140} />
+        <input data-autofocus dir="auto" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={140} />
       </Field>
       <div className="form-row two">
         <Field label={t("Date")}>
@@ -358,7 +358,7 @@ function EventForm({ composer, onClose, onRemove }: { composer: ComposerState; o
         <span>{t("Mark as important")}</span>
       </label>
       <Field label={t("Note")}>
-        <textarea value={note} onChange={(event) => setNote(event.target.value)} rows={3} maxLength={4000} />
+        <textarea dir="auto" value={note} onChange={(event) => setNote(event.target.value)} rows={3} maxLength={4000} />
       </Field>
       <Actions editing={Boolean(existing)} label={t("Add event")} onClose={onClose} onRemove={onRemove} />
     </form>
@@ -513,7 +513,7 @@ function GoalForm({ composer, onClose, onRemove }: { composer: ComposerState; on
   return (
     <form className="form" onSubmit={submit}>
       <Field label={t("Title")} error={error}>
-        <input data-autofocus value={title} onChange={(event) => setTitle(event.target.value)} maxLength={140} />
+        <input data-autofocus dir="auto" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={140} />
       </Field>
       <div className="field">
         <span>{t("Horizon")}</span>
@@ -534,7 +534,7 @@ function GoalForm({ composer, onClose, onRemove }: { composer: ComposerState; on
         <small className="hint">{t("Short-term is this season. Long-term is the larger direction.")}</small>
       </div>
       <Field label={t("Description")}>
-        <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} maxLength={2000} />
+        <textarea dir="auto" value={description} onChange={(event) => setDescription(event.target.value)} rows={3} maxLength={2000} />
       </Field>
       <Field label={t("Deadline")} hint={t("Optional")}>
         <input type="date" value={deadline} onChange={(event) => setDeadline(event.target.value)} />
@@ -582,7 +582,7 @@ function NoteForm({ composer, onClose, onRemove }: { composer: ComposerState; on
   return (
     <form className="form" onSubmit={submit}>
       <Field label={t("Title")} error={error}>
-        <input data-autofocus value={title} onChange={(event) => setTitle(event.target.value)} maxLength={140} />
+        <input data-autofocus dir="auto" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={140} />
       </Field>
       <div className="field">
         <span>{t("Kind")}</span>
@@ -617,6 +617,7 @@ function NoteForm({ composer, onClose, onRemove }: { composer: ComposerState; on
       <Field label={kind === 'journal' ? t("Entry") : t("Note")} hint={t("Markdown works: **bold**, *italic*, - lists, - [ ] checkboxes, # headings, #tags, links.")}>
         <textarea
           hidden={preview}
+          dir="auto"
           className={kind === 'journal' ? 'journal-entry' : undefined}
           value={body}
           onChange={(event) => setBody(event.target.value)}

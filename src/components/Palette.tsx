@@ -186,6 +186,7 @@ function PaletteInner() {
   }, [index]);
 
   const onKey = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.nativeEvent.isComposing || event.key === 'Process') return;
     if (event.key === 'Escape') {
       event.preventDefault();
       event.stopPropagation();
@@ -221,6 +222,7 @@ function PaletteInner() {
           <SearchIcon size={18} />
           <input
             autoFocus
+            dir="auto"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={onKey}
