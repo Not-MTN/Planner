@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { categoryById } from '../constants';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
@@ -9,14 +9,15 @@ import {
   formatFullDate,
   formatMonthShort,
   formatMonthYear,
+  weekdayHeaders,
   formatWeekRange,
   formatWeekdayShort,
   isValidISODate,
   isWeekend,
   monthGrid,
+  timeToMinutes,
   todayISO,
-  weekDates,
-} from '../dates';
+  weekDates, displayTime } from '../dates';
 import { ChevronLeftIcon, ChevronRightIcon, PlusIcon, TickIcon } from '../icons';
 import {
   agendaWindow,
@@ -33,15 +34,15 @@ import {
 import { Meter } from '../components/ui';
 import type { CalendarTab } from '../route';
 import type { PlannerEvent } from '../types';
+import { t } from '../i18n';
 
 const TABS: Array<{ id: CalendarTab; label: string }> = [
-  { id: 'week', label: 'Week' },
-  { id: 'month', label: 'Month' },
-  { id: 'agenda', label: 'Upcoming' },
+  { id: 'week', label: t("Week") },
+  { id: 'month', label: t("Month") },
+  { id: 'agenda', label: t("Upcoming") },
 ];
 
 const HORIZONS = [7, 14, 30] as const;
-const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export function CalendarView() {
   const { route, navigate } = usePlanner();
@@ -51,23 +52,23 @@ export function CalendarView() {
   const setTab = (next: CalendarTab) => navigate({ name: 'calendar', tab: next, date: anchor });
 
   const title =
-    tab === 'week' ? formatWeekRange(anchor) : tab === 'month' ? formatMonthYear(Number(anchor.slice(0, 4)), Number(anchor.slice(5, 7))) : 'What’s ahead';
+    tab === 'week' ? formatWeekRange(anchor) : tab === 'month' ? formatMonthYear(Number(anchor.slice(0, 4)), Number(anchor.slice(5, 7))) : t("What’s ahead");
   const lede =
     tab === 'week'
-      ? 'Seven days, loosely held.'
+      ? t("Seven days, loosely held.")
       : tab === 'month'
-        ? 'The shape of the month.'
-        : 'The days ahead, only where something is planned.';
+        ? t("The shape of the month.")
+        : t("The days ahead, only where something is planned.");
 
   return (
     <div className="view">
       <header className="page-head">
         <div>
-          <p className="kicker">Calendar</p>
+          <p className="kicker">{t("Calendar")}</p>
           <h1>{title}</h1>
           <p className="lede">{lede}</p>
         </div>
-        <div className="segmented cal-tabs" role="tablist" aria-label="Calendar view">
+        <div className="segmented cal-tabs" role="tablist" aria-label={t("Calendar view")}>
           {TABS.map((item) => (
             <button
               key={item.id}
@@ -90,7 +91,7 @@ export function CalendarView() {
 }
 
 function WeekBoard({ anchor, today }: { anchor: string; today: string }) {
-  const { navigate, state, openComposer, moveEvent, swapEventTimes, toggleTask, toggleEvent, toggleHabit } = usePlanner();
+  const { navigate, state, openComposer, moveEvent, moveTask, resizeEvent, swapEventTimes, toggleTask, toggleEvent, toggleHabit } = usePlanner();
   const days = weekDates(anchor);
   const showingThisWeek = days.includes(today);
   const [picked, setPicked] = useState(anchor);
@@ -102,21 +103,21 @@ function WeekBoard({ anchor, today }: { anchor: string; today: string }) {
   return (
     <>
       <div className="cal-tools">
-        <p className="quiet-hint">Drag an event to another day. Tap a day to focus it below.</p>
+        <p className="quiet-hint">{t("Drag events or tasks to another day, or drag an event’s bottom edge to change its length.")}</p>
         <div className="pager">
-          <button type="button" className="icon-btn round" aria-label="Previous week" onClick={() => shift(-7)}>
+          <button type="button" className="icon-btn round" aria-label={t("Previous week")} onClick={() => shift(-7)}>
             <ChevronLeftIcon />
           </button>
           <button type="button" className="btn btn-ghost" disabled={showingThisWeek} onClick={() => navigate({ name: 'calendar', tab: 'week', date: today })}>
-            This week
+            {t("This week")}
           </button>
-          <button type="button" className="icon-btn round" aria-label="Next week" onClick={() => shift(7)}>
+          <button type="button" className="icon-btn round" aria-label={t("Next week")} onClick={() => shift(7)}>
             <ChevronRightIcon />
           </button>
         </div>
       </div>
 
-      <div className="day-strip" role="group" aria-label="Days this week">
+      <div className="day-strip" role="group" aria-label={t("Days this week")}>
         {days.map((date) => (
           <button
             key={date}
@@ -158,6 +159,11 @@ function WeekBoard({ anchor, today }: { anchor: string; today: string }) {
                 event.preventDefault();
                 setOver(null);
                 const raw = event.dataTransfer.getData('text/plain');
+                if (raw.startsWith('task:')) {
+                  const task = state.tasks.find((item) => item.id === raw.slice(5));
+                  if (task && task.dueDate !== date) moveTask(task.id, date);
+                  return;
+                }
                 if (!raw.startsWith('event:')) return;
                 const id = raw.slice(6);
                 const source = state.events.find((item) => item.id === id);
@@ -173,7 +179,7 @@ function WeekBoard({ anchor, today }: { anchor: string; today: string }) {
                 <Meter value={score.ratio ?? 0} label={`${formatWeekdayShort(date)} completion`} />
               </header>
               <div className="day-col-body">
-                {events.length === 0 && tasks.length === 0 ? <p className="open-label">Open</p> : null}
+                {events.length === 0 && tasks.length === 0 ? <p className="open-label">{t("Open")}</p> : null}
                 {events.map((item) => {
                   const fixed = Boolean(item.fixedCommitmentId);
                   return (
@@ -215,19 +221,20 @@ function WeekBoard({ anchor, today }: { anchor: string; today: string }) {
                         type="button"
                         className="week-chip-main"
                         disabled={fixed}
-                        title={fixed ? 'Protected weekly time' : undefined}
+                        title={fixed ? t("Protected weekly time") : undefined}
                         onClick={() => {
                           if (!fixed) openComposer({ mode: 'edit', type: 'event', id: item.id });
                         }}
                       >
-                        <time>{item.startTime}</time>
+                        <time>{displayTime(item.startTime)}{item.endTime ? `–${displayTime(item.endTime)}` : ''}</time>
                         <span>{item.title}</span>
                       </button>
-                      {fixed ? <span className="fixed-chip-tag">Fixed</span> : (
+                      {!fixed ? <ResizeHandle startTime={item.startTime} endTime={item.endTime} title={item.title} onResize={(end) => resizeEvent(item.id, end)} /> : null}
+                      {fixed ? <span className="fixed-chip-tag">{t("Fixed")}</span> : (
                         <button
                           type="button"
                           className={cx('mini-check', item.completed && 'on')}
-                          aria-label={item.completed ? `Mark ${item.title} not done` : `Mark ${item.title} complete`}
+                          aria-label={item.completed ? t("Mark {0} not done", { 0: item.title }) : t("Mark {0} complete", { 0: item.title })}
                           onMouseDown={(event) => event.stopPropagation()}
                           onDragStart={(event) => {
                             event.preventDefault();
@@ -242,11 +249,20 @@ function WeekBoard({ anchor, today }: { anchor: string; today: string }) {
                   );
                 })}
                 {tasks.map((task) => (
-                  <div key={task.id} className={cx('week-task', task.completed && 'is-done')}>
+                  <div
+                    key={task.id}
+                    className={cx('week-task', task.completed && 'is-done')}
+                    draggable
+                    title={t("Drag to another day")}
+                    onDragStart={(event) => {
+                      event.dataTransfer.setData('text/plain', `task:${task.id}`);
+                      event.dataTransfer.effectAllowed = 'move';
+                    }}
+                  >
                     <button
                       type="button"
                       className={cx('mini-check', task.completed && 'on')}
-                      aria-label={task.completed ? `Mark ${task.title} not done` : `Mark ${task.title} complete`}
+                      aria-label={task.completed ? t("Mark {0} not done", { 0: task.title }) : t("Mark {0} complete", { 0: task.title })}
                       onClick={() => toggleTask(task.id)}
                     >
                       {task.completed ? <TickIcon size={12} /> : null}
@@ -276,22 +292,86 @@ function WeekBoard({ anchor, today }: { anchor: string; today: string }) {
                       </li>
                     );
                   })}
-                  {habits.length > 3 ? <li className="more-habits">+{habits.length - 3} habits</li> : null}
+                  {habits.length > 3 ? <li className="more-habits">+{habits.length - 3} {t('habits')}</li> : null}
                 </ul>
               ) : null}
               <button
                 type="button"
                 className="day-add"
-                aria-label={`Add to ${formatFullDate(date)}`}
+                aria-label={t("Add to {0}", { 0: formatFullDate(date) })}
                 onClick={() => openComposer({ mode: 'create', type: 'event', date })}
               >
-                <PlusIcon size={14} /> Add
+                <PlusIcon size={14} /> {t("Add")}
               </button>
             </section>
           );
         })}
       </div>
     </>
+  );
+}
+
+const STEP = 15;
+
+function clockFrom(minutes: number): string {
+  const clamped = Math.max(0, Math.min(23 * 60 + 59, minutes));
+  return `${String(Math.floor(clamped / 60)).padStart(2, '0')}:${String(clamped % 60).padStart(2, '0')}`;
+}
+
+/** Drag down/up to lengthen or shorten an event in 15-minute steps. Arrow keys work too. */
+function ResizeHandle({ startTime, endTime, title, onResize }: { startTime: string; endTime: string | null; title: string; onResize: (end: string) => void }) {
+  const start = timeToMinutes(startTime);
+  const base = endTime ? timeToMinutes(endTime) : start + 60;
+  const [preview, setPreview] = useState<number | null>(null);
+  const drag = useRef<{ y: number } | null>(null);
+  const valueFor = (dy: number) => Math.max(start + STEP, Math.min(23 * 60 + 59, base + Math.round(dy / 6) * STEP));
+  return (
+    <span
+      className={cx('resize-handle', preview !== null && 'is-active')}
+      role="slider"
+      tabIndex={0}
+      aria-label={t("End time for {0}", { 0: title })}
+      aria-valuetext={clockFrom(preview ?? base)}
+      aria-valuenow={preview ?? base}
+      aria-valuemin={start + STEP}
+      aria-valuemax={23 * 60 + 59}
+      title={t("Drag to change the end time")}
+      draggable={false}
+      onDragStart={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onPointerDown={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        drag.current = { y: event.clientY };
+        setPreview(base);
+      }}
+      onPointerMove={(event) => {
+        if (!drag.current) return;
+        setPreview(valueFor(event.clientY - drag.current.y));
+      }}
+      onPointerUp={(event) => {
+        if (!drag.current) return;
+        const next = valueFor(event.clientY - drag.current.y);
+        drag.current = null;
+        setPreview(null);
+        if (next !== base) onResize(clockFrom(next));
+      }}
+      onPointerCancel={() => {
+        drag.current = null;
+        setPreview(null);
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+        event.preventDefault();
+        const next = Math.max(start + STEP, Math.min(23 * 60 + 59, base + (event.key === 'ArrowDown' ? STEP : -STEP)));
+        if (next !== base) onResize(clockFrom(next));
+      }}
+    >
+      {preview !== null ? <em>{t('until')} {displayTime(clockFrom(preview))}</em> : null}
+    </span>
   );
 }
 
@@ -317,24 +397,24 @@ function MonthBoard({ anchor, today }: { anchor: string; today: string }) {
       <div className="month-sheet">
         <div className="cal-tools">
           <div className="legend">
-            <span><i className="dot done accent-sage" /> Event</span>
-            <span><i className="dot done accent-blue" /> Task</span>
-            <span><i className="dot done accent-peach" /> Important</span>
+            <span><i className="dot done accent-sage" /> {t("Event")}</span>
+            <span><i className="dot done accent-blue" /> {t("Task")}</span>
+            <span><i className="dot done accent-peach" /> {t("Important")}</span>
           </div>
           <div className="pager">
-            <button type="button" className="icon-btn round" aria-label="Previous month" onClick={() => go(-1)}>
+            <button type="button" className="icon-btn round" aria-label={t("Previous month")} onClick={() => go(-1)}>
               <ChevronLeftIcon />
             </button>
             <button type="button" className="btn btn-ghost" disabled={isCurrent} onClick={() => navigate({ name: 'calendar', tab: 'month', date: today })}>
-              This month
+              {t("This month")}
             </button>
-            <button type="button" className="icon-btn round" aria-label="Next month" onClick={() => go(1)}>
+            <button type="button" className="icon-btn round" aria-label={t("Next month")} onClick={() => go(1)}>
               <ChevronRightIcon />
             </button>
           </div>
         </div>
         <div className="weekday-row" aria-hidden="true">
-          {WEEKDAYS.map((day) => (
+          {weekdayHeaders().map((day) => (
             <span key={day}>{day}</span>
           ))}
         </div>
@@ -387,7 +467,7 @@ function MonthBoard({ anchor, today }: { anchor: string; today: string }) {
           </div>
         </header>
         {events.length === 0 && tasks.length === 0 ? (
-          <p className="empty-inline">Nothing on this day yet.</p>
+          <p className="empty-inline">{t("Nothing on this day yet.")}</p>
         ) : (
           <>
             {events.length > 0 ? (
@@ -402,9 +482,9 @@ function MonthBoard({ anchor, today }: { anchor: string; today: string }) {
                         if (!event.fixedCommitmentId) openComposer({ mode: 'edit', type: 'event', id: event.id });
                       }}
                     >
-                      <time>{event.startTime}</time>
+                      <time>{displayTime(event.startTime)}</time>
                       <span>{event.title}</span>
-                      {event.fixedCommitmentId ? <small>Fixed</small> : null}
+                      {event.fixedCommitmentId ? <small>{t("Fixed")}</small> : null}
                     </button>
                   </li>
                 ))}
@@ -425,13 +505,13 @@ function MonthBoard({ anchor, today }: { anchor: string; today: string }) {
         )}
         <div className="panel-actions">
           <button type="button" className="btn btn-primary btn-small" onClick={() => openComposer({ mode: 'create', type: 'event', date: selected })}>
-            Add event
+            {t("Add event")}
           </button>
           <button type="button" className="btn btn-soft btn-small" onClick={() => openComposer({ mode: 'create', type: 'task', date: selected })}>
-            Add task
+            {t("Add task")}
           </button>
           <button type="button" className="btn btn-ghost btn-small" onClick={() => navigate({ name: 'day', date: selected })}>
-            Open day
+            {t("Open day")}
           </button>
         </div>
       </aside>
@@ -450,7 +530,7 @@ function AgendaBoard({ today }: { today: string }) {
     if (habit.archived || habit.frequency.type !== 'weekly') return [];
     const stats = habitStats(state, habit, weekDates(today), today);
     const left = Math.max(0, stats.expected - stats.done);
-    return left > 0 ? [`${habit.name} can still happen ${left === 1 ? 'once' : `${left} times`} this week`] : [];
+    return left > 0 ? [t("{0} can still happen {1} this week", { 0: habit.name, 1: left === 1 ? 'once' : t("{0} times", { 0: left }) })] : [];
   });
 
   return (
@@ -458,8 +538,8 @@ function AgendaBoard({ today }: { today: string }) {
       <div className="cal-tools">
         <p className="quiet-hint">
           {planned === 0
-            ? `The next ${horizon} days are open. Add only what you want to keep.`
-            : `${planned} ${planned === 1 ? 'day has' : 'days have'} something in the next ${horizon}.`}
+            ? t("The next {0} days are open. Add only what you want to keep.", { 0: horizon })
+            : t("{0} {1} something in the next {2}.", { 0: planned, 1: planned === 1 ? t("day has") : t("days have"), 2: horizon })}
         </p>
         <div className="pager">
           {HORIZONS.map((daysAhead) => (
@@ -470,18 +550,18 @@ function AgendaBoard({ today }: { today: string }) {
               aria-pressed={horizon === daysAhead}
               onClick={() => setHorizon(daysAhead)}
             >
-              {daysAhead} days
+              {daysAhead} {t('days')}
             </button>
           ))}
         </div>
       </div>
       {weekLeft.length > 0 ? <p className="meta">{weekLeft.join(' · ')}</p> : null}
       <label className="future-jump">
-        <span>Open a day</span>
+        <span>{t("Open a day")}</span>
         <input
           type="date"
           min={addDays(today, 1)}
-          aria-label="Open a future day"
+          aria-label={t("Open a future day")}
           onChange={(event) => {
             const value = event.target.value;
             if (isValidISODate(value) && value > today) navigate({ name: 'day', date: value });
@@ -503,7 +583,7 @@ function AgendaBoard({ today }: { today: string }) {
       {later.events.length + later.tasks.length + later.deadlines.length > 0 ? (
         <section className="card">
           <header className="card-head">
-            <h2 className="kicker">After {horizon} days</h2>
+            <h2 className="kicker">{t("After")} {horizon} {t('days')}</h2>
           </header>
           <ul className="panel-list">
             {later.events.map((event: PlannerEvent) => (
@@ -526,7 +606,7 @@ function AgendaBoard({ today }: { today: string }) {
               <li key={goal.id} className="plain">
                 <button type="button" onClick={() => openComposer({ mode: 'edit', type: 'goal', id: goal.id })}>
                   <time>{goal.date.slice(5)}</time>
-                  <span>{goal.title} · due</span>
+                  <span>{goal.title} {t("· due")}</span>
                 </button>
               </li>
             ))}
@@ -559,35 +639,35 @@ function DayCard({
   const habits = fixedHabits(day);
   return (
     <article className="card future-day">
-      <button type="button" className="future-date" onClick={onOpen} aria-label={`Open ${formatFullDate(day.date)}`}>
+      <button type="button" className="future-date" onClick={onOpen} aria-label={t("Open {0}", { 0: formatFullDate(day.date) })}>
         <span className="kicker">{dayRelation(day.date, today)}</span>
         <strong>{dayNumber(day.date)}</strong>
         <span>{formatMonthShort(day.date)}</span>
       </button>
       <div className="future-body">
         {day.intention ? <p className="future-intention">{day.intention}</p> : null}
-        {open ? <p className="open-label">Open</p> : null}
+        {open ? <p className="open-label">{t("Open")}</p> : null}
         <ul className="plan-list">
           {day.events.map((event) => (
             <li key={event.id} className={cx('plan-line', event.completed && 'is-done', `accent-${categoryById(event.category).accent}`, event.fixedCommitmentId && 'is-fixed')}>
               {event.fixedCommitmentId ? (
-                <span className="fixed-plan-mark" aria-label="Protected weekly time">↻</span>
+                <span className="fixed-plan-mark" aria-label={t("Protected weekly time")}>↻</span>
               ) : (
                 <button
                   type="button"
                   className={cx('check', event.completed && 'on')}
                   aria-pressed={event.completed}
-                  aria-label={event.completed ? `Mark ${event.title} not done` : `Mark ${event.title} complete`}
+                  aria-label={event.completed ? t("Mark {0} not done", { 0: event.title }) : t("Mark {0} complete", { 0: event.title })}
                   onClick={() => toggleEvent(event.id)}
                 >
                   {event.completed ? <TickIcon size={12} /> : null}
                 </button>
               )}
-              <time>{event.startTime}</time>
+              <time>{displayTime(event.startTime)}</time>
               {event.fixedCommitmentId ? <span className="item-title">{event.title}</span> : (
                 <button type="button" className="item-title" onClick={() => openComposer({ mode: 'edit', type: 'event', id: event.id })}>{event.title}</button>
               )}
-              {event.fixedCommitmentId ? <small className="fixed-plan-tag">Fixed</small> : null}
+              {event.fixedCommitmentId ? <small className="fixed-plan-tag">{t("Fixed")}</small> : null}
             </li>
           ))}
           {day.tasks.map((task) => (
@@ -596,7 +676,7 @@ function DayCard({
                 type="button"
                 className={cx('check', task.completed && 'on')}
                 aria-pressed={task.completed}
-                aria-label={task.completed ? `Mark ${task.title} not done` : `Mark ${task.title} complete`}
+                aria-label={task.completed ? t("Mark {0} not done", { 0: task.title }) : t("Mark {0} complete", { 0: task.title })}
                 onClick={() => toggleTask(task.id)}
               >
                 {task.completed ? <TickIcon size={12} /> : null}
@@ -607,13 +687,13 @@ function DayCard({
           ))}
           {day.notes.map((note) => (
             <li key={note.id} className="plan-line is-note">
-              <span className="plan-kind">Note</span>
+              <span className="plan-kind">{t("Note")}</span>
               <button type="button" className="item-title" onClick={() => openComposer({ mode: 'edit', type: 'note', id: note.id })}>{note.title}</button>
             </li>
           ))}
           {day.deadlines.map((goal) => (
             <li key={goal.id} className="plan-line is-note">
-              <span className="plan-kind">Due</span>
+              <span className="plan-kind">{t("Due")}</span>
               <button type="button" className="item-title" onClick={onOpen}>{goal.title}</button>
             </li>
           ))}
@@ -622,9 +702,9 @@ function DayCard({
           <p className="meta">{habits.slice(0, 4).map((habit) => habit.name).join(', ')}{habits.length > 4 ? ` +${habits.length - 4}` : ''}</p>
         ) : null}
         <div className="future-actions">
-          <button type="button" className="btn btn-tiny" onClick={onAddEvent}>Add event</button>
-          <button type="button" className="btn btn-tiny" onClick={onAddTask}>Add task</button>
-          <button type="button" className="text-btn inline" onClick={onOpen}>Open day</button>
+          <button type="button" className="btn btn-tiny" onClick={onAddEvent}>{t("Add event")}</button>
+          <button type="button" className="btn btn-tiny" onClick={onAddTask}>{t("Add task")}</button>
+          <button type="button" className="text-btn inline" onClick={onOpen}>{t("Open day")}</button>
         </div>
       </div>
     </article>

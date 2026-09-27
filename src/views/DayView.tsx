@@ -10,8 +10,7 @@ import {
   formatWeekdayLong,
   motivationFor,
   timeToMinutes,
-  todayISO,
-} from '../dates';
+  todayISO, displayTime } from '../dates';
 import { useNow } from '../hooks';
 import {
   dayScore,
@@ -30,6 +29,8 @@ import { EventRow, FixedEventRow, HabitRow, IntentionField, NowMark, TaskRow } f
 import { Empty, Meter, Ring } from '../components/ui';
 import { ChevronLeftIcon, ChevronRightIcon, PlusIcon, SparklesIcon, StopwatchIcon } from '../icons';
 import type { Habit } from '../types';
+import { autoSchedule } from '../scheduler';
+import { t } from '../i18n';
 
 export function DayView({ date }: { date: string }) {
   const planner = usePlanner();
@@ -55,7 +56,7 @@ export function DayView({ date }: { date: string }) {
     const complete = score.total > 0 && score.done === score.total;
     if (complete && !celebrateRef.current) {
       celebrate();
-      flash('Day complete. Beautifully done.');
+      flash(t("Day complete. Beautifully done."));
     }
     celebrateRef.current = complete;
   }, [score.total, score.done, celebrate, flash]);
@@ -97,11 +98,11 @@ export function DayView({ date }: { date: string }) {
     <div className="view">
       <header className={cx('hero', !isToday && 'hero-plain')}>
         <div className="hero-copy">
-          <p className="kicker">{isToday ? 'Personal Planner' : 'Day planner'}</p>
+          <p className="kicker">{isToday ? t("Personal Planner") : t("Day planner")}</p>
           <h1 className="hero-title">{formatWeekdayLong(date)}</h1>
           <p className="hero-date">
             <span className="hero-date-num">{dayNumber(date)}</span> {formatMonthLong(date)}
-            {isToday ? <span className="clock">{clock}</span> : null}
+            {isToday ? <span className="clock">{displayTime(clock)}</span> : null}
           </p>
           {isToday ? <p className="quote">{motivationFor(date)}</p> : null}
           <QuickAddBar defaultDate={date} />
@@ -118,18 +119,18 @@ export function DayView({ date }: { date: string }) {
           {isToday ? (
             <div className="hero-links">
               <button type="button" className="text-btn" onClick={() => navigate({ name: 'calendar', tab: 'agenda', date: today })}>
-                {dayRelation(addDays(today, 1), today)} and beyond
+                {dayRelation(addDays(today, 1), today)} {t("and beyond")}
               </button>
             </div>
           ) : (
             <div className="pager hero-pager">
-              <button type="button" className="icon-btn round" aria-label="Previous day" onClick={() => navigate({ name: 'day', date: addDays(date, -1) })}>
+              <button type="button" className="icon-btn round" aria-label={t("Previous day")} onClick={() => navigate({ name: 'day', date: addDays(date, -1) })}>
                 <ChevronLeftIcon />
               </button>
               <button type="button" className="btn btn-ghost" disabled={date === today} onClick={() => navigate({ name: 'day', date: today })}>
-                Today
+                {t("Today")}
               </button>
-              <button type="button" className="icon-btn round" aria-label="Next day" onClick={() => navigate({ name: 'day', date: addDays(date, 1) })}>
+              <button type="button" className="icon-btn round" aria-label={t("Next day")} onClick={() => navigate({ name: 'day', date: addDays(date, 1) })}>
                 <ChevronRightIcon />
               </button>
             </div>
@@ -138,33 +139,52 @@ export function DayView({ date }: { date: string }) {
 
         <aside className="card hero-panel">
           {!fresh ? <img className="postcard" src="/img/hero-day.jpg" alt="" loading="lazy" /> : null}
-          <p className="kicker">Progress</p>
-          <Ring value={score.ratio ?? 0} label={score.total ? `${score.done}/${score.total}` : 'Open'} caption="done today" />
+          <p className="kicker">{t("Progress")}</p>
+          <Ring value={score.ratio ?? 0} label={score.total ? `${score.done}/${score.total}` : t("Open")} caption={t("done today")} />
           <p className="progress-phrase">{progressPhrase(score.ratio)}</p>
           <p className="meta">
-            {score.eventsDone}/{score.eventsTotal} events · {score.tasksDone}/{score.tasksTotal} tasks · {score.habitsDone}/{score.habitsTotal} habits
+            {score.eventsDone}/{score.eventsTotal} {t("events ·")} {score.tasksDone}/{score.tasksTotal} {t("tasks ·")} {score.habitsDone}/{score.habitsTotal} {t('habits')}
           </p>
           <div className="qa-row">
             <button type="button" className="qa-tile accent-peach" onClick={() => openComposer({ mode: 'create', type: 'task', date })}>
               <span className="qa-icon"><PlusIcon size={15} /></span>
-              Task
+              {t("Task")}
             </button>
             <button type="button" className="qa-tile accent-sage" onClick={() => openComposer({ mode: 'create', type: 'event', date })}>
               <span className="qa-icon"><PlusIcon size={15} /></span>
-              Event
+              {t("Event")}
             </button>
             <button
               type="button"
               className="qa-tile accent-lav"
-              onClick={() => startFocus({ taskId: null, title: 'Focus session', minutes: 25 })}
+              onClick={() => startFocus({ taskId: null, title: t("Focus session"), minutes: 25 })}
             >
               <span className="qa-icon"><StopwatchIcon size={15} /></span>
-              Focus
+              {t("Focus")}
             </button>
           </div>
-          <button type="button" className="btn btn-soft btn-small ai-day-link" onClick={() => navigate({ name: 'ai', tab: 'plan' })}>
-            <SparklesIcon size={15} /> Plan with AI
-          </button>
+          <div className="plan-row">
+            <button
+              type="button"
+              className="btn btn-soft btn-small"
+              title={t("Fit untimed, overdue, and urgent tasks into today’s free time")}
+              disabled={date < today}
+              onClick={() => {
+                const plan = autoSchedule(state, date, { from: isToday ? nowMin + 10 : 9 * 60 });
+                if (plan.length === 0) {
+                  flash(t("Nothing to fit in — no untimed tasks, or no free time left."));
+                  return;
+                }
+                planner.applySchedule(plan);
+                flash(t("Planned {0} {1}: {2}{3}", { 0: plan.length, 1: plan.length === 1 ? t("task") : t("tasks"), 2: plan.slice(0, 3).map((item) => t("{0} {1}", { 0: item.time, 1: item.title })).join(', '), 3: plan.length > 3 ? '…' : '' }), { label: t("Undo"), run: planner.undo });
+              }}
+            >
+              <StopwatchIcon size={15} /> {t("Plan my day")}
+            </button>
+            <button type="button" className="btn btn-soft btn-small" onClick={() => navigate({ name: 'ai', tab: 'plan' })}>
+              <SparklesIcon size={15} /> {t("Plan with AI")}
+            </button>
+          </div>
         </aside>
       </header>
 
@@ -177,11 +197,11 @@ export function DayView({ date }: { date: string }) {
         <section className="card timeline-card">
           <header className="card-head">
             <div>
-              <p className="kicker">Schedule</p>
-              <h2 className="card-title">Timeline</h2>
+              <p className="kicker">{t("Schedule")}</p>
+              <h2 className="card-title">{t("Timeline")}</h2>
             </div>
             <button type="button" className="btn btn-tiny" onClick={() => openComposer({ mode: 'create', type: 'event', date })}>
-              Add event
+              {t("Add event")}
             </button>
           </header>
           {events.length === 0 ? (
@@ -189,11 +209,11 @@ export function DayView({ date }: { date: string }) {
               {isToday ? <NowMark time={clock} /> : null}
               <Empty
                 image="/img/spot-calendar.jpg"
-                title="Nothing timed yet."
-                text="Add a time only for what you want to protect."
+                title={t("Nothing timed yet.")}
+                text={t("Add a time only for what you want to protect.")}
                 action={
                   <button type="button" className="btn btn-soft" onClick={() => openComposer({ mode: 'create', type: 'event', date })}>
-                    Add event
+                    {t("Add event")}
                   </button>
                 }
               />
@@ -207,16 +227,16 @@ export function DayView({ date }: { date: string }) {
           <section className="card">
             <header className="card-head">
               <div>
-                <p className="kicker">Checklist</p>
-                <h2 className="card-title">Tasks</h2>
+                <p className="kicker">{t("Checklist")}</p>
+                <h2 className="card-title">{t("Tasks")}</h2>
               </div>
               <button type="button" className="btn btn-tiny" onClick={() => navigate({ name: 'tasks' })}>
-                All tasks
+                {t("All tasks")}
               </button>
             </header>
             {carried.length > 0 ? (
               <div className="carried">
-                <p>Carried over</p>
+                <p>{t("Carried over")}</p>
                 <ul className="item-list">
                   {carried.slice(0, 4).map((task) => (
                     <TaskRow
@@ -224,14 +244,14 @@ export function DayView({ date }: { date: string }) {
                       task={task}
                       showDate
                       onReschedule={() => moveTask(task.id, addDays(date, 1))}
-                      rescheduleLabel="Move to tomorrow"
+                      rescheduleLabel={t("Move to tomorrow")}
                       onDropSwap={(sourceId) => sourceId !== task.id && swapTasks(sourceId, task.id)}
                     />
                   ))}
                 </ul>
                 {carried.length > 4 ? (
                   <button type="button" className="text-btn" onClick={() => navigate({ name: 'tasks' })}>
-                    {carried.length - 4} more
+                    {carried.length - 4} {t('more')}
                   </button>
                 ) : null}
               </div>
@@ -239,11 +259,11 @@ export function DayView({ date }: { date: string }) {
             {openTasks.length === 0 && doneTasks.length === 0 ? (
               <Empty
                 image="/img/spot-tasks.jpg"
-                title="No tasks for this day."
-                text="A short list is easier to finish."
+                title={t("No tasks for this day.")}
+                text={t("A short list is easier to finish.")}
                 action={
                   <button type="button" className="btn btn-soft" onClick={() => openComposer({ mode: 'create', type: 'task', date })}>
-                    Add task
+                    {t("Add task")}
                   </button>
                 }
               />
@@ -265,21 +285,21 @@ export function DayView({ date }: { date: string }) {
           <section className="card wash-lav">
             <header className="card-head">
               <div>
-                <p className="kicker">Repeat</p>
-                <h2 className="card-title">Habits</h2>
+                <p className="kicker">{t("Repeat")}</p>
+                <h2 className="card-title">{t("Habits")}</h2>
               </div>
               <button type="button" className="btn btn-tiny" onClick={() => navigate({ name: 'habits' })}>
-                Tracker
+                {t("Tracker")}
               </button>
             </header>
             {habits.length === 0 ? (
               <Empty
                 image="/img/spot-library.jpg"
-                title="No habits for this day."
-                text="Start with one thing you want to repeat."
+                title={t("No habits for this day.")}
+                text={t("Start with one thing you want to repeat.")}
                 action={
                   <button type="button" className="btn btn-soft" onClick={() => openComposer({ mode: 'create', type: 'habit' })}>
-                    Add habit
+                    {t("Add habit")}
                   </button>
                 }
               />
@@ -305,20 +325,20 @@ function DayNotes({ date }: { date: string }) {
   return (
     <section className="card">
       <header className="card-head">
-        <h2 className="kicker">Notes for this day</h2>
+        <h2 className="kicker">{t("Notes for this day")}</h2>
         <button type="button" className="btn btn-tiny" onClick={() => openComposer({ mode: 'create', type: 'note', date })}>
-          Add note
+          {t("Add note")}
         </button>
       </header>
       {notes.length === 0 ? (
-        <p className="empty-inline">Nothing tied to this day yet.</p>
+        <p className="empty-inline">{t("Nothing tied to this day yet.")}</p>
       ) : (
         <ul className="mini-notes">
           {notes.map((note) => (
             <li key={note.id}>
               <button type="button" onClick={() => openComposer({ mode: 'edit', type: 'note', id: note.id })}>
                 <strong>{note.title}</strong>
-                <span>{note.body || 'Empty note'}</span>
+                <span>{note.body || t("Empty note")}</span>
               </button>
             </li>
           ))}
@@ -338,15 +358,15 @@ function EssentialsCard({ date, habits }: { date: string; habits: Habit[] }) {
     <section className="card essentials-card">
       <header className="card-head">
         <div>
-          <p className="kicker">Must-dos for every day</p>
-          <h2 className="card-title">Daily essentials</h2>
+          <p className="kicker">{t("Must-dos for every day")}</p>
+          <h2 className="card-title">{t("Daily essentials")}</h2>
         </div>
         {complete ? (
-          <span className="chip essentials-done">All done ✓</span>
+          <span className="chip essentials-done">{t("All done ✓")}</span>
         ) : (
           <div className="essentials-progress">
             <span className="essentials-count">{done}/{habits.length}</span>
-            <Meter value={habits.length === 0 ? 0 : done / habits.length} label="Daily essentials progress" />
+            <Meter value={habits.length === 0 ? 0 : done / habits.length} label={t("Daily essentials progress")} />
           </div>
         )}
       </header>

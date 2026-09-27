@@ -8,6 +8,14 @@ export type HabitFrequency =
   | { type: 'custom'; days: number[] }
   | { type: 'weekly'; times: number };
 
+export type TaskRepeat = 'daily' | 'weekdays' | 'weekly' | 'monthly' | 'yearly';
+
+export interface Subtask {
+  id: string;
+  title: string;
+  completed: boolean;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -21,6 +29,20 @@ export interface Task {
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
+  /** Repeat rule. Completing a repeating task schedules the next occurrence. */
+  repeat: TaskRepeat | null;
+  subtasks: Subtask[];
+  /** Set when the task was completed; used by insights. */
+  completedAt?: string | null;
+}
+
+export interface FocusLog {
+  id: string;
+  taskId: string | null;
+  title: string;
+  minutes: number;
+  date: string;
+  endedAt: string;
 }
 
 export interface PlannerEvent {
@@ -102,6 +124,7 @@ export interface Note {
   body: string;
   kind: NoteKind;
   date: string | null;
+  pinned?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -115,6 +138,7 @@ export interface PlannerState {
   goals: Goal[];
   notes: Note[];
   intentions: Record<string, string>;
+  focusLog: FocusLog[];
 }
 
 export interface TaskInput {
@@ -125,6 +149,8 @@ export interface TaskInput {
   category: string;
   note: string;
   goalId: string | null;
+  repeat?: TaskRepeat | null;
+  subtasks?: Subtask[];
 }
 
 export interface EventInput {
@@ -158,6 +184,7 @@ export interface NoteInput {
   body: string;
   kind: NoteKind;
   date: string | null;
+  pinned?: boolean;
 }
 
 export type ComposerState =
@@ -188,5 +215,6 @@ export function createEmptyState(): PlannerState {
     goals: [],
     notes: [],
     intentions: {},
+    focusLog: [],
   };
 }

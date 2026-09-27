@@ -1,5 +1,8 @@
 import { CATEGORIES, PRIORITIES, type Priority } from './constants';
-import { addDays, formatMonthShort, formatWeekdayShort, isValidISODate, parseISODate, todayISO } from './dates';
+import { repeatLabel } from './recurrence';
+import type { TaskRepeat } from './types';
+import { displayTime, addDays, formatMonthShort, formatWeekdayShort, isValidISODate, parseISODate, todayISO } from './dates';
+import { t } from './i18n';
 
 export interface QuickAddParse {
   kind: 'task' | 'event';
@@ -9,6 +12,7 @@ export interface QuickAddParse {
   endTime: string | null;
   priority: Priority | null;
   category: string | null;
+  repeat: TaskRepeat | null;
   chips: string[];
 }
 
@@ -108,15 +112,15 @@ function weekdayDate(word: string, today: string, next: boolean): string {
 }
 
 function describeDate(date: string, today: string): string {
-  if (date === today) return 'Today';
-  if (date === addDays(today, 1)) return 'Tomorrow';
+  if (date === today) return t("Today");
+  if (date === addDays(today, 1)) return t("Tomorrow");
   const diff = Math.round((parseISODate(date).getTime() - parseISODate(today).getTime()) / 86400000);
   if (diff > 1 && diff <= 6) return formatWeekdayShort(date);
   return `${formatWeekdayShort(date)} ${parseISODate(date).getDate()} ${formatMonthShort(date)}`;
 }
 
 function labelPriority(priority: Priority): string {
-  return PRIORITIES.find((item) => item.id === priority)?.label ?? 'Medium';
+  return PRIORITIES.find((item) => item.id === priority)?.label ?? t("Medium");
 }
 
 function labelCategory(category: string): string {
@@ -154,6 +158,31 @@ export function parseQuickAdd(input: string, defaultDate: string | null): QuickA
     if (prio) {
       priority = prio;
       token.used = true;
+    }
+  }
+
+  // Repeat phrases: "daily", "every day", "every weekday", "every mon", "weekly" …
+  let repeat: TaskRepeat | null = null;
+  const SOLO: Record<string, TaskRepeat> = { daily: 'daily', weekly: 'weekly', monthly: 'monthly', yearly: 'yearly', annually: 'yearly', weekdays: 'weekdays' };
+  const AFTER_EVERY: Record<string, TaskRepeat> = { day: 'daily', weekday: 'weekdays', weekdays: 'weekdays', week: 'weekly', month: 'monthly', year: 'yearly' };
+  for (let i = 0; i < tokens.length && !repeat; i += 1) {
+    if (!isFree(i)) continue;
+    const word = tokens[i].text.toLowerCase().replace(/[.,]$/, '');
+    if (SOLO[word]) {
+      repeat = SOLO[word];
+      use(i);
+    } else if (word === 'every' && isFree(i + 1)) {
+      const next = tokens[i + 1].text.toLowerCase().replace(/[.,]$/, '');
+      if (AFTER_EVERY[next]) {
+        repeat = AFTER_EVERY[next];
+        use(i);
+        use(i + 1);
+      } else if (WEEKDAYS[next] !== undefined) {
+        repeat = 'weekly';
+        date = weekdayDate(next, today, false);
+        use(i);
+        use(i + 1);
+      }
     }
   }
 
@@ -249,13 +278,14 @@ export function parseQuickAdd(input: string, defaultDate: string | null): QuickA
   if (!title) return null;
 
   const kind: 'task' | 'event' = rangeFound ? 'event' : 'task';
-  const resolvedDate = date ?? (kind === 'event' ? defaultDate ?? today : defaultDate);
+  const resolvedDate = date ?? (kind === 'event' || repeat ? defaultDate ?? today : defaultDate);
 
-  const chips: string[] = [kind === 'event' ? 'Event' : 'Task'];
+  const chips: string[] = [kind === 'event' ? t("Event") : t("Task")];
   if (resolvedDate) chips.push(describeDate(resolvedDate, today));
-  if (startTime) chips.push(endTime ? `${startTime} – ${endTime}` : startTime);
+  if (startTime) chips.push(endTime ? `${displayTime(startTime)} – ${displayTime(endTime)}` : displayTime(startTime));
   if (priority) chips.push(labelPriority(priority));
   if (category) chips.push(labelCategory(category));
+  if (repeat && kind === 'task') chips.push(`↻ ${repeatLabel(repeat)}`);
 
   return {
     kind,
@@ -265,6 +295,7 @@ export function parseQuickAdd(input: string, defaultDate: string | null): QuickA
     endTime,
     priority,
     category,
+    repeat: kind === 'task' ? repeat : null,
     chips,
   };
 }

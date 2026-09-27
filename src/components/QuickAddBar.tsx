@@ -3,6 +3,7 @@ import { usePlanner } from '../context';
 import { suggestTime, todayISO } from '../dates';
 import { PlusIcon } from '../icons';
 import { parseQuickAdd } from '../quickAdd';
+import { t } from '../i18n';
 
 export function QuickAddBar({ defaultDate, placeholder }: { defaultDate?: string | null; placeholder?: string }) {
   const { addTask, addEvent, flash, undo } = usePlanner();
@@ -23,7 +24,7 @@ export function QuickAddBar({ defaultDate, placeholder }: { defaultDate?: string
         note: '',
         important: false,
       });
-      flash(`Event “${parse.title}” added.`, { label: 'Undo', run: undo });
+      flash(t("Event “{0}” added.", { 0: parse.title }), { label: t("Undo"), run: undo });
     } else {
       addTask({
         title: parse.title,
@@ -33,8 +34,9 @@ export function QuickAddBar({ defaultDate, placeholder }: { defaultDate?: string
         category: parse.category ?? 'personal',
         note: '',
         goalId: null,
+        repeat: parse.repeat,
       });
-      flash(`Task “${parse.title}” added.`, { label: 'Undo', run: undo });
+      flash(t("Task “{0}” added.", { 0: parse.title }), { label: t("Undo"), run: undo });
     }
     setText('');
   };
@@ -48,12 +50,12 @@ export function QuickAddBar({ defaultDate, placeholder }: { defaultDate?: string
         <input
           value={text}
           onChange={(event) => setText(event.target.value)}
-          placeholder={placeholder ?? 'Add anything — try “Call mom tomorrow 5pm #work !high”'}
-          aria-label="Quick add"
+          placeholder={placeholder ?? t("Add anything — try “Call mom tomorrow 5pm #work !high”")}
+          aria-label={t("Quick add")}
           maxLength={200}
         />
         <button type="submit" className="btn btn-primary btn-small" disabled={!parse}>
-          Add
+          {t("Add")}
         </button>
       </div>
       {parse ? (

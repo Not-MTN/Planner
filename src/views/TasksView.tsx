@@ -7,12 +7,28 @@ import { TaskRow } from '../components/items';
 import { Empty } from '../components/ui';
 import { SparklesIcon } from '../icons';
 import type { Task } from '../types';
+import { TaskBoard, type BoardGroup } from './TaskBoard';
+import { t } from '../i18n';
+
+const LAYOUT_KEY = 'planner-task-layout';
+
+function loadLayout(): { layout: 'list' | 'board'; group: BoardGroup } {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? '{}') as { layout?: string; group?: string };
+    return {
+      layout: raw.layout === 'board' ? 'board' : 'list',
+      group: raw.group === 'priority' || raw.group === 'category' ? raw.group : 'when',
+    };
+  } catch {
+    return { layout: 'list', group: 'when' };
+  }
+}
 
 const FILTERS = [
-  { id: 'open', label: 'Open' },
-  { id: 'today', label: 'Today' },
-  { id: 'upcoming', label: 'Upcoming' },
-  { id: 'done', label: 'Done' },
+  { id: 'open', label: t("Open") },
+  { id: 'today', label: t("Today") },
+  { id: 'upcoming', label: t("Upcoming") },
+  { id: 'done', label: t("Done") },
 ] as const;
 
 type FilterId = (typeof FILTERS)[number]['id'];
@@ -21,7 +37,20 @@ export function TasksView() {
   const { state, openComposer, swapTasks, moveTask, clearCompletedTasks, loadSample, isEmpty } = useTaskViewHelpers();
   const [filter, setFilter] = useState<FilterId>('open');
   const [query, setQuery] = useState('');
+  const [view, setView] = useState(loadLayout);
   const today = todayISO();
+  const changeView = (next: typeof view) => {
+    setView(next);
+    try {
+      localStorage.setItem(LAYOUT_KEY, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  };
+  const searched = useMemo(
+    () => state.tasks.filter((task) => matchesQuery([task.title, task.note, task.category, task.priority, ...task.subtasks.map((item) => item.title)], query)),
+    [state.tasks, query],
+  );
 
   const counts = useMemo(
     () => ({
@@ -34,16 +63,14 @@ export function TasksView() {
   );
 
   const groups = useMemo(() => {
-    const matched = state.tasks.filter((task) =>
-      matchesQuery([task.title, task.note, task.category, task.priority], query),
-    );
+    const matched = searched;
     const visible = matched.filter((task) => {
       if (filter === 'done') return task.completed;
       if (filter === 'today') return task.dueDate === today;
       if (filter === 'upcoming') return !task.completed && task.dueDate !== null && task.dueDate > today;
       return !task.completed;
     });
-    if (filter === 'done') return [{ id: 'done', label: 'Completed', tasks: sortTasks(visible) }];
+    if (filter === 'done') return [{ id: 'done', label: t("Completed"), tasks: sortTasks(visible) }];
     if (filter === 'upcoming') {
       const byDate = new Map<string, Task[]>();
       for (const task of visible) {
@@ -60,26 +87,43 @@ export function TasksView() {
     const dueToday = visible.filter((task) => task.dueDate === today);
     const inbox = visible.filter((task) => !task.dueDate);
     return [
-      { id: 'carried', label: 'Carried over', tasks: sortTasks(carried) },
-      { id: 'today', label: 'Today', tasks: sortTasks(dueToday) },
-      { id: 'inbox', label: 'Anytime', tasks: sortTasks(inbox) },
+      { id: 'carried', label: t("Carried over"), tasks: sortTasks(carried) },
+      { id: 'today', label: t("Today"), tasks: sortTasks(dueToday) },
+      { id: 'inbox', label: t("Anytime"), tasks: sortTasks(inbox) },
     ].filter((group) => group.tasks.length > 0);
-  }, [state.tasks, filter, query, today]);
+  }, [searched, filter, today]);
 
   return (
     <div className="view">
       <header className="page-head">
         <div>
-          <p className="kicker">Tasks</p>
-          <h1>Tasks</h1>
-          <p className="lede">What you’ve promised yourself.</p>
+          <p className="kicker">{t("Tasks")}</p>
+          <h1>{t("Tasks")}</h1>
+          <p className="lede">{t("What you’ve promised yourself.")}</p>
         </div>
         <button type="button" className="btn btn-primary" onClick={() => openComposer({ mode: 'create', type: 'task', date: today })}>
-          Add task
+          {t("Add task")}
         </button>
       </header>
       <div className="toolbar">
-        <div className="filters" role="tablist" aria-label="Task filters">
+        <div className="segmented layout-switch" role="radiogroup" aria-label={t("Layout")}>
+          {(['list', 'board'] as const).map((layout) => (
+            <button key={layout} type="button" role="radio" aria-checked={view.layout === layout} className={cx('seg', view.layout === layout && 'on')} onClick={() => changeView({ ...view, layout })}>
+              {layout === 'list' ? t("List") : t("Board")}
+            </button>
+          ))}
+        </div>
+        {view.layout === 'board' ? (
+          <label className="board-group">
+            <span>{t("Group by")}</span>
+            <select value={view.group} onChange={(event) => changeView({ ...view, group: event.target.value as BoardGroup })}>
+              <option value="when">{t("When")}</option>
+              <option value="priority">{t("Priority")}</option>
+              <option value="category">{t("Category")}</option>
+            </select>
+          </label>
+        ) : (
+        <div className="filters" role="tablist" aria-label={t("Task filters")}>
           {FILTERS.map((item) => (
             <button
               key={item.id}
@@ -94,29 +138,32 @@ export function TasksView() {
             </button>
           ))}
         </div>
+        )}
         <label className="search">
-          <span className="visually-hidden">Search tasks</span>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search tasks" />
+          <span className="visually-hidden">{t("Search tasks")}</span>
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("Search tasks")} />
         </label>
       </div>
       {state.tasks.length === 0 ? (
         <section className="card">
           <Empty
             image="/img/spot-tasks.jpg"
-            title="Your list is clear."
-            text="Add a task when something actually needs a place."
+            title={t("Your list is clear.")}
+            text={t("Add a task when something actually needs a place.")}
             action={
               isEmpty ? (
                 <button type="button" className="btn btn-ghost" onClick={loadSample}>
-                  <SparklesIcon size={15} /> Try a sample day
+                  <SparklesIcon size={15} /> {t("Try a sample day")}
                 </button>
               ) : undefined
             }
           />
         </section>
+      ) : view.layout === 'board' ? (
+        <TaskBoard tasks={searched} group={view.group} today={today} />
       ) : groups.length === 0 ? (
         <section className="card">
-          <Empty title="Nothing in this view." text="Try another filter, or clear the search." />
+          <Empty title={t("Nothing in this view.")} text={t("Try another filter, or clear the search.")} />
         </section>
       ) : (
         <div className="stack">
@@ -126,7 +173,7 @@ export function TasksView() {
                 <h2 className="kicker">{group.label}</h2>
                 {group.id === 'done' && counts.done > 0 ? (
                   <button type="button" className="btn btn-tiny danger" onClick={clearCompletedTasks}>
-                    Clear completed
+                    {t("Clear completed")}
                   </button>
                 ) : null}
               </header>
@@ -137,7 +184,7 @@ export function TasksView() {
                     task={task}
                     showDate={filter === 'done' || group.id === 'carried' || filter === 'upcoming'}
                     onReschedule={group.id === 'carried' ? () => moveTask(task.id, addDays(today, 1)) : undefined}
-                    rescheduleLabel="Move to tomorrow"
+                    rescheduleLabel={t("Move to tomorrow")}
                     onDropSwap={(sourceId) => {
                       if (sourceId !== task.id) swapTasks(sourceId, task.id);
                     }}

@@ -4,6 +4,7 @@ import { frequencyLabelOf } from '../logic';
 import { HABIT_GROUPS, presetToInput, type HabitPreset } from '../presets';
 import { HabitGlyph } from '../icons';
 import { Modal } from './ui';
+import { t } from '../i18n';
 
 export function HabitLibrary({ onClose }: { onClose: () => void }) {
   const { state, addHabit, addHabits, flash, undo } = usePlanner();
@@ -11,20 +12,20 @@ export function HabitLibrary({ onClose }: { onClose: () => void }) {
 
   const addPreset = (preset: HabitPreset) => {
     addHabit(presetToInput(preset));
-    flash(`Habit “${preset.name}” added.`, { label: 'Undo', run: undo });
+    flash(t("Habit “{0}” added.", { 0: preset.name }), { label: t("Undo"), run: undo });
   };
 
   const addGroup = (presets: HabitPreset[]) => {
     const fresh = presets.filter((preset) => !existing.has(preset.name.toLowerCase()));
     if (fresh.length === 0) return;
     addHabits(fresh.map(presetToInput));
-    flash(`${fresh.length} ${fresh.length === 1 ? 'habit' : 'habits'} added.`, { label: 'Undo', run: undo });
+    flash(`${fresh.length} ${fresh.length === 1 ? 'habit' : 'habits'} added.`, { label: t("Undo"), run: undo });
   };
 
   return (
-    <Modal title="Habit library" onClose={onClose} className="sheet-library">
+    <Modal title={t("Habit library")} onClose={onClose} className="sheet-library">
       <img className="library-banner" src="/img/spot-library.jpg" alt="" loading="lazy" />
-      <p className="lede">Built-in habits and daily must-dos, one tap away. Add what fits; leave the rest.</p>
+      <p className="lede">{t("Built-in habits and daily must-dos, one tap away. Add what fits; leave the rest.")}</p>
       {HABIT_GROUPS.map((group) => (
         <section key={group.id} className="library-group">
           <header className="library-group-head">
@@ -37,7 +38,7 @@ export function HabitLibrary({ onClose }: { onClose: () => void }) {
               className="btn btn-tiny btn-soft"
               onClick={() => addGroup(group.presets)}
             >
-              Add all
+              {t("Add all")}
             </button>
           </header>
           <ul className="library-list">
@@ -58,10 +59,10 @@ export function HabitLibrary({ onClose }: { onClose: () => void }) {
                       <strong>{preset.name}</strong>
                       <small>
                         {frequencyLabelOf(preset.frequency)}
-                        {preset.essential ? ' · must-do' : ''}
+                        {preset.essential ? t(" · must-do") : ''}
                       </small>
                     </span>
-                    {added ? <span className="chip">Added</span> : <span className="library-add">Add</span>}
+                    {added ? <span className="chip">{t("Added")}</span> : <span className="library-add">{t("Add")}</span>}
                   </button>
                 </li>
               );

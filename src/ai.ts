@@ -1,3 +1,4 @@
+import { getLang, t } from './i18n';
 import { CATEGORIES, HABIT_ICONS, PRIORITIES, categoryById } from './constants';
 import type { Priority } from './constants';
 import { addDays, isValidISODate, isValidTime, timeToMinutes, weekdayIndex } from './dates';
@@ -115,26 +116,26 @@ function eventConflicts(
   const fixed = fixedSlots(state, event.date);
   for (const commitment of fixed) {
     if (timeOverlaps(proposedStart, proposedEnd, timeToMinutes(commitment.startTime), timeToMinutes(commitment.endTime))) {
-      return `overlaps protected time: ${commitment.title}`;
+      return t("overlaps protected time: {0}", { 0: commitment.title });
     }
   }
   const existing = state.events.filter((item) => item.date === event.date);
   for (const item of existing) {
     if (timeOverlaps(proposedStart, proposedEnd, timeToMinutes(item.startTime), eventEnd(item.startTime, item.endTime))) {
-      return `overlaps your existing event: ${item.title}`;
+      return t("overlaps your existing event: {0}", { 0: item.title });
     }
   }
   const timedTasks = state.tasks.filter((task) => task.dueDate === event.date && task.dueTime);
   for (const task of timedTasks) {
     const start = timeToMinutes(task.dueTime as string);
     if (timeOverlaps(proposedStart, proposedEnd, start, Math.min(24 * 60, start + 30))) {
-      return `overlaps your timed task: ${task.title}`;
+      return t("overlaps your timed task: {0}", { 0: task.title });
     }
   }
   for (const item of accepted) {
     if (item.date !== event.date) continue;
     if (timeOverlaps(proposedStart, proposedEnd, timeToMinutes(item.startTime), eventEnd(item.startTime, item.endTime))) {
-      return `overlaps another suggested plan: ${item.title}`;
+      return t("overlaps another suggested plan: {0}", { 0: item.title });
     }
   }
   return null;
@@ -159,7 +160,7 @@ function parseFrequency(value: unknown): HabitFrequency {
 
 function normalizePlan(rawValue: unknown, state: PlannerState, range: PlanRange): AIDraft {
   const raw = asRecord(rawValue);
-  if (!raw) throw new Error('xAI returned a plan in an unexpected format. Try again.');
+  if (!raw) throw new Error(t(t("xAI returned a plan in an unexpected format. Try again.")));
   const tasks: TaskInput[] = [];
   const existingTaskKeys = new Set(
     state.tasks.map((task) => `${task.dueDate ?? ''}|${task.title.toLowerCase().trim()}`),
@@ -245,7 +246,7 @@ function normalizePlan(rawValue: unknown, state: PlannerState, range: PlanRange)
   }
 
   return {
-    summary: cleanText(raw.summary, 400) || 'A first draft for the days ahead.',
+    summary: cleanText(raw.summary, 400) || t(t("A first draft for the days ahead.")),
     tasks,
     events,
     habits,
@@ -267,7 +268,7 @@ function extractContent(payload: unknown): string {
       return typeof text === 'string' ? [text] : [];
     }).join('\n');
   }
-  throw new Error('xAI did not return a response. Check the server configuration and try again.');
+  throw new Error(t(t("xAI did not return a response. Check the server configuration and try again.")));
 }
 
 function parseJson(text: string): unknown {
@@ -275,7 +276,7 @@ function parseJson(text: string): unknown {
   try {
     return JSON.parse(cleaned) as unknown;
   } catch {
-    throw new Error('The AI response was not valid JSON. Please try again.');
+    throw new Error(t(t("The AI response was not valid JSON. Please try again.")));
   }
 }
 
@@ -297,24 +298,24 @@ async function xaiJson(system: string, user: string, imageDataUrl?: string): Pro
         max_tokens: 3500,
         response_format: { type: 'json_object' },
         messages: [
-          { role: 'system', content: system },
+          { role: 'system', content: getLang() === 'fa' ? `${system}\n\nWrite every human-readable text value (summary, titles, notes, names, wins, improvements, wellness, reasons) in Persian (Farsi). Keep JSON keys, enum values, dates and times in English/ASCII exactly as specified.` : system },
           { role: 'user', content },
         ],
       }),
     });
   } catch {
-    throw new Error('Could not reach the xAI proxy. Check the server and try again.');
+    throw new Error(t(t("Could not reach the xAI proxy. Check the server and try again.")));
   }
   const payload = await response.json().catch(() => null) as unknown;
   if (!response.ok) {
     const message = cleanText(asRecord(asRecord(payload)?.error)?.message, 240);
-    if (response.status === 401) throw new Error('xAI rejected XAI_API_KEY. Check the server environment variable.');
-    if (response.status === 403) throw new Error(message || 'xAI rejected XAI_API_KEY. Check the server environment variable.');
+    if (response.status === 401) throw new Error(t(t("xAI rejected XAI_API_KEY. Check the server environment variable.")));
+    if (response.status === 403) throw new Error(message || t(t("xAI rejected XAI_API_KEY. Check the server environment variable.")));
     if (response.status === 503) throw new Error(message || XAI_KEY_MISSING_MESSAGE);
-    if (response.status === 413) throw new Error(message || 'The image or plan is too large for one request. Use a smaller image (up to 3 MB).');
-    if (response.status === 404) throw new Error('The xAI proxy was not found on this deployment. Redeploy with the api/ functions included.');
-    if (response.status === 504) throw new Error(message || 'The xAI request timed out. Please try again.');
-    throw new Error(message || `xAI request failed (${response.status}). Please try again.`);
+    if (response.status === 413) throw new Error(message || t(t("The image or plan is too large for one request. Use a smaller image (up to 3 MB).")));
+    if (response.status === 404) throw new Error(t(t("The xAI proxy was not found on this deployment. Redeploy with the api/ functions included.")));
+    if (response.status === 504) throw new Error(message || t(t("The xAI request timed out. Please try again.")));
+    throw new Error(message || t("xAI request failed ({0}). Please try again.", { 0: response.status }));
   }
   return parseJson(extractContent(payload));
 }
@@ -337,8 +338,8 @@ export async function generateAIPlan(options: {
   imageDataUrl?: string;
 }): Promise<AIDraft> {
   const { prompt, range, state, imageDataUrl } = options;
-  if (!isValidISODate(range.startDate) || range.days < 1 || range.days > 60) throw new Error('Choose a valid planning date range.');
-  if (!prompt.trim() && !imageDataUrl) throw new Error('Tell the AI what you want to do, or upload a plan image.');
+  if (!isValidISODate(range.startDate) || range.days < 1 || range.days > 60) throw new Error(t(t("Choose a valid planning date range.")));
+  if (!prompt.trim() && !imageDataUrl) throw new Error(t(t("Tell the AI what you want to do, or upload a plan image.")));
   const lastDate = addDays(range.startDate, range.days - 1);
   const currentPlans = {
     fixedWeeklyTimes: state.fixedCommitments.map((item) => ({
@@ -374,7 +375,7 @@ function reviewCarryForward(raw: unknown, candidates: PlannerState['tasks'], tod
     const taskId = cleanText(item?.taskId, 80);
     const date = cleanText(item?.date, 10);
     if (!candidateById.has(taskId) || !isValidISODate(date) || date <= today || date > addDays(today, 30) || suggested.has(taskId)) continue;
-    suggested.set(taskId, { date, reason: cleanText(item?.reason, 200) || 'A little more room to finish this.' });
+    suggested.set(taskId, { date, reason: cleanText(item?.reason, 200) || t(t("A little more room to finish this.")) });
   }
   const defaultDate = addDays(today, 1);
   return candidates.map((task) => {
@@ -384,7 +385,7 @@ function reviewCarryForward(raw: unknown, candidates: PlannerState['tasks'], tod
       title: task.title,
       fromDate: task.dueDate ?? today,
       date: choice?.date ?? defaultDate,
-      reason: choice?.reason ?? 'Move it forward only if it still matters to you.',
+      reason: choice?.reason ?? t(t("Move it forward only if it still matters to you.")),
     };
   });
 }
@@ -395,7 +396,7 @@ export async function generateAIReview(options: {
   today: string;
 }): Promise<AIReview> {
   const { state, range, today } = options;
-  if (!isValidISODate(range.startDate) || range.days < 1 || range.days > 60) throw new Error('Choose a valid review date range.');
+  if (!isValidISODate(range.startDate) || range.days < 1 || range.days > 60) throw new Error(t(t("Choose a valid review date range.")));
   const lastDate = addDays(range.startDate, range.days - 1);
   const dates = Array.from({ length: range.days }, (_, index) => addDays(range.startDate, index));
   const tasks = state.tasks
@@ -433,12 +434,12 @@ export async function generateAIReview(options: {
   };
   const system = `You are a kind, honest planning coach. Review the planner data for ${range.startDate} through ${lastDate}. Be specific, balanced, and non-judgmental; never shame the user or equate productivity with self-worth. Point out concrete wins and one or two realistic improvements. Always include one gentle, broadly safe wellbeing idea without diagnosing or prescribing. Return ONLY JSON: {"summary":"2-4 sentences","wins":["..."],"improvements":["..."],"wellness":"one optional, gentle wellbeing idea","carryForward":[{"taskId":"an exact supplied task id","date":"YYYY-MM-DD after ${today} and within the next 30 days","reason":"short reason"}]}. Carry forward each unfinished task only if it still appears useful, use only supplied IDs, and choose practical future dates that leave space. Never invent, delete, or mark tasks complete. This is reflective coaching, not medical advice.`;
   const raw = asRecord(await xaiJson(system, `Here is the user's logged activity. Do not treat empty days as failures.\n${JSON.stringify(payload)}`));
-  if (!raw) throw new Error('xAI returned a review in an unexpected format. Try again.');
+  if (!raw) throw new Error(t(t("xAI returned a review in an unexpected format. Try again.")));
   return {
-    summary: cleanText(raw.summary, 700) || 'You showed up for some of the things that mattered. Let’s make the next plan a little easier to keep.',
+    summary: cleanText(raw.summary, 700) || t(t("You showed up for some of the things that mattered. Let’s make the next plan a little easier to keep.")),
     wins: stringList(raw.wins, 5),
     improvements: stringList(raw.improvements, 5),
-    wellness: cleanText(raw.wellness, 300) || 'Leave a little room for rest and a short stretch or walk if that feels good.',
+    wellness: cleanText(raw.wellness, 300) || t(t("Leave a little room for rest and a short stretch or walk if that feels good.")),
     carryForward: reviewCarryForward(raw.carryForward, openTasks, today),
   };
 }
@@ -452,5 +453,5 @@ export function hasReviewActivity(state: PlannerState, range: PlanRange): boolea
 
 export function friendlyXAIError(error: unknown): string {
   if (error instanceof Error) return error.message;
-  return 'The AI could not complete that request. Please try again.';
+  return t(t("The AI could not complete that request. Please try again."));
 }

@@ -1,56 +1,57 @@
+import { t } from './i18n';
 export const ACCENTS = ['sage', 'blue', 'pink', 'lav', 'peach'] as const;
 export type Accent = (typeof ACCENTS)[number];
 
 export const ACCENT_CHOICES = [
-  { id: 'sage', label: 'Sage' },
-  { id: 'blue', label: 'Ocean' },
-  { id: 'pink', label: 'Rose' },
-  { id: 'lav', label: 'Lilac' },
-  { id: 'peach', label: 'Amber' },
+  { id: 'sage', get label() { return t('Sage'); } },
+  { id: 'blue', get label() { return t('Ocean'); } },
+  { id: 'pink', get label() { return t('Rose'); } },
+  { id: 'lav', get label() { return t('Lilac'); } },
+  { id: 'peach', get label() { return t('Amber'); } },
 ] as const;
 
 export const CATEGORIES = [
-  { id: 'personal', label: 'Personal', accent: 'peach' },
-  { id: 'work', label: 'Work', accent: 'blue' },
-  { id: 'health', label: 'Health', accent: 'sage' },
-  { id: 'learning', label: 'Learning', accent: 'lav' },
-  { id: 'home', label: 'Home', accent: 'pink' },
-  { id: 'social', label: 'Social', accent: 'blue' },
+  { id: 'personal', get label() { return t('Personal'); }, accent: 'peach' },
+  { id: 'work', get label() { return t('Work'); }, accent: 'blue' },
+  { id: 'health', get label() { return t('Health'); }, accent: 'sage' },
+  { id: 'learning', get label() { return t('Learning'); }, accent: 'lav' },
+  { id: 'home', get label() { return t('Home'); }, accent: 'pink' },
+  { id: 'social', get label() { return t('Social'); }, accent: 'blue' },
 ] as const;
 
 export type CategoryId = (typeof CATEGORIES)[number]['id'];
 
 export const PRIORITIES = [
-  { id: 'low', label: 'Low' },
-  { id: 'medium', label: 'Medium' },
-  { id: 'high', label: 'High' },
+  { id: 'low', get label() { return t('Low'); } },
+  { id: 'medium', get label() { return t('Medium'); } },
+  { id: 'high', get label() { return t('High'); } },
 ] as const;
 
 export type Priority = (typeof PRIORITIES)[number]['id'];
 
 export const HABIT_ICONS = [
-  { id: 'water', label: 'Water' },
-  { id: 'book', label: 'Reading' },
-  { id: 'study', label: 'Study' },
-  { id: 'moon', label: 'Sleep' },
-  { id: 'sun', label: 'Morning' },
-  { id: 'walk', label: 'Walk' },
-  { id: 'heart', label: 'Care' },
-  { id: 'leaf', label: 'Outdoors' },
-  { id: 'coffee', label: 'Coffee' },
-  { id: 'pencil', label: 'Writing' },
-  { id: 'home', label: 'Home' },
-  { id: 'stretch', label: 'Movement' },
-  { id: 'spark', label: 'Focus' },
+  { id: 'water', get label() { return t('Water'); } },
+  { id: 'book', get label() { return t('Reading'); } },
+  { id: 'study', get label() { return t('Study'); } },
+  { id: 'moon', get label() { return t('Sleep'); } },
+  { id: 'sun', get label() { return t('Morning'); } },
+  { id: 'walk', get label() { return t('Walk'); } },
+  { id: 'heart', get label() { return t('Care'); } },
+  { id: 'leaf', get label() { return t('Outdoors'); } },
+  { id: 'coffee', get label() { return t('Coffee'); } },
+  { id: 'pencil', get label() { return t('Writing'); } },
+  { id: 'home', get label() { return t('Home'); } },
+  { id: 'stretch', get label() { return t('Movement'); } },
+  { id: 'spark', get label() { return t('Focus'); } },
 ] as const;
 
 export type HabitIconId = (typeof HABIT_ICONS)[number]['id'];
 
 export const NOTE_KINDS = [
-  { id: 'quick', label: 'Quick note', accent: 'peach' },
-  { id: 'idea', label: 'Idea', accent: 'lav' },
-  { id: 'reminder', label: 'Reminder', accent: 'blue' },
-  { id: 'journal', label: 'Journal', accent: 'sage' },
+  { id: 'quick', get label() { return t('Quick note'); }, accent: 'peach' },
+  { id: 'idea', get label() { return t('Idea'); }, accent: 'lav' },
+  { id: 'reminder', get label() { return t('Reminder'); }, accent: 'blue' },
+  { id: 'journal', get label() { return t('Journal'); }, accent: 'sage' },
 ] as const;
 
 export type NoteKind = (typeof NOTE_KINDS)[number]['id'];

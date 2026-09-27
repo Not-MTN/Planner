@@ -8,6 +8,7 @@ import {
   weekdayIndex,
 } from './dates';
 import type { DayScore, DotState, Goal, Habit, HabitFrequency, PlannerEvent, PlannerState, Task } from './types';
+import { t } from './i18n';
 
 export function isDone(state: PlannerState, habitId: string, date: string): boolean {
   return state.completions.some((item) => item.habitId === habitId && item.date === date);
@@ -164,11 +165,11 @@ export function dayScore(state: PlannerState, date: string, includeOpenFlexible 
 }
 
 export function progressPhrase(ratio: number | null): string {
-  if (ratio === null) return 'Nothing scheduled yet.';
-  if (ratio === 0) return 'Whenever you are ready.';
-  if (ratio < 0.5) return 'A gentle start.';
-  if (ratio < 1) return 'Moving through the day.';
-  return 'Today is complete.';
+  if (ratio === null) return t("Nothing scheduled yet.");
+  if (ratio === 0) return t("Whenever you are ready.");
+  if (ratio < 0.5) return t("A gentle start.");
+  if (ratio < 1) return t("Moving through the day.");
+  return t("Today is complete.");
 }
 
 export function goalProgress(goal: Goal, tasks: Task[]): { done: number; total: number; ratio: number } {
@@ -215,10 +216,10 @@ export function frequencyLabelOf(frequency: HabitFrequency): string {
 
 export function frequencyLabel(habit: Pick<Habit, 'frequency'>): string {
   const frequency = habit.frequency;
-  if (frequency.type === 'daily') return 'Every day';
-  if (frequency.type === 'weekdays') return 'Weekdays';
-  if (frequency.type === 'weekly') return `${frequency.times}× a week`;
-  const names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  if (frequency.type === 'daily') return t("Every day");
+  if (frequency.type === 'weekdays') return t("Weekdays");
+  if (frequency.type === 'weekly') return t("{0}× a week", { 0: frequency.times });
+  const names = [t("Sun"), 'Mon', t("Tue"), t("Wed"), t("Thu"), t("Fri"), t("Sat")];
   const labels = [...frequency.days].sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map((day) => names[day]);
   return labels.join(', ');
 }
@@ -249,19 +250,19 @@ export function weekNarrative(state: PlannerState, today: string): string {
   }).length;
   const habitDone = state.habits.filter((habit) => !habit.archived && weekDates(today).some((date) => date <= today && isDone(state, habit.id, date))).length;
   if (total === 0 && state.goals.length === 0 && state.habits.length === 0) {
-    return 'A quiet week so far. Add only what you want to keep.';
+    return t("A quiet week so far. Add only what you want to keep.");
   }
   const head =
     total === 0
-      ? 'The week’s schedule is still open.'
+      ? t("The week’s schedule is still open.")
       : done === 0
-        ? `${total} ${total === 1 ? 'thing is' : 'things are'} on the page so far.`
+        ? t("{0} {1} on the page so far.", { 0: total, 1: total === 1 ? t("thing is") : t("things are") })
         : done === total
-          ? `Everything scheduled so far this week is done.`
-          : `${done} of ${total} scheduled things are done so far this week.`;
+          ? t("Everything scheduled so far this week is done.")
+          : t("{0} of {1} scheduled things are done so far this week.", { 0: done, 1: total });
   const habitLine =
-    habitDone === 0 ? '' : ` ${habitDone} ${habitDone === 1 ? 'habit was' : 'habits were'} kept this week.`;
-  const goalLine = moving === 0 ? '' : ` ${moving} ${moving === 1 ? 'goal is' : 'goals are'} still in motion.`;
+    habitDone === 0 ? '' : t(" {0} {1} kept this week.", { 0: habitDone, 1: habitDone === 1 ? t("habit was") : t("habits were") });
+  const goalLine = moving === 0 ? '' : t(" {0} {1} still in motion.", { 0: moving, 1: moving === 1 ? t("goal is") : t("goals are") });
   return `${head}${habitLine}${goalLine}`.replace(/\s+/g, ' ').trim();
 }
 

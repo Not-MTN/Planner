@@ -4,15 +4,19 @@ import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { isValidTime, suggestTime, timeToMinutes, todayISO, WEEKDAY_TOGGLES } from '../dates';
 import { HabitGlyph } from '../icons';
-import type { ComposerState, EventInput, GoalHorizon, HabitFrequency, HabitInput, NoteInput, PlannerState, TaskInput } from '../types';
+import { REPEAT_CHOICES } from '../recurrence';
+import { uid } from '../mutate';
+import type { Subtask, TaskRepeat, ComposerState, EventInput, GoalHorizon, HabitFrequency, HabitInput, NoteInput, PlannerState, TaskInput } from '../types';
 import { Field, Modal } from './ui';
+import { Markdown } from './Markdown';
+import { t } from '../i18n';
 
 const TITLES: Record<ComposerState['type'], [string, string]> = {
-  task: ['New task', 'Edit task'],
-  event: ['New event', 'Edit event'],
-  habit: ['New habit', 'Edit habit'],
-  goal: ['New goal', 'Edit goal'],
-  note: ['New note', 'Edit note'],
+  task: [t("New task"), t("Edit task")],
+  event: [t("New event"), t("Edit event")],
+  habit: [t("New habit"), t("Edit habit")],
+  goal: [t("New goal"), t("Edit goal")],
+  note: [t("New note"), t("Edit note")],
 };
 
 export function Composer() {
@@ -44,14 +48,14 @@ function ComposerForm({
     if (composer.type === 'habit') planner.deleteHabit(composer.id);
     if (composer.type === 'goal') planner.deleteGoal(composer.id);
     if (composer.type === 'note') planner.deleteNote(composer.id);
-    planner.flash(`${labelFor(composer.type)} “${item ?? 'Removed'}” removed.`, { label: 'Undo', run: planner.undo });
+    planner.flash(t("{0} “{1}” removed.", { 0: labelFor(composer.type), 1: item ?? t("Removed") }), { label: t("Undo"), run: planner.undo });
     onClose();
   };
 
   return (
     <Modal title={heading} onClose={onClose}>
       {!editing ? (
-        <div className="segmented type-switch" role="tablist" aria-label="What to add">
+        <div className="segmented type-switch" role="tablist" aria-label={t("What to add")}>
           {(['task', 'event', 'habit', 'goal', 'note'] as const).map((item) => (
             <button
               key={item}
@@ -94,11 +98,11 @@ function findItem(state: PlannerState, composer: { type: ComposerState['type']; 
 }
 
 function labelFor(type: ComposerState['type']): string {
-  if (type === 'task') return 'Task';
-  if (type === 'event') return 'Event';
-  if (type === 'habit') return 'Habit';
-  if (type === 'goal') return 'Goal';
-  return 'Note';
+  if (type === 'task') return t("Task");
+  if (type === 'event') return t("Event");
+  if (type === 'habit') return t("Habit");
+  if (type === 'goal') return t("Goal");
+  return t("Note");
 }
 
 function TaskForm({
@@ -122,16 +126,26 @@ function TaskForm({
   const [category, setCategory] = useState(existing?.category ?? 'personal');
   const [goalId, setGoalId] = useState(existing?.goalId ?? '');
   const [note, setNote] = useState(existing?.note ?? '');
+  const [repeat, setRepeat] = useState<TaskRepeat | ''>(existing?.repeat ?? '');
+  const [subtasks, setSubtasks] = useState<Subtask[]>(existing?.subtasks ?? []);
+  const [draftStep, setDraftStep] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  const addStep = () => {
+    const text = draftStep.trim();
+    if (!text) return;
+    setSubtasks((items) => [...items, { id: uid(), title: text.slice(0, 140), completed: false }]);
+    setDraftStep('');
+  };
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!title.trim()) {
-      setError('Add a title.');
+      setError(t("Add a title."));
       return;
     }
     if (dueTime && !isValidTime(dueTime)) {
-      setError('Use a valid time.');
+      setError(t("Use a valid time."));
       return;
     }
     const input: TaskInput = {
@@ -142,6 +156,8 @@ function TaskForm({
       category,
       note,
       goalId: goalId || null,
+      repeat: repeat || null,
+      subtasks: draftStep.trim() ? [...subtasks, { id: uid(), title: draftStep.trim(), completed: false }] : subtasks,
     };
     if (existing) updateTask(existing.id, input);
     else addTask(input);
@@ -150,12 +166,12 @@ function TaskForm({
 
   return (
     <form className="form" onSubmit={submit}>
-      <Field label="Title" error={error}>
+      <Field label={t("Title")} error={error}>
         <input data-autofocus value={title} onChange={(event) => setTitle(event.target.value)} maxLength={140} />
       </Field>
       <div className="field">
-        <span>Priority</span>
-        <div className="segmented" role="radiogroup" aria-label="Priority">
+        <span>{t("Priority")}</span>
+        <div className="segmented" role="radiogroup" aria-label={t("Priority")}>
           {PRIORITIES.map((item) => (
             <button
               key={item.id}
@@ -171,34 +187,84 @@ function TaskForm({
         </div>
       </div>
       <div className="form-row two">
-        <Field label="Due date">
+        <Field label={t("Due date")}>
           <input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
         </Field>
-        <Field label="Due time">
+        <Field label={t("Due time")}>
           <input type="time" value={dueTime} onChange={(event) => setDueTime(event.target.value)} />
         </Field>
       </div>
+      <Field label={t("Repeat")} hint={repeat ? t("Finishing it schedules the next one.") : undefined}>
+        <select value={repeat} onChange={(event) => setRepeat(event.target.value as TaskRepeat | '')}>
+          <option value="">{t("Does not repeat")}</option>
+          {REPEAT_CHOICES.map((item) => (
+            <option key={item.id} value={item.id}>{item.label}</option>
+          ))}
+        </select>
+      </Field>
+      <div className="field">
+        <span>{t("Checklist")}</span>
+        {subtasks.length ? (
+          <ul className="subtask-edit">
+            {subtasks.map((item) => (
+              <li key={item.id}>
+                <input
+                  type="checkbox"
+                  checked={item.completed}
+                  aria-label={t("Mark {0} done", { 0: item.title })}
+                  onChange={() => setSubtasks((items) => items.map((step) => (step.id === item.id ? { ...step, completed: !step.completed } : step)))}
+                />
+                <input
+                  value={item.title}
+                  maxLength={140}
+                  aria-label={t("Step title")}
+                  onChange={(event) => setSubtasks((items) => items.map((step) => (step.id === item.id ? { ...step, title: event.target.value } : step)))}
+                />
+                <button type="button" className="text-btn" aria-label={t("Remove step {0}", { 0: item.title })} onClick={() => setSubtasks((items) => items.filter((step) => step.id !== item.id))}>
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <div className="subtask-add">
+          <input
+            value={draftStep}
+            maxLength={140}
+            placeholder={t("Add a step and press Enter")}
+            aria-label={t("New checklist step")}
+            onChange={(event) => setDraftStep(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                addStep();
+              }
+            }}
+          />
+          <button type="button" className="btn btn-soft" onClick={addStep}>{t("Add")}</button>
+        </div>
+      </div>
       <div className="form-row two">
-        <Field label="Category">
+        <Field label={t("Category")}>
           <select value={category} onChange={(event) => setCategory(event.target.value)}>
             {CATEGORIES.map((item) => (
               <option key={item.id} value={item.id}>{item.label}</option>
             ))}
           </select>
         </Field>
-        <Field label="Goal" hint="Optional. Completing it moves the goal.">
+        <Field label={t("Goal")} hint={t("Optional. Completing it moves the goal.")}>
           <select value={goalId} onChange={(event) => setGoalId(event.target.value)}>
-            <option value="">No goal</option>
+            <option value="">{t("No goal")}</option>
             {goals.map((goal) => (
               <option key={goal.id} value={goal.id}>{goal.title}</option>
             ))}
           </select>
         </Field>
       </div>
-      <Field label="Note">
+      <Field label={t("Note")}>
         <textarea value={note} onChange={(event) => setNote(event.target.value)} rows={3} maxLength={4000} />
       </Field>
-      <Actions editing={Boolean(existing)} label="Add task" onClose={onClose} onRemove={onRemove} />
+      <Actions editing={Boolean(existing)} label={t("Add task")} onClose={onClose} onRemove={onRemove} />
     </form>
   );
 }
@@ -218,19 +284,19 @@ function EventForm({ composer, onClose, onRemove }: { composer: ComposerState; o
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!title.trim()) {
-      setError('Add a title.');
+      setError(t("Add a title."));
       return;
     }
     if (!date) {
-      setError('Choose a date.');
+      setError(t("Choose a date."));
       return;
     }
     if (!isValidTime(startTime)) {
-      setError('Add a start time.');
+      setError(t("Add a start time."));
       return;
     }
     if (endTime && (!isValidTime(endTime) || timeToMinutes(endTime) <= timeToMinutes(startTime))) {
-      setError('End time should be after the start.');
+      setError(t("End time should be after the start."));
       return;
     }
     const input: EventInput = {
@@ -249,22 +315,22 @@ function EventForm({ composer, onClose, onRemove }: { composer: ComposerState; o
 
   return (
     <form className="form" onSubmit={submit}>
-      <Field label="Title" error={error}>
+      <Field label={t("Title")} error={error}>
         <input data-autofocus value={title} onChange={(event) => setTitle(event.target.value)} maxLength={140} />
       </Field>
       <div className="form-row two">
-        <Field label="Date">
+        <Field label={t("Date")}>
           <input type="date" value={date} onChange={(event) => setDate(event.target.value)} required />
         </Field>
-        <Field label="Starts">
+        <Field label={t("Starts")}>
           <input type="time" value={startTime} onChange={(event) => setStartTime(event.target.value)} required />
         </Field>
       </div>
       <div className="form-row two">
-        <Field label="Ends" hint="Optional">
+        <Field label={t("Ends")} hint={t("Optional")}>
           <input type="time" value={endTime} onChange={(event) => setEndTime(event.target.value)} />
         </Field>
-        <Field label="Category">
+        <Field label={t("Category")}>
           <select value={category} onChange={(event) => setCategory(event.target.value)}>
             {CATEGORIES.map((item) => (
               <option key={item.id} value={item.id}>{item.label}</option>
@@ -274,12 +340,12 @@ function EventForm({ composer, onClose, onRemove }: { composer: ComposerState; o
       </div>
       <label className="check-line">
         <input type="checkbox" checked={important} onChange={(event) => setImportant(event.target.checked)} />
-        <span>Mark as important</span>
+        <span>{t("Mark as important")}</span>
       </label>
-      <Field label="Note">
+      <Field label={t("Note")}>
         <textarea value={note} onChange={(event) => setNote(event.target.value)} rows={3} maxLength={4000} />
       </Field>
-      <Actions editing={Boolean(existing)} label="Add event" onClose={onClose} onRemove={onRemove} />
+      <Actions editing={Boolean(existing)} label={t("Add event")} onClose={onClose} onRemove={onRemove} />
     </form>
   );
 }
@@ -307,11 +373,11 @@ function HabitForm({ composer, onClose, onRemove }: { composer: ComposerState; o
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!name.trim()) {
-      setError('Name the habit.');
+      setError(t("Name the habit."));
       return;
     }
     if (frequency.type === 'custom' && frequency.days.length === 0) {
-      setError('Choose at least one day.');
+      setError(t("Choose at least one day."));
       return;
     }
     const input: HabitInput = { name, icon, accent, frequency, essential };
@@ -322,12 +388,12 @@ function HabitForm({ composer, onClose, onRemove }: { composer: ComposerState; o
 
   return (
     <form className="form" onSubmit={submit}>
-      <Field label="Name" error={error}>
+      <Field label={t("Name")} error={error}>
         <input data-autofocus value={name} onChange={(event) => setName(event.target.value)} maxLength={60} />
       </Field>
       <div className="field">
-        <span>Icon</span>
-        <div className="icon-picker" role="listbox" aria-label="Habit icon">
+        <span>{t("Icon")}</span>
+        <div className="icon-picker" role="listbox" aria-label={t("Habit icon")}>
           {HABIT_ICONS.map((item) => (
             <button
               key={item.id}
@@ -343,8 +409,8 @@ function HabitForm({ composer, onClose, onRemove }: { composer: ComposerState; o
         </div>
       </div>
       <div className="field">
-        <span>Colour</span>
-        <div className="swatches" role="radiogroup" aria-label="Habit colour">
+        <span>{t("Colour")}</span>
+        <div className="swatches" role="radiogroup" aria-label={t("Habit colour")}>
           {ACCENTS.map((item) => (
             <button
               key={item}
@@ -358,16 +424,16 @@ function HabitForm({ composer, onClose, onRemove }: { composer: ComposerState; o
           ))}
         </div>
       </div>
-      <Field label="Frequency">
+      <Field label={t("Frequency")}>
         <select value={freqType} onChange={(event) => setFreqType(event.target.value as HabitFrequency['type'])}>
-          <option value="daily">Every day</option>
-          <option value="weekdays">Weekdays</option>
-          <option value="custom">Specific days</option>
-          <option value="weekly">Times per week</option>
+          <option value="daily">{t("Every day")}</option>
+          <option value="weekdays">{t("Weekdays")}</option>
+          <option value="custom">{t("Specific days")}</option>
+          <option value="weekly">{t("Times per week")}</option>
         </select>
       </Field>
       {freqType === 'custom' ? (
-        <div className="day-pills" role="group" aria-label="Days">
+        <div className="day-pills" role="group" aria-label={t("Days")}>
           {WEEKDAY_TOGGLES.map((item) => {
             const on = days.includes(item.day);
             return (
@@ -385,7 +451,7 @@ function HabitForm({ composer, onClose, onRemove }: { composer: ComposerState; o
         </div>
       ) : null}
       {freqType === 'weekly' ? (
-        <Field label="Times each week" hint="Shown until the week’s target is met. No streak pressure.">
+        <Field label={t("Times each week")} hint={t("Shown until the week’s target is met. No streak pressure.")}>
           <input
             type="number"
             min={1}
@@ -397,9 +463,9 @@ function HabitForm({ composer, onClose, onRemove }: { composer: ComposerState; o
       ) : null}
       <label className="check-line">
         <input type="checkbox" checked={essential} onChange={(event) => setEssential(event.target.checked)} />
-        <span>A must-do for every day — pinned to Today</span>
+        <span>{t("A must-do for every day — pinned to Today")}</span>
       </label>
-      <Actions editing={Boolean(existing)} label="Add habit" onClose={onClose} onRemove={onRemove} />
+      <Actions editing={Boolean(existing)} label={t("Add habit")} onClose={onClose} onRemove={onRemove} />
     </form>
   );
 }
@@ -417,7 +483,7 @@ function GoalForm({ composer, onClose, onRemove }: { composer: ComposerState; on
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!title.trim()) {
-      setError('Name the goal.');
+      setError(t("Name the goal."));
       return;
     }
     if (existing) {
@@ -430,12 +496,12 @@ function GoalForm({ composer, onClose, onRemove }: { composer: ComposerState; on
 
   return (
     <form className="form" onSubmit={submit}>
-      <Field label="Title" error={error}>
+      <Field label={t("Title")} error={error}>
         <input data-autofocus value={title} onChange={(event) => setTitle(event.target.value)} maxLength={140} />
       </Field>
       <div className="field">
-        <span>Horizon</span>
-        <div className="segmented" role="radiogroup" aria-label="Horizon">
+        <span>{t("Horizon")}</span>
+        <div className="segmented" role="radiogroup" aria-label={t("Horizon")}>
           {([['short', 'Short-term'], ['long', 'Long-term']] as const).map(([id, label]) => (
             <button
               key={id}
@@ -449,20 +515,20 @@ function GoalForm({ composer, onClose, onRemove }: { composer: ComposerState; on
             </button>
           ))}
         </div>
-        <small className="hint">Short-term is this season. Long-term is the larger direction.</small>
+        <small className="hint">{t("Short-term is this season. Long-term is the larger direction.")}</small>
       </div>
-      <Field label="Description">
+      <Field label={t("Description")}>
         <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} maxLength={2000} />
       </Field>
-      <Field label="Deadline" hint="Optional">
+      <Field label={t("Deadline")} hint={t("Optional")}>
         <input type="date" value={deadline} onChange={(event) => setDeadline(event.target.value)} />
       </Field>
       {!existing ? (
-        <Field label="First step" hint="Optional. You can add more on the goal.">
+        <Field label={t("First step")} hint={t("Optional. You can add more on the goal.")}>
           <input value={milestone} onChange={(event) => setMilestone(event.target.value)} maxLength={140} />
         </Field>
       ) : null}
-      <Actions editing={Boolean(existing)} label="Add goal" onClose={onClose} onRemove={onRemove} />
+      <Actions editing={Boolean(existing)} label={t("Add goal")} onClose={onClose} onRemove={onRemove} />
     </form>
   );
 }
@@ -470,19 +536,21 @@ function GoalForm({ composer, onClose, onRemove }: { composer: ComposerState; on
 function NoteForm({ composer, onClose, onRemove }: { composer: ComposerState; onClose: () => void; onRemove: () => void }) {
   const { state, addNote, updateNote } = usePlanner();
   const existing = composer.mode === 'edit' ? state.notes.find((note) => note.id === composer.id) : undefined;
-  const [title, setTitle] = useState(existing?.title === 'Untitled note' ? '' : existing?.title ?? '');
+  const [title, setTitle] = useState((existing?.title === 'Untitled note' || existing?.title === t('Untitled note')) ? '' : existing?.title ?? '');
   const [kind, setKind] = useState<NoteKind>(existing?.kind ?? 'quick');
   const [date, setDate] = useState(existing?.date ?? (composer.mode === 'create' ? composer.date ?? '' : ''));
   const [body, setBody] = useState(existing?.body ?? '');
+  const [pinned, setPinned] = useState(existing?.pinned === true);
+  const [preview, setPreview] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!title.trim() && !body.trim()) {
-      setError('Write a title or a few words.');
+      setError(t("Write a title or a few words."));
       return;
     }
-    const input: NoteInput = { title, body, kind, date: date || null };
+    const input: NoteInput = { title, body, kind, date: date || null, pinned };
     if (existing) updateNote(existing.id, input);
     else addNote(input);
     onClose();
@@ -490,12 +558,12 @@ function NoteForm({ composer, onClose, onRemove }: { composer: ComposerState; on
 
   return (
     <form className="form" onSubmit={submit}>
-      <Field label="Title" error={error}>
+      <Field label={t("Title")} error={error}>
         <input data-autofocus value={title} onChange={(event) => setTitle(event.target.value)} maxLength={140} />
       </Field>
       <div className="field">
-        <span>Kind</span>
-        <div className="segmented" role="radiogroup" aria-label="Note kind">
+        <span>{t("Kind")}</span>
+        <div className="segmented" role="radiogroup" aria-label={t("Note kind")}>
           {NOTE_KINDS.map((item) => (
             <button
               key={item.id}
@@ -510,20 +578,31 @@ function NoteForm({ composer, onClose, onRemove }: { composer: ComposerState; on
           ))}
         </div>
       </div>
-      <Field label="Date" hint="Optional. Ties the note to a day.">
+      <Field label={t("Date")} hint={t("Optional. Ties the note to a day.")}>
         <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
       </Field>
-      <Field label={kind === 'journal' ? 'Entry' : 'Note'}>
+      <div className="note-editor-bar">
+        <label className="set-inline"><input type="checkbox" checked={pinned} onChange={(event) => setPinned(event.target.checked)} /> {t("Pin to top")}</label>
+        <div className="segmented" role="radiogroup" aria-label={t("Editor mode")}>
+          <button type="button" role="radio" aria-checked={!preview} className={cx('seg', !preview && 'on')} onClick={() => setPreview(false)}>{t("Write")}</button>
+          <button type="button" role="radio" aria-checked={preview} className={cx('seg', preview && 'on')} onClick={() => setPreview(true)}>{t("Preview")}</button>
+        </div>
+      </div>
+      {preview ? (
+        <div className="md-body md-preview">{body.trim() ? <Markdown text={body} /> : <p className="meta">{t("Nothing to preview yet.")}</p>}</div>
+      ) : null}
+      <Field label={kind === 'journal' ? t("Entry") : t("Note")} hint={t("Markdown works: **bold**, *italic*, - lists, - [ ] checkboxes, # headings, #tags, links.")}>
         <textarea
+          hidden={preview}
           className={kind === 'journal' ? 'journal-entry' : undefined}
           value={body}
           onChange={(event) => setBody(event.target.value)}
           rows={kind === 'journal' ? 8 : 5}
           maxLength={20000}
-          placeholder={kind === 'journal' ? 'What do you want to remember about this day?' : 'A few words is enough.'}
+          placeholder={kind === 'journal' ? t("What do you want to remember about this day?") : t("A few words is enough.")}
         />
       </Field>
-      <Actions editing={Boolean(existing)} label="Add note" onClose={onClose} onRemove={onRemove} />
+      <Actions editing={Boolean(existing)} label={t("Add note")} onClose={onClose} onRemove={onRemove} />
     </form>
   );
 }
@@ -543,17 +622,17 @@ function Actions({
     <div className="form-actions">
       {editing ? (
         <button type="button" className="btn btn-danger" onClick={onRemove}>
-          Remove
+          {t("Remove")}
         </button>
       ) : (
         <span />
       )}
       <div className="form-actions-right">
         <button type="button" className="btn btn-ghost" onClick={onClose}>
-          Cancel
+          {t("Cancel")}
         </button>
         <button type="submit" className="btn btn-primary">
-          {editing ? 'Save' : label}
+          {editing ? t("Save") : label}
         </button>
       </div>
     </div>

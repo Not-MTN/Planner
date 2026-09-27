@@ -17,6 +17,7 @@ import { formatPercent, frequencyLabel, habitDot, habitStats, habitStreaks } fro
 import { Meter } from '../components/ui';
 import { HabitLibrary } from '../components/HabitLibrary';
 import { ESSENTIAL_PRESETS, presetToInput } from '../presets';
+import { t } from '../i18n';
 
 const HEAT_WEEKS = 12;
 
@@ -43,16 +44,16 @@ export function HabitsView() {
     <div className="view">
       <header className="page-head">
         <div>
-          <p className="kicker">Habit tracker</p>
-          <h1>Habits</h1>
-          <p className="lede">Repeat what you want to keep.</p>
+          <p className="kicker">{t("Habit tracker")}</p>
+          <h1>{t("Habits")}</h1>
+          <p className="lede">{t("Repeat what you want to keep.")}</p>
         </div>
         <div className="page-head-actions">
           <button type="button" className="btn btn-soft" onClick={() => setLibraryOpen(true)}>
-            Library
+            {t("Library")}
           </button>
           <button type="button" className="btn btn-primary" onClick={() => openComposer({ mode: 'create', type: 'habit' })}>
-            Add habit
+            {t("Add habit")}
           </button>
         </div>
       </header>
@@ -61,9 +62,9 @@ export function HabitsView() {
         <section className="card library-empty">
           <img className="spot spot-lg" src="/img/spot-library.jpg" alt="" loading="lazy" />
           <div className="library-empty-body">
-            <p className="kicker">Habit library</p>
-            <h2 className="section-title">Start with a classic</h2>
-            <p className="lede">Built-in habits and daily must-dos, ready in one tap.</p>
+            <p className="kicker">{t("Habit library")}</p>
+            <h2 className="section-title">{t("Start with a classic")}</h2>
+            <p className="lede">{t("Built-in habits and daily must-dos, ready in one tap.")}</p>
             <div className="preset-grid">
               {ESSENTIAL_PRESETS.map((preset) => (
                 <button
@@ -72,7 +73,7 @@ export function HabitsView() {
                   className={cx('preset-chip', `accent-${preset.accent}`)}
                   onClick={() => {
                     addHabit(presetToInput(preset));
-                    flash(`Habit “${preset.name}” added.`, { label: 'Undo', run: undo });
+                    flash(t("Habit “{0}” added.", { 0: preset.name }), { label: t("Undo"), run: undo });
                   }}
                 >
                   <span className={cx('icon-well', `accent-${preset.accent}`)}>
@@ -82,7 +83,7 @@ export function HabitsView() {
                     <strong>{preset.name}</strong>
                     {preset.blurb ? <small>{preset.blurb}</small> : null}
                   </span>
-                  <span className="library-add" aria-hidden="true">Add</span>
+                  <span className="library-add" aria-hidden="true">{t("Add")}</span>
                 </button>
               ))}
             </div>
@@ -92,13 +93,13 @@ export function HabitsView() {
                 className="btn btn-primary"
                 onClick={() => {
                   addHabits(ESSENTIAL_PRESETS.map(presetToInput));
-                  flash('Daily essentials added.', { label: 'Undo', run: undo });
+                  flash(t("Daily essentials added."), { label: t("Undo"), run: undo });
                 }}
               >
-                Add all essentials
+                {t("Add all essentials")}
               </button>
               <button type="button" className="btn btn-ghost" onClick={() => setLibraryOpen(true)}>
-                Browse the full library
+                {t("Browse the full library")}
               </button>
             </div>
           </div>
@@ -108,10 +109,10 @@ export function HabitsView() {
           <div className="habit-toolbar">
             <p className="kicker">{formatMonthYear(cursor.year, cursor.month)}</p>
             <div className="pager">
-              <button type="button" className="icon-btn round" aria-label="Previous month" onClick={() => shift(-1)}>
+              <button type="button" className="icon-btn round" aria-label={t("Previous month")} onClick={() => shift(-1)}>
                 <ChevronLeftIcon />
               </button>
-              <button type="button" className="icon-btn round" aria-label="Next month" onClick={() => shift(1)}>
+              <button type="button" className="icon-btn round" aria-label={t("Next month")} onClick={() => shift(1)}>
                 <ChevronRightIcon />
               </button>
             </div>
@@ -132,22 +133,22 @@ export function HabitsView() {
                       <p className="meta">{frequencyLabel(habit)}</p>
                       {habit.essential ? (
                         <p className="essential-tag">
-                          <SunIcon size={12} /> Daily must-do
+                          <SunIcon size={12} /> {t("Daily must-do")}
                         </p>
                       ) : null}
                     </div>
                     <div className="habit-nums">
                       <span className="habit-percent">{formatPercent(monthStats.ratio)}</span>
-                      <span className="streak-chip big" title={`Best streak: ${streaks.best} ${streaks.best === 1 ? 'day' : 'days'}`}>
-                        <FlameIcon size={13} /> {streaks.current} day{streaks.current === 1 ? '' : 's'}
+                      <span className="streak-chip big" title={t("Best streak: {0} {1}", { 0: streaks.best, 1: streaks.best === 1 ? t("day") : t("days") })}>
+                        <FlameIcon size={13} /> {streaks.current} {streaks.current === 1 ? t('day') : t('days')}
                       </span>
                     </div>
                   </header>
-                  <Meter value={monthStats.ratio} label={`${habit.name} this month`} />
+                  <Meter value={monthStats.ratio} label={t("{0} this month", { 0: habit.name })} />
                   <p className="meta habit-count">
                     {monthStats.expected === 0
-                      ? 'No planned days in this stretch yet.'
-                      : `${monthStats.done} of ${monthStats.expected} this month`}
+                      ? t("No planned days in this stretch yet.")
+                      : t("{0} of {1} this month", { 0: monthStats.done, 1: monthStats.expected })}
                   </p>
                   <div className="habit-week">
                     {week.map((date) => (
@@ -160,7 +161,7 @@ export function HabitsView() {
                           key={`${date}-dot`}
                           type="button"
                           className={cx('dot', 'dot-btn', status, `accent-${habit.accent}`)}
-                          aria-label={`${habit.name} on ${formatWeekdayShort(date)} ${dayNumber(date)}, ${status}`}
+                          aria-label={t("{0} on {1} {2}, {3}", { 0: habit.name, 1: formatWeekdayShort(date), 2: dayNumber(date), 3: status })}
                           aria-pressed={status === 'done'}
                           disabled={status === 'off'}
                           onClick={() => toggleHabit(habit.id, date)}
@@ -174,7 +175,7 @@ export function HabitsView() {
                       <span>{formatMonthShort(addDays(heatStart, Math.round(HEAT_WEEKS / 2 * 7)))}</span>
                       <span>{formatMonthShort(today)}</span>
                     </div>
-                    <div className="heat-grid" role="group" aria-label={`${habit.name} over the last ${HEAT_WEEKS} weeks`}>
+                    <div className="heat-grid" role="group" aria-label={t("{0} over the last {1} weeks", { 0: habit.name, 1: HEAT_WEEKS })}>
                       {Array.from({ length: HEAT_WEEKS }, (_, weekIndex) => (
                         <div key={weekIndex} className="heat-col">
                           {weekDates(addDays(heatStart, weekIndex * 7)).map((date) => {
@@ -185,7 +186,7 @@ export function HabitsView() {
                                 type="button"
                                 className={cx('heat-cell', status, `accent-${habit.accent}`)}
                                 title={`${formatWeekdayShort(date)} ${dayNumber(date)} ${formatMonthShort(date)} — ${status === 'done' ? 'done' : status === 'open' ? 'missed' : status === 'future' ? 'upcoming' : status === 'optional' ? 'optional' : 'not planned'}`}
-                                aria-label={`${habit.name} on ${date}: ${status}`}
+                                aria-label={t("{0} on {1}: {2}", { 0: habit.name, 1: date, 2: status })}
                                 aria-pressed={status === 'done'}
                                 disabled={status === 'off' || status === 'future'}
                                 onClick={() => toggleHabit(habit.id, date)}
@@ -197,24 +198,24 @@ export function HabitsView() {
                     </div>
                   </div>
                   <p className="visually-hidden">
-                    This week, {weekStats.done} of {weekStats.expected || week.length} kept. Streak: {streaks.current}, best {streaks.best}.
+                    {t("This week,")} {weekStats.done} {t('of')} {weekStats.expected || week.length} {t("kept. Streak:")} {streaks.current}{t(", best")} {streaks.best}.
                   </p>
                   <div className="row-actions">
                     <button type="button" className="btn btn-tiny" onClick={() => openComposer({ mode: 'edit', type: 'habit', id: habit.id })}>
-                      Edit
+                      {t("Edit")}
                     </button>
                     <button type="button" className="btn btn-tiny" onClick={() => setHabitArchived(habit.id, true)}>
-                      Archive
+                      {t("Archive")}
                     </button>
                     <button
                       type="button"
                       className="btn btn-tiny danger"
                       onClick={() => {
                         deleteHabit(habit.id);
-                        flash(`Habit “${habit.name}” removed.`, { label: 'Undo', run: undo });
+                        flash(t("Habit “{0}” removed.", { 0: habit.name }), { label: t("Undo"), run: undo });
                       }}
                     >
-                      Remove
+                      {t("Remove")}
                     </button>
                   </div>
                 </article>
@@ -223,13 +224,13 @@ export function HabitsView() {
           </div>
           {archived.length > 0 ? (
             <details className="archive-block">
-              <summary>Archived ({archived.length})</summary>
+              <summary>{t("Archived (")}{archived.length})</summary>
               <ul>
                 {archived.map((habit) => (
                   <li key={habit.id}>
                     <span>{habit.name}</span>
                     <button type="button" className="btn btn-tiny" onClick={() => setHabitArchived(habit.id, false)}>
-                      Restore
+                      {t("Restore")}
                     </button>
                   </li>
                 ))}

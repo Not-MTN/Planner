@@ -1,6 +1,9 @@
 import { isValidISODate, isValidTime, timeToMinutes, todayISO } from './dates';
+import { nextDueAfterCompletion, REPEAT_SET } from './recurrence';
 import type {
   EventInput,
+  Subtask,
+  TaskRepeat,
   FixedCommitmentInput,
   GoalInput,
   HabitInput,
@@ -23,6 +26,18 @@ function nextOrder(items: { sortOrder: number }[]): number {
 
 function clean(value: string, max: number): string {
   return value.trim().slice(0, max);
+}
+
+function cleanRepeat(value: TaskRepeat | null | undefined): TaskRepeat | null {
+  return value && REPEAT_SET.has(value) ? value : null;
+}
+
+export function cleanSubtasks(items: Subtask[] | undefined): Subtask[] {
+  if (!items) return [];
+  return items
+    .map((item) => ({ id: item.id || uid(), title: clean(item.title, 140), completed: item.completed === true }))
+    .filter((item) => item.title)
+    .slice(0, 50);
 }
 
 function shiftedEnd(previousStart: string, previousEnd: string | null, nextStart: string): string | null {
@@ -58,6 +73,9 @@ export function addTask(state: PlannerState, input: TaskInput, id = uid(), now =
         sortOrder: nextOrder(state.tasks),
         createdAt: now,
         updatedAt: now,
+        repeat: cleanRepeat(input.repeat),
+        subtasks: cleanSubtasks(input.subtasks),
+        completedAt: null,
       },
     ],
   };
@@ -79,6 +97,8 @@ export function updateTask(state: PlannerState, id: string, patch: Partial<TaskI
         dueDate,
         dueTime,
         note: patch.note === undefined ? task.note : patch.note.trim().slice(0, 4000),
+        repeat: patch.repeat === undefined ? task.repeat : cleanRepeat(patch.repeat),
+        subtasks: patch.subtasks === undefined ? task.subtasks : cleanSubtasks(patch.subtasks),
         updatedAt: now,
       };
     }),
@@ -93,11 +113,60 @@ export function clearCompletedTasks(state: PlannerState): PlannerState {
   return { ...state, tasks: state.tasks.filter((task) => !task.completed) };
 }
 
-export function toggleTask(state: PlannerState, id: string, now = nowIso()): PlannerState {
+export function toggleTask(state: PlannerState, id: string, now = nowIso(), today = todayISO(), nextId = uid()): PlannerState {
+  const target = state.tasks.find((task) => task.id === id);
+  if (!target) return state;
+  const completing = !target.completed;
+  const tasks = state.tasks.map((task) =>
+    task.id === id
+      ? { ...task, completed: completing, completedAt: completing ? now : null, repeat: completing ? null : task.repeat, updatedAt: now }
+      : task,
+  );
+  if (completing && target.repeat) {
+    // The finished copy stays in history; a fresh copy carries the rule forward.
+    tasks.push({
+      ...target,
+      id: nextId,
+      completed: false,
+      completedAt: null,
+      dueDate: nextDueAfterCompletion(target.dueDate, target.repeat, today),
+      subtasks: target.subtasks.map((item) => ({ ...item, completed: false })),
+      sortOrder: nextOrder(state.tasks),
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+  return { ...state, tasks };
+}
+
+export function toggleSubtask(state: PlannerState, taskId: string, subtaskId: string, now = nowIso()): PlannerState {
   return {
     ...state,
-    tasks: state.tasks.map((task) => (task.id === id ? { ...task, completed: !task.completed, updatedAt: now } : task)),
+    tasks: state.tasks.map((task) =>
+      task.id === taskId
+        ? { ...task, updatedAt: now, subtasks: task.subtasks.map((item) => (item.id === subtaskId ? { ...item, completed: !item.completed } : item)) }
+        : task,
+    ),
   };
+}
+
+export function resizeEvent(state: PlannerState, id: string, endTime: string, now = nowIso()): PlannerState {
+  const event = state.events.find((item) => item.id === id);
+  if (!event || !isValidTime(endTime) || timeToMinutes(endTime) <= timeToMinutes(event.startTime)) return state;
+  return updateEvent(state, id, { endTime }, now);
+}
+
+export function logFocus(
+  state: PlannerState,
+  entry: { taskId: string | null; title: string; minutes: number },
+  id = uid(),
+  now = nowIso(),
+  date = todayISO(),
+): PlannerState {
+  const minutes = Math.round(entry.minutes);
+  if (!Number.isFinite(minutes) || minutes < 1) return state;
+  const log = [...state.focusLog, { id, taskId: entry.taskId, title: clean(entry.title, 140) || 'Focus', minutes: Math.min(minutes, 600), date, endedAt: now }];
+  return { ...state, focusLog: log.slice(-2000) };
 }
 
 export function swapTasks(state: PlannerState, aId: string, bId: string, now = nowIso()): PlannerState {
@@ -459,6 +528,7 @@ export function addNote(state: PlannerState, input: NoteInput, id = uid(), now =
         body,
         kind: input.kind,
         date: input.date && isValidISODate(input.date) ? input.date : null,
+        pinned: input.pinned === true,
         createdAt: now,
         updatedAt: now,
       },
@@ -480,6 +550,7 @@ export function updateNote(state: PlannerState, id: string, patch: Partial<NoteI
         title,
         body,
         date: patch.date === undefined ? note.date : patch.date && isValidISODate(patch.date) ? patch.date : null,
+        pinned: patch.pinned === undefined ? note.pinned === true : patch.pinned === true,
         updatedAt: now,
       };
     }),

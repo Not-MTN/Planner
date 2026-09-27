@@ -2,14 +2,40 @@
 
 A calm, local-first planner for your day, your week, and the days ahead — tasks, habits, goals, and notes in one beautiful place.
 
-Planner data stays in this browser (`localStorage`); there is no planner account or database. If you choose to use AI, the current prompt and the minimum schedule/check-in details needed for that request pass through the server-side proxy to xAI. Use **Settings → Export** for a backup file, and **Settings → Import** to bring one back.
+Planner data is saved in this browser (`localStorage`, mirrored to IndexedDB). Optional **end-to-end encrypted sync** keeps devices in step through your own Neon database — there are no accounts, and the server only stores ciphertext. If you choose to use AI, the current prompt and the minimum schedule/check-in details needed for that request pass through the server-side proxy to xAI. Use **Settings → Export** for a backup file, and **Settings → Import** to bring one back.
 
 ```bash
 npm install
 npm run dev
 ```
 
-Other scripts: `npm run typecheck`, `npm test`, `npm run build`.
+Other scripts: `npm run typecheck`, `npm test`, `npm run build`, `npm run test:e2e` (browser tests — run `npx playwright install chromium` once first).
+
+## Sync across devices (Neon)
+
+1. Create a project at [neon.tech](https://neon.tech) and copy the connection string (Dashboard → **Connect**).
+2. Set it as `DATABASE_URL`:
+   - **Vercel:** Project Settings → Environment Variables → `DATABASE_URL`, then redeploy. (Or use Vercel's Neon integration, which adds it for you.)
+   - **Locally:** add `DATABASE_URL=...` to `.env.local` and restart `npm run dev`.
+3. In Planner: **Settings → Sync across devices → Turn on sync**. Copy the 20-character code, then on your other device choose **I have a code**.
+
+The table is created automatically on first use (`db/schema.sql` has the same SQL if you'd rather run it yourself).
+
+How it works: the sync code never leaves your devices. The browser derives an AES-GCM-256 key from it (PBKDF2, 150k rounds) and encrypts the whole planner before upload; the database row is keyed by a SHA-256 hash of the code. Uploads use version numbers, so two devices can't silently overwrite each other — if both changed, items are merged by id and the most recently edited copy wins. Anyone with the code can read your planner, so keep it private; **Delete cloud copy** removes the row.
+
+| Endpoint | Method | Purpose |
+| --- | --- | --- |
+| `/api/sync/status` | GET | `{ configured: boolean }` |
+| `/api/sync` | GET / PUT / DELETE | Read, compare-and-swap write, or delete the encrypted blob (`X-Sync-Id` header) |
+
+
+## Languages (English / فارسی)
+
+Settings → **Language** switches the whole interface to Persian with a right-to-left layout (Vazirmatn font, mirrored arrows, logical CSS). Choosing فارسی also sets Persian day/month names and a Saturday week start; the page reloads to apply. The AI coach replies in Persian while it is selected.
+
+- Strings are wrapped in `t('English text')` (`src/i18n.ts`); English is the key and the fallback.
+- Persian lives in `src/locales/fa.ts`. `src/i18n.test.ts` fails if any `t(...)` string lacks a translation or a placeholder like `{0}` goes missing.
+- Dates stay on the Gregorian calendar with Latin digits so times and ISO dates line up everywhere.
 
 ## What's inside
 
@@ -30,6 +56,20 @@ Other scripts: `npm run typecheck`, `npm test`, `npm run build`.
 - **Protected weekly times** — add a repeating class, shift, or appointment (for example Tuesday 08:00–09:00). It appears on the calendar and the AI rejects overlapping events.
 - **AI review** — ask for a daily, weekly, monthly, or custom reflection on completed tasks, events, and habit check-ins. Select unfinished tasks and dates to carry them forward; nothing is rescheduled without your action.
 - **Themes** — light, dark, or follow your system, plus five accent colours. All in Settings.
+- **Repeating tasks** — daily, weekdays, weekly, monthly, or yearly. Finishing one schedules the next copy (overdue ones skip ahead to the next future date). Quick add understands `every day`, `weekdays`, `every monday`, `monthly`…
+- **Checklists** — break a task into steps; the row shows a progress bar and you can tick steps inline.
+- **Reminders** — optional notifications before events and timed tasks, plus a morning summary. Falls back to in-app toasts if notifications are blocked. (Settings → Reminders; works while Planner is open or installed.)
+- **Installable & offline** — a service worker caches the app shell, so Planner opens without a connection. Install it from Settings → App or your browser menu.
+- **Calendar files (.ics)** — export events, protected weekly times (as repeating events), and dated tasks; import from Google, Outlook, or Apple Calendar. All-day events arrive as dated tasks.
+- **Task board** — switch Tasks between List and a Kanban Board grouped by When, Priority, or Category. Drag cards between columns to reschedule, re-prioritise, or complete.
+- **Calendar editing** — in Week view, drag an event's bottom edge (or focus it and use ↑/↓) to change its length in 15-minute steps; drag tasks to other days too.
+- **Plan my day** — one tap fits today's untimed, overdue, and urgent tasks into your free time around events and protected hours. One undo reverses it.
+- **Pomodoro focus** — short and long breaks between rounds; every focused minute (even when you end early) is logged.
+- **Rhythm insights** — focus time for the last 7 days, the hour you usually get things done, habit links ("on days you run you finish 40% more tasks"), and a copyable Markdown weekly report.
+- **Markdown notes** — headings, bold/italic, lists, checkboxes, links, and `#tags` (tap a tag to filter). Pin important notes to the top. Rendered safely without raw HTML.
+- **Week start, clock & date language** — Monday/Sunday/Saturday weeks, 24-hour or 12-hour times, and day/month names in English, your device language, Finnish, Swedish, German, French, Spanish, or Persian (Settings → Calendar, dates & time).
+- **Larger storage** — every save is mirrored to IndexedDB; if `localStorage` fills up, Planner keeps saving there and loads the newest copy on start.
+- **Keyboard-friendly board** — focus a card and press ←/→ to move it between columns.
 - **Keyboard shortcuts** — `⌘K` search & add · `N` new task · `T` today · `⌘Z` undo · `esc` close.
 
 ## xAI (Grok) setup

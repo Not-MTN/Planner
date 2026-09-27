@@ -5,3 +5,7 @@ dist
 .vite
 coverage
 .vercel
+
+# Playwright
+test-results/
+playwright-report/

@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { cx } from '../cx';
 import { CloseIcon, LeafIcon } from '../icons';
+import { t } from '../i18n';
 
 export function Modal({
   title,
@@ -73,7 +74,7 @@ export function Modal({
         <div className="sheet-handle" aria-hidden="true" />
         <header className="sheet-head">
           <h2 id={titleId}>{title}</h2>
-          <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>
+          <button type="button" className="icon-btn" aria-label={t("Close")} onClick={onClose}>
             <CloseIcon size={18} />
           </button>
         </header>
@@ -175,13 +176,13 @@ export function Ring({ value, label, caption }: { value: number; label: string; 
 export function LoadingScreen() {
   return (
     <div className="loading" aria-busy="true" aria-live="polite">
-      <p className="kicker">Personal Planner</p>
+      <p className="kicker">{t("Personal Planner")}</p>
       <div className="sk sk-title" />
       <div className="sk-grid">
         <div className="sk sk-card" />
         <div className="sk sk-card short" />
       </div>
-      <p className="visually-hidden">Loading your planner</p>
+      <p className="visually-hidden">{t("Loading your planner")}</p>
     </div>
   );
 }

@@ -1,8 +1,11 @@
 import { ACCENTS, HABIT_ICONS, NOTE_KINDS, PRIORITIES } from './constants';
 import { isValidISODate, isValidTime, localDateFromTimestamp, timeToMinutes } from './dates';
-import { createEmptyState, type FixedCommitment, type Goal, type Habit, type HabitFrequency, type Note, type PlannerEvent, type PlannerState, type Task } from './types';
+import { REPEAT_SET } from './recurrence';
+import { createEmptyState, type FixedCommitment, type FocusLog, type Subtask, type TaskRepeat, type Goal, type Habit, type HabitFrequency, type Note, type PlannerEvent, type PlannerState, type Task } from './types';
+import { t } from './i18n';
 
 export const STORAGE_KEY = 'personal-planner.v1';
+export const STORAGE_FULL = t("Browser storage is full, so that change was not saved.");
 const MAX_BACKUP = 2_000_000;
 const PRIORITY_SET = new Set<string>(PRIORITIES.map((item) => item.id));
 const ACCENT_SET = new Set<string>(ACCENTS);
@@ -61,7 +64,44 @@ function sanitizeTask(value: unknown): Task | null {
     sortOrder: typeof raw.sortOrder === 'number' && Number.isFinite(raw.sortOrder) ? raw.sortOrder : 0,
     createdAt: asString(raw.createdAt, 40) || new Date(0).toISOString(),
     updatedAt: asString(raw.updatedAt, 40) || new Date(0).toISOString(),
+    repeat: REPEAT_SET.has(String(raw.repeat)) ? (raw.repeat as TaskRepeat) : null,
+    subtasks: sanitizeSubtasks(raw.subtasks),
+    completedAt: asString(raw.completedAt, 40) || null,
   };
+}
+
+function sanitizeSubtasks(value: unknown): Subtask[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const raw = item as Record<string, unknown>;
+    const id = asString(raw.id, 80);
+    const title = asString(raw.title, 140)?.trim();
+    if (!id || !title || seen.has(id)) return [];
+    seen.add(id);
+    return [{ id, title, completed: raw.completed === true }];
+  }).slice(0, 50);
+}
+
+function sanitizeFocusLog(value: unknown): FocusLog[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const raw = item as Record<string, unknown>;
+    const id = asString(raw.id, 80);
+    const date = asString(raw.date, 10);
+    const minutes = typeof raw.minutes === 'number' && Number.isFinite(raw.minutes) ? Math.round(raw.minutes) : 0;
+    if (!id || !date || !isValidISODate(date) || minutes < 1) return [];
+    return [{
+      id,
+      taskId: asString(raw.taskId, 80),
+      title: asString(raw.title, 140) || t("Focus"),
+      minutes: Math.min(minutes, 600),
+      date,
+      endedAt: asString(raw.endedAt, 40) || new Date(0).toISOString(),
+    }];
+  }).slice(-2000);
 }
 
 function sanitizeEvent(value: unknown): PlannerEvent | null {
@@ -178,10 +218,11 @@ function sanitizeNote(value: unknown): Note | null {
   const kind = asString(raw.kind, 20) || 'quick';
   return {
     id,
-    title: title || 'Untitled note',
+    title: title || t("Untitled note"),
     body,
     kind: KIND_SET.has(kind) ? (kind as Note['kind']) : 'quick',
     date: date && isValidISODate(date) ? date : null,
+    pinned: raw.pinned === true,
     createdAt: asString(raw.createdAt, 40) || new Date(0).toISOString(),
     updatedAt: asString(raw.updatedAt, 40) || new Date(0).toISOString(),
   };
@@ -256,6 +297,7 @@ export function sanitizeState(raw: unknown): PlannerState | null {
     goals,
     notes,
     intentions,
+    focusLog: sanitizeFocusLog(source.focusLog),
   };
 }
 
@@ -302,8 +344,8 @@ export function saveTo(storage: Pick<Storage, 'setItem'>, state: PlannerState): 
     return null;
   } catch (error) {
     const name = error && typeof error === 'object' && 'name' in error ? String(error.name) : '';
-    if (name === 'QuotaExceededError') return 'Browser storage is full, so that change was not saved.';
-    return 'That change could not be saved in this browser.';
+    if (name === 'QuotaExceededError') return STORAGE_FULL;
+    return t("That change could not be saved in this browser.");
   }
 }
 
