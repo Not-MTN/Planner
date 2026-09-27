@@ -57,10 +57,15 @@ Settings → **Language** switches the whole interface to Persian with a right-t
 - **AI review** — ask for a daily, weekly, monthly, or custom reflection on completed tasks, events, and habit check-ins. Select unfinished tasks and dates to carry them forward; nothing is rescheduled without your action.
 - **Themes** — light, dark, or follow your system, plus five accent colours. All in Settings.
 - **Repeating tasks** — daily, weekdays, weekly, monthly, or yearly. Finishing one schedules the next copy (overdue ones skip ahead to the next future date). Quick add understands `every day`, `weekdays`, `every monday`, `monthly`…
+- **Repeating events** — birthdays, classes, and weekly meetings expand onto matching days (and export with an RRULE).
+- **Waiting** — mark a task as waiting on a person or reply; it stays off Overdue until you clear it.
+- **Week template & review** — copy this week onto the next, and carry unfinished work to the same weekday. A review card appears on Today and Calendar → Week.
+- **Milestone dates** — goal steps can have a date and show up on Upcoming.
+- **Busy calendar** — Settings can export an .ics of busy times only (titles stripped).
 - **Checklists** — break a task into steps; the row shows a progress bar and you can tick steps inline.
 - **Reminders** — optional notifications before events and timed tasks, plus a morning summary. Falls back to in-app toasts if notifications are blocked. (Settings → Reminders; works while Planner is open or installed.)
 - **Installable & offline** — a service worker caches the app shell, so Planner opens without a connection. Install it from Settings → App or your browser menu.
-- **Calendar files (.ics)** — export events, protected weekly times (as repeating events), and dated tasks; import from Google, Outlook, or Apple Calendar. All-day events arrive as dated tasks.
+- **Calendar files (.ics)** — export events, protected weekly times (as repeating events), and dated tasks; import from Google, Outlook, or Apple Calendar. All-day events arrive as dated tasks. **Export busy times** shares only Busy blocks.
 - **Task board** — switch Tasks between List and a Kanban Board grouped by When, Priority, or Category. Drag cards between columns to reschedule, re-prioritise, or complete.
 - **Calendar editing** — in Week view, drag an event's bottom edge (or focus it and use ↑/↓) to change its length in 15-minute steps; drag tasks to other days too.
 - **Plan my day** — one tap fits today's untimed, overdue, and urgent tasks into your free time around events and protected hours. One undo reverses it.

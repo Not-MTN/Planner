@@ -7,6 +7,7 @@ import {
   weekDates,
   weekdayIndex,
 } from './dates';
+import { occursOn } from './recurrence';
 import type { DayScore, DotState, Goal, Habit, HabitFrequency, PlannerEvent, PlannerState, Task } from './types';
 import { t } from './i18n';
 
@@ -102,13 +103,28 @@ export function fixedEventsForDate(state: PlannerState, date: string): PlannerEv
       sortOrder: -1,
       createdAt: commitment.createdAt,
       updatedAt: commitment.updatedAt,
+      repeat: null,
       fixedCommitmentId: commitment.id,
+    }));
+}
+
+export function seriesEventsForDate(state: PlannerState, date: string): PlannerEvent[] {
+  if (!isValidISODate(date)) return [];
+  return state.events
+    .filter((event) => event.repeat && !event.completed && event.date !== date && occursOn(event.date, event.repeat, date))
+    .map((event) => ({
+      ...event,
+      id: `series:${event.id}:${date}`,
+      date,
+      completed: false,
+      seriesEventId: event.id,
     }));
 }
 
 export function eventsForDate(state: PlannerState, date: string): PlannerEvent[] {
   return [
     ...state.events.filter((event) => event.date === date),
+    ...seriesEventsForDate(state, date),
     ...fixedEventsForDate(state, date),
   ].sort(compareEvents);
 }
@@ -119,7 +135,18 @@ export function tasksForDate(state: PlannerState, date: string): Task[] {
 
 export function overdueTasks(state: PlannerState, today: string): Task[] {
   return state.tasks
-    .filter((task) => !task.completed && task.dueDate !== null && task.dueDate < today)
+    .filter((task) => !task.completed && !task.waiting && task.dueDate !== null && task.dueDate < today)
+    .sort(compareTasks);
+}
+
+export function waitingTasks(state: PlannerState): Task[] {
+  return state.tasks.filter((task) => !task.completed && Boolean(task.waiting)).sort(compareTasks);
+}
+
+export function weekLeftovers(state: PlannerState, today: string): Task[] {
+  const days = new Set(weekDates(today).filter((date) => date <= today));
+  return state.tasks
+    .filter((task) => !task.completed && !task.waiting && task.dueDate !== null && days.has(task.dueDate))
     .sort(compareTasks);
 }
 
@@ -284,9 +311,16 @@ export function agendaDay(state: PlannerState, date: string): AgendaDay {
     habits: habitsDueOn(state, date),
     notes: state.notes.filter((note) => note.date === date).map((note) => ({ id: note.id, title: note.title })),
     intention: state.intentions[date] ?? '',
-    deadlines: state.goals
-      .filter((goal) => goal.deadline === date && goalProgress(goal, state.tasks).ratio < 1)
-      .map((goal) => ({ id: goal.id, title: goal.title })),
+    deadlines: [
+      ...state.goals
+        .filter((goal) => goal.deadline === date && goalProgress(goal, state.tasks).ratio < 1)
+        .map((goal) => ({ id: goal.id, title: goal.title })),
+      ...state.goals.flatMap((goal) =>
+        goal.milestones
+          .filter((step) => !step.completed && step.dueDate === date)
+          .map((step) => ({ id: step.id, title: `${goal.title}: ${step.title}` })),
+      ),
+    ],
   };
 }
 

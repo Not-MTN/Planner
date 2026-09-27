@@ -6,7 +6,7 @@ import { DownloadIcon, SparklesIcon, UploadIcon } from '../icons';
 import { Modal } from './ui';
 import { useEffect, useState } from 'react';
 import { DATE_LANGUAGES, todayISO, type DateLanguage } from '../dates';
-import { downloadICS, parseICS } from '../ics';
+import { downloadBusyICS, downloadICS, parseICS } from '../ics';
 import { canInstall, isInstalled, onInstallChange, promptInstall } from '../pwa';
 import { LEAD_CHOICES } from '../reminders';
 import { t, getLang, setLang, LANGUAGES, type Lang } from '../i18n';
@@ -277,6 +277,9 @@ function CalendarSection() {
       <div className="set-actions">
         <button type="button" className="btn btn-soft" onClick={() => { downloadICS(state, todayISO()); flash(t("Calendar file downloaded.")); }}>
           <DownloadIcon size={16} /> {t("Export .ics")}
+        </button>
+        <button type="button" className="btn btn-ghost" onClick={() => { downloadBusyICS(state, todayISO()); flash(t("Busy calendar downloaded.")); }}>
+          <DownloadIcon size={16} /> {t("Export busy times")}
         </button>
         <button type="button" className="btn btn-soft" onClick={icsFile.open}>
           <UploadIcon size={16} /> {t("Import .ics")}

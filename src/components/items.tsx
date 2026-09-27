@@ -43,6 +43,8 @@ export function IntentionField({ date }: { date: string }) {
 export function EventRow({ event, onDropSwap }: { event: PlannerEvent; onDropSwap?: (sourceId: string) => void }) {
   const { toggleEvent, updateEvent, openComposer, deleteEvent, flash, undo } = usePlanner();
   const accent = categoryById(event.category).accent;
+  const series = Boolean(event.seriesEventId);
+  const editId = event.seriesEventId ?? event.id;
   const duration = formatDuration(event.startTime, event.endTime);
   return (
     <li
@@ -64,7 +66,9 @@ export function EventRow({ event, onDropSwap }: { event: PlannerEvent; onDropSwa
         className={cx('check', event.completed && 'on')}
         aria-pressed={event.completed}
         aria-label={event.completed ? t("Mark {0} not done", { 0: event.title }) : t("Mark {0} complete", { 0: event.title })}
-        onClick={() => toggleEvent(event.id)}
+        onClick={() => {
+          if (!series) toggleEvent(event.id);
+        }}
       >
         {event.completed ? <TickIcon size={14} /> : null}
       </button>
@@ -80,7 +84,7 @@ export function EventRow({ event, onDropSwap }: { event: PlannerEvent; onDropSwa
         />
       </label>
       <div className="item-body">
-        <button type="button" className="item-title" onClick={() => openComposer({ mode: 'edit', type: 'event', id: event.id })}>
+        <button type="button" className="item-title" onClick={() => openComposer({ mode: 'edit', type: 'event', id: editId })}>
           {event.title}
         </button>
         <p className="meta">
@@ -88,6 +92,7 @@ export function EventRow({ event, onDropSwap }: { event: PlannerEvent; onDropSwa
           {categoryById(event.category).label}
           {duration ? ` · ${duration}` : ''}
           {event.important ? t(" · Important") : ''}
+          {event.repeat || series ? <span className="repeat-chip">↻ {repeatLabel(event.repeat)}</span> : null}
         </p>
       </div>
       <span
@@ -108,10 +113,11 @@ export function EventRow({ event, onDropSwap }: { event: PlannerEvent; onDropSwa
         type="button"
         className="icon-btn"
         aria-label={t("Edit {0}", { 0: event.title })}
-        onClick={() => openComposer({ mode: 'edit', type: 'event', id: event.id })}
+        onClick={() => openComposer({ mode: 'edit', type: 'event', id: editId })}
       >
         <PencilIcon size={16} />
       </button>
+      {series ? null : (
       <button
         type="button"
         className="icon-btn row-delete"
@@ -123,6 +129,7 @@ export function EventRow({ event, onDropSwap }: { event: PlannerEvent; onDropSwa
       >
         <TrashIcon size={16} />
       </button>
+      )}
     </li>
   );
 }
@@ -201,6 +208,7 @@ export function TaskRow({
           {categoryById(task.category).label}
           {task.dueTime ? ` · ${displayTime(task.dueTime)}` : ''}
           {showDate && task.dueDate ? ` · ${formatWeekdayShort(task.dueDate)} ${dayNumber(task.dueDate)} ${formatMonthShort(task.dueDate)}` : ''}
+          {task.waiting ? <span className="repeat-chip">{t("Waiting on {0}", { 0: task.waiting })}</span> : null}
           {task.repeat ? <span className="repeat-chip" title={repeatLabel(task.repeat)}>↻ {repeatLabel(task.repeat).replace('Every ', '')}</span> : null}
           {task.subtasks.length ? (
             <button type="button" className="steps-chip" aria-expanded={open} onClick={() => setOpen((value) => !value)}>

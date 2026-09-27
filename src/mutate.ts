@@ -1,4 +1,4 @@
-import { isValidISODate, isValidTime, timeToMinutes, todayISO } from './dates';
+import { addDays, isValidISODate, isValidTime, timeToMinutes, todayISO, weekDates } from './dates';
 import { nextDueAfterCompletion, REPEAT_SET } from './recurrence';
 import type {
   EventInput,
@@ -76,6 +76,7 @@ export function addTask(state: PlannerState, input: TaskInput, id = uid(), now =
         repeat: cleanRepeat(input.repeat),
         subtasks: cleanSubtasks(input.subtasks),
         completedAt: null,
+        waiting: input.waiting ? clean(input.waiting, 140) : null,
       },
     ],
   };
@@ -99,6 +100,7 @@ export function updateTask(state: PlannerState, id: string, patch: Partial<TaskI
         note: patch.note === undefined ? task.note : patch.note.trim().slice(0, 4000),
         repeat: patch.repeat === undefined ? task.repeat : cleanRepeat(patch.repeat),
         subtasks: patch.subtasks === undefined ? task.subtasks : cleanSubtasks(patch.subtasks),
+        waiting: patch.waiting === undefined ? task.waiting : patch.waiting ? clean(patch.waiting, 140) : null,
         updatedAt: now,
       };
     }),
@@ -120,6 +122,7 @@ export function duplicateTask(state: PlannerState, id: string, now = nowIso(), n
       goalId: task.goalId,
       repeat: task.repeat,
       subtasks: task.subtasks.map((step) => ({ ...step, id: '', completed: false })),
+      waiting: task.waiting,
     },
     nextId,
     now,
@@ -228,6 +231,7 @@ export function addEvent(state: PlannerState, input: EventInput, id = uid(), now
         sortOrder: nextOrder(state.events),
         createdAt: now,
         updatedAt: now,
+        repeat: cleanRepeat(input.repeat),
       },
     ],
   };
@@ -255,6 +259,7 @@ export function updateEvent(state: PlannerState, id: string, patch: Partial<Even
         startTime,
         endTime,
         note: patch.note === undefined ? event.note : patch.note.trim().slice(0, 4000),
+        repeat: patch.repeat === undefined ? event.repeat : cleanRepeat(patch.repeat),
         updatedAt: now,
       };
     }),
@@ -454,7 +459,9 @@ export function addGoal(state: PlannerState, input: GoalInput, id = uid(), miles
         description: input.description.trim().slice(0, 2000),
         horizon: input.horizon,
         deadline: input.deadline && isValidISODate(input.deadline) ? input.deadline : null,
-        milestones: milestone ? [{ id: milestoneId, title: milestone, completed: false }] : [],
+        milestones: milestone
+          ? [{ id: milestoneId, title: milestone, completed: false, dueDate: input.milestoneDue && isValidISODate(input.milestoneDue) ? input.milestoneDue : null }]
+          : [],
         createdAt: now,
         updatedAt: now,
       },
@@ -495,14 +502,15 @@ export function deleteGoal(state: PlannerState, id: string): PlannerState {
   };
 }
 
-export function addMilestone(state: PlannerState, goalId: string, title: string, id = uid(), now = nowIso()): PlannerState {
+export function addMilestone(state: PlannerState, goalId: string, title: string, id = uid(), now = nowIso(), dueDate: string | null = null): PlannerState {
   const cleaned = clean(title, 140);
   if (!cleaned) return state;
+  const due = dueDate && isValidISODate(dueDate) ? dueDate : null;
   return {
     ...state,
     goals: state.goals.map((goal) =>
       goal.id === goalId
-        ? { ...goal, updatedAt: now, milestones: [...goal.milestones, { id, title: cleaned, completed: false }] }
+        ? { ...goal, updatedAt: now, milestones: [...goal.milestones, { id, title: cleaned, completed: false, dueDate: due }] }
         : goal,
     ),
   };
@@ -588,4 +596,60 @@ export function setIntention(state: PlannerState, date: string, text: string): P
   if (!text.trim()) delete next[date];
   else next[date] = text.slice(0, 160);
   return { ...state, intentions: next };
+}
+
+/** Copy this week's dated events and open tasks onto the following week. */
+export function copyWeek(state: PlannerState, fromDate: string, now = nowIso()): PlannerState {
+  if (!isValidISODate(fromDate)) return state;
+  const days = new Set(weekDates(fromDate));
+  let next = state;
+  for (const event of state.events) {
+    if (!days.has(event.date) || event.repeat || event.completed) continue;
+    next = addEvent(
+      next,
+      {
+        title: event.title,
+        date: addDays(event.date, 7),
+        startTime: event.startTime,
+        endTime: event.endTime,
+        category: event.category,
+        note: event.note,
+        important: event.important,
+      },
+      uid(),
+      now,
+    );
+  }
+  for (const task of state.tasks) {
+    if (!task.dueDate || !days.has(task.dueDate) || task.completed || task.repeat) continue;
+    next = addTask(
+      next,
+      {
+        title: task.title,
+        priority: task.priority,
+        dueDate: addDays(task.dueDate, 7),
+        dueTime: task.dueTime,
+        category: task.category,
+        note: task.note,
+        goalId: task.goalId,
+        subtasks: task.subtasks.map((step) => ({ ...step, id: '', completed: false })),
+        waiting: task.waiting,
+      },
+      uid(),
+      now,
+    );
+  }
+  return next;
+}
+
+/** Shift unfinished work from this week onto the same weekday next week. */
+export function carryWeekLeftovers(state: PlannerState, today: string, now = nowIso()): PlannerState {
+  if (!isValidISODate(today)) return state;
+  const days = weekDates(today);
+  let next = state;
+  for (const task of state.tasks) {
+    if (task.completed || !task.dueDate || !days.includes(task.dueDate) || task.dueDate > today) continue;
+    next = moveTask(next, task.id, addDays(task.dueDate, 7), now);
+  }
+  return next;
 }

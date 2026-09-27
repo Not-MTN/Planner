@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { displayTime, formatMonthLong, monthGrid, setDisplayPrefs, setWeekStart, startOfWeek, weekdayHeaders } from './dates';
-import { parseICS, toICS } from './ics';
+import { parseICS, toBusyICS, toICS } from './ics';
 import { focusSummary, habitLinks, productiveHours, weeklyReport } from './insights';
 import { extractTags } from './components/Markdown';
 import { addEvent, addFixedCommitment, addHabit, addNote, addTask, logFocus, resizeEvent, toggleHabit, toggleSubtask, toggleTask, updateNote, updateTask } from './mutate';
@@ -127,6 +127,25 @@ describe('ics', () => {
     const parsed = parseICS(text);
     expect(parsed.tasks[0]).toMatchObject({ title: 'Mum’s birthday', dueDate: '2026-10-01' });
     expect(parsed.skipped).toBe(1);
+  });
+
+  it('exports repeating events and a busy calendar without titles', () => {
+    const state = addEvent(createEmptyState(), {
+      title: 'Secret 1:1',
+      date: '2026-09-28',
+      startTime: '10:00',
+      endTime: '10:30',
+      category: 'work',
+      note: 'private',
+      important: true,
+      repeat: 'weekly',
+    }, 'e');
+    const ics = toICS(state, new Date(2026, 8, 27));
+    expect(ics).toContain('RRULE:FREQ=WEEKLY');
+    const busy = toBusyICS(state, new Date(2026, 8, 27));
+    expect(busy).toContain('SUMMARY:Busy');
+    expect(busy).not.toContain('Secret');
+    expect(busy).not.toContain('private');
   });
 });
 

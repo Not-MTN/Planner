@@ -127,6 +127,7 @@ function TaskForm({
   const [goalId, setGoalId] = useState(existing?.goalId ?? '');
   const [note, setNote] = useState(existing?.note ?? '');
   const [repeat, setRepeat] = useState<TaskRepeat | ''>(existing?.repeat ?? '');
+  const [waiting, setWaiting] = useState(existing?.waiting ?? '');
   const [subtasks, setSubtasks] = useState<Subtask[]>(existing?.subtasks ?? []);
   const [draftStep, setDraftStep] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -157,6 +158,7 @@ function TaskForm({
       note,
       goalId: goalId || null,
       repeat: repeat || null,
+      waiting: waiting.trim() || null,
       subtasks: draftStep.trim() ? [...subtasks, { id: uid(), title: draftStep.trim(), completed: false }] : subtasks,
     };
     if (existing) updateTask(existing.id, input);
@@ -194,6 +196,9 @@ function TaskForm({
           <input type="time" value={dueTime} onChange={(event) => setDueTime(event.target.value)} />
         </Field>
       </div>
+      <Field label={t("Waiting on")} hint={t("Keeps it off the overdue list until this is clear.")}>
+        <input value={waiting} onChange={(event) => setWaiting(event.target.value)} maxLength={140} placeholder={t("A person, a reply, a delivery…")} />
+      </Field>
       <Field label={t("Repeat")} hint={repeat ? t("Finishing it schedules the next one.") : undefined}>
         <select value={repeat} onChange={(event) => setRepeat(event.target.value as TaskRepeat | '')}>
           <option value="">{t("Does not repeat")}</option>
@@ -278,6 +283,7 @@ function EventForm({ composer, onClose, onRemove }: { composer: ComposerState; o
   const [endTime, setEndTime] = useState(existing?.endTime ?? '');
   const [category, setCategory] = useState(existing?.category ?? 'personal');
   const [important, setImportant] = useState(existing?.important ?? false);
+  const [repeat, setRepeat] = useState<TaskRepeat | ''>(existing?.repeat ?? '');
   const [note, setNote] = useState(existing?.note ?? '');
   const [error, setError] = useState<string | null>(null);
 
@@ -307,6 +313,7 @@ function EventForm({ composer, onClose, onRemove }: { composer: ComposerState; o
       category,
       note,
       important,
+      repeat: repeat || null,
     };
     if (existing) updateEvent(existing.id, input);
     else addEvent(input);
@@ -338,6 +345,14 @@ function EventForm({ composer, onClose, onRemove }: { composer: ComposerState; o
           </select>
         </Field>
       </div>
+      <Field label={t("Repeat")} hint={repeat ? t("Shows on matching days ahead.") : undefined}>
+        <select value={repeat} onChange={(event) => setRepeat(event.target.value as TaskRepeat | '')}>
+          <option value="">{t("Does not repeat")}</option>
+          {REPEAT_CHOICES.map((item) => (
+            <option key={item.id} value={item.id}>{item.label}</option>
+          ))}
+        </select>
+      </Field>
       <label className="check-line">
         <input type="checkbox" checked={important} onChange={(event) => setImportant(event.target.checked)} />
         <span>{t("Mark as important")}</span>
@@ -478,6 +493,7 @@ function GoalForm({ composer, onClose, onRemove }: { composer: ComposerState; on
   const [description, setDescription] = useState(existing?.description ?? '');
   const [deadline, setDeadline] = useState(existing?.deadline ?? '');
   const [milestone, setMilestone] = useState('');
+  const [milestoneDue, setMilestoneDue] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const submit = (event: FormEvent) => {
@@ -489,7 +505,7 @@ function GoalForm({ composer, onClose, onRemove }: { composer: ComposerState; on
     if (existing) {
       updateGoal(existing.id, { title, description, horizon, deadline: deadline || null });
     } else {
-      addGoal({ title, description, horizon, deadline: deadline || null, milestone });
+      addGoal({ title, description, horizon, deadline: deadline || null, milestone, milestoneDue: milestoneDue || null });
     }
     onClose();
   };
@@ -524,9 +540,16 @@ function GoalForm({ composer, onClose, onRemove }: { composer: ComposerState; on
         <input type="date" value={deadline} onChange={(event) => setDeadline(event.target.value)} />
       </Field>
       {!existing ? (
-        <Field label={t("First step")} hint={t("Optional. You can add more on the goal.")}>
-          <input value={milestone} onChange={(event) => setMilestone(event.target.value)} maxLength={140} />
-        </Field>
+        <>
+          <Field label={t("First step")} hint={t("Optional. You can add more on the goal.")}>
+            <input value={milestone} onChange={(event) => setMilestone(event.target.value)} maxLength={140} />
+          </Field>
+          {milestone.trim() ? (
+            <Field label={t("Step date")} hint={t("Optional. Shows on Upcoming.")}>
+              <input type="date" value={milestoneDue} onChange={(event) => setMilestoneDue(event.target.value)} />
+            </Field>
+          ) : null}
+        </>
       ) : null}
       <Actions editing={Boolean(existing)} label={t("Add goal")} onClose={onClose} onRemove={onRemove} />
     </form>

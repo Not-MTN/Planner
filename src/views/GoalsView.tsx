@@ -75,6 +75,7 @@ function GoalColumn({ title, goals, horizon }: { title: string; goals: Goal[]; h
 function GoalCard({ goal, fill }: { goal: Goal; fill: (typeof FILLS)[number] }) {
   const { state, toggleMilestone, toggleTask, addMilestone, deleteMilestone, openComposer, deleteGoal, flash, undo } = usePlanner();
   const [step, setStep] = useState('');
+  const [stepDue, setStepDue] = useState('');
   const progress = goalProgress(goal, state.tasks);
   const linked = linkedTasks(state, goal.id);
   const late = goal.deadline && progress.ratio < 1 && goal.deadline < todayISO();
@@ -107,7 +108,7 @@ function GoalCard({ goal, fill }: { goal: Goal; fill: (typeof FILLS)[number] }) 
             >
               {milestone.completed ? <TickIcon size={14} /> : null}
             </button>
-            <span>{milestone.title}</span>
+            <span>{milestone.title}{milestone.dueDate ? ` · ${milestone.dueDate}` : ''}</span>
             <button
               type="button"
               className="text-btn"
@@ -138,13 +139,18 @@ function GoalCard({ goal, fill }: { goal: Goal; fill: (typeof FILLS)[number] }) 
         onSubmit={(event) => {
           event.preventDefault();
           if (!step.trim()) return;
-          addMilestone(goal.id, step);
+          addMilestone(goal.id, step, stepDue || null);
           setStep('');
+          setStepDue('');
         }}
       >
         <label>
           <span className="visually-hidden">{t("Add a step to")} {goal.title}</span>
           <input value={step} onChange={(event) => setStep(event.target.value)} placeholder={t("Add a step")} maxLength={140} />
+        </label>
+        <label>
+          <span className="visually-hidden">{t("Step date")}</span>
+          <input type="date" value={stepDue} onChange={(event) => setStepDue(event.target.value)} />
         </label>
         <button type="submit" className="btn btn-tiny">{t("Add")}</button>
       </form>

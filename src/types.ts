@@ -34,6 +34,8 @@ export interface Task {
   subtasks: Subtask[];
   /** Set when the task was completed; used by insights. */
   completedAt?: string | null;
+  /** If set, this is waiting on someone/something and is not treated as overdue. */
+  waiting: string | null;
 }
 
 export interface FocusLog {
@@ -58,8 +60,11 @@ export interface PlannerEvent {
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
+  repeat: TaskRepeat | null;
   /** Present on read-only weekly occurrences generated from a protected time block. */
   fixedCommitmentId?: string;
+  /** Present on read-only dates generated from a repeating event. */
+  seriesEventId?: string;
 }
 
 export interface FixedCommitment {
@@ -105,6 +110,7 @@ export interface Milestone {
   id: string;
   title: string;
   completed: boolean;
+  dueDate: string | null;
 }
 
 export interface Goal {
@@ -151,6 +157,7 @@ export interface TaskInput {
   goalId: string | null;
   repeat?: TaskRepeat | null;
   subtasks?: Subtask[];
+  waiting?: string | null;
 }
 
 export interface EventInput {
@@ -161,6 +168,7 @@ export interface EventInput {
   category: string;
   note: string;
   important: boolean;
+  repeat?: TaskRepeat | null;
 }
 
 export interface HabitInput {
@@ -177,6 +185,7 @@ export interface GoalInput {
   horizon: GoalHorizon;
   deadline: string | null;
   milestone: string;
+  milestoneDue?: string | null;
 }
 
 export interface NoteInput {
