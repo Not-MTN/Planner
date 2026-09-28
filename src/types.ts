@@ -178,6 +178,41 @@ export interface AttachmentRef {
   addedAt: string;
 }
 
+/** Where a saved AI plan came from. */
+export type AIPlanSource = 'typed' | 'voice';
+
+/** How many drafted plans the Plans page keeps; the oldest falls off. */
+export const AI_PLAN_LIMIT = 30;
+
+/** Lifecycle of a saved AI plan: drafted, then (optionally) added to the planner. */
+export type AIPlanStatus = 'draft' | 'added';
+
+/**
+ * One AI-drafted plan kept on the Plans page. Draft items use the same input
+ * shapes as the AI draft review card; ids are only assigned when it's added.
+ */
+export interface SavedAIPlan {
+  id: string;
+  /** Short, human label — the request in brief or "Voice plan". */
+  title: string;
+  /** What the user asked for ('' when the plan came from a picture or voice). */
+  prompt: string;
+  /** The AI's own overview of the draft. */
+  summary: string;
+  startDate: string;
+  days: number;
+  status: AIPlanStatus;
+  source: AIPlanSource;
+  tasks: TaskInput[];
+  events: EventInput[];
+  habits: HabitInput[];
+  suggestions: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type SavedAIPlanInput = Omit<SavedAIPlan, 'id' | 'status' | 'createdAt' | 'updatedAt'>;
+
 export type MoodValue = 1 | 2 | 3 | 4 | 5;
 
 /** One mood check-in per day (the latest wins). */
@@ -195,6 +230,8 @@ export interface PlannerState {
   fixedCommitments: FixedCommitment[];
   /** Explicit, user-controlled context for the AI. */
   aiMemory: AIMemory[];
+  /** AI-drafted plans waiting on the Plans page. */
+  aiPlans: SavedAIPlan[];
   habits: Habit[];
   completions: HabitCompletion[];
   goals: Goal[];
@@ -281,6 +318,7 @@ export function createEmptyState(): PlannerState {
     events: [],
     fixedCommitments: [],
     aiMemory: [],
+    aiPlans: [],
     habits: [],
     completions: [],
     goals: [],

@@ -22,6 +22,7 @@ import {
   UndoIcon,
   RedoIcon,
   UploadIcon,
+  WeekIcon,
 } from '../icons';
 import { useImportFile } from '../hooks';
 import { routeKey, routeTitle, type Route } from '../route';
@@ -41,6 +42,7 @@ import { TasksView } from '../views/TasksView';
 const CalendarView = lazy(() => import('../views/CalendarView').then((m) => ({ default: m.CalendarView })));
 const InsightsView = lazy(() => import('../views/InsightsView').then((m) => ({ default: m.InsightsView })));
 const AIView = lazy(() => import('../views/AIView').then((m) => ({ default: m.AIView })));
+const PlansView = lazy(() => import('../views/PlansView').then((m) => ({ default: m.PlansView })));
 import { applyUpdate, onUpdateAvailable } from '../pwa';
 import { onTourRequest, requestTour, tourStartIndex } from '../tour';
 import { onAboutRequest, requestAbout } from '../about';
@@ -52,6 +54,7 @@ const NAV = [
   { name: 'today', label: t("Today"), icon: SunIcon },
   { name: 'calendar', label: t("Calendar"), icon: CalendarIcon },
   { name: 'ai', label: t("AI coach"), icon: SparklesIcon },
+  { name: 'plans', label: t("Plans"), icon: WeekIcon },
   { name: 'tasks', label: t("Tasks"), icon: CheckIcon },
   { name: 'habits', label: t("Habits"), icon: DotsIcon },
   { name: 'goals', label: t("Goals"), icon: FlagIcon },
@@ -176,7 +179,7 @@ export function Shell() {
     setMoreOpen(false);
   };
 
-  const moreActive = ['goals', 'notes', 'insights', 'ai'].includes(route.name);
+  const moreActive = ['goals', 'notes', 'insights', 'ai', 'plans'].includes(route.name);
 
   return (
     <div className="app-shell">
@@ -196,11 +199,11 @@ export function Shell() {
         </button>
         <nav className="side-nav" aria-label={t("Planner")}>
           <p className="nav-label">{t("Plan")}</p>
-          {NAV.slice(0, 3).map((item) => (
+          {NAV.slice(0, 4).map((item) => (
             <NavButton key={item.name} item={item} active={route.name === item.name || (item.name === 'calendar' && route.name === 'calendar')} onClick={() => go(item.name)} />
           ))}
           <p className="nav-label">{t("Track")}</p>
-          {NAV.slice(3).map((item) => (
+          {NAV.slice(4).map((item) => (
             <NavButton key={item.name} item={item} active={route.name === item.name} onClick={() => go(item.name)} />
           ))}
         </nav>
@@ -318,6 +321,7 @@ export function Shell() {
                   {route.name === 'notes' ? <NotesView /> : null}
                   {route.name === 'insights' ? <InsightsView /> : null}
                   {route.name === 'ai' ? <AIView /> : null}
+                  {route.name === 'plans' ? <PlansView /> : null}
                 </Suspense>
               </div>
             </>
@@ -357,6 +361,9 @@ export function Shell() {
             </button>
             <button type="button" className={cx(route.name === 'ai' && 'on')} onClick={() => go('ai')}>
               <SparklesIcon size={18} /> {t("AI coach")}
+            </button>
+            <button type="button" className={cx(route.name === 'plans' && 'on')} onClick={() => go('plans')}>
+              <WeekIcon size={18} /> {t("Plans")}
             </button>
             <button type="button" onClick={openPalette}><SearchIcon size={18} /> {t("Search & quick add")}</button>
             <button type="button" onClick={openSettings}><SlidersIcon size={18} /> {t("Settings")}</button>

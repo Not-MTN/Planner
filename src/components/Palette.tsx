@@ -142,6 +142,7 @@ function PaletteInner() {
     const commands: PaletteItem[] = [
       { id: 'go-today', icon: SunIcon, label: t("Go to Today"), run: close(() => navigate({ name: 'today' })) },
       { id: 'go-calendar', icon: CalendarIcon, label: t("Go to Calendar"), sub: 'Week, month, and what’s ahead', run: close(() => navigate({ name: 'calendar', tab: 'week', date: today })) },
+      { id: 'go-plans', icon: WeekIcon, label: t("Go to Plans"), sub: 'AI drafts, ready to add', run: close(() => navigate({ name: 'plans' })) },
       { id: 'go-tasks', icon: CheckIcon, label: t("Go to Tasks"), run: close(() => navigate({ name: 'tasks' })) },
       { id: 'go-habits', icon: DotsIcon, label: t("Go to Habits"), run: close(() => navigate({ name: 'habits' })) },
       { id: 'go-goals', icon: FlagIcon, label: t("Go to Goals"), run: close(() => navigate({ name: 'goals' })) },

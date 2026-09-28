@@ -8,6 +8,7 @@
  * The server stores { id, version, ciphertext } and can't read anything.
  */
 import { sanitizeState, serialize } from './storage';
+import { AI_PLAN_LIMIT } from './types';
 import type { PlannerState } from './types';
 
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O/1/I/L
@@ -158,6 +159,9 @@ export function mergeStates(local: PlannerState, remote: PlannerState): PlannerS
     events: mergeById(local.events, remote.events),
     fixedCommitments: mergeById(local.fixedCommitments, remote.fixedCommitments),
     aiMemory: mergeById(local.aiMemory, remote.aiMemory),
+    aiPlans: mergeById(local.aiPlans, remote.aiPlans)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, AI_PLAN_LIMIT),
     habits,
     completions: [...completions.values()].filter((item) => habitIds.has(item.habitId)),
     goals: mergeById(local.goals, remote.goals),

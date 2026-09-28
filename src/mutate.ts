@@ -1,5 +1,7 @@
 import { addDays, isValidISODate, isValidTime, timeToMinutes, todayISO, weekDates } from './dates';
 import { nextDueAfterCompletion, REPEAT_SET } from './recurrence';
+import { MAX_PLAN_DAYS } from './duration';
+import { AI_PLAN_LIMIT } from './types';
 import type {
   AIMemoryCategory,
   AIMemoryInput,
@@ -14,6 +16,8 @@ import type {
   MoodValue,
   NoteInput,
   PlannerState,
+  SavedAIPlan,
+  SavedAIPlanInput,
   TaskInput,
 } from './types';
 
@@ -285,6 +289,53 @@ export function deleteAIMemory(state: PlannerState, id: string): PlannerState {
 
 export function clearAIMemory(state: PlannerState): PlannerState {
   return state.aiMemory.length === 0 ? state : { ...state, aiMemory: [] };
+}
+
+// ── Saved AI plans (the Plans page) ───────────────────────────────────
+
+function cleanPlanTitle(input: SavedAIPlanInput): string {
+  const title = input.title.trim().slice(0, 140);
+  if (title) return title;
+  const fallback = input.summary.trim() || input.prompt.trim();
+  return fallback.slice(0, 60);
+}
+
+/** Save an AI draft to the Plans page, newest first. Returns the stored plan. */
+export function saveAIPlan(state: PlannerState, input: SavedAIPlanInput, id = uid(), now = nowIso()): { state: PlannerState; plan: SavedAIPlan } {
+  const startDate = isValidISODate(input.startDate) ? input.startDate : todayISO();
+  const days = Math.max(1, Math.min(MAX_PLAN_DAYS, Math.round(Number.isFinite(input.days) ? input.days : 1)));
+  const plan: SavedAIPlan = {
+    id,
+    title: cleanPlanTitle(input),
+    prompt: input.prompt.trim().slice(0, 2400),
+    summary: input.summary.trim().slice(0, 400),
+    startDate,
+    days,
+    status: 'draft',
+    source: input.source === 'voice' ? 'voice' : 'typed',
+    tasks: input.tasks.slice(0, 40),
+    events: input.events.slice(0, 40),
+    habits: input.habits.slice(0, 12),
+    suggestions: input.suggestions.slice(0, 5),
+    createdAt: now,
+    updatedAt: now,
+  };
+  return { state: { ...state, aiPlans: [plan, ...state.aiPlans].slice(0, AI_PLAN_LIMIT) }, plan };
+}
+
+export function deleteAIPlan(state: PlannerState, id: string): PlannerState {
+  return state.aiPlans.some((plan) => plan.id === id)
+    ? { ...state, aiPlans: state.aiPlans.filter((plan) => plan.id !== id) }
+    : state;
+}
+
+/** Mark a plan as applied to the planner once its items have been added. */
+export function markAIPlanAdded(state: PlannerState, id: string, now = nowIso()): PlannerState {
+  if (!state.aiPlans.some((plan) => plan.id === id && plan.status === 'draft')) return state;
+  return {
+    ...state,
+    aiPlans: state.aiPlans.map((plan) => (plan.id === id ? { ...plan, status: 'added', updatedAt: now } : plan)),
+  };
 }
 
 export function swapTasks(state: PlannerState, aId: string, bId: string, now = nowIso()): PlannerState {

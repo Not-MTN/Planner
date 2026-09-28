@@ -11,10 +11,11 @@ export type Route =
   | { name: 'goals' }
   | { name: 'notes' }
   | { name: 'insights' }
+  | { name: 'plans' }
   | { name: 'quickadd' }
   | { name: 'ai'; tab?: 'plan' | 'review' };
 
-const PLAIN_NAMES = new Set(['today', 'tasks', 'habits', 'goals', 'notes', 'insights']);
+const PLAIN_NAMES = new Set(['today', 'tasks', 'habits', 'goals', 'notes', 'insights', 'plans']);
 const CALENDAR_TABS = new Set(['week', 'month', 'agenda']);
 
 export function calendarDateFor(year: number, month: number): string {
@@ -93,6 +94,8 @@ export function routeTitle(route: Route): string {
       return 'Notes';
     case 'insights':
       return 'Insights';
+    case 'plans':
+      return 'Plans';
     case 'quickadd':
       return 'Quick add';
     case 'ai':

@@ -5,7 +5,7 @@ import { MicIcon, CloseIcon, VolumeIcon, SparklesIcon } from '../icons';
 import { t, getLang } from '../i18n';
 import { speakText, stopSpeaking, voiceTurn, type VoiceTurn } from '../voiceai';
 import { useSpeechInput, type SpeechError } from '../speech';
-import type { AIDraft } from '../ai';
+import type { AIDraft, PlanRange } from '../ai';
 
 /**
  * Voice AI: tap the orb, talk like a tired human, and the AI answers back —
@@ -30,7 +30,7 @@ function speechErrorMessage(error: SpeechError): string {
   return t("Something snagged — try again?");
 }
 
-export function VoiceTalk({ onDraft }: { onDraft: (draft: AIDraft) => void }) {
+export function VoiceTalk({ onDraft }: { onDraft: (draft: AIDraft, range: PlanRange) => void }) {
   const { state } = usePlanner();
   const speech = useSpeechInput();
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
@@ -65,7 +65,11 @@ export function VoiceTalk({ onDraft }: { onDraft: (draft: AIDraft) => void }) {
 
   const scrollLog = () => {
     window.setTimeout(() => {
-      logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' });
+      // scrollTo is absent in some engines/environments (jsdom) — never crash on it.
+      const node = logRef.current;
+      if (node && typeof node.scrollTo === 'function') {
+        node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' });
+      }
     }, 40);
   };
 
@@ -85,7 +89,7 @@ export function VoiceTalk({ onDraft }: { onDraft: (draft: AIDraft) => void }) {
       const replyText = result.followUp ? `${result.reply} ${result.followUp}` : result.reply;
       setBubbles((current) => [...current, { role: 'assistant', text: replyText }]);
       scrollLog();
-      if (result.draft) onDraft(result.draft);
+      if (result.draft) onDraft(result.draft, result.range);
       const spoken = !mutedRef.current && speakText(replyText, {
         lang: getLang(),
         onend: () => settle('idle'),
