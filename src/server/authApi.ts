@@ -182,6 +182,13 @@ export async function handleSignup(request: Request, store: AuthStore | null): P
   }
 }
 
+/** Reports whether accounts are wired up, without revealing the connection string. */
+export function handleAuthStatus(request: Request, databaseUrl: string | undefined): Response {
+  if (!isSameOriginRequest(request)) return error(403, 'Cross-origin requests are not allowed.');
+  if (request.method !== 'GET' && request.method !== 'HEAD') return error(405, 'Method not allowed.', undefined);
+  return json(200, { configured: Boolean(databaseUrl?.trim()) });
+}
+
 /* -------------------------------------------------------------------- salt */
 
 /**

@@ -9,7 +9,7 @@ import type { NextHandleFunction } from 'connect';
 import { handleXAIChatCompletions, handleXAIStatus } from './src/server/xaiProxy';
 import { API_SECURITY_HEADERS } from './src/server/security';
 import { handleSync, handleSyncStatus, neonStore } from './src/server/sync';
-import { handleAccountVault, handleLogin, handleLogout, handleSalt, handleSession, handleSignup, handleSession as _session } from './src/server/authApi';
+import { handleAccountVault, handleAuthStatus, handleLogin, handleLogout, handleSalt, handleSession, handleSignup } from './src/server/authApi';
 import { authStore } from './src/server/authStore';
 import { handleICS } from './src/server/icsProxy';
 
@@ -43,13 +43,15 @@ async function sendWebResponse(webResponse: Response, response: ServerResponse):
   response.end(Buffer.from(await webResponse.arrayBuffer()));
 }
 
-function xaiProxyHandler(apiKey: string | undefined): NextHandleFunction {
+function xaiProxyHandler(apiKey: string | undefined, model: string | undefined): NextHandleFunction {
   return (request, response, next) => {
     // Mounted at /api/xai, so request.url is relative to that prefix.
     const pathname = (request.url ?? '').split('?')[0];
     let handler: ((webRequest: Request) => Response | Promise<Response>) | null = null;
     if (pathname === '/status') handler = (webRequest) => handleXAIStatus(webRequest, apiKey);
-    else if (pathname === '/chat/completions') handler = (webRequest) => handleXAIChatCompletions(webRequest, apiKey);
+    else if (pathname === '/chat/completions') {
+      handler = (webRequest) => handleXAIChatCompletions(webRequest, apiKey, { model });
+    }
     if (!handler) {
       next();
       return;
@@ -65,8 +67,8 @@ function xaiProxyHandler(apiKey: string | undefined): NextHandleFunction {
   };
 }
 
-function xaiProxy(apiKey: string | undefined): Plugin {
-  const middleware = xaiProxyHandler(apiKey);
+function xaiProxy(apiKey: string | undefined, model: string | undefined): Plugin {
+  const middleware = xaiProxyHandler(apiKey, model);
   return {
     name: 'planner-xai-proxy',
     configureServer(server) {
@@ -192,9 +194,10 @@ export default defineConfig(({ mode }) => {
   // Read the secret only inside the Vite/Node process. It is never defined into the browser bundle.
   const fileEnv = loadEnv(mode, cwd(), '');
   const apiKey = env.XAI_API_KEY || fileEnv.XAI_API_KEY;
+  const model = env.XAI_MODEL || fileEnv.XAI_MODEL;
   const databaseUrl = env.DATABASE_URL || fileEnv.DATABASE_URL;
   return {
-    plugins: [react(), xaiProxy(apiKey), syncApi(databaseUrl), authApi(databaseUrl), icsApi()],
+    plugins: [react(), xaiProxy(apiKey, model), syncApi(databaseUrl), authApi(databaseUrl), icsApi()],
     build: {
       rollupOptions: {
         output: {

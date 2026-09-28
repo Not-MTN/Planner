@@ -5,5 +5,7 @@
 import { handleXAIChatCompletions } from '../../../src/server/xaiProxy.js';
 
 export function POST(request: Request): Promise<Response> {
-  return handleXAIChatCompletions(request, process.env.XAI_API_KEY);
+  // XAI_MODEL lets you switch models without a code change; it must match a
+  // model your key can use, and it is never exposed to the browser.
+  return handleXAIChatCompletions(request, process.env.XAI_API_KEY, { model: process.env.XAI_MODEL });
 }

@@ -347,18 +347,50 @@ async function xaiJsonInternal(system: string, user: string, imageDataUrl?: stri
     if (cause instanceof Error && cause.name === 'AbortError') throw cause;
     throw new Error(t(t("Could not reach the xAI proxy. Check the server and try again.")));
   }
-  const payload = await response.json().catch(() => null) as unknown;
+  // Read the body once: prefer text (so a non-JSON error can be reported), and
+  // fall back to json() for callers that only provide that.
+  let text = '';
+  if (typeof response.text === 'function') text = await response.text().catch(() => '');
+  let payload: unknown = parseJsonSafely(text);
+  if (!payload && typeof response.json === 'function') payload = await response.json().catch(() => null);
   if (!response.ok) {
-    const message = cleanText(asRecord(asRecord(payload)?.error)?.message, 240);
-    if (response.status === 401) throw new Error(t(t("xAI rejected XAI_API_KEY. Check the server environment variable.")));
-    if (response.status === 403) throw new Error(message || t(t("xAI rejected XAI_API_KEY. Check the server environment variable.")));
-    if (response.status === 503) throw new Error(message || XAI_KEY_MISSING_MESSAGE);
-    if (response.status === 413) throw new Error(message || t(t("The image or plan is too large for one request. Use a smaller image (up to 3 MB).")));
-    if (response.status === 404) throw new Error(t(t("The xAI proxy was not found on this deployment. Redeploy with the api/ functions included.")));
-    if (response.status === 504) throw new Error(message || t(t("The xAI request timed out. Please try again.")));
-    throw new Error(message || t("xAI request failed ({0}). Please try again.", { 0: response.status }));
+    const error = asRecord(asRecord(payload)?.error);
+    const message = cleanText(error?.message, 400);
+    const code = typeof error?.code === 'string' ? error.code : '';
+
+    // A JSON error body means the proxy reached xAI and is telling us why.
+    if (payload) {
+      if (code === 'upstream_auth' || response.status === 401) {
+        throw new Error(message || t("xAI rejected XAI_API_KEY. Check the server environment variable."));
+      }
+      if (code === 'upstream_forbidden' || response.status === 403) {
+        throw new Error(message || t("xAI rejected XAI_API_KEY. Check the server environment variable."));
+      }
+      if (code === 'model_not_found' || code === 'rate_limited') throw new Error(message || t("xAI request failed ({0}). Please try again.", { 0: response.status }));
+      if (response.status === 503) throw new Error(message || XAI_KEY_MISSING_MESSAGE);
+      if (response.status === 413) throw new Error(message || t("The image or plan is too large for one request. Use a smaller image (up to 3 MB)."));
+      if (response.status === 504) throw new Error(message || t("The xAI request timed out. Please try again."));
+      throw new Error(message || t("xAI request failed ({0}). Please try again.", { 0: response.status }));
+    }
+
+    // No JSON at all: something in front of the app answered, not our proxy.
+    if (response.status === 404) throw new Error(t("The xAI proxy was not found on this deployment. Redeploy with the api/ functions included."));
+    throw new Error(
+      t("The server returned an unexpected response ({0}) instead of JSON. If this deployment has password protection or Vercel Authentication enabled, turn it off, or check that the api/ functions were deployed.", {
+        0: response.status,
+      }),
+    );
   }
   return parseJson(extractContent(payload));
+}
+
+function parseJsonSafely(text: string): unknown {
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 /** Voice/plain-text JSON chat against the xAI proxy (system + user in, parsed JSON out). */

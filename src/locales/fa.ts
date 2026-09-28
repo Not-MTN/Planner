@@ -920,6 +920,7 @@ export const fa: Record<string, string> = {
   "The two-minute tour": "تور دو دقیقه‌ای",
   "The voice service couldn't be reached — check your connection": "به سرویس صوتی دسترسی نشد — اتصال را بررسی کن",
   "The week’s schedule is still open.": "برنامهٔ هفته هنوز خالی است.",
+  "The server returned an unexpected response ({0}) instead of JSON. If this deployment has password protection or Vercel Authentication enabled, turn it off, or check that the api/ functions were deployed.": "سرور پاسخی غیرمنتظره ({0}) به‌جای JSON برگرداند. اگر قفل رمز یا Vercel Authentication روی این استقرار فعال است آن را خاموش کنید، یا بررسی کنید که توابع api/ مستقر شده باشند.",
   "The xAI proxy was not found on this deployment. Redeploy with the api/ functions included.": "پراکسی xAI در این استقرار پیدا نشد. با توابع api/ دوباره منتشر کنید.",
   "The xAI request timed out. Please try again.": "زمان درخواست xAI تمام شد. لطفاً دوباره امتحان کنید.",
   "Theme": "پوسته",
