@@ -190,3 +190,18 @@ export function cleanShareCiphertext(value: unknown): string | null {
   if (typeof value !== 'string' || !value) return null;
   return value.length <= MAX_SHARE_BYTES * 2 && BASE64_PATTERN.test(value) ? value : null;
 }
+
+/* ------------------------------------------------------------------ notices */
+
+export interface NotePutRequest {
+  linkId: string;
+  /** base64 — the note, encrypted with the link's key. Empty clears it. */
+  ciphertext: string | null;
+  weekOf: string;
+}
+
+export interface NoteResponse {
+  linkId: string;
+  ciphertext: string | null;
+  weekOf: string | null;
+}

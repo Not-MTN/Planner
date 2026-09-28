@@ -12,7 +12,7 @@ import { BookIcon, FlagIcon, PlusIcon, StopwatchIcon, TrashIcon } from '../icons
 import { t } from '../i18n';
 import { daysUntil, GRADE_LABELS, gradeLabel, newId, splitExplanations, subjectMinutes, subjectProgress, weekOf, weekResults, withExplanation, withSubject, withoutExplanation, withoutSubject } from '../panels';
 import { normalizeLinkCode } from '../auth/crypto';
-import { acceptInvitation, removeLink, shareWeeklyResults, syncLinks } from '../auth/links';
+import { acceptInvitation, relayNotices, removeLink, shareWeeklyResults, syncLinks } from '../auth/links';
 import { AuthError } from '../auth/session';
 import type { ChangeNote, StudentSubject } from '../types';
 import { Field, Empty } from '../components/ui';
@@ -29,9 +29,10 @@ export function StudentPanelView() {
   useEffect(() => {
     let cancelled = false;
     void syncLinks(panels)
-      .then((result) => {
-        if (!cancelled && result.changed) updatePanels(result.panels);
-      })
+      // Notes left by one guardian are passed to the others here: only this
+      // planner holds every link's key, so it is the only one that can.
+      .then((result) => (cancelled ? null : relayNotices(result.panels)))
+      .then(() => undefined)
       .catch(() => undefined);
     return () => {
       cancelled = true;

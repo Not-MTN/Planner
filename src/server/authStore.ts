@@ -73,6 +73,9 @@ CREATE TABLE IF NOT EXISTS planner_links (
   share_week             text,
   share_updated_at       timestamptz,
   status                 text NOT NULL CHECK (status IN ('pending','linked','revoked')),
+  note_to_student        text,
+  note_to_guardian       text,
+  note_week              text,
   created_at             timestamptz NOT NULL DEFAULT now(),
   updated_at             timestamptz NOT NULL DEFAULT now(),
   UNIQUE (guardian_id, student_username_lower)
@@ -137,6 +140,9 @@ export interface LinkRow {
   code_hash: string;
   wrapped_share: string;
   share_ciphertext: string | null;
+  note_to_student: string | null;
+  note_to_guardian: string | null;
+  note_week: string | null;
   share_week: string | null;
   share_updated_at: string | null;
   status: 'pending' | 'linked' | 'revoked';
@@ -175,6 +181,14 @@ export interface AuthStore {
   getShare(linkId: string, guardianId: string): Promise<LinkRow | null>;
   /** Either side can end a link; it disappears from both. */
   deleteLink(linkId: string, userId: string): Promise<boolean>;
+  /**
+   * A note for whoever is on the other side of the link: a guardian writes for
+   * the student, the student writes for the guardian. Encrypted with the link's
+   * key, so the server only relays ciphertext.
+   */
+  putNote(linkId: string, userId: string, to: 'student' | 'guardian', ciphertext: string | null, weekOf: string): Promise<LinkRow | null>;
+  /** Reads the note addressed to the caller. */
+  getNote(linkId: string, userId: string): Promise<{ ciphertext: string | null; weekOf: string | null } | null>;
 }
 
 /* ------------------------------------------------------------------ hashing */
@@ -329,6 +343,9 @@ export function createMemoryAuthStore(): AuthStore {
         code_hash: input.codeHash,
         wrapped_share: input.wrappedShare,
         share_ciphertext: null,
+        note_to_student: null,
+        note_to_guardian: null,
+        note_week: null,
         share_week: null,
         share_updated_at: null,
         status: 'pending',
@@ -382,6 +399,25 @@ export function createMemoryAuthStore(): AuthStore {
     async getShare(linkId, guardianId) {
       const link = links.find((item) => item.id === linkId && item.guardian_id === guardianId);
       return link ? { ...link } : null;
+    },
+
+    async putNote(linkId, userId, to, ciphertext, weekOf) {
+      const link = links.find((item) => item.id === linkId && item.status === 'linked');
+      if (!link) return null;
+      if (to === 'student' && link.guardian_id !== userId) return null;
+      if (to === 'guardian' && link.student_id !== userId) return null;
+      if (to === 'student') link.note_to_student = ciphertext;
+      else link.note_to_guardian = ciphertext;
+      link.note_week = weekOf;
+      link.updated_at = new Date().toISOString();
+      return link;
+    },
+    async getNote(linkId, userId) {
+      const link = links.find((item) => item.id === linkId);
+      if (!link) return null;
+      const mine = link.guardian_id === userId ? link.note_to_guardian : link.student_id === userId ? link.note_to_student : null;
+      if (mine === null && link.guardian_id !== userId && link.student_id !== userId) return null;
+      return { ciphertext: mine, weekOf: link.note_week };
     },
     async deleteLink(linkId, userId) {
       const index = links.findIndex(
@@ -449,6 +485,9 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
         share_week             text,
         share_updated_at       timestamptz,
         status                 text NOT NULL CHECK (status IN ('pending','linked','revoked')),
+        note_to_student        text,
+        note_to_guardian       text,
+        note_week              text,
         created_at             timestamptz NOT NULL DEFAULT now(),
         updated_at             timestamptz NOT NULL DEFAULT now(),
         UNIQUE (guardian_id, student_username_lower)
@@ -656,6 +695,35 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
       await ensure();
       const rows = (await sql`SELECT * FROM planner_links WHERE id = ${linkId} AND guardian_id = ${guardianId}`) as LinkRow[];
       return rows[0] ?? null;
+    },
+
+    async putNote(linkId, userId, to, ciphertext, weekOf) {
+      await ensure();
+      // Two plain statements rather than a fragment: easier to read, and the
+      // test double understands them.
+      const rows = (to === 'student'
+        ? await sql`
+            UPDATE planner_links
+            SET note_to_student = ${ciphertext}, note_week = ${weekOf}, updated_at = now()
+            WHERE id = ${linkId} AND status = 'linked' AND guardian_id = ${userId}
+            RETURNING *
+          `
+        : await sql`
+            UPDATE planner_links
+            SET note_to_guardian = ${ciphertext}, note_week = ${weekOf}, updated_at = now()
+            WHERE id = ${linkId} AND status = 'linked' AND student_id = ${userId}
+            RETURNING *
+          `) as LinkRow[];
+      return rows[0] ?? null;
+    },
+
+    async getNote(linkId, userId) {
+      await ensure();
+      const rows = (await sql`SELECT * FROM planner_links WHERE id = ${linkId}`) as LinkRow[];
+      const row = rows[0];
+      if (!row || (row.guardian_id !== userId && row.student_id !== userId)) return null;
+      const ciphertext = row.guardian_id === userId ? row.note_to_guardian : row.note_to_student;
+      return { ciphertext, weekOf: row.note_week };
     },
 
     async deleteLink(linkId, userId) {

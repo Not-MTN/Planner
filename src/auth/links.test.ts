@@ -39,6 +39,9 @@ function route(path: string, method: string, body?: string, search = ''): Promis
       return api.then((m) => m.handleLinks(request, store));
     case 'POST /api/auth/link-accept':
       return api.then((m) => m.handleLinkAccept(request, store));
+    case 'GET /api/auth/note':
+    case 'PUT /api/auth/note':
+      return api.then((m) => m.handleNote(request, store));
     case 'GET /api/auth/share':
     case 'PUT /api/auth/share':
       return api.then((m) => m.handleShare(request, store));
@@ -193,6 +196,60 @@ describe('linking a guardian and a student', () => {
     const synced = await syncLinks(after);
     expect(synced.panels.guardian.links).toHaveLength(0);
   }, 120_000);
+
+  it('carries a note from one guardian to the other, through the student', async () => {
+    const { inviteStudent, acceptInvitation, postNotice } = await import('./links');
+
+    // Two guardians follow the same student.
+    await join('parent9', 'parent9@example.com', createEmptyState());
+    const parentInvite = await inviteStudent(createEmptyState().panels, 'student9');
+
+    await join('student9', 'student9@example.com', createEmptyState());
+    let studentPanels = await acceptInvitation(createEmptyState().panels, parentInvite.invitation.code);
+
+    // The second guardian needs the student's account to exist first, which it does.
+    const { endSession } = await import('./session');
+    endSession();
+    await join('advisor9', 'advisor9@example.com', createEmptyState());
+    const advisorInvite = await inviteStudent(createEmptyState().panels, 'student9');
+    endSession();
+
+    const { signIn } = await import('./session');
+    await signIn('student9', PASSWORD, false);
+    const { acceptInvitation: acceptAgain } = await import('./links');
+    studentPanels = await acceptAgain(studentPanels, advisorInvite.invitation.code);
+    expect(studentPanels.student.guardians).toHaveLength(2);
+
+    // The parent writes a note for the other adults.
+    endSession();
+    await signIn('parent9', PASSWORD, false);
+    const parentPanels = await postNotice(parentInvite.panels, parentInvite.invitation.link.linkId!, 'Moved Thursday chemistry to the evening.');
+    expect(parentPanels.guardian.notices[0]?.summary).toContain('Thursday');
+
+    // The student passes it on.
+    endSession();
+    await signIn('student9', PASSWORD, false);
+    const { relayNotices: relay } = await import('./links');
+    const relayed = await relay(studentPanels);
+    expect(relayed.relayed).toBe(1);
+
+    // The advisor picks it up.
+    endSession();
+    await signIn('advisor9', PASSWORD, false);
+    const { readNotices: read, syncLinks: sync } = await import('./links');
+    // Their link only counts as linked once the panel has caught up.
+    const advisorPanels = (await sync(advisorInvite.panels)).panels;
+    expect(advisorPanels.guardian.links[0]?.status).toBe('linked');
+    const inbox = await read(advisorPanels);
+    expect(inbox.changed).toBe(true);
+    expect(inbox.panels.guardian.notices[0]?.summary).toContain('Thursday');
+    expect(inbox.panels.guardian.notices[0]?.author).toBe('parent9');
+    expect(inbox.panels.guardian.notices[0]?.read).toBe(false);
+
+    // Reading it twice does not duplicate it.
+    const again = await read(inbox.panels);
+    expect(again.changed).toBe(false);
+  }, 180_000);
 
   it('seals the share key with the code, so only the code holder can open it', async () => {
     const code = formatLinkCode();

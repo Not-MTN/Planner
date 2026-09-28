@@ -74,6 +74,7 @@ describe('Vercel function discovery', () => {
         '/api/auth/links',
         '/api/auth/link-accept',
         '/api/auth/share',
+        '/api/auth/note',
       ].sort(),
     );
   });

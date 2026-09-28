@@ -30,7 +30,7 @@ import {
 } from './crypto';
 import { getActiveSession, request } from './session';
 import { newId, weekOf, weekResults } from '../panels';
-import type { GuardianLink, Panels, PlannerState, StudentGuardian, WeekResults, WeekSubjectMinutes } from '../types';
+import type { GuardianLink, GuardianNotice, Panels, PlannerState, StudentGuardian, WeekResults, WeekSubjectMinutes } from '../types';
 /** Matches the cap in storage.ts, so the vault and the view agree. */
 const WEEKS_KEPT = 12;
 import type { AcceptLinkResponse, LinksResponse, ShareResponse } from '../shared/authContract';
@@ -149,6 +149,146 @@ export async function removeLink(panels: Panels, linkId: string): Promise<Panels
     ...panels,
     guardian: { ...panels.guardian, links: panels.guardian.links.filter((link) => link.linkId !== linkId) },
     student: { ...panels.student, guardians: panels.student.guardians.filter((guardian) => guardian.linkId !== linkId) },
+  };
+}
+
+/* ----------------------------------------------------------------- notices */
+
+async function shareKeyFor(dek: CryptoKey, wrapped: string): Promise<CryptoKey> {
+  const raw = await unwrapKeyRaw(wrapped, dek);
+  return importDek(raw, false);
+}
+
+/**
+ * Guardian: tell the other adults following this student what you changed.
+ * The student's own device passes it on, so no key is ever shared with the
+ * server or with a stranger.
+ */
+export async function postNotice(panels: Panels, linkId: string, summary: string): Promise<Panels> {
+  const session = await requireSession();
+  const link = panels.guardian.links.find((item) => item.linkId === linkId);
+  if (!link?.wrappedShareKey) throw new LinkError('That link is not ready yet.');
+  const text = summary.trim().slice(0, 160);
+  if (!text) return panels;
+
+  const key = await shareKeyFor(session.dek, link.wrappedShareKey);
+  const note = {
+    id: newId('note'),
+    student: link.username,
+    author: session.user.displayName || session.user.username,
+    summary: text,
+    weekOf: weekOf(),
+    createdAt: new Date().toISOString(),
+  };
+  const ciphertext = await encryptJson(note, key);
+  await request('/api/auth/note', {
+    method: 'PUT',
+    body: JSON.stringify({ linkId, ciphertext, weekOf: note.weekOf }),
+  });
+  // The author sees their own note straight away, marked as read.
+  const notice: GuardianNotice = { ...note, read: true };
+  return { ...panels, guardian: { ...panels.guardian, notices: [notice, ...panels.guardian.notices].slice(0, 20) } };
+}
+
+/**
+ * Student: collect what a guardian left for you, and pass it to the others.
+ * Only the student holds every link's key, so they are the only one who can
+ * translate a note from one guardian into the other's language.
+ */
+export async function relayNotices(panels: Panels): Promise<{ panels: Panels; relayed: number }> {
+  const session = await requireSession();
+  const guardians = panels.student.guardians;
+  if (guardians.length === 0) return { panels, relayed: 0 };
+
+  const week = weekOf();
+  let relayed = 0;
+
+  for (const source of guardians) {
+    interface RelayNote {
+      id?: string;
+      weekOf?: string;
+      summary?: string;
+      author?: string;
+      student?: string;
+      createdAt?: string;
+    }
+    let note: RelayNote | null = null;
+    try {
+      const sourceKey = await shareKeyFor(session.dek, source.wrappedShareKey);
+      const incoming = await request<{ ciphertext: string | null }>(`/api/auth/note?linkId=${encodeURIComponent(source.linkId)}`);
+      if (!incoming.ciphertext) continue;
+      note = await decryptJson<RelayNote>(incoming.ciphertext, sourceKey);
+    } catch {
+      continue;
+    }
+    if (!note?.summary) continue;
+
+    // Hand it to every other guardian, sealed with each of their own keys.
+    for (const target of guardians) {
+      if (target.linkId === source.linkId) continue;
+      try {
+        const targetKey = await shareKeyFor(session.dek, target.wrappedShareKey);
+        const ciphertext = await encryptJson(
+          { ...note, id: `${note.id ?? 'note'}-${source.linkId.slice(0, 4)}`, student: session.user.username },
+          targetKey,
+        );
+        await request('/api/auth/note', { method: 'PUT', body: JSON.stringify({ linkId: target.linkId, ciphertext, weekOf: note.weekOf ?? week }) });
+        relayed += 1;
+      } catch {
+        /* one guardian offline must not block the rest */
+      }
+    }
+
+    // Clear the note now that it is on its way.
+    try {
+      await request('/api/auth/note', { method: 'PUT', body: JSON.stringify({ linkId: source.linkId, ciphertext: null, weekOf: note.weekOf ?? week }) });
+    } catch {
+      /* best effort */
+    }
+  }
+
+  return { panels, relayed };
+}
+
+/** Guardian: pick up whatever the others left for you. */
+export async function readNotices(panels: Panels): Promise<{ panels: Panels; changed: boolean }> {
+  const session = await requireSession();
+  const known = new Set(panels.guardian.notices.map((notice) => notice.id));
+  const found: GuardianNotice[] = [];
+
+  for (const link of panels.guardian.links) {
+    if (link.status !== 'linked' || !link.linkId || !link.wrappedShareKey) continue;
+    try {
+      const key = await shareKeyFor(session.dek, link.wrappedShareKey);
+      const incoming = await request<{ ciphertext: string | null }>(`/api/auth/note?linkId=${encodeURIComponent(link.linkId)}`);
+      if (!incoming.ciphertext) continue;
+      const note = await decryptJson<GuardianNotice>(incoming.ciphertext, key);
+      if (!note?.summary || known.has(note.id)) continue;
+      found.push({
+        id: String(note.id).slice(0, 80),
+        student: String(note.student ?? link.username).slice(0, 40),
+        author: String(note.author ?? '').slice(0, 60) || link.displayName,
+        summary: String(note.summary).slice(0, 160),
+        weekOf: String(note.weekOf ?? '').slice(0, 10),
+        createdAt: String(note.createdAt ?? new Date().toISOString()).slice(0, 40),
+        read: false,
+      });
+    } catch {
+      /* an unreadable note is skipped, not fatal */
+    }
+  }
+
+  if (found.length === 0) return { panels, changed: false };
+  const notices = [...found, ...panels.guardian.notices].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 20);
+  return { panels: { ...panels, guardian: { ...panels.guardian, notices } }, changed: true };
+}
+
+/** Guardian: mark every notice as read. */
+export function markNoticesRead(panels: Panels): Panels {
+  if (panels.guardian.notices.every((notice) => notice.read)) return panels;
+  return {
+    ...panels,
+    guardian: { ...panels.guardian, notices: panels.guardian.notices.map((notice) => ({ ...notice, read: true })) },
   };
 }
 

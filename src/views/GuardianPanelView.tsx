@@ -12,7 +12,7 @@ import { HeartIcon, PlusIcon, TrashIcon } from '../icons';
 import { t } from '../i18n';
 import { Field, Empty } from '../components/ui';
 import { CompletionRing, FocusTrend, SubjectSplit, WeekBars, minutesLabel } from '../components/charts';
-import { inviteStudent, refreshResults, removeLink, syncLinks, type Invitation } from '../auth/links';
+import { inviteStudent, markNoticesRead, postNotice, readNotices, refreshResults, removeLink, syncLinks, type Invitation } from '../auth/links';
 import { AuthError } from '../auth/session';
 import type { GuardianLink } from '../types';
 
@@ -23,7 +23,10 @@ export function GuardianPanelView() {
   const [invitation, setInvitation] = useState<Invitation | null>(null);
   const [copied, setCopied] = useState(false);
   const [draft, setDraft] = useState({ username: '', displayName: '' });
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [sending, setSending] = useState<string | null>(null);
   const guardian = panels.guardian;
+  const unread = guardian.notices.filter((notice) => !notice.read).length;
 
   // Once signed in, results arrive on their own: check when the panel opens and
   // whenever the planner is saved again.
@@ -31,9 +34,10 @@ export function GuardianPanelView() {
     let cancelled = false;
     void syncLinks(panels)
       .then((sync) => (cancelled ? null : refreshResults(sync.panels)))
-      .then((refreshed) => {
-        if (cancelled || !refreshed) return;
-        if (refreshed.changed) updatePanels(refreshed.panels);
+      .then((refreshed) => (cancelled || !refreshed ? null : readNotices(refreshed.panels)))
+      .then((notices) => {
+        if (cancelled || !notices) return;
+        if (notices.changed) updatePanels(notices.panels);
       })
       .catch(() => undefined);
     return () => {
@@ -72,6 +76,22 @@ export function GuardianPanelView() {
       window.setTimeout(() => setCopied(false), 2200);
     } catch {
       setCopied(false);
+    }
+  };
+
+  const send = async (link: GuardianLink) => {
+    const text = (notes[link.id] ?? '').trim();
+    if (!text || !link.linkId || sending) return;
+    setSending(link.id);
+    try {
+      const next = await postNotice(panels, link.linkId, text);
+      updatePanels(next);
+      setNotes((current) => ({ ...current, [link.id]: '' }));
+      flash(t("Sent. The other guardians of {0} will see it next time they sync.", { 0: link.displayName }));
+    } catch (error) {
+      flash(error instanceof Error ? error.message : t("That note could not be sent."));
+    } finally {
+      setSending(null);
     }
   };
 
@@ -167,6 +187,38 @@ export function GuardianPanelView() {
             </div>
             <p className="hint">{t("They choose whether to share. Until they accept, nothing of theirs is shown here.")}</p>
           </div>
+        ) : null}
+
+        {guardian.notices.length > 0 ? (
+          <section className="card notices">
+            <header className="card-head">
+              <div>
+                <p className="kicker">{t("From the other guardians")}</p>
+                <h2 className="card-title">
+                  {t("What changed")}
+                  {unread > 0 ? <span className="badge-count"> {unread}</span> : null}
+                </h2>
+              </div>
+              {unread > 0 ? (
+                <button type="button" className="btn btn-ghost btn-tiny" onClick={() => updatePanels(markNoticesRead(panels))}>
+                  {t("Mark all read")}
+                </button>
+              ) : null}
+            </header>
+            <ul className="notice-list">
+              {guardian.notices.slice(0, 8).map((notice) => (
+                <li key={notice.id} className={cx('notice', !notice.read && 'unread')}>
+                  <div className="notice-body">
+                    <p className="notice-text">{notice.summary}</p>
+                    <p className="notice-meta">
+                      {notice.author} · @{notice.student}
+                      {notice.weekOf ? ` · ${notice.weekOf}` : ''}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
         ) : null}
 
         {invitation ? (
@@ -277,6 +329,29 @@ export function GuardianPanelView() {
                         <SubjectSplit subjects={link.results.subjects} />
                       </section>
                     ) : null}
+
+                    <div className="notice-form">
+                      <Field label={t("Tell the other guardians what you changed")}>
+                        <input
+                          className="input"
+                          value={notes[link.id] ?? ''}
+                          maxLength={160}
+                          placeholder={t("Moved Thursday's chemistry session to the evening.")}
+                          onChange={(event) => setNotes((current) => ({ ...current, [link.id]: event.target.value }))}
+                        />
+                      </Field>
+                      <div className="panel-form-actions">
+                        <button
+                          type="button"
+                          className="btn btn-outline btn-small"
+                          disabled={sending === link.id || !(notes[link.id] ?? '').trim()}
+                          onClick={() => void send(link)}
+                        >
+                          {sending === link.id ? <span className="spinner" aria-hidden="true" /> : null}
+                          {t("Send")}
+                        </button>
+                      </div>
+                    </div>
                   </>
                 )}
               </li>

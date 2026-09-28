@@ -1368,4 +1368,11 @@ export const fa: Record<string, string> = {
   "Peak {0}.": "بیشینه {0}.",
   "Charts appear once there is more than one week to compare.": "نمودارها وقتی بیش از یک هفته برای مقایسه باشد نمایش داده می‌شوند.",
   "Where the time went": "زمان صرف چه چیزی شد",
+  "Sent. The other guardians of {0} will see it next time they sync.": "فرستاده شد. سرپرست‌های دیگرِ {0} دفعه‌ی بعد که همگام‌سازی کنند آن را می‌بینند.",
+  "That note could not be sent.": "این یادداشت فرستاده نشد.",
+  "From the other guardians": "از سوی سرپرست‌های دیگر",
+  "Mark all read": "علامت‌گذاری همه به‌عنوان خوانده‌شده",
+  "Tell the other guardians what you changed": "به سرپرست‌های دیگر بگویید چه چیزی را تغییر دادید",
+  "Moved Thursday's chemistry session to the evening.": "جلسه‌ی شیمی پنجشنبه را به عصر منتقل کردم.",
+  "Send": "ارسال",
 };

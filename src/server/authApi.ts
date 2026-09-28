@@ -26,6 +26,7 @@ import {
   SESSION_COOKIE,
   SESSION_TTL_DAYS,
   type LinksResponse,
+  type NoteResponse,
   type LoginResponse,
   type OutgoingLink,
   type PublicUser,
@@ -528,6 +529,59 @@ export function hashLinkCode(code: string): string | null {
   if (!/^[A-Z0-9]{12}$/.test(clean)) return null;
   const canonical = `plnr-${clean.match(/.{4}/g)!.join('-')}`;
   return createHash('sha256').update(canonical).digest('base64');
+}
+
+/* ------------------------------------------------------------------ notices */
+
+/**
+ * A note travels one hop: a guardian writes for the student, the student writes
+ * for the guardian. The student's own device re-seals it for their other
+ * guardians, so two adults who follow the same student can tell each other what
+ * they changed — without the server ever reading a word.
+ */
+export async function handleNote(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'auth-note', 60) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+
+  const session = await linkUser(request, store);
+  if (!session) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+
+  if (request.method === 'PUT') {
+    const body = await readJsonBody(request);
+    const linkId = cleanLinkId(body?.linkId);
+    const weekOf = cleanWeekOf(body?.weekOf);
+    if (!linkId || !weekOf) return error(400, 'Expected { linkId, weekOf }.');
+    // Empty clears the note after it has been collected.
+    const ciphertext = body?.ciphertext === null || body?.ciphertext === '' ? null : cleanShareCiphertext(body?.ciphertext);
+    if (body?.ciphertext !== null && body?.ciphertext !== '' && !ciphertext) return error(400, 'That note could not be sent.');
+
+    // Who is writing decides where it lands: the guardian's note waits for the
+    // student, the student's note waits for their guardian.
+    const asGuardian = await session.store.getShare(linkId, session.user.id);
+    const to = asGuardian ? 'student' : 'guardian';
+    try {
+      const row = await session.store.putNote(linkId, session.user.id, to, ciphertext, weekOf);
+      if (!row) return error(404, 'That link is not active.', 'not_found');
+      return json(200, { ok: true, weekOf: row.note_week });
+    } catch {
+      return error(502, 'The accounts database could not be reached. Try again shortly.');
+    }
+  }
+
+  if (request.method === 'GET') {
+    const linkId = cleanLinkId(new URL(request.url).searchParams.get('linkId'));
+    if (!linkId) return error(400, 'Expected ?linkId=.');
+    try {
+      const note = await session.store.getNote(linkId, session.user.id);
+      if (!note) return error(404, 'That link is not there.', 'not_found');
+      const payload: NoteResponse = { linkId, ciphertext: note.ciphertext, weekOf: note.weekOf };
+      return json(200, payload);
+    } catch {
+      return error(502, 'The accounts database could not be reached. Try again shortly.');
+    }
+  }
+
+  return error(405, 'Method not allowed.', undefined);
 }
 
 /* ------------------------------------------------------------------- share */

@@ -42,17 +42,17 @@ const ACCOUNT = {
   ciphertext: 'dmF1bHRjaXBoZXJ0ZXh0',
 };
 
-function post(path: string, body: unknown, cookie?: string): Request {
+function put(path: string, body: unknown, cookie?: string): Request {
   return new Request(`https://planner.test${path}`, {
-    method: 'POST',
+    method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
     body: JSON.stringify(body),
   });
 }
 
-function put(path: string, body: unknown, cookie?: string): Request {
+function post(path: string, body: unknown, cookie?: string): Request {
   return new Request(`https://planner.test${path}`, {
-    method: 'PUT',
+    method: 'POST',
     headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
     body: JSON.stringify(body),
   });
@@ -190,7 +190,7 @@ describe('accounts on the real database path', () => {
 
     const links = await import('./authApi').then((m) =>
       m.handleLinks(
-        post('/api/auth/links', { username: 'student', codeHash: HASH, wrappedShare: HASH }, guardian),
+        post('/api/auth/links', { username: 'thestudent', codeHash: HASH, wrappedShare: HASH }, guardian),
         store,
       ),
     );
@@ -200,7 +200,7 @@ describe('accounts on the real database path', () => {
     // A second invitation to the same student is refused, not duplicated.
     const again = await import('./authApi').then((m) =>
       m.handleLinks(
-        post('/api/auth/links', { username: 'student', codeHash: HASH, wrappedShare: HASH }, guardian),
+        post('/api/auth/links', { username: 'thestudent', codeHash: HASH, wrappedShare: HASH }, guardian),
         store,
       ),
     );
@@ -209,7 +209,27 @@ describe('accounts on the real database path', () => {
 
     // Only the code's hash is stored, never the code that unlocks the results.
     expect(JSON.stringify(db.tables.planner_links[0])).not.toContain('plnr-');
-    void guardian;
+
+    const linkId = db.tables.planner_links[0]!.id as string;
+    const { handleNote } = await import('./authApi');
+
+    // Nothing can be posted to a link the student has not accepted.
+    const refused = await handleNote(
+      put('/api/auth/note', { linkId, ciphertext: HASH, weekOf: '2026-09-28' }, guardian),
+      store,
+    );
+    expect(refused.status).toBe(404);
+
+    // Once accepted, the guardian's words wait for the student, not the other way round.
+    const cookieFrom2 = cookieFrom;
+    void cookieFrom2(await handleSignup(post('/api/auth/signup', { ...ACCOUNT, username: 'thestudent', email: 'thestudent@example.com' }), store));
+    const studentId = db.tables.planner_users.find((user) => user.username === 'thestudent')!.id as string;
+    await store.acceptLink(HASH, { id: studentId, usernameLower: 'thestudent' });
+    const note = await handleNote(put('/api/auth/note', { linkId, ciphertext: HASH, weekOf: '2026-09-28' }, guardian), store);
+    expect(note.status).toBe(200);
+    expect(db.tables.planner_links[0]?.note_to_student).toBe(HASH);
+    // The student's slot stays empty: nothing has been relayed yet.
+    expect(db.tables.planner_links[0]?.note_to_guardian).toBeFalsy();
     void guardianId;
   });
 

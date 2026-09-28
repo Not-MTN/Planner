@@ -182,6 +182,34 @@ export function createFakeNeon(): FakeDb {
       return tables.planner_links.filter((row) => row.id === id && row.guardian_id === guardian_id).map((row) => ({ ...row }));
     }
 
+    if (/SET note_to_student = /i.test(q)) {
+      const [ciphertext, weekOf, id, guardian_id] = values;
+      const row = tables.planner_links.find(
+        (item) => item.id === id && item.status === 'linked' && item.guardian_id === guardian_id,
+      );
+      if (!row) return [];
+      row.note_to_student = ciphertext;
+      row.note_week = weekOf;
+      row.updated_at = now();
+      return [{ ...row }];
+    }
+
+    if (/SET note_to_guardian = /i.test(q)) {
+      const [ciphertext, weekOf, id, student_id] = values;
+      const row = tables.planner_links.find(
+        (item) => item.id === id && item.status === 'linked' && item.student_id === student_id,
+      );
+      if (!row) return [];
+      row.note_to_guardian = ciphertext;
+      row.note_week = weekOf;
+      row.updated_at = now();
+      return [{ ...row }];
+    }
+
+    if (/^SELECT \* FROM planner_links WHERE id = /i.test(q)) {
+      return tables.planner_links.filter((row) => row.id === values[0]).map((row) => ({ ...row }));
+    }
+
     if (/^DELETE FROM planner_links WHERE id = /i.test(q)) {
       const [id, user_id] = values;
       const kept = tables.planner_links.filter(

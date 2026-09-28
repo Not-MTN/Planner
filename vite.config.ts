@@ -15,6 +15,7 @@ import {
   handleLinkAccept,
   handleLinks,
   handleLogin,
+  handleNote,
   handleLogout,
   handleSalt,
   handleSession,

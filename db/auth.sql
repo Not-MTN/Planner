@@ -69,6 +69,11 @@ CREATE TABLE IF NOT EXISTS planner_links (
   share_week             text,
   share_updated_at       timestamptz,
   status                 text NOT NULL CHECK (status IN ('pending','linked','revoked')),
+  -- A note travels one hop: a guardian leaves words for the student, the
+  -- student's own device re-seals them for the other guardians.
+  note_to_student        text,
+  note_to_guardian       text,
+  note_week              text,
   created_at             timestamptz NOT NULL DEFAULT now(),
   updated_at             timestamptz NOT NULL DEFAULT now(),
   UNIQUE (guardian_id, student_username_lower)
