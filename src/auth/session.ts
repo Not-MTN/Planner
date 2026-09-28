@@ -8,7 +8,15 @@ import { createVaultKeys, decryptState, deriveFromPassword, encryptState, format
 import { rememberOnDevice } from './device';
 import type { PlannerState } from '../types';
 
-export type AuthErrorCode = 'bad_credentials' | 'taken' | 'email_taken' | 'not_configured' | 'conflict' | 'network' | 'unknown';
+export type AuthErrorCode =
+  | 'bad_credentials'
+  | 'taken'
+  | 'email_taken'
+  | 'not_configured'
+  | 'unauthenticated'
+  | 'conflict'
+  | 'network'
+  | 'unknown';
 
 export class AuthError extends Error {
   readonly code: AuthErrorCode;
@@ -131,13 +139,20 @@ export async function signIn(identifier: string, password: string, remember = tr
 }
 
 /**
- * Who is signed in, or null when nobody is. A network failure is thrown rather
- * than swallowed: an offline device should keep using its local copy instead of
- * being sent to the sign-in page.
+ * Who is signed in, or null when nobody is.
+ *
+ * "Not signed in" is an ordinary answer, so a 401 becomes null. A network or
+ * database failure is thrown instead of swallowed: an offline device should keep
+ * using its local copy rather than be sent to the sign-in page.
  */
 export async function fetchSession(): Promise<PublicUser | null> {
-  const result = await request<SessionResponse>('/api/auth/session');
-  return result.user;
+  try {
+    const result = await request<SessionResponse>('/api/auth/session');
+    return result.user;
+  } catch (error) {
+    if (error instanceof AuthError && error.code === 'unauthenticated') return null;
+    throw error;
+  }
 }
 
 export async function signOut(): Promise<void> {

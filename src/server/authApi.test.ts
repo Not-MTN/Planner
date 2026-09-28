@@ -190,8 +190,14 @@ describe('account API', () => {
     const me = (await (await handleSession(get('/api/auth/session', cookie), store)).json()) as { user: PublicUser | null };
     expect(me.user?.username).toBe('sara');
 
-    const anon = (await (await handleSession(get('/api/auth/session'), store)).json()) as { user: PublicUser | null };
-    expect(anon.user).toBeNull();
+    // No cookie at all is an unauthenticated request, not a successful one.
+    const anon = await handleSession(get('/api/auth/session'), store);
+    expect(anon.status).toBe(401);
+
+    // So is a cookie whose session has ended: it is cleared for the browser too.
+    const stale = await handleSession(get('/api/auth/session', 'planner_session=not-a-real-session'), store);
+    expect(stale.status).toBe(401);
+    expect(stale.headers.get('set-cookie')).toContain('Max-Age=0');
 
     const out = await handleLogout(post('/api/auth/logout', undefined, cookie), store);
     expect(out.status).toBe(200);

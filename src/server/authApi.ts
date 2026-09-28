@@ -284,12 +284,19 @@ export async function handleSession(request: Request, store: AuthStore | null): 
   if (request.method !== 'GET' && request.method !== 'HEAD') return error(405, 'Method not allowed.', undefined);
 
   const token = readSessionToken(request);
-  const payload: SessionResponse = { user: null };
-  if (!token) return json(200, payload);
+  // Nobody signed in is still an unauthenticated answer: a status that says
+  // "success" for a request with no session is how a client ends up believing
+  // it is logged in when it is not.
+  if (!token) return error(401, 'You are not signed in.', 'unauthenticated');
 
   try {
     const found = await store!.findSession(hashToken(token));
-    if (!found) return json(200, payload, { 'Set-Cookie': clearedCookie(isHttps(request)) });
+    // An expired cookie is cleared, so the browser stops sending it.
+    if (!found) {
+      return json(401, { user: null } as SessionResponse, {
+        'Set-Cookie': clearedCookie(isHttps(request)),
+      });
+    }
     return json(200, { user: toPublicUser(found.user) });
   } catch {
     return error(502, 'The accounts database could not be reached. Try again shortly.');

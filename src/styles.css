@@ -3649,3 +3649,33 @@ html, body { overflow-x: clip; }
 .guidance { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
 .guidance-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .empty-note { margin: 10px 0 0; font-size: 12.5px; color: var(--muted); }
+
+/* ── Thumbs are bigger than a mouse pointer ─────────────────────────────── */
+/* The smallest controls in the app are comfortable with a cursor and fiddly
+   with a thumb, so they grow on touch devices. Forty-four pixels is the size
+   Apple and Google both recommend for a reliable tap. */
+@media (pointer: coarse) {
+  .btn-tiny,
+  .icon-btn.round,
+  .seg,
+  .dot-btn {
+    min-height: 44px;
+  }
+
+  .icon-btn.round {
+    width: 44px;
+    height: 44px;
+  }
+
+  .text-btn {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 6px 8px;
+    margin-inline: -8px;
+  }
+
+  .btn-small {
+    min-height: 40px;
+  }
+}

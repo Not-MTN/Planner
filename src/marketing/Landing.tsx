@@ -207,6 +207,46 @@ export function Landing({ lang, navigate }: { lang: Lang; navigate: Nav }) {
         </div>
       </section>
 
+      {/* ---------------------------- linking ------------------------------- */}
+      <section className="section section-tint" id="linking">
+        <div className="wrap">
+          <header className="section-head reveal" data-reveal>
+            <p className="kicker">{c.linkKicker}</p>
+            <h2>{c.linkTitle}</h2>
+            <p className="lede">{c.linkSub}</p>
+          </header>
+
+          <div className="link-layout">
+            <ol className="link-rail">
+              {[
+                { t: c.link1T, d: c.link1D },
+                { t: c.link2T, d: c.link2D },
+                { t: c.link3T, d: c.link3D },
+                { t: c.link4T, d: c.link4D },
+              ].map((step, index) => (
+                <li key={step.t} className="reveal" data-reveal style={{ transitionDelay: `${index * 90}ms` }}>
+                  <span className="link-num">{index + 1}</span>
+                  <div>
+                    <h3>{step.t}</h3>
+                    <p>{step.d}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+
+            <figure className="link-art reveal" data-reveal {...SPOT}>
+              <img src="/img/auth-link.jpg" alt="" width="900" height="600" loading="lazy" decoding="async" />
+              <figcaption>{c.linkNote}</figcaption>
+            </figure>
+          </div>
+
+          <div className="link-extra reveal" data-reveal>
+            <h3>{c.linkGuardianT}</h3>
+            <p>{c.linkGuardianD}</p>
+          </div>
+        </div>
+      </section>
+
       {/* ------------------------------ matrix ------------------------------ */}
       <section className="section section-tint">
         <div className="wrap">

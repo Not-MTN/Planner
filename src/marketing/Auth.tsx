@@ -36,9 +36,19 @@ function errorText(code: AuthErrorCode | null, c: Record<string, string>): strin
   return c.errUnknown;
 }
 
-const QUOTES: { key: 'authQuote1' | 'authQuote2'; by: 'authQuote1By' | 'authQuote2By' }[] = [
-  { key: 'authQuote1', by: 'authQuote1By' },
-  { key: 'authQuote2', by: 'authQuote2By' },
+/**
+ * The panel beside the form: three photographs that slowly cross-fade, each
+ * with its own line. Purely decorative, so it stays out of the accessibility
+ * tree and stops entirely when the visitor prefers less motion.
+ */
+const QUOTES: {
+  key: 'authQuote1' | 'authQuote2' | 'authQuote3';
+  by: 'authQuote1By' | 'authQuote2By' | 'authQuote3By';
+  art: string;
+}[] = [
+  { key: 'authQuote1', by: 'authQuote1By', art: '/img/auth-desk.jpg' },
+  { key: 'authQuote2', by: 'authQuote2By', art: '/img/auth-privacy.jpg' },
+  { key: 'authQuote3', by: 'authQuote3By', art: '/img/auth-link.jpg' },
 ];
 
 function Aside({ lang }: { lang: Lang }) {
@@ -53,7 +63,21 @@ function Aside({ lang }: { lang: Lang }) {
   return (
     <aside className="auth-aside" aria-hidden="true">
       <div className="auth-aside-glow" />
-      <img className="auth-aside-art" src="/img/mkt-hero.jpg" alt="" width="900" height="600" />
+      <div className="auth-aside-stage">
+        {QUOTES.map((item, position) => (
+          <img
+            key={item.art}
+            className={position === index ? 'auth-aside-art is-active' : 'auth-aside-art'}
+            src={item.art}
+            alt=""
+            width="900"
+            height="600"
+            loading={position === 0 ? 'eager' : 'lazy'}
+            decoding="async"
+          />
+        ))}
+        <div className="auth-aside-veil" />
+      </div>
       <div className="auth-aside-body">
         <p className="auth-mark">{c.brand}</p>
         <blockquote key={quote.key} className="auth-quote">
@@ -63,6 +87,11 @@ function Aside({ lang }: { lang: Lang }) {
         <ul className="auth-aside-points">
           <li>{c.heroTrust}</li>
         </ul>
+        <div className="auth-dots">
+          {QUOTES.map((item, position) => (
+            <span key={item.art} className={position === index ? 'is-active' : undefined} />
+          ))}
+        </div>
       </div>
     </aside>
   );

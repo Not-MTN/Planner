@@ -188,3 +188,73 @@ describe('reading an AI answer safely', () => {
     expect(guidance.encouragement).toBe('Focus time went up.');
   });
 });
+
+/* ------------------------------------------------------------------------- */
+/* What happens when the AI is unhappy: the panel must show words, never a    */
+/* stack trace, and never a blank card that looks broken.                     */
+
+import { afterEach, describe as describeFailures, expect as expectFailure, it as itFailure, vi } from 'vitest';
+import { generateGuardianGuidance, generateStudentAdvice } from './ai';
+
+function reply(body: unknown, status = 200, contentType = 'application/json'): Response {
+  return new Response(typeof body === 'string' ? body : JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': contentType },
+  });
+}
+
+function completion(content: string): unknown {
+  return { choices: [{ message: { content } }] };
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describeFailures('when the AI is unhappy', () => {
+  const results: WeekResults = weekResults(createEmptyState(), WEEK);
+
+  itFailure('explains a missing key instead of failing silently', async () => {
+    // A 503 with no detail of its own is the signature of an unset key.
+    vi.stubGlobal('fetch', vi.fn(async () => reply({ error: { code: 'upstream_auth' } }, 503)));
+    await expectFailure(generateStudentAdvice({ state: createEmptyState() })).rejects.toThrow(/XAI_API_KEY/);
+    vi.stubGlobal('fetch', vi.fn(async () => reply({ error: { code: 'upstream_auth' } }, 503)));
+    await expectFailure(generateGuardianGuidance({ results })).rejects.toThrow(/XAI_API_KEY/);
+  });
+
+  itFailure('passes on whatever the proxy actually said, when it said something', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => reply({ error: { message: 'Your key was rotated.', code: 'upstream_auth' } }, 401)));
+    await expectFailure(generateStudentAdvice({ state: createEmptyState() })).rejects.toThrow(/Your key was rotated/);
+  });
+
+  itFailure('survives an answer that is not JSON at all', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => reply('<html>A proxy answer</html>', 200, 'text/html')));
+    await expectFailure(generateStudentAdvice({ state: createEmptyState() })).rejects.toThrow();
+  });
+
+  itFailure('says so when the answer has nothing usable in it', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => reply(completion('{}'))));
+    await expectFailure(generateStudentAdvice({ state: createEmptyState() })).rejects.toThrow(/unexpected format/i);
+
+    vi.stubGlobal('fetch', vi.fn(async () => reply(completion('[]'))));
+    await expectFailure(generateGuardianGuidance({ results })).rejects.toThrow(/unexpected format/i);
+  });
+
+  itFailure('passes a rate limit message through in plain words', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => reply({ error: { message: 'Slow down for a minute.', code: 'rate_limited' } }, 429)),
+    );
+    await expectFailure(generateGuardianGuidance({ results })).rejects.toThrow(/Slow down for a minute/);
+  });
+
+  itFailure('reports a missing proxy rather than hanging', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => reply('Not Found', 404, 'text/plain')));
+    await expectFailure(generateStudentAdvice({ state: createEmptyState() })).rejects.toThrow(/proxy/i);
+  });
+
+  itFailure('returns nothing rather than throwing when the reply is empty but well-formed', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => reply(completion('{"summary":"","focus":[],"watchOut":null}'))));
+    await expectFailure(generateStudentAdvice({ state: createEmptyState() })).rejects.toThrow();
+  });
+});
