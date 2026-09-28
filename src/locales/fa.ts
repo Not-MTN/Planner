@@ -1050,4 +1050,32 @@ export const fa: Record<string, string> = {
 
   "Down": "بی‌حال",
   "Feeling down still counts as showing up. Noted with care.": "بی‌حال بودن هم یعنی حضور داشتن. با دقت ثبت شد.",
+
+  "Type like you think": "همان‌طور که فکر می‌کنید تایپ کنید",
+  "Everything on Today starts here: “Call mom tomorrow 5pm #work !high” becomes a full task. The little microphone accepts your voice.": "همه‌چیز امروز از این‌جا شروع می‌شود: «تماس با مامان فردا ۵ عصر #کار !مهم» یک کار کامل می‌شود. میکروفون کوچک هم صدایتان را می‌پذیرد.",
+  "One tap plans the day": "با یک ضربه روز برنامه‌ریزی می‌شود",
+  "“Plan my day” fits your tasks into free time, estimates included. “Plan with AI” drafts a whole week you review before anything lands.": "«روزم را برنامه‌ریزی کن» کارهایتان را با حساب برآوردها در زمان خالی جا می‌دهد. «برنامه با هوش» یک هفته‌ی کامل پیش‌نویس می‌کند که پیش از فرود مرورش می‌کنید.",
+  "Your hours, gently held": "ساعت‌هایتان، به‌آرامی نگهداشته‌شده",
+  "Timed things live here, with a moving “now” line. In Calendar → Week you can drag events to re-time them.": "کارهای زمان‌دار این‌جا زندگی می‌کنند، با خط متحرک «الان». در تقویم ← هفته می‌توانید رویدادها را بکشید و زمانشان را عوض کنید.",
+  "Habits with a day off": "عادت‌ها با روز استراحت",
+  "Tap to check a habit. The moon gives it a rest day without breaking the streak — and counted habits get a +1 button.": "برای تیک‌زدن عادت ضربه بزنید. ماه به آن روز استراحت می‌دهد بی‌آن‌که زنجیره بشکند — و عادت‌های شمارشی دکمه‌ی +۱ دارند.",
+  "One tap every evening. A glowing day fires confetti, and Insights shows the pattern behind your moods.": "هر عصر یک ضربه. روز درخشان باران کاغذرنگی می‌شود و بینش الگوی پشت حال‌وهوایتان را نشان می‌دهد.",
+  "A few lines stay with the day": "چند خط با روز می‌ماند",
+  "The journal saves itself as you write, becomes the day's note in Notes, and notes link together with [[double brackets]].": "دفترچه خودش هنگام نوشتن ذخیره می‌شود، یادداشت همان روز در یادداشت‌ها می‌شود و یادداشت‌ها با [[دو کروشه]] به هم پیوند می‌خورند.",
+  "That's the whole tour": "تمام تور همین بود",
+  "⌘K searches everything, ⌘Z takes anything back, and the gear holds sync, feeds, weather, shared lists and backups. Make today a good one.": "⌘K همه‌چیز را جست‌وجو می‌کند، ⌘Z هر چیزی را برمی‌گرداند و چرخ‌دنده همگام‌سازی، خوراک‌ها، هوا، فهرست‌های مشترک و پشتیبان‌ها را نگه می‌دارد. امروز را روز خوبی کنید.",
+  "Skip tour": "رد کردن تور",
+  "Start planning": "شروع برنامه‌ریزی",
+  "Tour {0} of {1}": "{0} از {1}",
+  "New here?": "تازه رسیدید؟",
+  "The two-minute tour": "تور دو دقیقه‌ای",
+  "Walks through quick add, planning, habits, mood and notes — with the language picker first.": "افزودن سریع، برنامه‌ریزی، عادت‌ها، حال‌وهوا و یادداشت‌ها را نشان می‌دهد — نخست با انتخاب زبان.",
+  "Show me around": "به من نشان بده",
+  "How Planner works": "طرز کار برنامه‌ریز",
+  "How it works": "طرز کار",
+
+  "Back": "قبلی",
+  "Next": "بعدی",
+
+  "Show {0} more": "نمایش {0} مورد دیگر",
 };

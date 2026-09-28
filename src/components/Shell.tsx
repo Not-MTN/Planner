@@ -14,6 +14,7 @@ import {
   NoteIcon,
   PlusIcon,
   SearchIcon,
+  HelpIcon,
   SlidersIcon,
   SparklesIcon,
   SunIcon,
@@ -40,6 +41,8 @@ const CalendarView = lazy(() => import('../views/CalendarView').then((m) => ({ d
 const InsightsView = lazy(() => import('../views/InsightsView').then((m) => ({ default: m.InsightsView })));
 const AIView = lazy(() => import('../views/AIView').then((m) => ({ default: m.AIView })));
 import { applyUpdate, onUpdateAvailable } from '../pwa';
+import { onTourRequest, requestTour, tourStartIndex } from '../tour';
+import { TourSheet } from './TourSheet';
 import { t } from '../i18n';
 
 const NAV = [
@@ -104,6 +107,16 @@ export function Shell() {
 
   const [updateReady, setUpdateReady] = useState(false);
   useEffect(() => onUpdateAvailable(() => setUpdateReady(true)), []);
+
+  // First-run tour: opens by itself on the very first boot (and resumes after
+  // a language-switch reload); replayable from the (?) side tool or Settings.
+  const [tourStep, setTourStep] = useState<number | null>(null);
+  useEffect(() => {
+    if (!ready) return;
+    const start = tourStartIndex();
+    if (start !== null) setTourStep(start);
+  }, [ready]);
+  useEffect(() => onTourRequest(() => setTourStep(0)), []);
 
   // The PWA shortcut / #/today?qa=1 deep link: drop the caret straight into quick add.
   useEffect(() => {
@@ -217,6 +230,10 @@ export function Shell() {
           >
             {isDark ? <SunIcon size={16} /> : <MoonIcon size={16} />}
             <span>{isDark ? t("Light mode") : t("Dark mode")}</span>
+          </button>
+          <button type="button" className="side-tool side-help" onClick={() => requestTour()} title={t("How Planner works")}>
+            <HelpIcon size={16} />
+            <span>{t("How it works")}</span>
           </button>
           <button type="button" className="side-tool" onClick={openSettings} title={t("Settings")}>
             <SlidersIcon size={16} />
@@ -337,6 +354,7 @@ export function Shell() {
             </button>
             <button type="button" onClick={openPalette}><SearchIcon size={18} /> {t("Search & quick add")}</button>
             <button type="button" onClick={openSettings}><SlidersIcon size={18} /> {t("Settings")}</button>
+            <button type="button" onClick={requestTour}><HelpIcon size={18} /> {t("How Planner works")}</button>
             <button type="button" onClick={exportData}><DownloadIcon size={18} /> {t("Export backup")}</button>
             <button type="button" onClick={importFile.open}><UploadIcon size={18} /> {t("Import backup")}</button>
           </div>
@@ -395,6 +413,9 @@ export function Shell() {
             </button>
           ) : null}
         </div>
+      ) : null}
+      {tourStep !== null && ready ? (
+        <TourSheet step={tourStep} onStep={setTourStep} onClose={() => setTourStep(null)} />
       ) : null}
       <input ref={importFile.ref} className="visually-hidden" tabIndex={-1} aria-hidden="true" type="file" accept="application/json,.json" onChange={importFile.onChange} />
     </div>

@@ -43,6 +43,7 @@ export function TasksView() {
   const [query, setQuery] = useState('');
   const [view, setView] = useState(loadLayout);
   const [selecting, setSelecting] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, number>>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkDate, setBulkDate] = useState('');
   const [bulkCategory, setBulkCategory] = useState('');
@@ -206,8 +207,14 @@ export function TasksView() {
                 ) : null}
               </header>
               <ul className="item-list">
-                {group.tasks.map((task) => (
-                  <TaskRow
+                {(() => {
+                  const shown = expandedGroups[group.id] ?? 40;
+                  const visible = group.tasks.slice(0, shown);
+                  const hidden = group.tasks.length - visible.length;
+                  return (
+                    <>
+                      {visible.map((task) => (
+                        <TaskRow
                     key={task.id}
                     task={task}
                     showDate={filter === 'done' || group.id === 'carried' || filter === 'upcoming'}
@@ -227,11 +234,25 @@ export function TasksView() {
                           }
                         : undefined
                     }
-                    onDropSwap={(sourceId) => {
-                      if (sourceId !== task.id) swapTasks(sourceId, task.id);
-                    }}
-                  />
-                ))}
+                          onDropSwap={(sourceId) => {
+                            if (sourceId !== task.id) swapTasks(sourceId, task.id);
+                          }}
+                        />
+                      ))}
+                      {hidden > 0 ? (
+                        <li className="item-more">
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-small"
+                            onClick={() => setExpandedGroups((cur) => ({ ...cur, [group.id]: shown + 60 }))}
+                          >
+                            {t("Show {0} more", { 0: hidden > 60 ? 60 : hidden })}
+                          </button>
+                        </li>
+                      ) : null}
+                    </>
+                  );
+                })()}
               </ul>
             </section>
           ))}

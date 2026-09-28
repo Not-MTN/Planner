@@ -160,7 +160,9 @@ export function parseQuickAdd(input: string, defaultDate: string | null): QuickA
   const rawTokens = foldDigits(input).trim().split(/\s+/).filter(Boolean);
   if (rawTokens.length === 0) return null;
   const tokens: Token[] = rawTokens.map((text) => ({ text, used: false }));
-  const today = todayISO();
+  // Anchor relative words ("tomorrow", "in 3 days", weekdays) at the day the caller
+  // passed in, so parsing stays deterministic and stable across the real clock.
+  const today = defaultDate ?? todayISO();
 
   let priority: Priority | null = null;
   let category: string | null = null;

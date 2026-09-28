@@ -291,6 +291,28 @@ describe('app smoke', () => {
     expect(text()).toContain('Trip packing');
   });
 
+  it('welcomes a first-time visitor with the tour and remembers completion', async () => {
+    localStorage.clear();
+    mountApp();
+    const text = () => document.body.textContent ?? '';
+    expect(text()).toContain('Welcome to Planner');
+    expect(text()).toContain('Pick your language');
+    expect(document.querySelector('[data-tour]')).toBeTruthy();
+
+    // Picking the already-active language advances without a reload.
+    const active = document.querySelector('.tour-lang-btn[aria-pressed="true"]') as HTMLButtonElement;
+    expect(active).toBeTruthy();
+    act(() => active.click());
+    expect(text()).toContain('Type like you think');
+
+    // Walk one more step, then skip → done is remembered.
+    act(() => (document.querySelector('[data-tour-bubble] .btn-primary') as HTMLButtonElement).click());
+    expect(text()).toContain('One tap plans the day');
+    act(() => (document.querySelector('.tour-skip') as HTMLButtonElement).click());
+    expect(text()).not.toContain('One tap plans the day');
+    expect(localStorage.getItem('planner-tour-done')).toBe('1');
+  });
+
   it('has an accessible name on every button and keeps focus styles', async () => {
     window.history.replaceState(null, '', '#/tasks');
     mountApp();

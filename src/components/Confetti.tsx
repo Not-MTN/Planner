@@ -14,11 +14,15 @@ interface Piece {
   round: boolean;
 }
 
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
 export function Confetti({ seed }: { seed: number }) {
   const [show, setShow] = useState(false);
 
   useEffect(() => {
-    if (seed <= 0) return;
+    if (seed <= 0 || prefersReducedMotion()) return;
     setShow(true);
     const id = window.setTimeout(() => setShow(false), 2100);
     return () => window.clearTimeout(id);

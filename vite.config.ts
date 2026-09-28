@@ -148,6 +148,15 @@ export default defineConfig(({ mode }) => {
   const databaseUrl = env.DATABASE_URL || fileEnv.DATABASE_URL;
   return {
     plugins: [react(), xaiProxy(apiKey), syncApi(databaseUrl), icsApi()],
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            vendor: ['react', 'react-dom'],
+          },
+        },
+      },
+    },
     server: {
       host: '0.0.0.0',
       port: 5173,

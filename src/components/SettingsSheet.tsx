@@ -9,6 +9,7 @@ import { FeedsSection, SharedSpaceSection, TaskImportSection, TemplatesSection, 
 import { DATE_LANGUAGES, todayISO, type DateLanguage } from '../dates';
 import { downloadBusyICS, downloadICS, parseICS } from '../ics';
 import { canInstall, isInstalled, onInstallChange, promptInstall } from '../pwa';
+import { requestTour } from '../tour';
 import { LEAD_CHOICES } from '../reminders';
 import { t, getLang, setLang, LANGUAGES, type Lang } from '../i18n';
 
@@ -404,6 +405,18 @@ export function SettingsSheet() {
       <WeatherSection />
       <TemplatesSection />
       <InstallSection />
+      <section className="set-section">
+        <h3 className="kicker">{t("New here?")}</h3>
+        <div className="set-row">
+          <div>
+            <p className="set-label">{t("The two-minute tour")}</p>
+            <p className="set-hint">{t("Walks through quick add, planning, habits, mood and notes — with the language picker first.")}</p>
+          </div>
+          <button type="button" className="btn btn-soft" onClick={() => { closeSettings(); requestTour(); }}>
+            {t("Show me around")}
+          </button>
+        </div>
+      </section>
 
       <section className="set-section">
         <h3 className="kicker">{t("AI coach · xAI")}</h3>

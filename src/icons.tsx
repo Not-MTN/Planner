@@ -124,6 +124,25 @@ export function ArcIcon(props: IconProps) {
   );
 }
 
+export function HelpIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="12" r="8.4" />
+      <path d="M9.4 9.2a2.6 2.6 0 1 1 3.9 2.3c-.9.5-1.3 1-1.3 1.9" />
+      <circle cx="12" cy="16.6" r="0.4" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+export function GlobeIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="12" r="8.4" />
+      <path d="M3.6 12h16.8M12 3.6c2.4 2.2 3.6 5.1 3.6 8.4s-1.2 6.2-3.6 8.4c-2.4-2.2-3.6-5.1-3.6-8.4S9.6 5.8 12 3.6Z" />
+    </Svg>
+  );
+}
+
 export function MicIcon(props: IconProps) {
   return (
     <Svg {...props}>

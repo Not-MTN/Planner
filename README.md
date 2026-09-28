@@ -43,6 +43,7 @@ Settings → **Language** switches the whole interface to Persian with a right-t
 
 **Eight simple places** — Today, Calendar (Week · Month · Upcoming), AI Coach, Tasks, Habits, Goals, Notes, Insights.
 
+- **A gentle first-run tour** — the first time Planner opens, a short tour asks for your language (English / فارسی), then walks quick add, day planning, the timeline, habits, mood and the journal. Replay it anytime from the tiny **?** button in the sidebar, the More sheet, or Settings → New here.
 - **Today** — one quiet page for the day: timeline with a live "now" marker, tasks, habits, notes, a daily intention, and a progress ring that celebrates when the day is complete.
 - **Daily essentials** — built-in must-do-every-day jobs (drink water, move 30 minutes, get outside, sleep by 11, tidy, vitamins) pinned to the top of Today with their own progress. First run offers them as a one-tap starter pack.
 - **Habit library** — a shelf of classic habits and routines (body, mind, home, connection) you can add in one tap, with "Add all" per group.
