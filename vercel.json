@@ -4,6 +4,12 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "fluid": true,
+  "rewrites": [
+    { "source": "/app", "destination": "/index.html" },
+    { "source": "/login", "destination": "/index.html" },
+    { "source": "/signup", "destination": "/index.html" },
+    { "source": "/recover", "destination": "/index.html" }
+  ],
   "headers": [
     {
       "source": "/(.*)",
