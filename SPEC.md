@@ -36,10 +36,20 @@ Status: **draft for review — no code written yet.**
 | Retention | Full detail inside the hot window; **weekly rollup to results** afterwards. |
 | AI | Assists both sides. AI and guardian changes land as **reviewable proposals**, never silent writes. |
 | Local-first | Still true. Editing works offline; signing in and signing up need a connection. |
+| Panels | **Optional and additive.** Someone may pick the student panel, the guardian panel, both, or **none** and simply use the personal panel. Choosing one never removes the personal planner; the dashboard is the hub that opens each panel. A panel can be added or removed at any time, and removing one deletes nothing. |
 
 ---
 
 ## 3. Roles
+
+**Panels are optional.** The account role picked at sign-up only decides which
+panel is switched on first — it is never a mode the planner is locked into:
+
+- Pick nothing (or **Skip**) → the personal planner, exactly as it is today.
+- **Student panel** → adds subjects, exams and a weekly summary.
+- **Guardian panel** → adds the roster and weekly results (Parent or Advisor).
+- Any combination can be turned on or off later from **Panels**, reachable from
+  the dashboard. The dashboard shows a tile per enabled panel.
 
 Roles are **capabilities attached to an account**, not mutually exclusive boxes.
 

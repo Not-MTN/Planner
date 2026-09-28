@@ -1,0 +1,113 @@
+/**
+ * Helpers for the optional student and guardian panels.
+ *
+ * The retention rule lives here: detail (a change and the reason for it) stays
+ * inside the active week, and once the week rolls over only the results remain.
+ * A guardian never receives the detail at all — only weekly results.
+ */
+import { addDays, startOfWeek, todayISO } from './dates';
+import type { ChangeNote, Panels, PlannerState, StudentSubject, WeekResults } from './types';
+
+export function weekOf(date = todayISO()): string {
+  return startOfWeek(date);
+}
+
+/** Results are all that survives a week: counts and focused minutes. */
+export function weekResults(state: PlannerState, week = weekOf()): WeekResults {
+  const days = new Set<string>();
+  for (let index = 0; index < 7; index += 1) days.add(addDays(week, index));
+
+  const inWeek = (iso: string | null): boolean => !!iso && days.has(iso);
+  const events = state.events.filter((event) => inWeek(event.date));
+  const tasks = state.tasks.filter((task) => inWeek(task.dueDate));
+  const focusMinutes = state.focusLog
+    .filter((entry) => inWeek(entry.date))
+    .reduce((total, entry) => total + (entry.minutes ?? 0), 0);
+
+  const done = tasks.filter((task) => task.completed).length + events.filter((event) => event.completed).length;
+  const planned = tasks.length + events.length;
+  const notes = state.panels.student.explanations.filter((note) => note.weekOf === week);
+
+  return {
+    weekOf: week,
+    planned,
+    done,
+    focusMinutes,
+    headline: notes[0]?.summary ?? null,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/** Minutes focused this week on tasks belonging to a subject (matched by category). */
+export function subjectMinutes(state: PlannerState, subject: StudentSubject, week = weekOf()): number {
+  const days = new Set<string>();
+  for (let index = 0; index < 7; index += 1) days.add(addDays(week, index));
+  const key = subject.name.trim().toLowerCase();
+  const taskIds = new Set(
+    state.tasks.filter((task) => (task.category ?? '').trim().toLowerCase() === key).map((task) => task.id),
+  );
+  return state.focusLog
+    .filter((entry) => days.has(entry.date) && entry.taskId && taskIds.has(entry.taskId))
+    .reduce((total, entry) => total + (entry.minutes ?? 0), 0);
+}
+
+export function subjectProgress(state: PlannerState, subject: StudentSubject, week = weekOf()): { done: number; total: number } {
+  const days = new Set<string>();
+  for (let index = 0; index < 7; index += 1) days.add(addDays(week, index));
+  const key = subject.name.trim().toLowerCase();
+  const tasks = state.tasks.filter((task) => (task.category ?? '').trim().toLowerCase() === key && days.has(task.dueDate ?? ''));
+  return { done: tasks.filter((task) => task.completed).length, total: tasks.length };
+}
+
+/**
+ * Splits explanations into this week's detail and a count per older week.
+ * Older detail is not deleted here — the panel simply stops showing it, and the
+ * rolling weekly results are what get shared.
+ */
+export function splitExplanations(
+  notes: ChangeNote[],
+  week = weekOf(),
+): { current: ChangeNote[]; past: Array<{ week: string; count: number }> } {
+  const current: ChangeNote[] = [];
+  const counts = new Map<string, number>();
+  for (const note of notes) {
+    if (note.weekOf === week) {
+      current.push(note);
+      continue;
+    }
+    counts.set(note.weekOf, (counts.get(note.weekOf) ?? 0) + 1);
+  }
+  current.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const past = [...counts.entries()]
+    .map(([weekStart, count]) => ({ week: weekStart, count }))
+    .sort((a, b) => b.week.localeCompare(a.week));
+  return { current, past };
+}
+
+export function daysUntil(iso: string | null, from = todayISO()): number | null {
+  if (!iso) return null;
+  const start = Date.parse(`${from}T00:00:00`);
+  const target = Date.parse(`${iso}T00:00:00`);
+  if (!Number.isFinite(start) || !Number.isFinite(target)) return null;
+  return Math.round((target - start) / 86_400_000);
+}
+
+export function newId(prefix: string): string {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function withSubject(panels: Panels, subject: StudentSubject): Panels {
+  return { ...panels, student: { ...panels.student, subjects: [...panels.student.subjects, subject] } };
+}
+
+export function withoutSubject(panels: Panels, id: string): Panels {
+  return { ...panels, student: { ...panels.student, subjects: panels.student.subjects.filter((item) => item.id !== id) } };
+}
+
+export function withExplanation(panels: Panels, note: ChangeNote): Panels {
+  return { ...panels, student: { ...panels.student, explanations: [note, ...panels.student.explanations].slice(0, 200) } };
+}
+
+export function withoutExplanation(panels: Panels, id: string): Panels {
+  return { ...panels, student: { ...panels.student, explanations: panels.student.explanations.filter((item) => item.id !== id) } };
+}

@@ -191,26 +191,37 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
   const [role, setRole] = useState<Role>('personal');
+  const [guardianKind, setGuardianKind] = useState<'advisor' | 'parent'>('advisor');
   const [agreed, setAgreed] = useState(false);
   const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const createAccount = async () => {
+  const createAccount = async (chosen: Role = role) => {
     if (busy) return;
     setBusy(true);
     setError(null);
     try {
       // Anything already planned in this browser becomes the first vault.
       const { state } = loadFrom(window.localStorage);
+      // A panel is an extra, so choosing one here only switches that panel on —
+      // the planner underneath is exactly what they already had.
+      const panels = {
+        student: { ...state.panels.student, enabled: chosen === 'student' },
+        guardian: {
+          ...state.panels.guardian,
+          enabled: chosen === 'guardian',
+          kind: chosen === 'guardian' ? guardianKind : state.panels.guardian.kind,
+        },
+      };
       await signUp({
         username,
         email,
         displayName: name,
-        role,
+        role: chosen,
         password,
-        initialState: state,
+        initialState: { ...state, panels },
       });
       setBusy(false);
       setStep('recovery');
@@ -344,16 +355,45 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
                   </button>
                 ))}
               </div>
+              {role === 'guardian' ? (
+                <div className="role-pick role-kind reveal-in" style={{ animationDelay: '90ms' }}>
+                  <p className="role-kind-label">{c.authRoleKind}</p>
+                  {(
+                    [
+                      ['parent', c.authRoleKindParent, c.authRoleKindParentD],
+                      ['advisor', c.authRoleKindAdvisor, c.authRoleKindAdvisorD],
+                    ] as ['parent' | 'advisor', string, string][]
+                  ).map(([value, title, description]) => (
+                    <button
+                      type="button"
+                      key={value}
+                      className={`role-option ${guardianKind === value ? 'is-chosen' : ''}`}
+                      onClick={() => setGuardianKind(value)}
+                      aria-pressed={guardianKind === value}
+                    >
+                      <span className="role-radio" aria-hidden="true" />
+                      <span>
+                        <strong>{title}</strong>
+                        <em>{description}</em>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               <footer className="auth-foot reveal-in" style={{ animationDelay: '120ms' }}>
-                <button type="button" className="link" onClick={() => setStep('details')}>
-                  {c.authBack}
+                <button
+                  type="button"
+                  className="link"
+                  onClick={() => createAccount('personal')}
+                >
+                  {c.authRoleSkip}
                 </button>
                 {error ? (
                   <p className="auth-error" role="alert">
                     {error}
                   </p>
                 ) : null}
-                <button type="button" className="btn btn-primary btn-block" disabled={busy} onClick={createAccount}>
+                <button type="button" className="btn btn-primary btn-block" disabled={busy} onClick={() => void createAccount()}>
                   {busy ? <span className="spinner" aria-hidden="true" /> : null}
                   {busy ? c.authBusy : c.authContinue}
                 </button>

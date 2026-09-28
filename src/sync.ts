@@ -9,7 +9,7 @@
  */
 import { sanitizeState, serialize } from './storage';
 import { AI_PLAN_LIMIT } from './types';
-import type { PlannerState } from './types';
+import type { Panels, PlannerState } from './types';
 
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O/1/I/L
 const SETTINGS_KEY = 'planner-sync';
@@ -136,6 +136,36 @@ function mergeById<T extends Stamped>(local: T[], remote: T[]): T[] {
 }
 
 /**
+ * Panels merge additively: turning a panel on anywhere turns it on everywhere,
+ * and turning it off is only honoured when no device still has it on. (Both
+ * panels are optional extras on top of the personal planner.)
+ */
+export function mergePanels(local: Panels, remote: Panels): Panels {
+  const byId = <T extends { id: string }>(a: T[], b: T[]): T[] => {
+    const map = new Map<string, T>();
+    for (const item of b) map.set(item.id, item);
+    for (const item of a) map.set(item.id, item);
+    return [...map.values()];
+  };
+  return {
+    student: {
+      enabled: local.student.enabled || remote.student.enabled,
+      subjects: byId(local.student.subjects, remote.student.subjects).slice(0, 40),
+      explanations: byId(local.student.explanations, remote.student.explanations)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, 200),
+    },
+    guardian: {
+      enabled: local.guardian.enabled || remote.guardian.enabled,
+      kind: local.guardian.kind ?? remote.guardian.kind,
+      links: byId(local.guardian.links, remote.guardian.links)
+        .sort((a, b) => a.displayName.localeCompare(b.displayName))
+        .slice(0, 20),
+    },
+  };
+}
+
+/**
  * Combines two diverged copies. Items are matched by id and the most recently
  * edited version wins. (Used only when both devices changed since the last sync;
  * otherwise the newer copy is taken as-is so deletions carry over.)
@@ -155,6 +185,7 @@ export function mergeStates(local: PlannerState, remote: PlannerState): PlannerS
   const habits = mergeById(local.habits, remote.habits);
   const habitIds = new Set(habits.map((habit) => habit.id));
   return {
+    panels: mergePanels(local.panels, remote.panels),
     tasks: mergeById(local.tasks, remote.tasks),
     events: mergeById(local.events, remote.events),
     fixedCommitments: mergeById(local.fixedCommitments, remote.fixedCommitments),

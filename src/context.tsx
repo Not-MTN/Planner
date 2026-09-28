@@ -81,7 +81,7 @@ import { fetchFeedEvents, loadFeeds, mergeFeedEvents, saveFeeds, type CalendarFe
 import { loadWeatherSettings, saveWeatherSettings, type WeatherSettings } from './weather';
 import { applyTheme, loadAccent, loadThemeMode, resolvedMode, type ThemeMode } from './theme';
 import type { Accent } from './constants';
-import { createEmptyState, type AIMemoryInput, type AttachmentRef, type ComposerState, type EventInput, type FixedCommitmentInput, type GoalInput, type HabitInput, type MoodValue, type NoteInput, type PlannerState, type SavedAIPlanInput, type TaskInput } from './types';
+import { createEmptyState, type AIMemoryInput, type AttachmentRef, type ComposerState, type EventInput, type FixedCommitmentInput, type GoalInput, type HabitInput, type MoodValue, type NoteInput, type Panels, type PlannerState, type SavedAIPlanInput, type TaskInput } from './types';
 import { t } from './i18n';
 import { isTestEnv } from './env';
 import { attachmentNotice, MAX_ATTACHMENTS_PER_NOTE, storeAttachment, sweepAttachmentBlobs } from './files';
@@ -130,6 +130,11 @@ interface PlannerContextValue {
   exportData: () => void;
   importText: (text: string) => void;
   loadSample: () => void;
+  panels: Panels;
+  /** Replaces the panels block. Panels are optional extras on top of the planner. */
+  updatePanels: (next: Panels) => void;
+  /** Adds or removes a panel. The personal planner is never affected. */
+  setPanelEnabled: (panel: 'student' | 'guardian', enabled: boolean) => void;
   flash: (message: string, action?: NoticeAction) => void;
   dismissNotice: () => void;
   undo: () => void;
@@ -733,6 +738,30 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
 
   // ── Calendar feed subscriptions ─────────────────────────────────────────────
   const feedsRef = useRef(feeds);
+  // Panels are additive: switching one on or off never touches tasks, events,
+  // habits or anything else in the personal planner.
+  const updatePanels = useCallback(
+    (next: Panels) => {
+      commit((current) => (current.panels === next ? current : { ...current, panels: next }));
+    },
+    [commit],
+  );
+
+  const setPanelEnabled = useCallback(
+    (panel: 'student' | 'guardian', enabled: boolean) => {
+      commit((current) => {
+        const panels = current.panels;
+        if (panel === 'student') {
+          if (panels.student.enabled === enabled) return current;
+          return { ...current, panels: { ...panels, student: { ...panels.student, enabled } } };
+        }
+        if (panels.guardian.enabled === enabled) return current;
+        return { ...current, panels: { ...panels, guardian: { ...panels.guardian, enabled } } };
+      });
+    },
+    [commit],
+  );
+
   const updateFeeds = useCallback((next: CalendarFeed[]) => {
     feedsRef.current = next;
     saveFeeds(next);
@@ -923,6 +952,9 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
 
   const value = useMemo<PlannerContextValue>(() => ({
     state,
+    panels: state.panels,
+    updatePanels,
+    setPanelEnabled,
     ready,
     error,
     notice,

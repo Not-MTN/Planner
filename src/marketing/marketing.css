@@ -2269,3 +2269,20 @@
     transform: none;
   }
 }
+
+/* The guardian kind pick, inside the (optional) role step. */
+.role-kind {
+  margin-top: 16px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px dashed color-mix(in srgb, var(--ink) 16%, transparent);
+  background: color-mix(in srgb, var(--paper) 60%, transparent);
+}
+.role-kind-label {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+.role-kind .role-option { padding: 12px 14px; border-radius: 14px; }

@@ -224,6 +224,72 @@ export interface MoodEntry {
   updatedAt: string;
 }
 
+/**
+ * The two optional panels. Neither one replaces the personal planner: someone
+ * may run the personal panel alone, add the student panel, add the guardian
+ * panel, or both, and can turn a panel off again without losing the planner.
+ */
+export interface Panels {
+  student: StudentPanel;
+  guardian: GuardianPanel;
+}
+
+export interface StudentPanel {
+  enabled: boolean;
+  /** Subjects the student tracks, with an optional exam date. */
+  subjects: StudentSubject[];
+  /** Why the student changed something significant. Detail kept for the active week only. */
+  explanations: ChangeNote[];
+}
+
+export interface GuardianPanel {
+  enabled: boolean;
+  kind: GuardianKind | null;
+  /** Students this guardian watches. Only weekly results travel, never detail. */
+  links: GuardianLink[];
+}
+
+export type GuardianKind = 'advisor' | 'parent';
+
+export interface StudentSubject {
+  id: string;
+  name: string;
+  accent: string;
+  examDate: string | null;
+  /** Target study time per week, in minutes. */
+  targetMinutes: number | null;
+}
+
+/** A short explanation the student writes for a significant change. */
+export interface ChangeNote {
+  id: string;
+  createdAt: string;
+  /** Monday of the week this belongs to. */
+  weekOf: string;
+  summary: string;
+  reason: string;
+}
+
+/** One week of results: all a guardian ever sees of a student's planner. */
+export interface WeekResults {
+  weekOf: string;
+  planned: number;
+  done: number;
+  focusMinutes: number;
+  /** The student's own words about the week, if they wrote any. */
+  headline: string | null;
+  updatedAt: string;
+}
+
+export interface GuardianLink {
+  id: string;
+  username: string;
+  displayName: string;
+  status: 'pending' | 'linked';
+  /** Latest weekly results. Replaced every week — never accumulated. */
+  results: WeekResults | null;
+}
+
 export interface PlannerState {
   tasks: Task[];
   events: PlannerEvent[];
@@ -239,6 +305,7 @@ export interface PlannerState {
   moods: MoodEntry[];
   intentions: Record<string, string>;
   focusLog: FocusLog[];
+  panels: Panels;
 }
 
 export interface TaskInput {
@@ -326,5 +393,13 @@ export function createEmptyState(): PlannerState {
     intentions: {},
     moods: [],
     focusLog: [],
+    panels: createEmptyPanels(),
+  };
+}
+
+export function createEmptyPanels(): Panels {
+  return {
+    student: { enabled: false, subjects: [], explanations: [] },
+    guardian: { enabled: false, kind: null, links: [] },
   };
 }

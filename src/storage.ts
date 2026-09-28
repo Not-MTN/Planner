@@ -2,7 +2,7 @@ import { ACCENTS, categoryById, HABIT_ICONS, NOTE_KINDS, PRIORITIES } from './co
 import { isValidISODate, isValidTime, localDateFromTimestamp, timeToMinutes } from './dates';
 import { REPEAT_SET } from './recurrence';
 import { MAX_PLAN_DAYS } from './duration';
-import { AI_PLAN_LIMIT, createEmptyState, type AIMemory, type AttachmentRef, type AIMemoryCategory, type EventInput, type FixedCommitment, type FocusLog, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Subtask, type TaskInput, type TaskRepeat, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task } from './types';
+import { AI_PLAN_LIMIT, createEmptyPanels, createEmptyState, type AIMemory, type AttachmentRef, type AIMemoryCategory, type ChangeNote, type EventInput, type FixedCommitment, type FocusLog, type GuardianKind, type GuardianLink, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Panels, type StudentSubject, type Subtask, type TaskInput, type TaskRepeat, type WeekResults, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task } from './types';
 import { t } from './i18n';
 
 export const STORAGE_KEY = 'personal-planner.v1';
@@ -481,6 +481,112 @@ export function sanitizeState(raw: unknown): PlannerState | null {
     moods,
     intentions,
     focusLog: sanitizeFocusLog(source.focusLog),
+    panels: sanitizePanels(source.panels),
+  };
+}
+
+const PANEL_EXPLANATION_LIMIT = 200;
+const PANEL_SUBJECT_LIMIT = 40;
+const PANEL_LINK_LIMIT = 20;
+
+function sanitizeSubject(value: unknown): StudentSubject | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = asString(raw.id, 80);
+  const name = asString(raw.name, 60)?.trim();
+  if (!id || !name) return null;
+  const examDate = asString(raw.examDate, 10);
+  const target = typeof raw.targetMinutes === 'number' && Number.isFinite(raw.targetMinutes) ? Math.round(raw.targetMinutes) : null;
+  return {
+    id,
+    name,
+    accent: ACCENT_SET.has(String(raw.accent)) ? String(raw.accent) : 'sage',
+    examDate: examDate && isValidISODate(examDate) ? examDate : null,
+    targetMinutes: target === null ? null : Math.min(6_000, Math.max(0, target)),
+  };
+}
+
+function sanitizeChangeNote(value: unknown): ChangeNote | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = asString(raw.id, 80);
+  const summary = asString(raw.summary, 140)?.trim();
+  const weekOf = asString(raw.weekOf, 10);
+  if (!id || !summary || !weekOf || !isValidISODate(weekOf)) return null;
+  return {
+    id,
+    createdAt: asString(raw.createdAt, 40) || new Date(0).toISOString(),
+    weekOf,
+    summary,
+    reason: (asString(raw.reason, 400) ?? '').trim(),
+  };
+}
+
+function sanitizeWeekResults(value: unknown): WeekResults | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const weekOf = asString(raw.weekOf, 10);
+  if (!weekOf || !isValidISODate(weekOf)) return null;
+  const number = (input: unknown, max: number) => (typeof input === 'number' && Number.isFinite(input) ? Math.min(max, Math.max(0, Math.round(input))) : 0);
+  return {
+    weekOf,
+    planned: number(raw.planned, 10_000),
+    done: number(raw.done, 10_000),
+    focusMinutes: number(raw.focusMinutes, 100_000),
+    headline: (asString(raw.headline, 160) ?? '').trim() || null,
+    updatedAt: asString(raw.updatedAt, 40) || new Date(0).toISOString(),
+  };
+}
+
+function sanitizeGuardianLink(value: unknown): GuardianLink | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = asString(raw.id, 80);
+  const username = asString(raw.username, 40)?.trim().toLowerCase();
+  if (!id || !username) return null;
+  return {
+    id,
+    username,
+    displayName: (asString(raw.displayName, 60) ?? '').trim() || username,
+    status: raw.status === 'linked' ? 'linked' : 'pending',
+    results: sanitizeWeekResults(raw.results),
+  };
+}
+
+/** Panels are opt-in and additive: turning one off never touches the planner itself. */
+export function sanitizePanels(value: unknown): Panels {
+  const empty = createEmptyPanels();
+  if (!value || typeof value === 'object' === false) return empty;
+  const raw = value as Record<string, unknown>;
+  const student = (raw.student ?? {}) as Record<string, unknown>;
+  const guardian = (raw.guardian ?? {}) as Record<string, unknown>;
+  const subjects = uniqueBy(
+    (Array.isArray(student.subjects) ? student.subjects : []).flatMap((item) => {
+      const subject = sanitizeSubject(item);
+      return subject ? [subject] : [];
+    }),
+    (item) => item.id,
+  ).slice(0, PANEL_SUBJECT_LIMIT);
+  const explanations = uniqueBy(
+    (Array.isArray(student.explanations) ? student.explanations : []).flatMap((item) => {
+      const note = sanitizeChangeNote(item);
+      return note ? [note] : [];
+    }),
+    (item) => item.id,
+  )
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, PANEL_EXPLANATION_LIMIT);
+  const links = uniqueBy(
+    (Array.isArray(guardian.links) ? guardian.links : []).flatMap((item) => {
+      const link = sanitizeGuardianLink(item);
+      return link ? [link] : [];
+    }),
+    (item) => item.id,
+  ).slice(0, PANEL_LINK_LIMIT);
+  const kind = guardian.kind === 'advisor' || guardian.kind === 'parent' ? (guardian.kind as GuardianKind) : null;
+  return {
+    student: { enabled: student.enabled === true, subjects, explanations },
+    guardian: { enabled: guardian.enabled === true && kind !== null, kind, links },
   };
 }
 
