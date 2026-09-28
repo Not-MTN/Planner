@@ -224,7 +224,7 @@ describe('accounts on the real database path', () => {
     const cookieFrom2 = cookieFrom;
     void cookieFrom2(await handleSignup(post('/api/auth/signup', { ...ACCOUNT, username: 'thestudent', email: 'thestudent@example.com' }), store));
     const studentId = db.tables.planner_users.find((user) => user.username === 'thestudent')!.id as string;
-    await store.acceptLink(HASH, { id: studentId, usernameLower: 'thestudent' });
+    await store!.acceptLink(HASH, { id: studentId, usernameLower: 'thestudent' });
     const note = await handleNote(put('/api/auth/note', { linkId, ciphertext: HASH, weekOf: '2026-09-28' }, guardian), store);
     expect(note.status).toBe(200);
     expect(db.tables.planner_links[0]?.note_to_student).toBe(HASH);
