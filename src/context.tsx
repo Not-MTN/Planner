@@ -258,8 +258,11 @@ const HISTORY_LIMIT = 60;
 const HISTORY_PERSIST_LIMIT = 8;
 const HISTORY_IDB_KEY = 'history';
 
-export function PlannerProvider({ children }: { children: ReactNode }) {
-  const [boot] = useState(() => loadFrom(localStorage));
+export function PlannerProvider({ children, initialState }: { children: ReactNode; initialState?: PlannerState | null }) {
+  // `initialState` wins when the planner was opened from an encrypted vault.
+  const [boot] = useState(() =>
+    initialState ? { state: sanitizeState(initialState) ?? loadFrom(localStorage).state, error: null as string | null, persist: true } : loadFrom(localStorage),
+  );
   const [state, setState] = useState<PlannerState>(boot.state);
   const [ready] = useState(true);
   const [error, setError] = useState<string | null>(boot.error);
@@ -367,8 +370,9 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // On start, prefer the IndexedDB copy if it's newer (localStorage full or cleared).
+  // Skipped when we booted from a vault, which is the authoritative copy.
   useEffect(() => {
-    if (!boot.persist) return;
+    if (!boot.persist || initialState) return;
     let cancelled = false;
     void idbRead().then((stored) => {
       // Restore the persisted undo stack too (past only — nothing to redo after a reload).

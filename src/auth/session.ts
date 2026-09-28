@@ -34,7 +34,12 @@ export function endSession(): void {
   active = null;
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+/** Adopts a session that was unlocked outside of signIn (device cache, unlock screen). */
+export function adoptSession(user: PublicUser, dek: CryptoKey, vault: { version: number; ciphertext: string }): void {
+  active = { user, dek, vault };
+}
+
+export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
     response = await fetch(path, {

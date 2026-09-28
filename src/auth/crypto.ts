@@ -124,11 +124,22 @@ export async function wrapKey(key: CryptoKey, wrappingKey: CryptoKey): Promise<s
   return toBase64(out);
 }
 
-export async function unwrapKey(wrapped: string, wrappingKey: CryptoKey): Promise<CryptoKey> {
+/** Returns the raw key bytes. Only used to re-wrap the key for a device. */
+export async function unwrapKeyRaw(wrapped: string, wrappingKey: CryptoKey): Promise<Uint8Array<ArrayBuffer>> {
   const bytes = fromBase64(wrapped);
   if (bytes.length < 13) throw new VaultError('That wrapped key is not valid.');
   const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytes.subarray(0, 12) }, wrappingKey, bytes.subarray(12));
-  return importAes(copyToBuffer(new Uint8Array(plain)), false);
+  return copyToBuffer(new Uint8Array(plain));
+}
+
+export async function importDek(raw: Uint8Array<ArrayBuffer>, extractable = false): Promise<CryptoKey> {
+  const key = await importAes(raw, extractable);
+  raw.fill(0);
+  return key;
+}
+
+export async function unwrapKey(wrapped: string, wrappingKey: CryptoKey): Promise<CryptoKey> {
+  return importDek(await unwrapKeyRaw(wrapped, wrappingKey), false);
 }
 
 export async function encryptState(state: PlannerState, dek: CryptoKey): Promise<string> {

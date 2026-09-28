@@ -6,8 +6,9 @@ import './styles.css';
 
 // The marketing site and the planner are two separate bundles: opening the app
 // never downloads the landing page, and vice versa.
-const App = lazy(() => import('./App').then((module) => ({ default: module.App })));
 const Site = lazy(() => import('./marketing/Site').then((module) => ({ default: module.Site })));
+// The gate opens the encrypted vault, then renders the planner.
+const AccountGate = lazy(() => import('./auth/AccountGate').then((module) => ({ default: module.AccountGate })));
 
 /**
  * "/" and the auth pages are the marketing site; "/app" is the planner.
@@ -46,7 +47,7 @@ createRoot(root).render(
         </div>
       }
     >
-      {target === 'app' ? <App /> : <Site />}
+      {target === 'app' ? <AccountGate /> : <Site />}
     </Suspense>
   </StrictMode>,
 );
