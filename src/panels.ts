@@ -29,11 +29,25 @@ export function weekResults(state: PlannerState, week = weekOf()): WeekResults {
   const planned = tasks.length + events.length;
   const notes = state.panels.student.explanations.filter((note) => note.weekOf === week);
 
+  // Where the focused minutes went: grouped by category, top four, totals only.
+  const minutes = new Map<string, number>();
+  for (const entry of state.focusLog) {
+    if (!inWeek(entry.date)) continue;
+    const name = state.tasks.find((task) => task.id === entry.taskId)?.category?.trim() || 'Other';
+    minutes.set(name, (minutes.get(name) ?? 0) + (entry.minutes ?? 0));
+  }
+  const subjects = [...minutes.entries()]
+    .map(([name, value]) => ({ name, minutes: Math.round(value) }))
+    .filter((item) => item.minutes > 0)
+    .sort((a, b) => b.minutes - a.minutes)
+    .slice(0, 4);
+
   return {
     weekOf: week,
     planned,
     done,
     focusMinutes,
+    subjects,
     headline: notes[0]?.summary ?? null,
     updatedAt: new Date().toISOString(),
   };

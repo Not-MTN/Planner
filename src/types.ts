@@ -265,6 +265,20 @@ export function isGradeLevel(value: unknown): value is GradeLevel {
   return typeof value === 'string' && (GRADE_LEVELS as readonly string[]).includes(value);
 }
 
+/** "Your advisor changed the plan for this week" — in-panel, never email. */
+export interface GuardianNotice {
+  id: string;
+  /** The student it concerns, by username. */
+  student: string;
+  /** Who changed it. */
+  author: string;
+  /** What they said, in their own words. */
+  summary: string;
+  weekOf: string;
+  createdAt: string;
+  read: boolean;
+}
+
 export interface GuardianPanel {
   enabled: boolean;
   kind: GuardianKind | null;
@@ -272,6 +286,8 @@ export interface GuardianPanel {
   field: string | null;
   /** Students this guardian watches. Only weekly results travel, never detail. */
   links: GuardianLink[];
+  /** What the other guardians of those students changed, newest first. */
+  notices: GuardianNotice[];
 }
 
 /** A guardian this student accepted. The key for their results lives in the vault. */
@@ -307,11 +323,19 @@ export interface ChangeNote {
 }
 
 /** One week of results: all a guardian ever sees of a student's planner. */
+/** Minutes per subject, most-focused first. Counts only — never task titles. */
+export interface WeekSubjectMinutes {
+  name: string;
+  minutes: number;
+}
+
 export interface WeekResults {
   weekOf: string;
   planned: number;
   done: number;
   focusMinutes: number;
+  /** Where the focused time went, top four subjects. */
+  subjects: WeekSubjectMinutes[];
   /** The student's own words about the week, if they wrote any. */
   headline: string | null;
   updatedAt: string;
@@ -322,6 +346,8 @@ export interface GuardianLink {
   username: string;
   displayName: string;
   status: 'pending' | 'linked';
+  /** The last weeks of results, newest first. Capped: nothing accumulates. */
+  history: WeekResults[];
   /** The server's id for this request, once it exists. */
   linkId: string | null;
   /** The pairing code to hand to the student. Gone from here once accepted. */
@@ -442,6 +468,6 @@ export function createEmptyState(): PlannerState {
 export function createEmptyPanels(): Panels {
   return {
     student: { enabled: false, field: null, grade: null, guardians: [], subjects: [], explanations: [] },
-    guardian: { enabled: false, kind: null, field: null, links: [] },
+    guardian: { enabled: false, kind: null, field: null, links: [], notices: [] },
   };
 }

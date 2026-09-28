@@ -3580,3 +3580,57 @@ html, body { overflow-x: clip; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2s; } }
+
+/* ---------- Guardian charts ---------- */
+.chart { width: 100%; }
+.chart-svg { width: 100%; height: auto; display: block; overflow: visible; }
+.chart-grid { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.chart-bar-planned { fill: color-mix(in srgb, var(--muted) 32%, transparent); }
+.chart-bar-done { fill: var(--accent); }
+.chart-area { fill: color-mix(in srgb, var(--accent) 14%, transparent); }
+.chart-line { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.chart-dot { fill: var(--accent); stroke: var(--surface); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.chart-max { fill: var(--muted); font-size: 9px; font-variant-numeric: tabular-nums; }
+.chart-axis { display: flex; justify-content: space-between; gap: 4px; margin-top: 6px; }
+.chart-axis span { flex: 1; text-align: center; font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chart-keys { display: flex; gap: 14px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+.chart-keys span { display: inline-flex; align-items: center; gap: 6px; }
+.swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.swatch-planned { background: color-mix(in srgb, var(--muted) 32%, transparent); }
+.swatch-done { background: var(--accent); }
+
+.student-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; margin-top: 16px; }
+.chart-block .chart-title { margin: 0; font-size: 13px; font-weight: 620; color: var(--ink); }
+.chart-block .chart-note { margin: 2px 0 10px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.chart-empty { margin: 14px 0 0; font-size: 12.5px; color: var(--muted); }
+
+.ring { position: relative; width: 84px; height: 84px; flex: 0 0 auto; }
+.ring-svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.ring-track { fill: none; stroke: color-mix(in srgb, var(--muted) 18%, transparent); stroke-width: 9; }
+.ring-value { fill: none; stroke: var(--accent); stroke-width: 9; stroke-linecap: round; transition: stroke-dasharray 0.5s ease; }
+.ring-label { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; }
+.ring-label strong { font-size: 17px; font-variant-numeric: tabular-nums; color: var(--ink); }
+.ring-label span { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.result-stack { display: flex; flex-direction: column; gap: 10px; }
+
+.split { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.split-head { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; }
+.split-name { color: var(--ink); font-weight: 560; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.split-value { color: var(--muted); font-variant-numeric: tabular-nums; }
+.split-track { height: 7px; border-radius: 999px; background: color-mix(in srgb, var(--muted) 14%, transparent); margin-top: 5px; overflow: hidden; }
+.split-fill { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
+.split-fill-1 { background: color-mix(in srgb, var(--accent) 78%, var(--success, #2f9e6f)); }
+.split-fill-2 { background: color-mix(in srgb, var(--accent) 55%, var(--ink)); }
+.split-fill-3 { background: color-mix(in srgb, var(--accent) 35%, var(--muted)); }
+
+/* ---------- Guardian notices ---------- */
+.notice-list { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.notice-list li {
+  display: flex; gap: 12px; align-items: flex-start; padding: 11px 13px;
+  border-radius: var(--radius-small); border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-2) 60%, transparent);
+}
+.notice-list li.unread { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); background: var(--accent-soft); }
+.notice-body { flex: 1; min-width: 0; }
+.notice-text { margin: 0; font-size: 13px; line-height: 1.55; color: var(--ink); overflow-wrap: anywhere; }
+.notice-meta { margin: 4px 0 0; font-size: 11.5px; color: var(--muted); }

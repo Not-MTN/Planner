@@ -1360,4 +1360,12 @@ export const fa: Record<string, string> = {
   "Not shared yet": "هنوز ارسال نشده",
   "Have a code from a parent or advisor?": "کدی از والد یا مشاور دارید؟",
   "Linking…": "در حال پیوند دادن…",
+  "A guardian": "یک سرپرست",
+  "Planned against done": "برنامه‌ریزی‌شده در برابر انجام‌شده",
+  "The last {0} weeks.": "{0} هفته‌ی گذشته.",
+  "Planned": "برنامه‌ریزی‌شده",
+  "Focused time": "زمان تمرکز",
+  "Peak {0}.": "بیشینه {0}.",
+  "Charts appear once there is more than one week to compare.": "نمودارها وقتی بیش از یک هفته برای مقایسه باشد نمایش داده می‌شوند.",
+  "Where the time went": "زمان صرف چه چیزی شد",
 };

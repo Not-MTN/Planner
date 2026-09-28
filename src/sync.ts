@@ -166,6 +166,9 @@ export function mergePanels(local: Panels, remote: Panels): Panels {
       links: byId(local.guardian.links, remote.guardian.links)
         .sort((a, b) => a.displayName.localeCompare(b.displayName))
         .slice(0, 20),
+      notices: byId(local.guardian.notices ?? [], remote.guardian.notices ?? [])
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, 20),
     },
   };
 }

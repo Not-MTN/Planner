@@ -80,6 +80,12 @@ async function signInAs(username: string) {
   return signIn(username, PASSWORD, false);
 }
 
+function addDays(iso: string, days: number): string {
+  const date = new Date(`${iso}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
 describe('linking a guardian and a student', () => {
   it('carries weekly results from one vault to the other, and nowhere else', async () => {
     const { formatLinkCode: makeCode } = await import('./crypto');
@@ -139,20 +145,36 @@ describe('linking a guardian and a student', () => {
     // 4. Guardian reads them — and only them. The panel does both: reconcile
     // the link status first, then pull results.
     await signInAs('parent1');
-    const { refreshResults, syncLinks } = await import('./links');
+    const { syncLinks } = await import('./links');
     const synced = await syncLinks(withLink);
     expect(synced.changed).toBe(true);
     expect(synced.panels.guardian.links[0]?.status).toBe('linked');
     // The code has served its purpose and is dropped once the student accepted.
     expect(synced.panels.guardian.links[0]?.code).toBeNull();
 
-    const refreshed = await refreshResults(synced.panels);
+    // The subject split travels as totals — no task titles.
+    const { refreshResults: refreshAgain } = await import('./links');
+    const first = await refreshAgain(synced.panels);
+    const firstLink = first.panels.guardian.links[0]!;
+    expect(firstLink.results?.weekOf).toBe(week);
+    expect(firstLink.results?.planned).toBe(1);
+    expect(firstLink.results?.done).toBe(1);
+    expect(firstLink.results?.focusMinutes).toBe(75);
+    expect(firstLink.results?.subjects).toEqual([{ name: 'Maths', minutes: 75 }]);
+
+    // An earlier week joins the history instead of replacing it, newest first.
+    const earlier = addDays(week, -7);
+    await signInAs('student1');
+    const { shareWeeklyResults: shareEarlier } = await import('./links');
+    await shareEarlier(state, studentPanels, true, earlier);
+    await signInAs('parent1');
+    const refreshed = await refreshAgain(first.panels);
     const link = refreshed.panels.guardian.links[0]!;
+    expect(link.history.map((item) => item.weekOf)).toEqual([earlier, week]);
     expect(link.status).toBe('linked');
-    expect(link.results?.weekOf).toBe(week);
-    expect(link.results?.planned).toBe(1);
-    expect(link.results?.done).toBe(1);
-    expect(link.results?.focusMinutes).toBe(75);
+    // The newest week on the server is now the earlier one, and the week before
+    // it has moved into history rather than being forgotten.
+    expect(link.results?.weekOf).toBe(earlier);
   }, 120_000);
 
   it('refuses a second invitation to the same student, and lets either side end it', async () => {

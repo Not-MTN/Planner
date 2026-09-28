@@ -30,7 +30,9 @@ import {
 } from './crypto';
 import { getActiveSession, request } from './session';
 import { newId, weekOf, weekResults } from '../panels';
-import type { GuardianLink, Panels, PlannerState, StudentGuardian, WeekResults } from '../types';
+import type { GuardianLink, Panels, PlannerState, StudentGuardian, WeekResults, WeekSubjectMinutes } from '../types';
+/** Matches the cap in storage.ts, so the vault and the view agree. */
+const WEEKS_KEPT = 12;
 import type { AcceptLinkResponse, LinksResponse, ShareResponse } from '../shared/authContract';
 
 export class LinkError extends Error {}
@@ -75,6 +77,7 @@ export async function inviteStudent(panels: Panels, username: string, displayNam
     username: clean,
     displayName: displayName?.trim() || clean,
     status: 'pending',
+    history: [],
     linkId: result.link.id,
     code,
     wrappedShareKey,
@@ -113,11 +116,20 @@ export async function refreshResults(panels: Panels): Promise<{ panels: Panels; 
         planned: Number(results.planned) || 0,
         done: Number(results.done) || 0,
         focusMinutes: Number(results.focusMinutes) || 0,
+        subjects: (Array.isArray(results.subjects) ? results.subjects : [])
+          .filter((item): item is WeekSubjectMinutes => !!item && typeof item.name === 'string')
+          .map((item) => ({ name: String(item.name).slice(0, 40), minutes: Math.max(0, Math.round(Number(item.minutes) || 0)) }))
+          .slice(0, 4),
         headline: typeof results.headline === 'string' ? results.headline.slice(0, 160) : null,
         updatedAt: typeof results.updatedAt === 'string' ? results.updatedAt : new Date().toISOString(),
       };
       if (JSON.stringify(clean) !== JSON.stringify(link.results)) changed = true;
-      next.push({ ...link, results: clean });
+      // A week that has moved on joins the history, so the charts have a past.
+      const history =
+        link.history[0]?.weekOf === clean.weekOf
+          ? [clean, ...link.history.slice(1)]
+          : [clean, ...link.history.filter((week) => week.weekOf !== clean.weekOf)];
+      next.push({ ...link, results: clean, history: history.slice(0, WEEKS_KEPT) });
     } catch {
       next.push(link);
     }
@@ -171,11 +183,15 @@ export async function acceptInvitation(panels: Panels, code: string): Promise<Pa
  * Student: send this week's results to everyone they accepted. Results only —
  * counts, focused minutes, and the headline they chose to explain a change.
  */
-export async function shareWeeklyResults(state: PlannerState, panels: Panels, force = false): Promise<{ panels: Panels; sent: number }> {
+export async function shareWeeklyResults(
+  state: PlannerState,
+  panels: Panels,
+  force = false,
+  week = weekOf(),
+): Promise<{ panels: Panels; sent: number }> {
   const session = await requireSession();
   if (panels.student.guardians.length === 0) return { panels, sent: 0 };
 
-  const week = weekOf();
   const results = weekResults(state, week);
   let sent = 0;
   const guardians: StudentGuardian[] = [];

@@ -105,7 +105,7 @@ function sampleState(): PlannerState {
         subjects: [],
         explanations: [],
       },
-      guardian: { enabled: false, kind: null, field: null, links: [] },
+      guardian: { enabled: false, kind: null, field: null, links: [], notices: [] },
     },
   };
 }

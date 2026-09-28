@@ -11,6 +11,7 @@ import { cx } from '../cx';
 import { HeartIcon, PlusIcon, TrashIcon } from '../icons';
 import { t } from '../i18n';
 import { Field, Empty } from '../components/ui';
+import { CompletionRing, FocusTrend, SubjectSplit, WeekBars, minutesLabel } from '../components/charts';
 import { inviteStudent, refreshResults, removeLink, syncLinks, type Invitation } from '../auth/links';
 import { AuthError } from '../auth/session';
 import type { GuardianLink } from '../types';
@@ -220,16 +221,19 @@ export function GuardianPanelView() {
                 ) : (
                   <>
                     <div className="result-row">
-                      <div className="result">
-                        <p className="kicker">{t("Done")}</p>
-                        <p className="result-num">
-                          {link.results.done}
-                          <span className="result-of">/{link.results.planned}</span>
-                        </p>
-                      </div>
-                      <div className="result">
-                        <p className="kicker">{t("Focused")}</p>
-                        <p className="result-num">{hours(link.results.focusMinutes)}</p>
+                      <CompletionRing done={link.results.done} planned={link.results.planned} />
+                      <div className="result-stack">
+                        <div className="result">
+                          <p className="kicker">{t("Done")}</p>
+                          <p className="result-num">
+                            {link.results.done}
+                            <span className="result-of">/{link.results.planned}</span>
+                          </p>
+                        </div>
+                        <div className="result">
+                          <p className="kicker">{t("Focused")}</p>
+                          <p className="result-num">{hours(link.results.focusMinutes)}</p>
+                        </div>
                       </div>
                     </div>
                     {link.results.headline ? (
@@ -238,6 +242,41 @@ export function GuardianPanelView() {
                       <p className="student-headline muted">{t("No change explained this week.")}</p>
                     )}
                     <p className="student-week">{t("Week of {0}", { 0: link.results.weekOf })}</p>
+
+                    {link.history.length > 1 ? (
+                      <div className="student-charts">
+                        <section className="chart-block">
+                          <p className="chart-title">{t("Planned against done")}</p>
+                          <p className="chart-note">{t("The last {0} weeks.", { 0: link.history.length })}</p>
+                          <WeekBars weeks={link.history} />
+                          <div className="chart-keys">
+                            <span>
+                              <i className="swatch swatch-planned" aria-hidden="true" />
+                              {t("Planned")}
+                            </span>
+                            <span>
+                              <i className="swatch swatch-done" aria-hidden="true" />
+                              {t("Done")}
+                            </span>
+                          </div>
+                        </section>
+
+                        <section className="chart-block">
+                          <p className="chart-title">{t("Focused time")}</p>
+                          <p className="chart-note">{t("Peak {0}.", { 0: minutesLabel(Math.max(...link.history.map((week) => week.focusMinutes))) })}</p>
+                          <FocusTrend weeks={link.history} />
+                        </section>
+                      </div>
+                    ) : (
+                      <p className="chart-empty">{t("Charts appear once there is more than one week to compare.")}</p>
+                    )}
+
+                    {link.results.subjects.length > 0 ? (
+                      <section className="chart-block">
+                        <p className="chart-title">{t("Where the time went")}</p>
+                        <SubjectSplit subjects={link.results.subjects} />
+                      </section>
+                    ) : null}
                   </>
                 )}
               </li>
