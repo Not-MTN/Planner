@@ -1,0 +1,173 @@
+/* ============================================================
+   Design tokens and the base reset.
+   Loaded on EVERY page: the landing site, the auth screens and
+   the planner all draw from the same palette and type scale.
+   Component rules live in styles.css (planner only), marketing.css
+   and showcase.css (public site only) — keeping them apart is what
+   stops one page's components from re-styling another's.
+   ============================================================ */
+
+/* ============================================================
+   Planner — a calm, local-first daily planner
+   Design system: warm paper light theme, soft night dark theme,
+   five accent flavours, Fraunces + Figtree typography.
+   ============================================================ */
+
+/* ---------- Tokens: light ---------- */
+:root {
+  color-scheme: light;
+  --bg: #f5f0e7;
+  --bg-deep: #ece4d4;
+  --surface: #fffdf9;
+  --surface-2: #f6f1e7;
+  --surface-3: #efe8da;
+  --ink: #23201b;
+  --ink-soft: #5b5346;
+  --muted: #665e52;
+  --line: rgba(35, 32, 27, 0.08);
+  --line-strong: rgba(35, 32, 27, 0.16);
+  --danger: #a35254;
+  --danger-soft: #f7e7e4;
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset, 0 18px 40px rgba(72, 48, 22, 0.08), 0 1px 2px rgba(72, 48, 22, 0.06);
+  --shadow-soft: 0 1px 0 rgba(255, 255, 255, 0.75) inset, 0 8px 22px rgba(72, 48, 22, 0.05);
+  --shadow-lift: 0 2px 0 rgba(255, 255, 255, 0.7) inset, 0 28px 56px rgba(72, 48, 22, 0.16), 0 2px 6px rgba(72, 48, 22, 0.08);
+  --radius: 24px;
+  --radius-small: 16px;
+  --serif: "Fraunces", "Estedad Variable", "Iowan Old Style", Palatino, "Palatino Linotype", serif;
+  --sans: "Figtree", "Estedad Variable", "Avenir Next", "Segoe UI", sans-serif;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --sidebar: 252px;
+  --content: 1120px;
+}
+
+/* ---------- Tokens: dark ---------- */
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #171410;
+  --bg-deep: #100e0b;
+  --surface: #1f1b15;
+  --surface-2: #262117;
+  --surface-3: #2d271d;
+  --ink: #ece5d6;
+  --ink-soft: #c6bcaa;
+  --muted: #b0a594;
+  --line: rgba(236, 229, 214, 0.08);
+  --line-strong: rgba(236, 229, 214, 0.16);
+  --danger: #d98887;
+  --danger-soft: #3a2422;
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 18px 40px rgba(0, 0, 0, 0.35);
+  --shadow-soft: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 8px 20px rgba(0, 0, 0, 0.28);
+  --shadow-lift: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 24px 52px rgba(0, 0, 0, 0.5);
+}
+
+/* ---------- Pre-React loading shell ---------- */
+.boot-shell { max-width: 720px; margin: 0 auto; padding: 32px 20px; color: var(--ink); }
+.boot-kicker { margin: 0; color: var(--muted); font: 600 12px/1.2 var(--sans); letter-spacing: .14em; text-transform: uppercase; }
+.boot-line { height: 40px; width: 240px; margin-top: 14px; border-radius: 14px; background: var(--surface-3); }
+.boot-panel { height: 160px; margin-top: 18px; border-radius: 20px; background: var(--surface); }
+
+/* ---------- Category colours (used by .accent-* classes) ---------- */
+:root {
+  --cat-sage-text: #365f43;
+  --cat-sage: #6f9a7e;
+  --cat-blue-text: #325e80;
+  --cat-blue: #6e93b5;
+  --cat-pink-text: #873e4b;
+  --cat-pink: #c28891;
+  --cat-lav-text: #60478e;
+  --cat-lav: #9887c6;
+  --cat-peach-text: #804b27;
+  --cat-peach: #c98a5c;
+}
+[data-theme="dark"] {
+  --cat-sage-text: var(--cat-sage);
+  --cat-blue-text: var(--cat-blue);
+  --cat-pink-text: var(--cat-pink);
+  --cat-lav-text: var(--cat-lav);
+  --cat-peach-text: var(--cat-peach);
+
+  --cat-sage: #86b394;
+  --cat-blue: #89aecf;
+  --cat-pink: #d3a0a8;
+  --cat-lav: #ac9ed6;
+  --cat-peach: #d8a679;
+}
+.accent-sage { --item: var(--cat-sage); --item-text: var(--cat-sage-text); }
+.accent-blue { --item: var(--cat-blue); --item-text: var(--cat-blue-text); }
+.accent-pink { --item: var(--cat-pink); --item-text: var(--cat-pink-text); }
+.accent-lav { --item: var(--cat-lav); --item-text: var(--cat-lav-text); }
+.accent-peach { --item: var(--cat-peach); --item-text: var(--cat-peach-text); }
+
+/* ---------- App accent (highlights, primary buttons, nav) ---------- */
+[data-accent="sage"] { --accent: #396b49; --accent-deep: #3b6148; --accent-soft: #e2eee5; --accent-contrast: #f7fbf7; }
+[data-accent="blue"] { --accent: #34688f; --accent-deep: #3a6383; --accent-soft: #e3edf4; --accent-contrast: #f5fafd; }
+[data-accent="pink"] { --accent: #984653; --accent-deep: #8e505a; --accent-soft: #f6e7e9; --accent-contrast: #fdf7f7; }
+[data-accent="lav"] { --accent: #69549e; --accent-deep: #5c4d8c; --accent-soft: #eae6f4; --accent-contrast: #f9f8fd; }
+[data-accent="peach"] { --accent: #94592e; --accent-deep: #935c33; --accent-soft: #f6e8db; --accent-contrast: #fdf9f4; }
+[data-theme="dark"][data-accent="sage"] { --accent: #7dab8c; --accent-deep: #a9cdb5; --accent-soft: #22302a; --accent-contrast: #101711; }
+[data-theme="dark"][data-accent="blue"] { --accent: #7aa3c8; --accent-deep: #a7c6e2; --accent-soft: #1f2c36; --accent-contrast: #0f151c; }
+[data-theme="dark"][data-accent="pink"] { --accent: #cd97a0; --accent-deep: #e4bcc2; --accent-soft: #332528; --accent-contrast: #1c1013; }
+[data-theme="dark"][data-accent="lav"] { --accent: #a496d2; --accent-deep: #c4b9e6; --accent-soft: #272238; --accent-contrast: #141020; }
+[data-theme="dark"][data-accent="peach"] { --accent: #d3a06e; --accent-deep: #e6c096; --accent-soft: #322818; --accent-contrast: #1a1207; }
+
+/* ---------- Base ---------- */
+* { box-sizing: border-box; }
+html, body, #root { min-height: 100%; }
+html { scroll-behavior: smooth; }
+/* Some people get motion sickness from smooth scrolling. */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+}
+body { overflow-x: clip; }
+body {
+  margin: 0;
+  font-family: var(--sans);
+  color: var(--ink);
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(1000px 540px at -10% -12%, rgba(255, 248, 236, 0.9), transparent 58%),
+    radial-gradient(760px 440px at 112% -6%, rgba(210, 228, 216, 0.5), transparent 52%),
+    radial-gradient(700px 420px at 82% 112%, rgba(240, 220, 208, 0.42), transparent 50%);
+  line-height: 1.5;
+  font-size: 15.5px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+[data-theme="dark"] body {
+  background-image:
+    radial-gradient(1000px 540px at -10% -12%, rgba(64, 56, 40, 0.5), transparent 58%),
+    radial-gradient(760px 440px at 112% -6%, rgba(38, 54, 44, 0.5), transparent 52%),
+    radial-gradient(700px 420px at 82% 112%, rgba(56, 42, 34, 0.4), transparent 50%);
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: 0.45; }
+a { color: inherit; text-decoration: none; }
+ul, ol { margin: 0; padding: 0; list-style: none; }
+p { margin: 0; }
+h1, h2, h3 { margin: 0; }
+img { max-width: 100%; }
+::selection { background: var(--accent-soft); color: var(--accent-deep); }
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.skip {
+  position: absolute;
+  inset-inline-start: 12px;
+  top: -48px;
+  background: var(--ink);
+  color: var(--bg);
+  padding: 8px 14px;
+  border-radius: 999px;
+  z-index: 60;
+}
+.skip:focus { top: 12px; }
