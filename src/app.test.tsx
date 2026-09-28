@@ -185,6 +185,57 @@ describe('app smoke', () => {
     expect(window.localStorage.getItem('planner-theme')).toBe('dark');
   });
 
+  function setTextareaValue(area: HTMLTextAreaElement, value: string): void {
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+    setter?.call(area, value);
+    act(() => {
+      area.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+
+  it('dictates a plan request to the AI with the browser voice service', async () => {
+    let live: { onresult: ((event: unknown) => void) | null; onend: (() => void) | null; lang: string; started: boolean } | null = null;
+    class FakeRecognition {
+      lang = '';
+      interimResults = false;
+      continuous = false;
+      onresult: ((event: unknown) => void) | null = null;
+      onend: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      started = false;
+      constructor() {
+        live = this as unknown as typeof live;
+      }
+      start() { this.started = true; }
+      stop() { this.onend?.(); }
+    }
+    (window as unknown as { SpeechRecognition: unknown }).SpeechRecognition = FakeRecognition;
+    mountApp();
+    try {
+      const aiNav = [...document.querySelectorAll<HTMLButtonElement>('.nav-link')].find((button) => button.textContent?.includes('AI coach'));
+      await act(async () => {
+        aiNav?.click();
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      });
+      const mic = document.querySelector<HTMLButtonElement>('.voice-mic');
+      expect(mic).toBeTruthy(); // mic renders only because dictation is available
+      setTextareaValue(document.querySelector('.ai-prompt-field textarea') as HTMLTextAreaElement, 'Keep evenings free.');
+      act(() => mic?.click());
+      expect(document.querySelector('.voice-mic')?.getAttribute('aria-pressed')).toBe('true');
+      expect((live as unknown as { started: boolean } | null)?.started).toBe(true);
+      expect((live as unknown as { lang: string } | null)?.lang).toBe('en-US');
+      act(() => {
+        (live as unknown as { onresult: (e: unknown) => void } | null)?.onresult({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: 'gym at 6 pm' } }] });
+      });
+      const textarea = document.querySelector('.ai-prompt-field textarea') as HTMLTextAreaElement;
+      expect(textarea.value).toBe('Keep evenings free. gym at 6 pm');
+      act(() => mic?.click());
+      expect(document.querySelector('.voice-mic')?.getAttribute('aria-pressed')).toBe('false');
+    } finally {
+      delete (window as unknown as { SpeechRecognition?: unknown }).SpeechRecognition;
+    }
+  });
+
   it('opens the AI coach and shows the protected weekly schedule editor', async () => {
     mountApp();
     const aiNav = [...document.querySelectorAll<HTMLButtonElement>('.nav-link')].find((button) =>

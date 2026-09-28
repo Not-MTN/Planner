@@ -1126,4 +1126,11 @@ export const fa: Record<string, string> = {
   "Remove attachment {0}": "حذف پیوست {0}",
   "Download {0}": "دانلود {0}",
   "Loading audio…": "در حال بارگذاری صوت…",
+
+  "Dictate your plan request": "دیکته‌ی درخواست برنامه",
+  "Listening…": "در حال گوش‌دادن…",
+  "Type or dictate — tap the mic and just say your day. Example: “Class Tuesday 8am, gym after, help me fit it all in.”": "تایپ یا دیکته — میکروفون را بزنید و فقط بگویید روزتان چطور است. مثلاً: «کلاس سه‌شنبه ۸ صبح، بعدش باشگاه، کمکم کن همه را جا بدهم.»",
+
+  "Voice everywhere it counts": "صدا همه‌جایی که مهم است",
+  "Voice everywhere it counts — dictate into the AI coach prompt (tap the mic and just describe your day, in English or فارسی) and into quick add. Uses the browser's built-in speech service, so nothing is recorded anywhere else.": "دیکته‌ی صوتی — از صفحه‌ی برنامه‌ریز هوشمند (میکروفون را بزنید و روزتان را تعریف کنید، فارسی یا انگلیسی، هر دو) و افزودن سریع. از سرویس صوتی‌ای که در خود مرورگر است کار می‌کند — هیچ جای دیگری چیزی ضبط نمی‌شود.",
 };

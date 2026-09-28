@@ -145,3 +145,31 @@ test('any file — including music — can be attached to a note', async ({ page
   const src = await audio.getAttribute('src');
   expect(src?.startsWith('blob:') || src === null || src === '').toBeTruthy();
 });
+
+test('voice dictation button appears on the AI plan request where supported', async ({ page }) => {
+  // Chromium ships the Web Speech API; stub a fresh page anyway to stay deterministic.
+  await page.addInitScript(() => {
+    class FakeRecognition {
+      lang = '';
+      interimResults = true;
+      continuous = false;
+      onresult: ((event: unknown) => void) | null = null;
+      onend: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      start() {
+        window.setTimeout(() => {
+          this.onresult?.({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: 'yoga at 7 in the morning' } }] });
+          this.onend?.();
+        }, 30);
+      }
+      stop() { this.onend?.(); }
+    }
+    (window as unknown as { SpeechRecognition: unknown }).SpeechRecognition = FakeRecognition;
+  });
+  await page.goto('/#/ai');
+  await expect(page.locator('.ai-prompt-field')).toBeVisible({ timeout: 10000 });
+  const textarea = page.locator('.ai-prompt-field textarea');
+  await textarea.fill('Keep it light.');
+  await page.locator('.voice-mic').click();
+  await expect(textarea).toHaveValue('Keep it light. yoga at 7 in the morning');
+});
