@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { registerPWA } from './pwa';
 import { applyDocumentLang } from './i18n';
+import '@fontsource-variable/estedad';
 import './styles.css';
 
 applyDocumentLang();
