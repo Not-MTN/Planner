@@ -7,7 +7,7 @@
  * - Brains: the existing xAI proxy (same as the typed plan builder).
  * - TTS: the browser's speech synthesizer; no audio ever leaves the device.
  */
-import { xaiChatJson, normalizeDraftPlan, type AIDraft, type PlanRange } from './ai';
+import { xaiChatJson, normalizeDraftPlan, draftForModel, type AIDraft, type PlanRange } from './ai';
 import { addDays, todayISO } from './dates';
 import { parsePlanDuration } from './duration';
 import { getLang, t } from './i18n';
@@ -86,6 +86,7 @@ Rules:
 3. If one crucial thing is missing (for example they asked to plan "this week" but the draft would depend on a specific day), ask ONE short spoken question in "reply", set "followUp" to the same question, and leave "draft" null.
 4. Keep health ideas gentle and optional; never medical advice. If they sound low, answer kindly first, plan lightly second.
 5. "followUp": null or one short question that would genuinely change the plan. "draft": null or a JSON plan object.
+6. A draft may already be on screen ("currentDraft", with its range). If the user refers to that plan — revise it, lighten it, tighten it, move things in it, add to it, or take things out — return the FULL revised draft for that same range: keep every item they did not ask to change, apply their change, and update the summary. Only build a brand-new plan when they clearly ask for a different one.
 
 Return ONLY a JSON object: {"reply": "…", "followUp": "…|null", "draft": null | {"summary": "…", "tasks": [{"title": "…", "date": "YYYY-MM-DD", "priority": "low|medium|high", "category": "personal|work|health|learning|home|social", "note": "optional"}], "events": [{"title": "…", "date": "YYYY-MM-DD", "startTime": "HH:MM", "endTime": "HH:MM", "category": "personal|work|health|learning|home|social", "important": false, "note": "optional"}], "habits": [{"name": "…", "frequency": {"type": "daily|weekdays|custom|weekly", "days": [1,2], "times": 3}, "category": "health|personal|learning|home", "icon": "water|book|study|moon|sun|walk|heart|leaf|coffee|pencil|home|stretch|spark"}], "suggestions": ["up to three gentle wellbeing ideas"]}}`;
 }
@@ -117,17 +118,26 @@ export function normalizeVoiceReply(rawValue: unknown, state: PlannerState, rang
 
 const VOICE_TURN_TIMEOUT_MS = 45_000;
 
+/** The draft currently on screen, so voice can revise instead of restart. */
+export interface VoiceCurrentDraft {
+  draft: AIDraft;
+  range: PlanRange;
+}
+
 /**
  * One spoken exchange. A hard 45 s ceiling keeps the UI from hanging in
  * "thinking…" forever when the network stalls mid-request.
+ *
+ * When a draft is already on screen (`currentDraft`), the model can revise it
+ * in place: "make Tuesday lighter" edits the plan instead of starting over.
  */
-export async function voiceTurn(options: { utterance: string; history: VoiceTurn[]; state: PlannerState }): Promise<VoiceReply> {
+export async function voiceTurn(options: { utterance: string; history: VoiceTurn[]; state: PlannerState; currentDraft?: VoiceCurrentDraft | null }): Promise<VoiceReply> {
   const utterance = options.utterance.replace(/\s+/g, ' ').trim().slice(0, MAX_UTTERANCE_LEN);
   if (!utterance) throw new Error(t("I couldn't hear anything — try again?"));
   const today = todayISO();
-  // Hear the horizon in the newest words first, then fall back to anything the
-  // user said earlier in this conversation ("plan my month" → answer to a
-  // follow-up keeps the month), then to the week-ahead default.
+  // Range resolution: (1) a length named right now, (2) a length said earlier
+  // in this conversation, (3) the draft already on screen (revisions keep
+  // their horizon), (4) the week-ahead default.
   const recentUserTurns = [...options.history].reverse().filter((turn) => turn.role === 'user').map((turn) => turn.text);
   let range: PlanRange | null = null;
   for (const said of [utterance, ...recentUserTurns]) {
@@ -137,12 +147,14 @@ export async function voiceTurn(options: { utterance: string; history: VoiceTurn
       break;
     }
   }
+  if (!range && options.currentDraft) range = options.currentDraft.range;
   if (!range) range = voiceRange(today);
   const payload = {
     utterance,
     today,
     range: { startDate: range.startDate, endDate: addDays(range.startDate, range.days - 1), days: range.days },
     history: compressHistory(options.history),
+    ...(options.currentDraft ? { currentDraft: draftForModel(options.currentDraft.draft) } : {}),
     context: buildVoiceContext(options.state, today, range),
   };
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;

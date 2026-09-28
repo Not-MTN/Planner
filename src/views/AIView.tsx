@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type Re
 import { CATEGORIES, categoryById } from '../constants';
 import { usePlanner } from '../context';
 import { addDays, formatFullDate, timeToMinutes, todayISO, weekdayIndex, displayTime } from '../dates';
-import { filterDraftAgainstState, habitFrequencyLabel, MAX_PLAN_IMAGE_BYTES, XAI_KEY_MISSING_MESSAGE, checkXAIConfiguration, friendlyXAIError, generateAIPlan, generateAIReview, hasReviewActivity } from '../ai';
-import type { AIReview, AIDraft, PlanRange } from '../ai';
+import { analyzeDraft, filterDraftAgainstState, habitFrequencyLabel, MAX_PLAN_IMAGE_BYTES, XAI_KEY_MISSING_MESSAGE, checkXAIConfiguration, friendlyXAIError, generateAIPlan, generateAIReview, hasReviewActivity, refineAIPlan } from '../ai';
+import type { AIReview, AIDraft, DraftWarning, PlanRange } from '../ai';
 import { MAX_PLAN_DAYS, parsePlanDuration } from '../duration';
 import { cx } from '../cx';
 import { useSpeechInput } from '../speech';
 import { VoiceTalk } from '../components/VoiceTalk';
+import { DraftRefine } from '../components/DraftRefine';
 import { CalendarIcon, CheckIcon, LeafIcon, MicIcon, PlusIcon, SparklesIcon, UploadIcon } from '../icons';
 import type { AIMemory, AIMemoryCategory, FixedCommitmentInput } from '../types';
 import { t } from '../i18n';
@@ -87,6 +88,7 @@ export function AIView() {
     requestConfirm,
     applyAIPlan,
     saveAIPlan,
+    updateAIPlan,
     rescheduleTasks,
     flash,
   } = planner;
@@ -128,6 +130,10 @@ export function AIView() {
 
   const days = periodDays(period, customDays);
   const planRange = useMemo<PlanRange>(() => ({ startDate: planStart, days }), [planStart, days]);
+  // The range the on-screen draft was written for (it may differ from the
+  // builder controls once the user switches them). Voice and typed revisions
+  // always follow this range, not whatever the builder says now.
+  const [draftRange, setDraftRange] = useState<PlanRange>(planRange);
   // "Plan my next two weeks" — hear the length in the request itself so the
   // AI plans for exactly as long as the user says.
   const heard = useMemo(() => parsePlanDuration(prompt, today), [prompt, today]);
@@ -181,7 +187,44 @@ export function AIView() {
         suggestions: result.suggestions,
       });
       setDraft(result);
+      setDraftRange(planRange);
       setDraftPlanId(planId);
+    } catch (reason) {
+      setError(friendlyXAIError(reason));
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  /**
+   * "Revise draft" — the AI edits the draft that is on screen and the linked
+   * copy on the Plans page is updated in the same step. The range never
+   * changes: the draft keeps the span it was written for.
+   */
+  const refineDraft = async (request: string) => {
+    if (!draft) return;
+    setError('');
+    const configured = await checkXAIConfiguration();
+    setXaiConfigured(configured);
+    if (!configured) {
+      setError(XAI_KEY_MISSING_MESSAGE);
+      openSettings();
+      return;
+    }
+    setWorking(true);
+    try {
+      const result = await refineAIPlan({ draft, request, range: draftRange, state });
+      setDraft(result);
+      if (draftPlanId) {
+        updateAIPlan(draftPlanId, {
+          summary: result.summary,
+          tasks: result.tasks,
+          events: result.events,
+          habits: result.habits,
+          suggestions: result.suggestions,
+        });
+      }
+      flash(t("Draft updated — review the changes before adding."));
     } catch (reason) {
       setError(friendlyXAIError(reason));
     } finally {
@@ -191,20 +234,34 @@ export function AIView() {
 
   /** Voice drafts land on the Plans page too — source 'voice'. */
   const onVoiceDraft = (next: AIDraft, range: PlanRange) => {
-    const planId = saveAIPlan({
-      title: t("Voice plan"),
-      prompt: '',
-      summary: next.summary,
-      startDate: range.startDate,
-      days: range.days,
-      source: 'voice',
-      tasks: next.tasks,
-      events: next.events,
-      habits: next.habits,
-      suggestions: next.suggestions,
-    });
+    // Voice asked to change the plan on screen → revise the linked copy in
+    // place when the spans line up; otherwise treat it as a brand-new draft.
+    const linked = draftPlanId ? state.aiPlans.find((plan) => plan.id === draftPlanId) : null;
+    if (linked && linked.startDate === range.startDate && linked.days === range.days) {
+      updateAIPlan(linked.id, {
+        summary: next.summary,
+        tasks: next.tasks,
+        events: next.events,
+        habits: next.habits,
+        suggestions: next.suggestions,
+      });
+    } else {
+      const planId = saveAIPlan({
+        title: t("Voice plan"),
+        prompt: '',
+        summary: next.summary,
+        startDate: range.startDate,
+        days: range.days,
+        source: 'voice',
+        tasks: next.tasks,
+        events: next.events,
+        habits: next.habits,
+        suggestions: next.suggestions,
+      });
+      setDraftPlanId(planId);
+    }
     setDraft(next);
-    setDraftPlanId(planId);
+    setDraftRange(range);
     setError('');
   };
 
@@ -377,7 +434,7 @@ export function AIView() {
 
       {currentTab === 'plan' ? (
         <>
-          <VoiceTalk onDraft={onVoiceDraft} />
+          <VoiceTalk onDraft={onVoiceDraft} currentDraft={draft ? { draft, range: draftRange } : null} />
           <section className="card ai-builder">
             <header className="card-head">
               <div>
@@ -477,7 +534,16 @@ export function AIView() {
             </div>
           </section>
 
-          {draft ? <PlanDraft draft={draft} onAdd={addDraft} onDiscard={() => { setDraft(null); setDraftPlanId(null); }} /> : null}
+          {draft ? (
+            <PlanDraft
+              draft={draft}
+              warnings={analyzeDraft(draft, state, draftRange)}
+              working={working}
+              onRefine={refineDraft}
+              onAdd={addDraft}
+              onDiscard={() => { setDraft(null); setDraftPlanId(null); }}
+            />
+          ) : null}
 
           <section className="card fixed-manager">
             <header className="card-head">
@@ -762,7 +828,14 @@ function addMinutes(time: string, amount: number): string {
   return `${String(Math.floor(Math.min(mins, 1439) / 60)).padStart(2, '0')}:${String(Math.min(mins, 1439) % 60).padStart(2, '0')}`;
 }
 
-function PlanDraft({ draft, onAdd, onDiscard }: { draft: AIDraft; onAdd: () => void; onDiscard: () => void }) {
+function PlanDraft({ draft, warnings, working, onRefine, onAdd, onDiscard }: {
+  draft: AIDraft;
+  warnings: DraftWarning[];
+  working: boolean;
+  onRefine: (request: string) => void;
+  onAdd: () => void;
+  onDiscard: () => void;
+}) {
   const total = draft.tasks.length + draft.events.length + draft.habits.length;
   return (
     <section className="card ai-draft-card">
@@ -774,6 +847,13 @@ function PlanDraft({ draft, onAdd, onDiscard }: { draft: AIDraft; onAdd: () => v
         <span className="chip">{total} {t('suggestions')}</span>
       </header>
       <p className="ai-draft-summary">{draft.summary}</p>
+      {warnings.length > 0 ? (
+        <div className="draft-warnings" role="status">
+          <strong>{t("A few things to double-check")}</strong>
+          <ul>{warnings.map((warning, index) => <li key={`${warning.kind}-${index}`}>{warning.message}</li>)}</ul>
+        </div>
+      ) : null}
+      <DraftRefine working={working} onRefine={onRefine} />
       {draft.suggestions.length > 0 ? (
         <div className="ai-wellbeing"><LeafIcon size={17} /><div><strong>{t("Gentle wellbeing ideas")}</strong><ul>{draft.suggestions.map((item, index) => <li key={index}>{item}</li>)}</ul></div></div>
       ) : null}

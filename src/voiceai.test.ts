@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { compressHistory, normalizeVoiceReply, pickVoice, speakText, stopSpeaking, voiceRange, voiceSystemPrompt, voiceTurn, VOICE_HISTORY_LIMIT } from './voiceai';
+import { compressHistory, normalizeVoiceReply, pickVoice, speakText, stopSpeaking, voiceRange, voiceSystemPrompt, voiceTurn, VOICE_HISTORY_LIMIT, type VoiceCurrentDraft } from './voiceai';
 import { createEmptyState } from './types';
 
 const today = new Date().toISOString().slice(0, 10);
@@ -145,6 +145,80 @@ describe('voice ai', () => {
       const payload = JSON.parse(body.messages[1].content) as { range: { days: number; startDate: string } };
       expect(payload.range.days).toBe(30);
       expect(payload.range.startDate).toBe(today);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('revises the draft on screen: keeps its range and sends it to the model', async () => {
+    const calls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push(String(init?.body));
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: JSON.stringify({ reply: 'Tuesday is lighter now.', followUp: null, draft: null }) } }],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }) as typeof fetch;
+    try {
+      const draftRange = { startDate: today, days: 14 };
+      const currentDraft: VoiceCurrentDraft = {
+        draft: {
+          summary: 'A two-week push.',
+          tasks: [{ title: 'Deep work block', dueDate: today, dueTime: null, priority: 'high', category: 'work', note: '', goalId: null }],
+          events: [],
+          habits: [],
+          suggestions: ['Rest counts too.'],
+          skippedEvents: [],
+        },
+        range: draftRange,
+      };
+      const result = await voiceTurn({
+        utterance: 'make it lighter on tuesday',
+        history: [],
+        state: createEmptyState(),
+        currentDraft,
+      });
+      // No new length was spoken — the revision keeps the draft's horizon.
+      expect(result.range).toEqual(draftRange);
+      const body = JSON.parse(calls[0]) as { messages: Array<{ role: string; content: string }> };
+      const payload = JSON.parse(body.messages[1].content) as {
+        range: { days: number };
+        currentDraft?: { summary: string; tasks: Array<{ title: string }>; suggestions: string[] };
+      };
+      expect(payload.range.days).toBe(14);
+      expect(payload.currentDraft?.summary).toBe('A two-week push.');
+      expect(payload.currentDraft?.tasks[0].title).toBe('Deep work block');
+      expect(payload.currentDraft?.suggestions).toEqual(['Rest counts too.']);
+      // The model is told it is editing the draft on screen.
+      expect(body.messages[0].content).toContain('currentDraft');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('a freshly spoken length beats the draft range', async () => {
+    const calls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push(String(init?.body));
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: JSON.stringify({ reply: 'done', followUp: null, draft: null }) } }],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }) as typeof fetch;
+    try {
+      const result = await voiceTurn({
+        utterance: 'actually, plan the next three days instead',
+        history: [],
+        state: createEmptyState(),
+        currentDraft: { draft: { summary: 'x', tasks: [], events: [], habits: [], suggestions: [], skippedEvents: [] }, range: { startDate: today, days: 30 } },
+      });
+      expect(result.range.days).toBe(3);
     } finally {
       globalThis.fetch = originalFetch;
     }

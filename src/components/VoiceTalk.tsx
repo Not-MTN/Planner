@@ -3,7 +3,7 @@ import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { MicIcon, CloseIcon, VolumeIcon, SparklesIcon } from '../icons';
 import { t, getLang } from '../i18n';
-import { speakText, stopSpeaking, voiceTurn, type VoiceTurn } from '../voiceai';
+import { speakText, stopSpeaking, voiceTurn, type VoiceCurrentDraft, type VoiceTurn } from '../voiceai';
 import { useSpeechInput, type SpeechError } from '../speech';
 import type { AIDraft, PlanRange } from '../ai';
 
@@ -30,7 +30,11 @@ function speechErrorMessage(error: SpeechError): string {
   return t("Something snagged — try again?");
 }
 
-export function VoiceTalk({ onDraft }: { onDraft: (draft: AIDraft, range: PlanRange) => void }) {
+export function VoiceTalk({ onDraft, currentDraft = null }: {
+  onDraft: (draft: AIDraft, range: PlanRange) => void;
+  /** The draft currently in the review card, so voice can revise it in place. */
+  currentDraft?: VoiceCurrentDraft | null;
+}) {
   const { state } = usePlanner();
   const speech = useSpeechInput();
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
@@ -84,7 +88,7 @@ export function VoiceTalk({ onDraft }: { onDraft: (draft: AIDraft, range: PlanRa
     scrollLog();
     try {
       const history: VoiceTurn[] = bubbles.slice(-10).map((bubble) => ({ role: bubble.role, text: bubble.text }));
-      const result = await voiceTurn({ utterance, history, state });
+      const result = await voiceTurn({ utterance, history, state, currentDraft });
       if (!mountedRef.current) return;
       const replyText = result.followUp ? `${result.reply} ${result.followUp}` : result.reply;
       setBubbles((current) => [...current, { role: 'assistant', text: replyText }]);

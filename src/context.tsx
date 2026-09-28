@@ -10,6 +10,8 @@ import {
   saveAIPlan as saveAIPlanTo,
   deleteAIPlan as deleteAIPlanFrom,
   markAIPlanAdded as markAIPlanAddedIn,
+  updateAIPlan as updateAIPlanIn,
+  type AIPlanPatch,
   addEvent as addEventTo,
   addFixedCommitment as addFixedCommitmentTo,
   deleteFixedCommitment as deleteFixedCommitmentFrom,
@@ -205,6 +207,8 @@ interface PlannerContextValue {
   /** Save an AI draft to the Plans page; returns the stored plan id. */
   saveAIPlan: (input: SavedAIPlanInput) => string;
   deleteAIPlan: (id: string) => void;
+  /** Replace a saved plan's draft contents after the AI revises it. */
+  updateAIPlan: (id: string, patch: AIPlanPatch) => void;
   rescheduleTasks: (moves: Array<{ id: string; date: string }>) => void;
   applySchedule: (plan: Array<{ id: string; date: string; time: string }>) => void;
   updateEvent: (id: string, patch: Partial<EventInput>) => void;
@@ -1043,6 +1047,7 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
       return id;
     },
     deleteAIPlan: (id) => commit((current) => deleteAIPlanFrom(current, id)),
+    updateAIPlan: (id, patch) => commit((current) => updateAIPlanIn(current, id, patch)),
     rescheduleTasks: (moves) => commit((current) => moves.reduce((next, move) => moveTaskIn(next, move.id, move.date), current)),
     applySchedule: (plan) => commit((current) => plan.reduce((next, item) => updateTaskIn(next, item.id, { dueDate: item.date, dueTime: item.time }), current)),
     updateEvent: (id, patch) => commit((current) => updateEventIn(current, id, patch)),

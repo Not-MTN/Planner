@@ -3323,3 +3323,17 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 }
 .ai-heard-range > span { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--accent-deep); }
 .ai-saved-note { margin-top: 6px; }
+
+/* ── Draft refinement + local quality checks ────────────────────────── */
+.ai-refine { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.ai-refine input { flex: 1; min-width: 0; }
+.ai-refine button { flex-shrink: 0; white-space: nowrap; }
+.draft-warnings {
+  margin-top: 10px; padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--cat-peach) 45%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--cat-peach) 9%, var(--surface));
+}
+.draft-warnings strong { display: block; font-size: 13px; color: var(--cat-peach-text); }
+.draft-warnings ul { margin: 6px 0 0; padding-inline-start: 18px; display: flex; flex-direction: column; gap: 4px; }
+.draft-warnings li { font-size: 13px; color: var(--ink-soft); overflow-wrap: anywhere; }
