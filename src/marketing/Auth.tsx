@@ -192,11 +192,36 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
   const [show, setShow] = useState(false);
   const [role, setRole] = useState<Role>('personal');
   const [guardianKind, setGuardianKind] = useState<'advisor' | 'parent'>('advisor');
+  const [studentField, setStudentField] = useState('');
+  const [studentGrade, setStudentGrade] = useState('');
+  const [guardianField, setGuardianField] = useState('');
+  const gradeOptions = [
+    { id: 'school-9', label: c.authGrade9 },
+    { id: 'school-10', label: c.authGrade10 },
+    { id: 'school-11', label: c.authGrade11 },
+    { id: 'school-12', label: c.authGrade12 },
+    { id: 'university', label: c.authGradeUniversity },
+    { id: 'postgrad', label: c.authGradePostgrad },
+    { id: 'other', label: c.authGradeOther },
+  ];
   const [agreed, setAgreed] = useState(false);
   const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  /** A panel without its details is not a panel yet. */
+  const panelDetails = (chosen: Role): { field: string | null; grade: string | null } | null => {
+    if (chosen === 'student') {
+      if (!studentField.trim() || !studentGrade) return null;
+      return { field: studentField.trim(), grade: studentGrade };
+    }
+    if (chosen === 'guardian') {
+      if (!guardianField.trim()) return null;
+      return { field: guardianField.trim(), grade: null };
+    }
+    return { field: null, grade: null };
+  };
 
   const createAccount = async (chosen: Role = role) => {
     if (busy) return;
@@ -205,14 +230,26 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
     try {
       // Anything already planned in this browser becomes the first vault.
       const { state } = loadFrom(window.localStorage);
+      const details = panelDetails(chosen);
+      if (!details) {
+        setError(c.authRoleMissing);
+        setBusy(false);
+        return;
+      }
       // A panel is an extra, so choosing one here only switches that panel on —
       // the planner underneath is exactly what they already had.
       const panels = {
-        student: { ...state.panels.student, enabled: chosen === 'student' },
+        student: {
+          ...state.panels.student,
+          enabled: chosen === 'student',
+          field: chosen === 'student' ? details.field : state.panels.student.field,
+          grade: chosen === 'student' ? details.grade : state.panels.student.grade,
+        },
         guardian: {
           ...state.panels.guardian,
           enabled: chosen === 'guardian',
           kind: chosen === 'guardian' ? guardianKind : state.panels.guardian.kind,
+          field: chosen === 'guardian' ? details.field : state.panels.guardian.field,
         },
       };
       await signUp({
@@ -356,8 +393,50 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
                   </button>
                 ))}
               </div>
+              {role === 'student' ? (
+                <div className="role-details reveal-in" style={{ animationDelay: '90ms' }}>
+                  <label className="field">
+                    <span>{c.authStudentField}</span>
+                    <input
+                      className="input"
+                      value={studentField}
+                      autoComplete="off"
+                      placeholder={c.authStudentFieldHint}
+                      onChange={(event) => setStudentField(event.target.value)}
+                    />
+                    {studentField.trim() ? <small className="hint">{c.authStudentFieldHint}</small> : null}
+                  </label>
+                  <label className="field">
+                    <span>{c.authStudentGrade}</span>
+                    <select className="input" value={studentGrade} onChange={(event) => setStudentGrade(event.target.value)}>
+                      <option value="">—</option>
+                      {gradeOptions.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              ) : null}
+
               {role === 'guardian' ? (
-                <div className="role-pick role-kind reveal-in" style={{ animationDelay: '90ms' }}>
+                <div className="role-details reveal-in" style={{ animationDelay: '90ms' }}>
+                  <label className="field">
+                    <span>{c.authGuardianField}</span>
+                    <input
+                      className="input"
+                      value={guardianField}
+                      autoComplete="off"
+                      placeholder={c.authGuardianFieldHint}
+                      onChange={(event) => setGuardianField(event.target.value)}
+                    />
+                    {guardianField.trim() ? <small className="hint">{c.authGuardianFieldHint}</small> : null}
+                  </label>
+                </div>
+              ) : null}
+              {role === 'guardian' ? (
+                <div className="role-pick role-kind reveal-in" style={{ animationDelay: '110ms' }}>
                   <p className="role-kind-label">{c.authRoleKind}</p>
                   {(
                     [

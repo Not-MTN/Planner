@@ -3529,3 +3529,20 @@ html, body { overflow-x: clip; }
   .hub-tile:hover { transform: none; }
   .subject-bar i { transition: none; }
 }
+
+/* ---------- Panel details ---------- */
+.panel-identity { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; margin: 0; }
+.panel-identity strong { font-size: 15px; font-weight: 640; color: var(--ink); }
+.panel-identity span { font-size: 13px; color: var(--muted); }
+.panel-identity span:not(:last-child)::after { content: ' ·'; }
+.segmented {
+  display: inline-flex; padding: 3px; gap: 3px; align-self: flex-start;
+  border-radius: 12px; background: color-mix(in srgb, var(--ink) 5%, transparent);
+  border: 1px solid var(--line);
+}
+.segment {
+  min-height: 32px; padding: 0 14px; border: 0; border-radius: 9px; cursor: pointer;
+  background: transparent; color: var(--muted); font: inherit; font-size: 13px; font-weight: 600;
+  transition: background 0.18s var(--ease), color 0.18s var(--ease);
+}
+.segment.on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-soft); }

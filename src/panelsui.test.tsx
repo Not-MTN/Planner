@@ -50,6 +50,14 @@ async function clickText(needle: string): Promise<void> {
   await settle();
 }
 
+function setSelect(select: HTMLSelectElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+  setter?.call(select, value);
+  act(() => {
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+}
+
 function setValue(input: HTMLInputElement, value: string): void {
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
   setter?.call(input, value);
@@ -98,6 +106,17 @@ describe('optional panels', () => {
     expect(buttons().some((item) => (item.textContent ?? '').trim() === 'Student')).toBe(false);
   });
 
+  it('will not add the student panel without what you study and where you are', async () => {
+    mountApp();
+    await settle();
+    await clickText('See the panels');
+    await clickText('Add student panel');
+    // The form is open and the panel is still off: details come first.
+    await clickText('Add student panel');
+    expect(text()).toContain('Add what you study and where you are in it.');
+    expect(text()).toContain('Not added');
+  });
+
   it('adds the student panel, keeps the planner, and reaches it from the dashboard', async () => {
     mountApp();
     await settle();
@@ -106,7 +125,15 @@ describe('optional panels', () => {
     expect(text()).toContain('Panels are additions to your planner');
 
     await clickText('Add student panel');
+    const field = document.querySelector('.panel-form input.input') as HTMLInputElement | null;
+    const grade = document.querySelector('.panel-form select.input') as HTMLSelectElement | null;
+    expect(field).toBeTruthy();
+    expect(grade).toBeTruthy();
+    setValue(field!, 'Physics');
+    setSelect(grade!, 'school-11');
+    await clickText('Add student panel');
     expect(text()).toContain('Student panel added');
+    expect(document.body.textContent).toContain('Physics');
 
     // The dashboard now links to it, and the personal planner is still there.
     await clickText('Open student panel');
@@ -138,6 +165,10 @@ describe('optional panels', () => {
     await clickText('Add guardian panel');
     expect(text()).toContain('Which kind of guardian are you?');
     await clickText('Parent');
+    const field = document.querySelector('.panel-form input.input') as HTMLInputElement | null;
+    expect(field).toBeTruthy();
+    setValue(field!, 'Mathematics');
+    await clickText('Add guardian panel');
     expect(text()).toContain('Parent panel added');
     await clickText('Open guardian panel');
     expect(text()).toContain('The week, as results');
@@ -147,6 +178,9 @@ describe('optional panels', () => {
     mountApp();
     await settle();
     await clickText('See the panels');
+    await clickText('Add student panel');
+    setValue(document.querySelector('.panel-form input.input') as HTMLInputElement, 'Physics');
+    setSelect(document.querySelector('.panel-form select.input') as HTMLSelectElement, 'school-11');
     await clickText('Add student panel');
     await clickText('Remove panel');
     expect(text()).toContain('Student panel removed');

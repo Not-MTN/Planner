@@ -150,6 +150,8 @@ export function mergePanels(local: Panels, remote: Panels): Panels {
   return {
     student: {
       enabled: local.student.enabled || remote.student.enabled,
+      field: local.student.field ?? remote.student.field,
+      grade: local.student.grade ?? remote.student.grade,
       subjects: byId(local.student.subjects, remote.student.subjects).slice(0, 40),
       explanations: byId(local.student.explanations, remote.student.explanations)
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -158,6 +160,7 @@ export function mergePanels(local: Panels, remote: Panels): Panels {
     guardian: {
       enabled: local.guardian.enabled || remote.guardian.enabled,
       kind: local.guardian.kind ?? remote.guardian.kind,
+      field: local.guardian.field ?? remote.guardian.field,
       links: byId(local.guardian.links, remote.guardian.links)
         .sort((a, b) => a.displayName.localeCompare(b.displayName))
         .slice(0, 20),

@@ -2,7 +2,7 @@ import { ACCENTS, categoryById, HABIT_ICONS, NOTE_KINDS, PRIORITIES } from './co
 import { isValidISODate, isValidTime, localDateFromTimestamp, timeToMinutes } from './dates';
 import { REPEAT_SET } from './recurrence';
 import { MAX_PLAN_DAYS } from './duration';
-import { AI_PLAN_LIMIT, createEmptyPanels, createEmptyState, type AIMemory, type AttachmentRef, type AIMemoryCategory, type ChangeNote, type EventInput, type FixedCommitment, type FocusLog, type GuardianKind, type GuardianLink, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Panels, type StudentSubject, type Subtask, type TaskInput, type TaskRepeat, type WeekResults, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task } from './types';
+import { AI_PLAN_LIMIT, createEmptyPanels, createEmptyState, isGradeLevel, type AIMemory, type AttachmentRef, type AIMemoryCategory, type ChangeNote, type EventInput, type FixedCommitment, type FocusLog, type GuardianKind, type GuardianLink, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Panels, type StudentSubject, type Subtask, type TaskInput, type TaskRepeat, type WeekResults, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task } from './types';
 import { t } from './i18n';
 
 export const STORAGE_KEY = 'personal-planner.v1';
@@ -584,9 +584,14 @@ export function sanitizePanels(value: unknown): Panels {
     (item) => item.id,
   ).slice(0, PANEL_LINK_LIMIT);
   const kind = guardian.kind === 'advisor' || guardian.kind === 'parent' ? (guardian.kind as GuardianKind) : null;
+  const field = (value: unknown) => {
+    const text = asString(value, 60)?.trim();
+    return text ? text : null;
+  };
+  const grade = isGradeLevel(student.grade) ? student.grade : null;
   return {
-    student: { enabled: student.enabled === true, subjects, explanations },
-    guardian: { enabled: guardian.enabled === true && kind !== null, kind, links },
+    student: { enabled: student.enabled === true, field: field(student.field), grade, subjects, explanations },
+    guardian: { enabled: guardian.enabled === true && kind !== null, kind, field: field(guardian.field), links },
   };
 }
 

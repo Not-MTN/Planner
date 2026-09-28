@@ -36,6 +36,7 @@ Status: **draft for review — no code written yet.**
 | Retention | Full detail inside the hot window; **weekly rollup to results** afterwards. |
 | AI | Assists both sides. AI and guardian changes land as **reviewable proposals**, never silent writes. |
 | Local-first | Still true. Editing works offline; signing in and signing up need a connection. |
+| Panel details | **A panel asks for two things before it opens.** Student: **field** and **grade**. Guardian: **type** (Parent / Advisor) and **field**. Skip stays personal. |
 | Panels | **Optional and additive.** Someone may pick the student panel, the guardian panel, both, or **none** and simply use the personal panel. Choosing one never removes the personal planner; the dashboard is the hub that opens each panel. A panel can be added or removed at any time, and removing one deletes nothing. |
 
 ---

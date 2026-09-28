@@ -107,6 +107,56 @@ describe('marketing site', () => {
     expect(container.textContent).toContain('Get back in');
   });
 
+  it('asks for the details a panel needs before it lets you continue', async () => {
+    await renderAt('/signup');
+
+    // Step 1: name, username, email, password, terms.
+    const fields = () => [...container.querySelectorAll('input')] as HTMLInputElement[];
+    const setValue = (input: HTMLInputElement, value: string) => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    await act(async () => {
+      const inputs = fields();
+      setValue(inputs[0]!, 'Omid');
+      setValue(inputs[1]!, 'omid');
+      setValue(inputs[2]!, 'omid@example.com');
+      setValue(inputs[3]!, 'a-long-enough-password');
+      const terms = inputs[4]!;
+      const click = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'checked')?.set;
+      click?.call(terms, true);
+      terms.dispatchEvent(new Event('click', { bubbles: true }));
+      terms.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const form = container.querySelector('form.auth-fields') as HTMLFormElement;
+    await act(async () => {
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    expect(container.textContent).toContain('Add a panel?');
+
+    // Choosing the student panel reveals what it needs.
+    const student = ([...container.querySelectorAll('.role-option')] as HTMLButtonElement[]).find((button) =>
+      (button.textContent ?? '').includes('Student panel'),
+    );
+    await act(async () => {
+      student?.click();
+    });
+    expect(container.textContent).toContain('What do you study?');
+
+    // Continuing without them says so instead of creating a broken account.
+    const continueButton = ([...container.querySelectorAll('button')] as HTMLButtonElement[]).find((button) =>
+      (button.textContent ?? '').trim() === 'Continue',
+    );
+    await act(async () => {
+      continueButton?.click();
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    });
+    expect(container.textContent).toContain('Add the details for the panel you picked');
+    // Still on step 2, not the recovery step.
+    expect(container.querySelector('.auth-steps li:nth-child(3)')?.className).not.toContain('is-active');
+  });
+
   it('does not use the app translation layer', async () => {
     // The i18n test scans src/ for translatable strings; the marketing site must
     // keep its own dictionary so it never trips that check.

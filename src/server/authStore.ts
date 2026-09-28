@@ -129,6 +129,22 @@ export async function hashAuthToken(authToken: string, salt: string): Promise<st
   return derived.toString('base64');
 }
 
+export interface StoredCredential {
+  /** The salt the server used, stored next to the hash. */
+  hashSalt: string;
+  authHash: string;
+}
+
+/**
+ * Hashes a credential together with the salt that will be stored beside it.
+ * Always use this: computing the hash with one salt and storing another makes
+ * every future sign-in fail.
+ */
+export async function hashCredential(authToken: string): Promise<StoredCredential> {
+  const hashSalt = newSalt();
+  return { hashSalt, authHash: await hashAuthToken(authToken, hashSalt) };
+}
+
 export function newSalt(): string {
   return randomBytes(16).toString('base64');
 }
@@ -182,12 +198,8 @@ export function createMemoryAuthStore(): AuthStore {
         created_at: new Date().toISOString(),
       };
       users.set(user.id, user);
-      const hashSalt = newSalt();
-      credentials.set(user.id, {
-        kdfSalt: input.kdfSalt,
-        hashSalt,
-        authHash: await hashAuthToken(input.authToken, hashSalt),
-      });
+      const credential = await hashCredential(input.authToken);
+      credentials.set(user.id, { kdfSalt: input.kdfSalt, ...credential });
       vaults.set(user.id, {
         version: 1,
         ciphertext: input.ciphertext,
@@ -220,8 +232,7 @@ export function createMemoryAuthStore(): AuthStore {
       return next;
     },
     async updateCredential(userId, kdfSalt, authToken) {
-      const hashSalt = newSalt();
-      credentials.set(userId, { kdfSalt, hashSalt, authHash: await hashAuthToken(authToken, hashSalt) });
+      credentials.set(userId, { kdfSalt, ...(await hashCredential(authToken)) });
     },
     async createSession(userId, tokenHash, _label, expiresAt) {
       sessions.set(tokenHash, { id: newId(), user_id: userId, expires_at: expiresAt.toISOString() });
@@ -299,6 +310,8 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
     async createAccount(input) {
       await ensure();
       const id = newId();
+      // Claim the name first: on a conflict this does nothing and we can answer
+      // "taken" without touching anything else.
       const rows = (await sql`
         INSERT INTO planner_users (id, username, username_lower, email_lower, display_name, role)
         VALUES (${id}, ${input.username}, ${input.username.toLowerCase()}, ${input.email}, ${input.displayName}, ${input.role})
@@ -314,15 +327,26 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
         if (clash.length > 0) return { ok: false, reason: 'username_taken' };
         return { ok: false, reason: 'email_taken' };
       }
-      const hash = await hashAuthToken(input.authToken, newSalt());
-      await sql`
-        INSERT INTO planner_credentials (user_id, kdf_salt, auth_hash, hash_salt)
-        VALUES (${id}, ${input.kdfSalt}, ${hash}, ${newSalt()})
-      `;
-      await sql`
-        INSERT INTO planner_vaults (user_id, version, ciphertext, wrapped_dek, wrapped_recovery)
-        VALUES (${id}, 1, ${input.ciphertext}, ${input.wrappedDek}, ${input.wrappedRecovery})
-      `;
+
+      const credential = await hashCredential(input.authToken);
+      try {
+        // Credentials and vault land together: an account with one but not the
+        // other could never sign in, and the name would be gone for good.
+        await sql.transaction([
+          sql`
+            INSERT INTO planner_credentials (user_id, kdf_salt, auth_hash, hash_salt)
+            VALUES (${id}, ${input.kdfSalt}, ${credential.authHash}, ${credential.hashSalt})
+          `,
+          sql`
+            INSERT INTO planner_vaults (user_id, version, ciphertext, wrapped_dek, wrapped_recovery)
+            VALUES (${id}, 1, ${input.ciphertext}, ${input.wrappedDek}, ${input.wrappedRecovery})
+          `,
+        ]);
+      } catch (error) {
+        // Give the name back rather than leaving a dead account behind.
+        await sql`DELETE FROM planner_users WHERE id = ${id}`.catch(() => undefined);
+        throw error;
+      }
       return { ok: true, user };
     },
 
@@ -344,7 +368,11 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
 
     async getVault(userId) {
       await ensure();
-      const rows = (await sql`SELECT version, ciphertext, wrapped_dek, wrapped_recovery, updated_at FROM planner_vaults WHERE user_id = ${userId}`) as VaultRow[];
+      // Aliased: the rest of the code reads camelCase names.
+      const rows = (await sql`
+        SELECT version, ciphertext, wrapped_dek AS "wrappedDek", wrapped_recovery AS "wrappedRecovery", updated_at
+        FROM planner_vaults WHERE user_id = ${userId}
+      `) as VaultRow[];
       return rows[0] ?? null;
     },
 
@@ -354,22 +382,27 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
         ? await sql`INSERT INTO planner_vaults (user_id, version, ciphertext, wrapped_dek, wrapped_recovery)
             VALUES (${userId}, 1, ${ciphertext}, '', '')
             ON CONFLICT (user_id) DO NOTHING
-            RETURNING version, ciphertext, wrapped_dek, wrapped_recovery, updated_at`
+            RETURNING version, ciphertext, wrapped_dek AS "wrappedDek", wrapped_recovery AS "wrappedRecovery", updated_at`
         : await sql`UPDATE planner_vaults
             SET version = version + 1, ciphertext = ${ciphertext}, updated_at = now()
             WHERE user_id = ${userId} AND version = ${baseVersion}
-            RETURNING version, ciphertext, wrapped_dek, wrapped_recovery, updated_at`) as VaultRow[];
+            RETURNING version, ciphertext, wrapped_dek AS "wrappedDek", wrapped_recovery AS "wrappedRecovery", updated_at`) as VaultRow[];
       return rows[0] ?? null;
     },
 
     async updateCredential(userId, kdfSalt, authToken) {
       await ensure();
-      const hash = await hashAuthToken(authToken, newSalt());
-      await sql`UPDATE planner_credentials SET kdf_salt = ${kdfSalt}, auth_hash = ${hash}, hash_salt = ${newSalt()}, updated_at = now() WHERE user_id = ${userId}`;
+      const credential = await hashCredential(authToken);
+      await sql`UPDATE planner_credentials
+        SET kdf_salt = ${kdfSalt}, auth_hash = ${credential.authHash}, hash_salt = ${credential.hashSalt}, updated_at = now()
+        WHERE user_id = ${userId}`;
     },
 
     async createSession(userId, tokenHash, label, expiresAt) {
       await ensure();
+      // Housekeeping while we are here: expired rows are dead weight, and this
+      // keeps the table bounded without a cron job.
+      await sql`DELETE FROM planner_sessions WHERE user_id = ${userId} AND expires_at < now()`;
       await sql`INSERT INTO planner_sessions (id, user_id, token_hash, label, expires_at) VALUES (${newId()}, ${userId}, ${tokenHash}, ${label.slice(0, 60)}, ${expiresAt.toISOString()})`;
     },
 

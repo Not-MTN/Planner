@@ -2286,3 +2286,12 @@
   color: var(--muted);
 }
 .role-kind .role-option { padding: 12px 14px; border-radius: 14px; }
+
+/* The details a panel needs before it opens. */
+.role-details {
+  display: flex; flex-direction: column; gap: 14px;
+  margin-top: 16px; padding: 16px;
+  border-radius: 18px; border: 1px dashed color-mix(in srgb, var(--ink) 16%, transparent);
+  background: color-mix(in srgb, var(--paper) 60%, transparent);
+}
+.role-details .field > span { color: var(--muted); }

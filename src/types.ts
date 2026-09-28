@@ -236,15 +236,38 @@ export interface Panels {
 
 export interface StudentPanel {
   enabled: boolean;
+  /** What they study — required the moment the panel is switched on. */
+  field: string | null;
+  /** Where they are in it: see GRADE_LEVELS. */
+  grade: string | null;
   /** Subjects the student tracks, with an optional exam date. */
   subjects: StudentSubject[];
   /** Why the student changed something significant. Detail kept for the active week only. */
   explanations: ChangeNote[];
 }
 
+/** Curated so a guardian can read it at a glance; 'other' keeps everyone included. */
+export const GRADE_LEVELS = [
+  'school-9',
+  'school-10',
+  'school-11',
+  'school-12',
+  'university',
+  'postgrad',
+  'other',
+] as const;
+
+export type GradeLevel = (typeof GRADE_LEVELS)[number];
+
+export function isGradeLevel(value: unknown): value is GradeLevel {
+  return typeof value === 'string' && (GRADE_LEVELS as readonly string[]).includes(value);
+}
+
 export interface GuardianPanel {
   enabled: boolean;
   kind: GuardianKind | null;
+  /** What they guide — required the moment the panel is switched on. */
+  field: string | null;
   /** Students this guardian watches. Only weekly results travel, never detail. */
   links: GuardianLink[];
 }
@@ -399,7 +422,7 @@ export function createEmptyState(): PlannerState {
 
 export function createEmptyPanels(): Panels {
   return {
-    student: { enabled: false, subjects: [], explanations: [] },
-    guardian: { enabled: false, kind: null, links: [] },
+    student: { enabled: false, field: null, grade: null, subjects: [], explanations: [] },
+    guardian: { enabled: false, kind: null, field: null, links: [] },
   };
 }

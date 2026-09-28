@@ -6,6 +6,7 @@
  * A guardian never receives the detail at all — only weekly results.
  */
 import { addDays, startOfWeek, todayISO } from './dates';
+import { t } from './i18n';
 import type { ChangeNote, Panels, PlannerState, StudentSubject, WeekResults } from './types';
 
 export function weekOf(date = todayISO()): string {
@@ -90,6 +91,39 @@ export function daysUntil(iso: string | null, from = todayISO()): number | null 
   const target = Date.parse(`${iso}T00:00:00`);
   if (!Number.isFinite(start) || !Number.isFinite(target)) return null;
   return Math.round((target - start) / 86_400_000);
+}
+
+export const GRADE_LABELS: Array<{ id: string; label: string }> = [
+  { id: 'school-9', label: 'Grade 9' },
+  { id: 'school-10', label: 'Grade 10' },
+  { id: 'school-11', label: 'Grade 11' },
+  { id: 'school-12', label: 'Grade 12' },
+  { id: 'university', label: 'University' },
+  { id: 'postgrad', label: 'Masters or PhD' },
+  { id: 'other', label: 'Something else' },
+];
+
+/** Human label for a stored grade id, or null when nothing is chosen. */
+export function gradeLabel(grade: string | null): string | null {
+  if (!grade) return null;
+  switch (grade) {
+    case 'school-9':
+      return t('Grade 9');
+    case 'school-10':
+      return t('Grade 10');
+    case 'school-11':
+      return t('Grade 11');
+    case 'school-12':
+      return t('Grade 12');
+    case 'university':
+      return t('University');
+    case 'postgrad':
+      return t('Masters or PhD');
+    case 'other':
+      return t('Something else');
+    default:
+      return grade;
+  }
 }
 
 export function newId(prefix: string): string {

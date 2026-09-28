@@ -10,13 +10,15 @@ import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { BookIcon, FlagIcon, PlusIcon, StopwatchIcon, TrashIcon } from '../icons';
 import { t } from '../i18n';
-import { daysUntil, newId, splitExplanations, subjectMinutes, subjectProgress, weekOf, weekResults, withExplanation, withSubject, withoutExplanation, withoutSubject } from '../panels';
+import { daysUntil, GRADE_LABELS, gradeLabel, newId, splitExplanations, subjectMinutes, subjectProgress, weekOf, weekResults, withExplanation, withSubject, withoutExplanation, withoutSubject } from '../panels';
 import type { ChangeNote, StudentSubject } from '../types';
 import { Field, Empty } from '../components/ui';
 import { ACCENTS } from '../constants';
 
 export function StudentPanelView() {
   const { state, panels, updatePanels, flash, navigate, setPanelEnabled } = usePlanner();
+  const [editing, setEditing] = useState(false);
+  const [details, setDetails] = useState({ field: panels.student.field ?? '', grade: panels.student.grade ?? '' });
   const week = useMemo(() => weekOf(), []);
   const results = useMemo(() => weekResults(state, week), [state, week]);
   const { current, past } = useMemo(() => splitExplanations(panels.student.explanations, week), [panels.student.explanations, week]);
@@ -88,7 +90,62 @@ export function StudentPanelView() {
             {t("Your planner is underneath all of this — the panel only adds a study view.")}
           </p>
         </div>
+        <button type="button" className="btn btn-tiny" onClick={() => setEditing((value) => !value)}>
+          {editing ? t("Cancel") : t("Change details")}
+        </button>
       </header>
+
+      {editing ? (
+        <section className="card">
+          <header className="card-head">
+            <div>
+              <p className="kicker">{t("Your details")}</p>
+              <h2 className="card-title">{t("What do you study?")}</h2>
+            </div>
+          </header>
+          <div className="panel-form">
+            <Field label={t("What do you study?")}>
+              <input
+                className="input"
+                value={details.field}
+                onChange={(event) => setDetails({ ...details, field: event.target.value })}
+              />
+            </Field>
+            <Field label={t("Where are you in it?")}>
+              <select className="input" value={details.grade} onChange={(event) => setDetails({ ...details, grade: event.target.value })}>
+                <option value="">—</option>
+                {GRADE_LABELS.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <div className="panel-form-actions">
+              <button
+                type="button"
+                className="btn btn-primary btn-small"
+                disabled={!details.field.trim() || !details.grade}
+                onClick={() => {
+                  updatePanels({
+                    ...panels,
+                    student: { ...panels.student, field: details.field.trim(), grade: details.grade },
+                  });
+                  setEditing(false);
+                  flash(t("Details saved."));
+                }}
+              >
+                {t("Save details")}
+              </button>
+            </div>
+          </div>
+        </section>
+      ) : (
+        <p className="panel-identity">
+          <strong>{panels.student.field || t("No field set")}</strong>
+          {panels.student.grade ? <span>{gradeLabel(panels.student.grade)}</span> : null}
+        </p>
+      )}
 
       <section className="card week-results" aria-label={t("This week")}>
         <div className="result-row">

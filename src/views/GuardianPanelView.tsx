@@ -82,6 +82,11 @@ export function GuardianPanelView() {
         </div>
       </header>
 
+      <p className="panel-identity">
+        <strong>{guardian.kind === 'parent' ? t("Parent") : t("Advisor")}</strong>
+        {guardian.field ? <span>{guardian.field}</span> : null}
+      </p>
+
       <section className="card">
         <header className="card-head">
           <div>

@@ -49,6 +49,39 @@ describe('panel storage', () => {
     expect(panels.student.explanations).toHaveLength(1);
   });
 
+  it('keeps what a student studies and where they are', () => {
+    const panels = sanitizePanels({
+      student: { enabled: true, field: '  Mathematics ', grade: 'school-11', subjects: [], explanations: [] },
+      guardian: { enabled: true, kind: 'parent', field: ' Physics ', links: [] },
+    });
+    expect(panels.student.field).toBe('Mathematics');
+    expect(panels.student.grade).toBe('school-11');
+    expect(panels.guardian.field).toBe('Physics');
+  });
+
+  it('drops a grade it does not recognise, and long or blank fields', () => {
+    const panels = sanitizePanels({
+      student: { enabled: true, field: '   ', grade: 'year-seven', subjects: [], explanations: [] },
+    });
+    expect(panels.student.field).toBeNull();
+    expect(panels.student.grade).toBeNull();
+    // Over-long text is trimmed to a sane length rather than thrown away.
+    const long = sanitizePanels({ student: { enabled: true, field: 'x'.repeat(200), grade: 'university', subjects: [], explanations: [] } });
+    expect(long.student.field).toHaveLength(60);
+    expect(long.student.grade).toBe('university');
+  });
+
+  it('keeps the details when a panel is merged from two devices', () => {
+    const base = createEmptyState().panels;
+    const local = stateWith({ ...base, student: { ...base.student, enabled: true, field: 'Law', grade: 'university', subjects: [], explanations: [] } });
+    const remote = stateWith({ ...base, student: { ...base.student, enabled: false, field: null, grade: null, subjects: [], explanations: [] } });
+    const merged = mergePanels(local.panels, remote.panels);
+    expect(merged.student.field).toBe('Law');
+    expect(merged.student.grade).toBe('university');
+    const other = mergePanels(remote.panels, local.panels);
+    expect(other.student.field).toBe('Law');
+  });
+
   it('caps subjects, notes and links so a vault never outgrows its budget', () => {
     const many = Array.from({ length: 60 }, (_, index) => subject(`s${index}`, `S${index}`));
     const notes = Array.from({ length: 260 }, (_, index) => note('2026-03-02', `${index}`));

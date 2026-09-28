@@ -130,13 +130,14 @@ export async function signIn(identifier: string, password: string, remember = tr
   return active;
 }
 
+/**
+ * Who is signed in, or null when nobody is. A network failure is thrown rather
+ * than swallowed: an offline device should keep using its local copy instead of
+ * being sent to the sign-in page.
+ */
 export async function fetchSession(): Promise<PublicUser | null> {
-  try {
-    const result = await request<SessionResponse>('/api/auth/session');
-    return result.user;
-  } catch {
-    return null;
-  }
+  const result = await request<SessionResponse>('/api/auth/session');
+  return result.user;
 }
 
 export async function signOut(): Promise<void> {

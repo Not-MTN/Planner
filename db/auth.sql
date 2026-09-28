@@ -52,3 +52,16 @@ CREATE TABLE IF NOT EXISTS planner_sessions (
 );
 
 CREATE INDEX IF NOT EXISTS planner_sessions_user_idx ON planner_sessions (user_id);
+
+-- ---------------------------------------------------------------------------
+-- Starting over (optional)
+-- ---------------------------------------------------------------------------
+-- Accounts created before 28 Sep 2026 stored a credential hash made with a
+-- different salt than the one saved next to it, so those accounts can never
+-- sign in. Nothing can repair them (the password itself never reached the
+-- server). If you created an account while that bug was live, clear the tables
+-- and sign up again:
+--
+--   DROP TABLE IF EXISTS planner_sessions, planner_vaults, planner_credentials, planner_users;
+--
+-- The API recreates them, empty, on the next request.
