@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { categoryById } from '../constants';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
-import { addDays, dayNumber, formatDuration, formatMonthShort, formatWeekdayShort, isValidTime, displayTime, todayISO } from '../dates';
-import { frequencyLabel, habitStreaks } from '../logic';
+import { addDays, dayNumber, formatDuration, formatMonthShort, formatWeekdayShort, isValidTime, displayTime, nextMonth, nextWeekend, todayISO } from '../dates';
+import { frequencyLabel, habitProgress, habitStreaks, isSkipped } from '../logic';
+import { formatEstimate } from '../quickAdd';
 import { FlameIcon, GripIcon, HabitGlyph, PencilIcon, StopwatchIcon, TickIcon, TrashIcon } from '../icons';
 import { repeatLabel } from '../recurrence';
 import type { Habit, PlannerEvent, Task } from '../types';
@@ -160,22 +161,26 @@ export function TaskRow({
   onDropSwap,
   onReschedule,
   rescheduleLabel = 'Tomorrow',
+  selection,
 }: {
   task: Task;
   showDate?: boolean;
   onDropSwap?: (sourceId: string) => void;
   onReschedule?: () => void;
   rescheduleLabel?: string;
+  /** Bulk-select mode: shows a checkbox instead of nothing. */
+  selection?: { selected: boolean; onToggle: () => void };
 }) {
   const { toggleTask, toggleSubtask, openComposer, deleteTask, flash, undo, startFocus, duplicateTask, moveTask } = usePlanner();
   const accent = categoryById(task.category).accent;
   const [open, setOpen] = useState(false);
+  const [picking, setPicking] = useState(false);
   const stepsDone = task.subtasks.filter((item) => item.completed).length;
   const today = todayISO();
   const overdue = !task.completed && task.dueDate !== null && task.dueDate < today;
   return (
     <li
-      className={cx('task', task.completed && 'is-done')}
+      className={cx('task', task.completed && 'is-done', selection?.selected && 'is-selected')}
       onDragOver={(dragEvent) => {
         if (!onDropSwap) return;
         dragEvent.preventDefault();
@@ -187,6 +192,15 @@ export function TaskRow({
         if (raw.startsWith('task:')) onDropSwap(raw.slice(5));
       }}
     >
+      {selection ? (
+        <input
+          type="checkbox"
+          className="select-box"
+          checked={selection.selected}
+          aria-label={t("Select {0}", { 0: task.title })}
+          onChange={selection.onToggle}
+        />
+      ) : null}
       <button
         type="button"
         className={cx('check', task.completed && 'on')}
@@ -208,6 +222,7 @@ export function TaskRow({
           <i className={cx('dot-inline', `accent-${accent}`)} aria-hidden="true" />
           {categoryById(task.category).label}
           {task.dueTime ? ` · ${displayTime(task.dueTime)}` : ''}
+          {task.estimatedMinutes ? <span className="repeat-chip" title={t("Planned effort")}>≈ {formatEstimate(task.estimatedMinutes)}</span> : null}
           {showDate && task.dueDate ? ` · ${formatWeekdayShort(task.dueDate)} ${dayNumber(task.dueDate)} ${formatMonthShort(task.dueDate)}` : ''}
           {task.waiting ? <span className="repeat-chip">{t("Waiting on {0}", { 0: task.waiting })}</span> : null}
           {task.repeat ? <span className="repeat-chip" title={repeatLabel(task.repeat)}>↻ {repeatLabel(task.repeat).replace('Every ', '')}</span> : null}
@@ -245,9 +260,35 @@ export function TaskRow({
             <button type="button" className="text-btn inline" onClick={() => (onReschedule ? onReschedule() : moveTask(task.id, addDays(today, 1)))}>
               {t("Move to tomorrow")}
             </button>
+            <button type="button" className="text-btn inline" onClick={() => moveTask(task.id, nextWeekend(today))}>
+              {t("This weekend")}
+            </button>
             <button type="button" className="text-btn inline" onClick={() => moveTask(task.id, addDays(today, 7))}>
               {t("Next week")}
             </button>
+            <button type="button" className="text-btn inline" onClick={() => moveTask(task.id, nextMonth(today))}>
+              {t("Next month")}
+            </button>
+            {picking ? (
+              <input
+                type="date"
+                className="snooze-date"
+                aria-label={t("Pick a date")}
+                min={today}
+                onChange={(event) => {
+                  if (event.target.value) {
+                    moveTask(task.id, event.target.value);
+                    setPicking(false);
+                  }
+                }}
+                onBlur={() => setPicking(false)}
+                autoFocus
+              />
+            ) : (
+              <button type="button" className="text-btn inline" onClick={() => setPicking(true)}>
+                {t("Pick date…")}
+              </button>
+            )}
           </div>
         ) : onReschedule ? (
           <button type="button" className="text-btn inline" onClick={onReschedule}>
@@ -306,11 +347,13 @@ export function TaskRow({
 }
 
 export function HabitRow({ habit, date }: { habit: Habit; date: string }) {
-  const { state, toggleHabit, openComposer } = usePlanner();
+  const { state, toggleHabit, setHabitValue, skipHabit, openComposer } = usePlanner();
   const done = state.completions.some((item) => item.habitId === habit.id && item.date === date);
+  const skipped = isSkipped(state, habit.id, date);
+  const progress = habitProgress(state, habit, date);
   const streak = habitStreaks(state, habit, date).current;
   return (
-    <li className={cx('habit-row', `accent-${habit.accent}`, done && 'is-done')}>
+    <li className={cx('habit-row', `accent-${habit.accent}`, done && !skipped && 'is-done', skipped && 'is-skipped')}>
       <span className={cx('icon-well', `accent-${habit.accent}`)}>
         <HabitGlyph name={habit.icon} />
       </span>
@@ -318,17 +361,43 @@ export function HabitRow({ habit, date }: { habit: Habit; date: string }) {
         <strong>{habit.name}</strong>
         <small>
           {frequencyLabel(habit)}
-          {streak >= 2 ? <span className="streak-chip"><FlameIcon size={12} />{streak}</span> : null}
+          {habit.unit ? ` · ${habit.unit.label}` : ''}
+          {skipped ? <span className="streak-chip" title={t("Rest day — your streak is safe")}>🌙 {t("rest")}</span> : streak >= 2 ? <span className="streak-chip"><FlameIcon size={12} />{streak}</span> : null}
         </small>
+      </button>
+      {progress && !skipped ? (
+        <span className="unit-progress">
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label={t("Add one {0} for {1}", { 0: habit.unit?.label ?? '', 1: habit.name })}
+            onClick={() => setHabitValue(habit.id, date, progress.value + 1)}
+          >
+            <span aria-hidden="true">＋</span>
+          </button>
+          <span className={cx('unit-count', progress.value >= progress.target && 'met')}>
+            {progress.value}/{progress.target}
+          </span>
+        </span>
+      ) : null}
+      <button
+        type="button"
+        className={cx('icon-btn', skipped && 'is-on')}
+        aria-label={skipped ? t("Take {0} out of rest", { 0: habit.name }) : t("Rest day for {0} (streak is safe)", { 0: habit.name })}
+        aria-pressed={skipped}
+        title={t("Rest day — the streak is not broken")}
+        onClick={() => skipHabit(habit.id, date)}
+      >
+        <span aria-hidden="true">🌙</span>
       </button>
       <button
         type="button"
-        className={cx('check', 'circle', done && 'on')}
-        aria-pressed={done}
-        aria-label={done ? t("Mark {0} not done", { 0: habit.name }) : t("Mark {0} complete", { 0: habit.name })}
+        className={cx('check', 'circle', done && !skipped && 'on')}
+        aria-pressed={done && !skipped}
+        aria-label={done && !skipped ? t("Mark {0} not done", { 0: habit.name }) : t("Mark {0} complete", { 0: habit.name })}
         onClick={() => toggleHabit(habit.id, date)}
       >
-        {done ? <TickIcon size={14} /> : null}
+        {done && !skipped ? <TickIcon size={14} /> : null}
       </button>
     </li>
   );

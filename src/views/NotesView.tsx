@@ -3,16 +3,46 @@ import { NOTE_KINDS, noteKindById } from '../constants';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { dayNumber, formatEdited, formatMonthShort, todayISO } from '../dates';
-import { matchesQuery } from '../logic';
+import { matchesQuery, noteBacklinks } from '../logic';
 import { Empty } from '../components/ui';
 import { extractTags, Markdown } from '../components/Markdown';
+import { AttachmentList } from '../components/Attachments';
 import { t } from '../i18n';
 
 export function NotesView() {
-  const { state, openComposer, deleteNote, updateNote, flash, undo } = usePlanner();
+  const { state, openComposer, deleteNote, updateNote, addNote, flash, undo } = usePlanner();
   const [kind, setKind] = useState<'all' | (typeof NOTE_KINDS)[number]['id']>('all');
   const [query, setQuery] = useState('');
   const [tag, setTag] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  /** [[Title]] pills: capture-phase so they win over the card's own open button. */
+  /** [[Title]] pills: capture-phase so they win over the card's own open button. */
+  const followLink = (title: string) => {
+    const found = state.notes.find((note) => note.title.trim().toLowerCase() === title.trim().toLowerCase());
+    if (found) {
+      setExpandedId(found.id);
+      openComposer({ mode: 'edit', type: 'note', id: found.id });
+    } else {
+      addNote({ title: title.slice(0, 140), body: '', kind: 'quick', date: null });
+      flash(t("Note “{0}” created.", { 0: title }), { label: t("Undo"), run: undo });
+    }
+  };
+  const onLinkClick = (event: React.MouseEvent) => {
+    const pill = (event.target as HTMLElement).closest<HTMLElement>('[data-notelink]');
+    if (!pill?.dataset.notelink) return;
+    event.preventDefault();
+    event.stopPropagation();
+    followLink(pill.dataset.notelink);
+  };
+  const onLinkKey = (event: React.KeyboardEvent) => {
+    if ((event.key !== 'Enter' && event.key !== ' ') || event.target === event.currentTarget) return;
+    const pill = (event.target as HTMLElement).closest<HTMLElement>('[data-notelink]');
+    if (!pill?.dataset.notelink) return;
+    event.preventDefault();
+    event.stopPropagation();
+    followLink(pill.dataset.notelink);
+  };
   const allTags = useMemo(() => [...new Set(state.notes.flatMap((note) => extractTags(`${note.title} ${note.body}`)))].sort(), [state.notes]);
   const notes = useMemo(
     () =>
@@ -92,20 +122,49 @@ export function NotesView() {
           <Empty title={t("No notes match.")} text={t("Try another kind, or clear the search.")} />
         </section>
       ) : (
-        <div className="note-grid">
+        <div className="note-grid" onClickCapture={onLinkClick} onKeyDownCapture={onLinkKey}>
           {notes.map((note) => {
             const meta = noteKindById(note.kind);
+            const backlinks = noteBacklinks(state.notes, note);
             return (
               <article key={note.id} className={cx('card note-card', `accent-${meta.accent}`, note.kind === 'journal' && 'is-journal', note.pinned && 'is-pinned')}>
-                <button type="button" className="note-open" onClick={() => openComposer({ mode: 'edit', type: 'note', id: note.id })}>
+                <div className="note-content">
                   <span className={cx('chip-label', `accent-${meta.accent}`)}>{meta.label}</span>
                   <h2>{note.title}</h2>
-                  {note.body ? <div className="md-body"><Markdown text={note.body} limit={14} /></div> : <p>{t("No words yet.")}</p>}
+                  {note.body ? (
+                    <div className="md-body">
+                      <Markdown text={note.body} limit={expandedId === note.id ? undefined : 14} />
+                    </div>
+                  ) : (
+                    <p>{t("No words yet.")}</p>
+                  )}
+                  <AttachmentList refs={note.attachments ?? []} />
                   <small>
                     {formatEdited(note.updatedAt)}
                     {note.date ? ` · ${dayNumber(note.date)} ${formatMonthShort(note.date)}` : ''}
                   </small>
+                </div>
+                <button
+                  type="button"
+                  className="text-btn note-open-btn"
+                  onClick={() => { setExpandedId(expandedId === note.id ? null : note.id); openComposer({ mode: 'edit', type: 'note', id: note.id }); }}
+                >
+                  {t("Open")}
                 </button>
+                {backlinks.length > 0 && expandedId === note.id ? (
+                  <div className="backlinks">
+                    <span className="kicker">{t("Linked from")}</span>
+                    {backlinks.map((source) => (
+                      <button key={source.id} type="button" className="backlink" onClick={() => openComposer({ mode: 'edit', type: 'note', id: source.id })}>
+                        {source.title}
+                      </button>
+                    ))}
+                  </div>
+                ) : backlinks.length > 0 ? (
+                  <button type="button" className="text-btn backlinks-toggle" onClick={() => setExpandedId(note.id)}>
+                    {t("{0} linked {1}", { 0: backlinks.length, 1: backlinks.length === 1 ? t("note") : t("notes") })}
+                  </button>
+                ) : null}
                 <div className="note-actions">
                 <button
                   type="button"

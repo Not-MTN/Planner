@@ -124,6 +124,45 @@ export function ArcIcon(props: IconProps) {
   );
 }
 
+export function HelpIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="12" r="8.4" />
+      <path d="M9.4 9.2a2.6 2.6 0 1 1 3.9 2.3c-.9.5-1.3 1-1.3 1.9" />
+      <circle cx="12" cy="16.6" r="0.4" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+export function GlobeIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="12" r="8.4" />
+      <path d="M3.6 12h16.8M12 3.6c2.4 2.2 3.6 5.1 3.6 8.4s-1.2 6.2-3.6 8.4c-2.4-2.2-3.6-5.1-3.6-8.4S9.6 5.8 12 3.6Z" />
+    </Svg>
+  );
+}
+
+export function VolumeIcon({ size = 24 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M11 5.5 6.5 9H4a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h2.5L11 18.5a.6.6 0 0 0 .96-.48V5.98A.6.6 0 0 0 11 5.5Z" fill="currentColor" stroke="none" />
+      <path d="M15 9.3a4 4 0 0 1 0 5.4" />
+      <path d="M17.8 6.8a7.2 7.2 0 0 1 0 10.4" />
+    </svg>
+  );
+}
+
+export function MicIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5.5 11a6.5 6.5 0 0 0 13 0" />
+      <path d="M12 17.5V21" />
+    </Svg>
+  );
+}
+
 export function PlusIcon(props: IconProps) {
   return (
     <Svg {...props}>

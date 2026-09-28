@@ -26,6 +26,10 @@
       "url": "/#/today"
     },
     {
+      "name": "Quick add",
+      "url": "/#/today?qa=1"
+    },
+    {
       "name": "Calendar",
       "url": "/#/calendar"
     },

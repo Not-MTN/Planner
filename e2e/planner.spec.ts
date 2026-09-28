@@ -2,7 +2,10 @@ import { expect, test } from '@playwright/test';
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/#/today');
-  await page.evaluate(() => localStorage.clear());
+  await page.evaluate(() => {
+    localStorage.clear();
+    localStorage.setItem('planner-tour-done', '1'); // specs here are not about the tour
+  });
   await page.reload();
 });
 

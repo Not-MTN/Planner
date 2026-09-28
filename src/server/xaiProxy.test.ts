@@ -54,8 +54,8 @@ describe('Vercel function discovery', () => {
       .filter((file) => /\.(ts|js|mjs)$/.test(file) && !file.includes('.test.'))
       .map((file) => '/api/' + relative(apiRoot, file).split(sep).join('/').replace(/\.(ts|js|mjs)$/, ''))
       .sort();
-    // api/sync/index.ts is served by Vercel at /api/sync.
-    expect(routes).toEqual([XAI_CHAT_URL, XAI_STATUS_URL, '/api/sync/index', '/api/sync/status'].sort());
+    // api/sync/index.ts is served by Vercel at /api/sync, api/ics/index.ts at /api/ics.
+    expect(routes).toEqual([XAI_CHAT_URL, XAI_STATUS_URL, '/api/sync/index', '/api/sync/status', '/api/ics/index'].sort());
   });
 
   it('exports web handlers for the right HTTP methods', () => {

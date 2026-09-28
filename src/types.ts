@@ -36,6 +36,8 @@ export interface Task {
   completedAt?: string | null;
   /** If set, this is waiting on someone/something and is not treated as overdue. */
   waiting: string | null;
+  /** Planned effort in minutes; used by Plan my day, the board, and plan-vs-focus insights. */
+  estimatedMinutes: number | null;
 }
 
 export interface FocusLog {
@@ -81,6 +83,8 @@ export interface PlannerEvent {
   fixedCommitmentId?: string;
   /** Present on read-only dates generated from a repeating event. */
   seriesEventId?: string;
+  /** Provenance for events imported from a subscribed calendar feed. */
+  source?: { url: string; uid: string } | null;
 }
 
 export interface FixedCommitment {
@@ -104,6 +108,12 @@ export interface FixedCommitmentInput {
   note: string;
 }
 
+/** Countable tracking for a habit, e.g. "8 glasses of water" or "2 km run". */
+export interface HabitUnit {
+  label: string;
+  target: number;
+}
+
 export interface Habit {
   id: string;
   name: string;
@@ -115,11 +125,17 @@ export interface Habit {
   createdOn: string;
   createdAt: string;
   updatedAt: string;
+  /** When set, a day counts as done once the recorded amount reaches the target. */
+  unit: HabitUnit | null;
 }
 
 export interface HabitCompletion {
   habitId: string;
   date: string;
+  /** Amount recorded for unit-based habits. Absent on older binary check-ins. */
+  value?: number;
+  /** A deliberate rest day: neutral — never breaks and never extends a streak. */
+  skipped?: boolean;
 }
 
 export interface Milestone {
@@ -149,6 +165,28 @@ export interface Note {
   pinned?: boolean;
   createdAt: string;
   updatedAt: string;
+  /** Files attached to this note; the bytes live in IndexedDB under file:<id>. */
+  attachments?: AttachmentRef[];
+}
+
+/** A file uploaded into the app and stored locally in IndexedDB. */
+export interface AttachmentRef {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  addedAt: string;
+}
+
+export type MoodValue = 1 | 2 | 3 | 4 | 5;
+
+/** One mood check-in per day (the latest wins). */
+export interface MoodEntry {
+  date: string;
+  value: MoodValue;
+  /** Optional link to the task that prompted the check-in. */
+  taskId?: string;
+  updatedAt: string;
 }
 
 export interface PlannerState {
@@ -161,6 +199,7 @@ export interface PlannerState {
   completions: HabitCompletion[];
   goals: Goal[];
   notes: Note[];
+  moods: MoodEntry[];
   intentions: Record<string, string>;
   focusLog: FocusLog[];
 }
@@ -176,6 +215,7 @@ export interface TaskInput {
   repeat?: TaskRepeat | null;
   subtasks?: Subtask[];
   waiting?: string | null;
+  estimatedMinutes?: number | null;
 }
 
 export interface EventInput {
@@ -187,6 +227,7 @@ export interface EventInput {
   note: string;
   important: boolean;
   repeat?: TaskRepeat | null;
+  source?: { url: string; uid: string } | null;
 }
 
 export interface HabitInput {
@@ -195,6 +236,7 @@ export interface HabitInput {
   accent: Accent;
   frequency: HabitFrequency;
   essential?: boolean;
+  unit?: HabitUnit | null;
 }
 
 export interface GoalInput {
@@ -212,6 +254,7 @@ export interface NoteInput {
   kind: NoteKind;
   date: string | null;
   pinned?: boolean;
+  attachments?: AttachmentRef[];
 }
 
 export type ComposerState =
@@ -230,7 +273,7 @@ export interface DayScore {
   ratio: number | null;
 }
 
-export type DotState = 'done' | 'open' | 'future' | 'optional' | 'off';
+export type DotState = 'done' | 'open' | 'future' | 'optional' | 'skipped' | 'off';
 
 export function createEmptyState(): PlannerState {
   return {
@@ -243,6 +286,7 @@ export function createEmptyState(): PlannerState {
     goals: [],
     notes: [],
     intentions: {},
+    moods: [],
     focusLog: [],
   };
 }

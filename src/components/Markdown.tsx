@@ -6,7 +6,7 @@ import { Fragment, type ReactNode } from 'react';
  * quotes, **bold**, *italic*, `code`, ~~strike~~, #tags and http(s) links.
  */
 
-const INLINE = /(\*\*[^*]+\*\*|__[^_]+__|\*[^*\s][^*]*\*|_[^_\s][^_]*_|`[^`]+`|~~[^~]+~~|\[[^\]]+\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<]+[^\s<.,;:!?)]|(?:^|(?<=\s))#[a-z][\w-]{0,30})/gi;
+const INLINE = /(\[\[[^\]]{1,120}\]\]|\*\*[^*]+\*\*|__[^_]+__|\*[^*\s][^*]*\*|_[^_\s][^_]*_|`[^`]+`|~~[^~]+~~|\[[^\]]+\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<]+[^\s<.,;:!?)]|(?:^|(?<=\s))#[a-z][\w-]{0,30})/gi;
 
 export function renderInline(text: string, keyBase = 'i'): ReactNode[] {
   const out: ReactNode[] = [];
@@ -17,7 +17,26 @@ export function renderInline(text: string, keyBase = 'i'): ReactNode[] {
     const start = match.index ?? 0;
     if (start > last) out.push(text.slice(last, start));
     const key = `${keyBase}-${index++}`;
-    if (token.startsWith('**') || token.startsWith('__')) out.push(<strong key={key}>{renderInline(token.slice(2, -2), key)}</strong>);
+    // [[Note]] links render as real buttons — note cards must not nest them.
+    if (token.startsWith('[[')) {
+      const inner = token.slice(2, -2);
+      const [title, alias] = inner.split('|');
+      const trim = (value?: string) => (value ?? '').trim();
+      out.push(
+        <button
+          key={key}
+          type="button"
+          className="note-link-pill"
+          data-notelink={trim(title)}
+          aria-label={`[[${trim(title)}]]`}
+          onClick={(event) => event.preventDefault()}
+          onKeyDown={(event) => event.stopPropagation()}
+        >
+          {trim(alias ?? title)}
+        </button>,
+      );
+    }
+    else if (token.startsWith('**') || token.startsWith('__')) out.push(<strong key={key}>{renderInline(token.slice(2, -2), key)}</strong>);
     else if (token.startsWith('~~')) out.push(<del key={key}>{token.slice(2, -2)}</del>);
     else if (token.startsWith('`')) out.push(<code key={key}>{token.slice(1, -1)}</code>);
     else if (token.startsWith('[')) {

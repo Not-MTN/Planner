@@ -1,7 +1,7 @@
 import { ACCENTS, HABIT_ICONS, NOTE_KINDS, PRIORITIES } from './constants';
 import { isValidISODate, isValidTime, localDateFromTimestamp, timeToMinutes } from './dates';
 import { REPEAT_SET } from './recurrence';
-import { createEmptyState, type AIMemory, type AIMemoryCategory, type FixedCommitment, type FocusLog, type Subtask, type TaskRepeat, type Goal, type Habit, type HabitFrequency, type Note, type PlannerEvent, type PlannerState, type Task } from './types';
+import { createEmptyState, type AIMemory, type AttachmentRef, type AIMemoryCategory, type FixedCommitment, type FocusLog, type HabitCompletion, type MoodEntry, type MoodValue, type Subtask, type TaskRepeat, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type Task } from './types';
 import { t } from './i18n';
 
 export const STORAGE_KEY = 'personal-planner.v1';
@@ -69,7 +69,32 @@ function sanitizeTask(value: unknown): Task | null {
     subtasks: sanitizeSubtasks(raw.subtasks),
     completedAt: asString(raw.completedAt, 40) || null,
     waiting: asString(raw.waiting, 140)?.trim() || null,
+    estimatedMinutes: sanitizeMinutes(raw.estimatedMinutes),
   };
+}
+
+function sanitizeMinutes(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  const minutes = Math.round(value);
+  return minutes >= 1 && minutes <= 1440 ? minutes : null;
+}
+
+function sanitizeUnit(value: unknown): HabitUnit | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const label = asString(raw.label, 20)?.trim().toLowerCase();
+  const target = typeof raw.target === 'number' && Number.isFinite(raw.target) ? Math.round(raw.target) : 0;
+  if (!label || target < 1 || target > 999) return null;
+  return { label: label.slice(0, 20), target };
+}
+
+function sanitizeEventSource(value: unknown): PlannerEvent['source'] {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const url = asString(raw.url, 400)?.trim();
+  const uid = asString(raw.uid, 200)?.trim();
+  if (!url || !uid || !/^https?:\/\//i.test(url)) return null;
+  return { url, uid };
 }
 
 function sanitizeSubtasks(value: unknown): Subtask[] {
@@ -151,6 +176,7 @@ function sanitizeEvent(value: unknown): PlannerEvent | null {
     createdAt: asString(raw.createdAt, 40) || new Date(0).toISOString(),
     updatedAt: asString(raw.updatedAt, 40) || new Date(0).toISOString(),
     repeat: REPEAT_SET.has(String(raw.repeat)) ? (raw.repeat as PlannerEvent['repeat']) : null,
+    source: sanitizeEventSource(raw.source),
   };
 }
 
@@ -200,6 +226,7 @@ function sanitizeHabit(value: unknown): Habit | null {
     createdOn: createdOn && isValidISODate(createdOn) ? createdOn : localDateFromTimestamp(createdAt),
     createdAt,
     updatedAt: asString(raw.updatedAt, 40) || createdAt,
+    unit: sanitizeUnit(raw.unit),
   };
 }
 
@@ -233,6 +260,22 @@ function sanitizeGoal(value: unknown): Goal | null {
   };
 }
 
+function sanitizeAttachment(value: unknown): AttachmentRef | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = asString(raw.id, 64);
+  const name = asString(raw.name, 180)?.trim();
+  if (!id || !name) return null;
+  const size = Number(raw.size);
+  return {
+    id,
+    name,
+    mime: asString(raw.mime, 80) || 'application/octet-stream',
+    size: Number.isFinite(size) && size >= 0 ? Math.round(size) : 0,
+    addedAt: asString(raw.addedAt, 40) || new Date(0).toISOString(),
+  };
+}
+
 function sanitizeNote(value: unknown): Note | null {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Record<string, unknown>;
@@ -251,6 +294,9 @@ function sanitizeNote(value: unknown): Note | null {
     pinned: raw.pinned === true,
     createdAt: asString(raw.createdAt, 40) || new Date(0).toISOString(),
     updatedAt: asString(raw.updatedAt, 40) || new Date(0).toISOString(),
+    attachments: Array.isArray(raw.attachments)
+      ? raw.attachments.map(sanitizeAttachment).filter((item): item is AttachmentRef => item !== null)
+      : undefined,
   };
 }
 
@@ -296,7 +342,11 @@ export function sanitizeState(raw: unknown): PlannerState | null {
         const key = `${habitId}|${date}`;
         if (completionSeen.has(key)) return [];
         completionSeen.add(key);
-        return [{ habitId, date }];
+        const rawValue = typeof rawItem.value === 'number' && Number.isFinite(rawItem.value) ? Math.round(rawItem.value) : null;
+        const entry: HabitCompletion = { habitId, date };
+        if (rawValue !== null && rawValue >= 0 && rawValue <= 999) entry.value = rawValue;
+        if (rawItem.skipped === true) entry.skipped = true;
+        return [entry];
       })
     : [];
   const goals = uniqueBy(Array.isArray(source.goals) ? source.goals.flatMap((item) => {
@@ -308,6 +358,18 @@ export function sanitizeState(raw: unknown): PlannerState | null {
     const note = sanitizeNote(item);
     return note ? [note] : [];
   }) : [], (item) => item.id);
+  const moodSeen = new Set<string>();
+  const moods = (Array.isArray(source.moods) ? source.moods : []).flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const rawItem = item as Record<string, unknown>;
+    const date = asString(rawItem.date, 10);
+    const value = typeof rawItem.value === 'number' ? Math.round(rawItem.value) : 0;
+    if (!date || !isValidISODate(date) || value < 1 || value > 5 || moodSeen.has(date)) return [];
+    moodSeen.add(date);
+    const entry: MoodEntry = { date, value: value as MoodValue, updatedAt: asString(rawItem.updatedAt, 40) || new Date(0).toISOString() };
+    if (typeof rawItem.taskId === 'string' && rawItem.taskId.length <= 80) entry.taskId = rawItem.taskId;
+    return [entry];
+  });
   const intentions: Record<string, string> = {};
   if (source.intentions && typeof source.intentions === 'object' && !Array.isArray(source.intentions)) {
     for (const [key, value] of Object.entries(source.intentions)) {
@@ -324,6 +386,7 @@ export function sanitizeState(raw: unknown): PlannerState | null {
     completions,
     goals,
     notes,
+    moods,
     intentions,
     focusLog: sanitizeFocusLog(source.focusLog),
   };

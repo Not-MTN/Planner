@@ -36,9 +36,9 @@ async function run<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) 
 }
 
 /** Serialized planner JSON (the same format as backups). */
-export async function idbRead(): Promise<string | null> {
+export async function idbRead(key = KEY): Promise<string | null> {
   try {
-    const value = await run('readonly', (store) => store.get(KEY) as IDBRequest<unknown>);
+    const value = await run('readonly', (store) => store.get(key) as IDBRequest<unknown>);
     return typeof value === 'string' ? value : null;
   } catch {
     return null;
@@ -48,18 +48,53 @@ export async function idbRead(): Promise<string | null> {
 let queue: Promise<unknown> = Promise.resolve();
 
 /** Writes are serialised so an older write can never land after a newer one. */
-export function idbWrite(serialized: string): Promise<boolean> {
+export function idbWrite(serialized: string, key = KEY): Promise<boolean> {
   const next = queue.then(
-    () => run('readwrite', (store) => store.put(serialized, KEY)).then(() => true, () => false),
+    () => run('readwrite', (store) => store.put(serialized, key)).then(() => true, () => false),
   );
   queue = next;
   return next;
 }
 
-export function idbClear(): Promise<boolean> {
-  const next = queue.then(() => run('readwrite', (store) => store.delete(KEY)).then(() => true, () => false));
+export function idbClear(key = KEY): Promise<boolean> {
+  const next = queue.then(() => run('readwrite', (store) => store.delete(key)).then(() => true, () => false));
   queue = next;
   return next;
+}
+
+/** All keys in the store that start with `prefix` (attachment sweeping). */
+export async function idbKeysWithPrefix(prefix: string): Promise<string[]> {
+  try {
+    const keys = await run('readonly', (store) => store.getAllKeys() as IDBRequest<IDBValidKey[]>);
+    return keys.filter((key): key is string => typeof key === 'string' && key.startsWith(prefix));
+  } catch {
+    return [];
+  }
+}
+
+// ── Binary attachments (notes' files/music) ─────────────────────────────
+// Stored as Blobs under `file:<id>` keys in the same kv store — a separate
+// namespace from the serialized planner state and its undo history.
+
+export async function idbReadBlob(key: string): Promise<Blob | null> {
+  try {
+    const value = await run('readonly', (store) => store.get(key) as IDBRequest<unknown>);
+    return value instanceof Blob ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export function idbWriteBlob(key: string, blob: Blob): Promise<boolean> {
+  const next = queue.then(
+    () => run('readwrite', (store) => store.put(blob, key)).then(() => true, () => false),
+  );
+  queue = next;
+  return next;
+}
+
+export function idbDelete(key: string): Promise<boolean> {
+  return idbClear(key);
 }
 
 /** exportedAt of a serialized copy, for picking the newer of two. */

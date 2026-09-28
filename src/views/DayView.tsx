@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
 import {
@@ -6,6 +6,7 @@ import {
   dayNumber,
   dayRelation,
   formatClock,
+  formatJalaliLong,
   formatMonthLong,
   formatWeekdayLong,
   motivationFor,
@@ -18,24 +19,26 @@ import {
   eventsForDate,
   habitsDueOn,
   isEmptyState,
+  journalForDate,
   overdueTasks,
   progressPhrase,
   tasksForDate,
   upcomingFocus,
   weekLeftovers,
 } from '../logic';
+import { fetchWeather, weatherInfo, type WeatherNow } from '../weather';
 import { QuickAddBar } from '../components/QuickAddBar';
 import { WelcomeCard } from '../components/WelcomeCard';
 import { EventRow, FixedEventRow, HabitRow, IntentionField, NowMark, TaskRow } from '../components/items';
 import { Empty, Meter, Ring } from '../components/ui';
 import { ChevronLeftIcon, ChevronRightIcon, PlusIcon, SparklesIcon, StopwatchIcon } from '../icons';
-import type { Habit } from '../types';
+import type { Habit, MoodValue } from '../types';
 import { autoSchedule } from '../scheduler';
 import { t } from '../i18n';
 
 export function DayView({ date }: { date: string }) {
   const planner = usePlanner();
-  const { state, openComposer, navigate, swapEventTimes, swapTasks, moveTask, flash, celebrate, startFocus, carryWeekLeftovers, undo } = planner;
+  const { state, display, openComposer, navigate, swapEventTimes, swapTasks, moveTask, flash, celebrate, startFocus, carryWeekLeftovers, undo } = planner;
   const now = useNow(20000);
   const today = todayISO(now);
   const isToday = date === today;
@@ -57,7 +60,10 @@ export function DayView({ date }: { date: string }) {
     const complete = score.total > 0 && score.done === score.total;
     if (complete && !celebrateRef.current) {
       celebrate();
-      flash(t("Day complete. Beautifully done."));
+      flash(t("Day complete. Beautifully done."), {
+        label: t("How did it feel?"),
+        run: () => document.querySelector('[data-mood-card]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }),
+      });
     }
     celebrateRef.current = complete;
   }, [score.total, score.done, celebrate, flash]);
@@ -105,6 +111,7 @@ export function DayView({ date }: { date: string }) {
             <span className="hero-date-num">{dayNumber(date)}</span> {formatMonthLong(date)}
             {isToday ? <span className="clock">{displayTime(clock)}</span> : null}
           </p>
+          {display.jalali ? <p className="jalali-line">{formatJalaliLong(date)}</p> : null}
           {isToday ? <p className="quote">{motivationFor(date)}</p> : null}
           <QuickAddBar defaultDate={date} />
           {upcoming.length > 0 ? (
@@ -190,6 +197,8 @@ export function DayView({ date }: { date: string }) {
       </header>
 
       {fresh && isToday ? <WelcomeCard /> : null}
+      {isToday ? <WeatherCard /> : null}
+      {isToday ? <MoodCard date={today} /> : null}
       {essentials.length > 0 ? <EssentialsCard date={date} habits={essentials} /> : null}
 
       <IntentionField key={date} date={date} />
@@ -304,7 +313,7 @@ export function DayView({ date }: { date: string }) {
             )}
           </section>
 
-          <section className="card wash-lav">
+          <section className="card wash-lav" data-tour="habits">
             <header className="card-head">
               <div>
                 <p className="kicker">{t("Repeat")}</p>
@@ -334,10 +343,171 @@ export function DayView({ date }: { date: string }) {
             )}
           </section>
 
+          <JournalCard key={`journal-${date}`} date={date} />
+
           <DayNotes date={date} />
         </div>
       </div>
     </div>
+  );
+}
+
+/** One quiet line (or more) a day: the dated journal note, edited inline. */
+function JournalCard({ date }: { date: string }) {
+  const { state, addNote, updateNote, openComposer } = usePlanner();
+  const note = journalForDate(state.notes, date);
+  const [body, setBody] = useState(note?.body ?? '');
+  const [saved, setSaved] = useState(false);
+  const timer = useRef<number | null>(null);
+
+  const save = (value: string) => {
+    if (!value.trim() && !note) return;
+    if (note) {
+      if (value !== note.body) updateNote(note.id, { body: value });
+    } else {
+      addNote({ title: formatWeekdayLong(date), body: value, kind: 'journal', date });
+    }
+    setSaved(true);
+    if (timer.current) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setSaved(false), 1600);
+  };
+
+  return (
+    <section className="card journal-card">
+      <header className="card-head">
+        <div>
+          <p className="kicker">{t("Journal")}</p>
+          <h2 className="card-title">{t("A few lines for this day")}</h2>
+        </div>
+        <div className="journal-side">
+          {saved ? <span className="journal-saved" role="status">{t("Saved")}</span> : null}
+          {note ? (
+            <button type="button" className="btn btn-tiny" onClick={() => openComposer({ mode: 'edit', type: 'note', id: note.id })}>
+              {t("Open")}
+            </button>
+          ) : null}
+        </div>
+      </header>
+      <textarea
+        className={cx('journal-entry', 'journal-inline')}
+        dir="auto"
+        value={body}
+        rows={4}
+        maxLength={20000}
+        placeholder={t("What do you want to remember about this day?")}
+        aria-label={t("Journal entry for this day")}
+        onChange={(event) => setBody(event.target.value)}
+        onBlur={() => save(body)}
+      />
+    </section>
+  );
+}
+
+const MOODS: Array<{ value: MoodValue; emoji: string; label: string; line: string }> = [
+  { value: 1, emoji: '😩', label: t("Drained"), line: t("Rough days count too. Be gentle with yourself tonight.") },
+  { value: 2, emoji: '😕', label: t("Down"), line: t("Feeling down still counts as showing up. Noted with care.") },
+  { value: 3, emoji: '🙂', label: t("Steady"), line: t("Steady is a quiet win. Nicely held.") },
+  { value: 4, emoji: '😄', label: t("Bright"), line: t("Bright! Notice what made it work — do more of that.") },
+  { value: 5, emoji: '🤩', label: t("Glowing"), line: t("Glowing! Bottle this feeling. You earned it.") },
+];
+
+/**
+ * The daily mood check-in — one honest tap about how the day felt. Big, warm,
+ * and a little playful on purpose: this is where the reward for showing up
+ * lives. Logging a top mood fires the confetti.
+ */
+function MoodCard({ date }: { date: string }) {
+  const { state, logMood, celebrate } = usePlanner();
+  const mood = state.moods.find((entry) => entry.date === date);
+  const invited = !mood && new Date().getHours() >= 16;
+  const meta = mood ? MOODS.find((item) => item.value === mood.value) : null;
+
+  const pick = (value: MoodValue) => {
+    if (mood?.value === value) {
+      logMood(date, null);
+      return;
+    }
+    logMood(date, value);
+    if (value === 5) celebrate();
+  };
+
+  return (
+    <section className={cx('card', 'mood-card', invited && 'invited', mood && `mood-${mood.value} has-mood`)} data-mood-card>
+      <header className="card-head">
+        <div>
+          <p className="kicker">{t("Daily check-in")}</p>
+          <h2 className="card-title">{mood ? t("Today felt {0}", { 0: meta?.label.toLowerCase() ?? '' }) : t("How did today feel?")}</h2>
+        </div>
+        {mood ? <span className="mood-current" aria-hidden="true">{meta?.emoji}</span> : null}
+      </header>
+      <div className="mood-row" role="group" aria-label={t("How today felt, 1 to 5")}>
+        {MOODS.map((item) => (
+          <button
+            key={item.value}
+            type="button"
+            className={cx('mood-btn', mood?.value === item.value && 'on')}
+            aria-label={t("Log today as {0}", { 0: item.label })}
+            aria-pressed={mood?.value === item.value}
+            title={mood?.value === item.value ? t("Tap again to clear") : item.label}
+            onClick={() => pick(item.value)}
+          >
+            <span className="mood-emoji" aria-hidden="true">{item.emoji}</span>
+            <span className="mood-label">{item.label}</span>
+          </button>
+        ))}
+      </div>
+      {meta ? (
+        <p className="mood-line" role="status">{meta.line}</p>
+      ) : (
+        <p className="mood-line dim">{t("One tap, no judgment — tomorrow you can see the pattern.")}</p>
+      )}
+    </section>
+  );
+}
+
+/** Weather for today, only when enabled in Settings (Open-Meteo, no key). */
+function WeatherCard() {
+  const { weather } = usePlanner();
+  const [data, setData] = useState<WeatherNow | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!weather.enabled || weather.lat === null || weather.lon === null) return;
+    let cancelled = false;
+    void fetchWeather(weather.lat, weather.lon)
+      .then((now) => {
+        if (!cancelled) setData(now);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [weather.enabled, weather.lat, weather.lon]);
+
+  if (!weather.enabled || weather.lat === null || weather.lon === null) return null;
+  if (failed) return null;
+  if (!data) {
+    return (
+      <section className="card weather-card is-loading" aria-hidden="true">
+        <span className="weather-icon">☁️</span>
+      </section>
+    );
+  }
+  const info = weatherInfo(data.code);
+  return (
+    <section className="card weather-card" aria-label={t("Weather for today")}>
+      <span className="weather-icon" aria-hidden="true">{info.icon}</span>
+      <div className="weather-body">
+        <strong>{data.temp}°</strong>
+        <span className="weather-label">{info.label}</span>
+      </div>
+      <p className="meta weather-meta">
+        {t("Feels like {0}°", { 0: data.feels })} · {t("High {0}° · Low {1}°", { 0: data.hi, 1: data.lo })}
+        {weather.place ? ` · ${weather.place}` : ''}
+      </p>
+    </section>
   );
 }
 

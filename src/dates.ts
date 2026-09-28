@@ -179,20 +179,29 @@ function fmt(name: string, options: Intl.DateTimeFormatOptions): Intl.DateTimeFo
   return formatters[name];
 }
 
-export function loadDisplayPrefs(): { dateLanguage: DateLanguage; timeFormat: TimeFormat } {
+export interface DisplayPrefs {
+  dateLanguage: DateLanguage;
+  timeFormat: TimeFormat;
+  /** Show the Jalali (Persian calendar) date alongside Gregorian dates. */
+  jalali?: boolean;
+}
+
+export function loadDisplayPrefs(): DisplayPrefs {
+  let jalali = false;
   try {
-    const raw = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as { dateLanguage?: string; timeFormat?: string };
+    const raw = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as { dateLanguage?: string; timeFormat?: string; jalali?: boolean };
     dateLanguage = DATE_LANGUAGES.some((item) => item.id === raw.dateLanguage) ? (raw.dateLanguage as DateLanguage) : 'en-GB';
     timeFormat = raw.timeFormat === '12h' ? '12h' : '24h';
+    jalali = raw.jalali === true;
   } catch {
     dateLanguage = 'en-GB';
     timeFormat = '24h';
   }
   formatters = {};
-  return { dateLanguage, timeFormat };
+  return { dateLanguage, timeFormat, jalali };
 }
 
-export function setDisplayPrefs(prefs: { dateLanguage: DateLanguage; timeFormat: TimeFormat }): void {
+export function setDisplayPrefs(prefs: DisplayPrefs): void {
   dateLanguage = prefs.dateLanguage;
   timeFormat = prefs.timeFormat;
   formatters = {};
@@ -200,6 +209,31 @@ export function setDisplayPrefs(prefs: { dateLanguage: DateLanguage; timeFormat:
     localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
   } catch {
     /* ignore */
+  }
+}
+
+let jalaliFormatter: Intl.DateTimeFormat | null | undefined;
+
+/** "29 شهریور 1404" — the Jalali date for an ISO day, null when unsupported. */
+export function formatJalaliLong(iso: string): string | null {
+  if (jalaliFormatter === undefined) {
+    try {
+      jalaliFormatter = new Intl.DateTimeFormat('fa-IR-u-ca-persian', {
+        numberingSystem: 'latn',
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      });
+    } catch {
+      jalaliFormatter = null;
+    }
+  }
+  if (!jalaliFormatter) return null;
+  try {
+    return jalaliFormatter.format(parseISODate(iso));
+  } catch {
+    return null;
   }
 }
 
@@ -267,6 +301,19 @@ export function dayNumber(iso: string): number {
 export function isWeekend(iso: string): boolean {
   const day = parseISODate(iso).getDay();
   return day === 0 || day === 6;
+}
+
+/** The coming Saturday, or today when today is Saturday. */
+export function nextWeekend(iso: string, saturday = 6): string {
+  const date = parseISODate(iso);
+  const diff = (saturday - date.getDay() + 7) % 7;
+  return addDays(iso, diff === 0 && date.getDay() !== saturday ? 7 : diff);
+}
+
+/** The 1st of the month after the month containing `iso`. */
+export function nextMonth(iso: string): string {
+  const date = parseISODate(iso);
+  return toISODate(new Date(date.getFullYear(), date.getMonth() + 1, 1));
 }
 
 export function formatWeekRange(iso: string): string {

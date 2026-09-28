@@ -11,6 +11,7 @@ export type Route =
   | { name: 'goals' }
   | { name: 'notes' }
   | { name: 'insights' }
+  | { name: 'quickadd' }
   | { name: 'ai'; tab?: 'plan' | 'review' };
 
 const PLAIN_NAMES = new Set(['today', 'tasks', 'habits', 'goals', 'notes', 'insights']);
@@ -21,12 +22,16 @@ export function calendarDateFor(year: number, month: number): string {
 }
 
 export function parseHash(hash: string, now = new Date()): Route {
-  const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
+  const clean = hash.replace(/^#\/?/, '');
+  const [pathPart, queryPart] = clean.split('?');
+  const parts = (pathPart ?? '').split('/').filter(Boolean);
   const [head, a, b] = parts;
   const today = todayISO(now);
+  if (head === 'today' && /(^|&)qa=1(&|$)/.test(queryPart ?? '')) return { name: 'quickadd' };
   if (!head || head === 'today') return { name: 'today' };
   if (head === 'ai') return { name: 'ai', tab: a === 'review' ? 'review' : 'plan' };
   if (head === 'day' && a && isValidISODate(a)) return { name: 'day', date: a };
+  if (head === 'calendar' && !a) return { name: 'calendar', tab: 'week', date: today };
   if (head === 'calendar' && a && CALENDAR_TABS.has(a)) {
     return { name: 'calendar', tab: a as CalendarTab, date: b && isValidISODate(b) ? b : today };
   }
@@ -43,12 +48,16 @@ export function parseHash(hash: string, now = new Date()): Route {
   }
   if (head === 'future') return { name: 'calendar', tab: 'agenda', date: today };
   if (head === 'progress') return { name: 'insights' };
+  if (head === 'quickadd') return { name: 'quickadd' };
   if (PLAIN_NAMES.has(head)) return { name: head as 'today' };
   return { name: 'today' };
 }
 
 export function toHash(route: Route): string {
   switch (route.name) {
+    case 'quickadd':
+      // Deep link (PWA shortcut): today with the quick-add bar focused.
+      return '#/today?qa=1';
     case 'today':
       return '#/today';
     case 'day':
@@ -84,6 +93,8 @@ export function routeTitle(route: Route): string {
       return 'Notes';
     case 'insights':
       return 'Insights';
+    case 'quickadd':
+      return 'Quick add';
     case 'ai':
       return route.tab === 'review' ? 'AI review' : 'AI planner';
   }

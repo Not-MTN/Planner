@@ -5,9 +5,12 @@ import { useImportFile } from '../hooks';
 import { DownloadIcon, SparklesIcon, UploadIcon } from '../icons';
 import { Modal } from './ui';
 import { useEffect, useState } from 'react';
+import { FeedsSection, SharedSpaceSection, TaskImportSection, TemplatesSection, WeatherSection } from './SettingsExtras';
 import { DATE_LANGUAGES, todayISO, type DateLanguage } from '../dates';
 import { downloadBusyICS, downloadICS, parseICS } from '../ics';
 import { canInstall, isInstalled, onInstallChange, promptInstall } from '../pwa';
+import { requestTour } from '../tour';
+import { requestAbout } from '../about';
 import { LEAD_CHOICES } from '../reminders';
 import { t, getLang, setLang, LANGUAGES, type Lang } from '../i18n';
 
@@ -273,6 +276,21 @@ function CalendarSection() {
           ))}
         </select>
       </div>
+      <div className="set-row">
+        <div>
+          <p className="set-label">{t("Show Jalali dates")}</p>
+          <p className="set-hint">{t("Adds the Persian (Jalali) date alongside Gregorian dates.")}</p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={Boolean(display.jalali)}
+          className={cx('btn', 'btn-soft', display.jalali && 'btn-primary')}
+          onClick={() => setDisplay({ ...display, jalali: !display.jalali })}
+        >
+          {display.jalali ? t("On") : t("Off")}
+        </button>
+      </div>
       <p className="set-hint">{t("Exchange plans with Google Calendar, Outlook or Apple Calendar using .ics files. Timed events come in as events; all-day ones become dated tasks.")}</p>
       <div className="set-actions">
         <button type="button" className="btn btn-soft" onClick={() => { downloadICS(state, todayISO()); flash(t("Calendar file downloaded.")); }}>
@@ -380,9 +398,31 @@ export function SettingsSheet() {
       </section>
 
       <SyncSection />
+      <SharedSpaceSection />
       <RemindersSection />
       <CalendarSection />
+      <FeedsSection />
+      <TaskImportSection />
+      <WeatherSection />
+      <TemplatesSection />
       <InstallSection />
+      <section className="set-section">
+        <h3 className="kicker">{t("New here?")}</h3>
+        <div className="set-row">
+          <div>
+            <p className="set-label">{t("The two-minute tour")}</p>
+            <p className="set-hint">{t("Walks through quick add, planning, habits, mood and notes — with the language picker first.")}</p>
+          </div>
+          <span className="set-actions">
+            <button type="button" className="btn btn-soft" onClick={() => { closeSettings(); window.setTimeout(requestAbout, 60); }}>
+              {t("Why Planner?")}
+            </button>
+            <button type="button" className="btn btn-primary" onClick={() => { closeSettings(); window.setTimeout(requestTour, 60); }}>
+              {t("Show me around")}
+            </button>
+          </span>
+        </div>
+      </section>
 
       <section className="set-section">
         <h3 className="kicker">{t("AI coach · xAI")}</h3>

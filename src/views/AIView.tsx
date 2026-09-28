@@ -5,7 +5,9 @@ import { addDays, formatFullDate, timeToMinutes, todayISO, weekdayIndex, display
 import { MAX_PLAN_IMAGE_BYTES, XAI_KEY_MISSING_MESSAGE, checkXAIConfiguration, friendlyXAIError, generateAIPlan, generateAIReview, hasReviewActivity } from '../ai';
 import type { AIReview, AIDraft, PlanRange } from '../ai';
 import { cx } from '../cx';
-import { CalendarIcon, CheckIcon, LeafIcon, PlusIcon, SparklesIcon, UploadIcon } from '../icons';
+import { useSpeechInput } from '../speech';
+import { VoiceTalk } from '../components/VoiceTalk';
+import { CalendarIcon, CheckIcon, LeafIcon, MicIcon, PlusIcon, SparklesIcon, UploadIcon } from '../icons';
 import type { AIMemory, AIMemoryCategory, FixedCommitmentInput } from '../types';
 import { t } from '../i18n';
 
@@ -53,6 +55,13 @@ function readFile(file: File): Promise<string> {
   });
 }
 
+const PLAN_CHIPS = [
+  "Plan my days around my unfinished tasks",
+  "Add a small workout, three times next week",
+  "Keep mornings light. Push deep work after lunch.",
+  "Weekly reset: review what slipped and re-plan it",
+];
+
 export function AIView() {
   const planner = usePlanner();
   const {
@@ -80,6 +89,16 @@ export function AIView() {
   const [planStart, setPlanStart] = useState(today);
   const [reviewThrough, setReviewThrough] = useState(today);
   const [prompt, setPrompt] = useState('');
+  const speech = useSpeechInput();
+  const dictate = () => {
+    if (speech.listening) {
+      speech.stop();
+      return;
+    }
+    speech.start((spoken) => {
+      setPrompt((current) => (current.trim() ? `${current.replace(/\s+$/, '')} ${spoken}` : spoken));
+    });
+  };
   const [image, setImage] = useState<{ name: string; dataUrl: string } | null>(null);
   const [draft, setDraft] = useState<AIDraft | null>(null);
   const [review, setReview] = useState<AIReview | null>(null);
@@ -307,6 +326,7 @@ export function AIView() {
 
       {currentTab === 'plan' ? (
         <>
+          <VoiceTalk onDraft={(next) => { setDraft(next); setError(''); }} />
           <section className="card ai-builder">
             <header className="card-head">
               <div>
@@ -337,13 +357,35 @@ export function AIView() {
               ) : null}
             </div>
             <p className="ai-range-note">{formatFullDate(planRange.startDate)} — {formatFullDate(planEnd)}{t(". Fixed weekly times and existing events are treated as busy, protected slots.")}</p>
+            <div className="chip-row ai-chips" role="group" aria-label={t("Start from a suggestion")}>
+              {PLAN_CHIPS.map((chip) => (
+                <button key={chip} type="button" className="chip" onClick={() => setPrompt(chip)}>
+                  {chip}
+                </button>
+              ))}
+            </div>
             <label className="field ai-prompt-field">
-              <span>{t("Your plan request")}</span>
+              <span className="ai-prompt-label">
+                {t("Your plan request")}
+                {speech.available ? (
+                  <button
+                    type="button"
+                    className={cx('icon-btn', 'voice-mic', speech.listening && 'listening')}
+                    aria-label={speech.listening ? t("Stop dictation") : t("Dictate your plan request")}
+                    aria-pressed={speech.listening}
+                    title={t("Dictate — tap, speak, done")}
+                    onClick={dictate}
+                  >
+                    <MicIcon size={16} />
+                    {speech.listening ? <span className="voice-live">{t("Listening…")}</span> : null}
+                  </button>
+                ) : null}
+              </span>
               <textarea
                 rows={5}
                 maxLength={2400}
                 value={prompt}
-                placeholder={t("Example: I have class Tuesday morning. Help me fit in studying, a short workout, meals, and time to unwind. Keep each day manageable.")}
+                placeholder={speech.available ? t("Type or dictate — tap the mic and just say your day. Example: “Class Tuesday 8am, gym after, help me fit it all in.”") : t("Example: I have class Tuesday morning. Help me fit in studying, a short workout, meals, and time to unwind. Keep each day manageable.")}
                 onChange={(event) => setPrompt(event.target.value)}
               />
             </label>

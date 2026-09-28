@@ -34,11 +34,13 @@ function clock(minutes: number): string {
  * tasks are treated as busy. Pure — returns a plan and changes nothing.
  */
 export function autoSchedule(state: PlannerState, date: string, options: ScheduleOptions): ScheduledTask[] {
-  const length = options.length ?? 30;
+  const fallback = options.length ?? 30;
   const buffer = options.buffer ?? 10;
   const until = options.until ?? 21 * 60;
   const max = options.max ?? 8;
   const start = Math.ceil(Math.max(options.from, 7 * 60) / 15) * 15;
+  // A task's own estimate wins; otherwise the fallback block size.
+  const lengthOf = (task: Task) => Math.max(5, Math.min(12 * 60, task.estimatedMinutes ?? fallback));
 
   const busy: Array<[number, number]> = [];
   for (const event of eventsForDate(state, date)) {
@@ -50,7 +52,7 @@ export function autoSchedule(state: PlannerState, date: string, options: Schedul
   for (const task of dayTasks) {
     if (task.completed || !task.dueTime) continue;
     const s = timeToMinutes(task.dueTime);
-    busy.push([s, s + length]);
+    busy.push([s, s + lengthOf(task)]);
   }
   busy.sort((a, b) => a[0] - b[0]);
 
@@ -66,6 +68,7 @@ export function autoSchedule(state: PlannerState, date: string, options: Schedul
   let cursor = start;
   for (const task of candidates) {
     if (plan.length >= max) break;
+    const length = lengthOf(task);
     // Find the first gap at or after the cursor that fits the block.
     let placed: number | null = null;
     let probe = cursor;
@@ -77,7 +80,10 @@ export function autoSchedule(state: PlannerState, date: string, options: Schedul
       }
       probe = Math.ceil((clash[1] + buffer) / 5) * 5;
     }
-    if (placed === null) break;
+    if (placed === null) {
+      // This candidate doesn't fit in the remaining day; try a shorter one instead of giving up.
+      continue;
+    }
     plan.push({ id: task.id, title: task.title, date, time: clock(placed) });
     busy.push([placed, placed + length]);
     busy.sort((a, b) => a[0] - b[0]);

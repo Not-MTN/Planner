@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
+import { CATEGORIES, PRIORITIES, type Priority } from '../constants';
 import { addDays, formatFullDate, todayISO } from '../dates';
 import { matchesQuery } from '../logic';
 import { TaskRow } from '../components/items';
@@ -37,9 +38,16 @@ type FilterId = (typeof FILTERS)[number]['id'];
 
 export function TasksView() {
   const { state, openComposer, swapTasks, moveTask, clearCompletedTasks, loadSample, isEmpty } = useTaskViewHelpers();
+  const bulk = useBulkActions();
   const [filter, setFilter] = useState<FilterId>('open');
   const [query, setQuery] = useState('');
   const [view, setView] = useState(loadLayout);
+  const [selecting, setSelecting] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, number>>({});
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkDate, setBulkDate] = useState('');
+  const [bulkCategory, setBulkCategory] = useState('');
+  const [bulkPriority, setBulkPriority] = useState('');
   const today = todayISO();
   const changeView = (next: typeof view) => {
     setView(next);
@@ -151,6 +159,19 @@ export function TasksView() {
           <span className="visually-hidden">{t("Search tasks")}</span>
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("Search tasks")} />
         </label>
+        {view.layout === 'list' && state.tasks.length > 0 ? (
+          <button
+            type="button"
+            className={cx('btn', 'btn-soft', 'btn-small', selecting && 'btn-primary')}
+            aria-pressed={selecting}
+            onClick={() => {
+              setSelecting((value) => !value);
+              setSelected(new Set());
+            }}
+          >
+            {selecting ? t("Done selecting") : t("Select")}
+          </button>
+        ) : null}
       </div>
       {state.tasks.length === 0 ? (
         <section className="card">
@@ -186,25 +207,112 @@ export function TasksView() {
                 ) : null}
               </header>
               <ul className="item-list">
-                {group.tasks.map((task) => (
-                  <TaskRow
+                {(() => {
+                  const shown = expandedGroups[group.id] ?? 40;
+                  const visible = group.tasks.slice(0, shown);
+                  const hidden = group.tasks.length - visible.length;
+                  return (
+                    <>
+                      {visible.map((task) => (
+                        <TaskRow
                     key={task.id}
                     task={task}
                     showDate={filter === 'done' || group.id === 'carried' || filter === 'upcoming'}
                     onReschedule={group.id === 'carried' ? () => moveTask(task.id, addDays(today, 1)) : undefined}
                     rescheduleLabel={t("Move to tomorrow")}
-                    onDropSwap={(sourceId) => {
-                      if (sourceId !== task.id) swapTasks(sourceId, task.id);
-                    }}
-                  />
-                ))}
+                    selection={
+                      selecting
+                        ? {
+                            selected: selected.has(task.id),
+                            onToggle: () =>
+                              setSelected((current) => {
+                                const next = new Set(current);
+                                if (next.has(task.id)) next.delete(task.id);
+                                else next.add(task.id);
+                                return next;
+                              }),
+                          }
+                        : undefined
+                    }
+                          onDropSwap={(sourceId) => {
+                            if (sourceId !== task.id) swapTasks(sourceId, task.id);
+                          }}
+                        />
+                      ))}
+                      {hidden > 0 ? (
+                        <li className="item-more">
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-small"
+                            onClick={() => setExpandedGroups((cur) => ({ ...cur, [group.id]: shown + 60 }))}
+                          >
+                            {t("Show {0} more", { 0: hidden > 60 ? 60 : hidden })}
+                          </button>
+                        </li>
+                      ) : null}
+                    </>
+                  );
+                })()}
               </ul>
             </section>
           ))}
         </div>
       )}
+      {selecting && selected.size > 0 ? (
+        <div className="bulk-bar" role="toolbar" aria-label={t("Bulk actions")}>
+          <span className="bulk-count">{t("{0} selected", { 0: selected.size })}</span>
+          <button type="button" className="btn btn-small btn-soft" onClick={() => { bulk.completeTasksByIds([...selected], true); done(); }}>
+            {t("Complete")}
+          </button>
+          <button type="button" className="btn btn-small btn-soft" onClick={() => { bulk.completeTasksByIds([...selected], false); done(); }}>
+            {t("Reopen")}
+          </button>
+          <input type="date" className="bulk-date" value={bulkDate} aria-label={t("Move all to date")} onChange={(event) => setBulkDate(event.target.value)} />
+          <button type="button" className="btn btn-small btn-soft" disabled={!bulkDate} onClick={() => { bulk.moveTasksByIds([...selected], bulkDate); done(); }}>
+            {t("Set date")}
+          </button>
+          <select value={bulkCategory} aria-label={t("Set category")} onChange={(event) => { if (event.target.value) { bulk.updateTasksByIds([...selected], { category: event.target.value }); setBulkCategory(''); done(); } }}>
+            <option value="">{t("Category…")}</option>
+            {CATEGORIES.map((item) => (
+              <option key={item.id} value={item.id}>{item.label}</option>
+            ))}
+          </select>
+          <select value={bulkPriority} aria-label={t("Set priority")} onChange={(event) => { if (event.target.value) { bulk.updateTasksByIds([...selected], { priority: event.target.value as Priority }); setBulkPriority(''); done(); } }}>
+            <option value="">{t("Priority…")}</option>
+            {PRIORITIES.map((item) => (
+              <option key={item.id} value={item.id}>{item.label}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="btn btn-small danger"
+            onClick={() => {
+              const count = selected.size;
+              bulk.deleteTasksByIds([...selected]);
+              done();
+              bulk.flash(t("{0} {1} removed.", { 0: count, 1: count === 1 ? t("task") : t("tasks") }), { label: t("Undo"), run: bulk.undo });
+            }}
+          >
+            {t("Delete")}
+          </button>
+          <button type="button" className="text-btn" onClick={done}>
+            {t("Clear")}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
+
+  function done() {
+    setSelecting(false);
+    setSelected(new Set());
+    setBulkDate('');
+  }
+}
+
+function useBulkActions() {
+  const { completeTasksByIds, updateTasksByIds, deleteTasksByIds, moveTasksByIds, flash, undo } = usePlanner();
+  return { completeTasksByIds, updateTasksByIds, deleteTasksByIds, moveTasksByIds, flash, undo };
 }
 
 function useTaskViewHelpers() {

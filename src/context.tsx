@@ -29,8 +29,15 @@ import {
   deleteTask as deleteTaskFrom,
   moveEvent as moveEventIn,
   moveTask as moveTaskIn,
+  completeTasks as completeTasksIn,
+  deleteTasks as deleteTasksIn,
+  moveTasks as moveTasksIn,
+  updateTasks as updateTasksIn,
+  setHabitValue as setHabitValueIn,
+  skipHabit as skipHabitIn,
   setHabitArchived as setHabitArchivedIn,
   setIntention as setIntentionIn,
+  setMood as setMoodIn,
   swapEventTimes as swapEventTimesIn,
   swapTasks as swapTasksIn,
   toggleEvent as toggleEventIn,
@@ -46,14 +53,32 @@ import {
   updateNote as updateNoteIn,
   updateTask as updateTaskIn,
 } from './mutate';
-import { loadDisplayPrefs, loadWeekStart, setDisplayPrefs as storeDisplayPrefs, setWeekStart as storeWeekStart, todayISO, type DateLanguage, type TimeFormat, type WeekStart } from './dates';
+import { loadDisplayPrefs, loadWeekStart, setDisplayPrefs as storeDisplayPrefs, setWeekStart as storeWeekStart, todayISO, type DisplayPrefs, type WeekStart } from './dates';
 import { dueReminders, loadFired, loadReminderSettings, saveFired, saveReminderSettings, showNotification, type ReminderSettings } from './reminders';
 import { buildSampleState } from './sample';
 import { deleteRemote, EMPTY_SYNC, generateCode, loadSyncSettings, mergeStates, normalizeCode, saveSyncSettings, SyncError, syncConfigured, syncOnce, type SyncSettings } from './sync';
+import {
+  EMPTY_SHARED,
+  isSharedNote,
+  loadSharedSettings,
+  loadTombstones,
+  normalizeSharedCode,
+  saveSharedSettings,
+  saveTombstones,
+  SHARED_CATEGORY,
+  syncSharedOnce,
+  tombstoneKey,
+  type SharedSettings,
+  type Tombstones,
+} from './shared';
+import { fetchFeedEvents, loadFeeds, mergeFeedEvents, saveFeeds, type CalendarFeed } from './feeds';
+import { loadWeatherSettings, saveWeatherSettings, type WeatherSettings } from './weather';
 import { applyTheme, loadAccent, loadThemeMode, resolvedMode, type ThemeMode } from './theme';
 import type { Accent } from './constants';
-import { createEmptyState, type AIMemoryInput, type ComposerState, type EventInput, type FixedCommitmentInput, type GoalInput, type HabitInput, type NoteInput, type PlannerState, type TaskInput } from './types';
+import { createEmptyState, type AIMemoryInput, type AttachmentRef, type ComposerState, type EventInput, type FixedCommitmentInput, type GoalInput, type HabitInput, type MoodValue, type NoteInput, type PlannerState, type TaskInput } from './types';
 import { t } from './i18n';
+import { isTestEnv } from './env';
+import { attachmentNotice, MAX_ATTACHMENTS_PER_NOTE, storeAttachment, sweepAttachmentBlobs } from './files';
 
 export interface NoticeAction {
   label: string;
@@ -122,8 +147,8 @@ interface PlannerContextValue {
   confettiSeed: number;
   reminders: ReminderSettings;
   weekStart: WeekStart;
-  display: { dateLanguage: DateLanguage; timeFormat: TimeFormat };
-  setDisplay: (prefs: { dateLanguage: DateLanguage; timeFormat: TimeFormat }) => void;
+  display: DisplayPrefs;
+  setDisplay: (prefs: DisplayPrefs) => void;
   sync: SyncSettings;
   syncStatus: SyncStatus;
   syncMessage: string | null;
@@ -132,6 +157,20 @@ interface PlannerContextValue {
   stopSync: () => void;
   syncNow: () => void;
   deleteCloudCopy: () => Promise<void>;
+  shared: SharedSettings;
+  sharedStatus: SyncStatus;
+  sharedMessage: string | null;
+  startShared: (code?: string) => string | null;
+  stopShared: () => void;
+  syncSharedNow: () => void;
+  feeds: CalendarFeed[];
+  /** Validates + imports the feed once. Returns an error message, or null on success. */
+  addFeed: (url: string) => Promise<string | null>;
+  removeFeed: (url: string) => void;
+  refreshFeeds: (force?: boolean) => void;
+  weather: WeatherSettings;
+  setWeather: (settings: WeatherSettings) => void;
+  importTaskList: (tasks: TaskInput[]) => void;
   setWeekStart: (value: WeekStart) => void;
   setReminders: (settings: ReminderSettings) => void;
   celebrate: () => void;
@@ -141,6 +180,10 @@ interface PlannerContextValue {
   deleteTask: (id: string) => void;
   clearCompletedTasks: () => void;
   toggleTask: (id: string) => void;
+  completeTasksByIds: (ids: string[], complete?: boolean) => void;
+  updateTasksByIds: (ids: string[], patch: Partial<TaskInput>) => void;
+  deleteTasksByIds: (ids: string[]) => void;
+  moveTasksByIds: (ids: string[], date: string | null) => void;
   toggleSubtask: (taskId: string, subtaskId: string) => void;
   resizeEvent: (id: string, endTime: string) => void;
   logFocus: (entry: { taskId: string | null; title: string; minutes: number }) => void;
@@ -171,6 +214,8 @@ interface PlannerContextValue {
   deleteHabit: (id: string) => void;
   setHabitArchived: (id: string, archived: boolean) => void;
   toggleHabit: (habitId: string, date: string) => void;
+  setHabitValue: (habitId: string, date: string, value: number) => void;
+  skipHabit: (habitId: string, date: string) => void;
   addGoal: (input: GoalInput) => void;
   updateGoal: (id: string, patch: Partial<Omit<GoalInput, 'milestone'>>) => void;
   deleteGoal: (id: string) => void;
@@ -179,13 +224,28 @@ interface PlannerContextValue {
   deleteMilestone: (goalId: string, milestoneId: string) => void;
   addNote: (input: NoteInput) => void;
   updateNote: (id: string, patch: Partial<NoteInput>) => void;
+  attachFilesToNote: (noteId: string, files: File[]) => Promise<void>;
   deleteNote: (id: string) => void;
   setIntention: (date: string, text: string) => void;
+  /** Log how a day felt (1–5); pass null to clear. */
+  logMood: (date: string, value: MoodValue | null, taskId?: string) => void;
 }
 
 const PlannerContext = createContext<PlannerContextValue | null>(null);
 
+/** How many items exist in `next` that weren't in `before` — for "merged from your other devices". */
+function countNew(before: PlannerState, next: PlannerState): number {
+  const diff = (a: Array<{ id: string }>, b: Array<{ id: string }>) => {
+    const known = new Set(a.map((item) => item.id));
+    return b.filter((item) => !known.has(item.id)).length;
+  };
+  return diff(before.tasks, next.tasks) + diff(before.events, next.events) + diff(before.notes, next.notes) + diff(before.goals, next.goals) + diff(before.habits, next.habits);
+}
+
 const HISTORY_LIMIT = 60;
+/** Past states mirrored to IndexedDB so undo survives a reload. */
+const HISTORY_PERSIST_LIMIT = 8;
+const HISTORY_IDB_KEY = 'history';
 
 export function PlannerProvider({ children }: { children: ReactNode }) {
   const [boot] = useState(() => loadFrom(localStorage));
@@ -212,6 +272,11 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
   const [display, setDisplayState] = useState(() => loadDisplayPrefs());
   const [weekStart, setWeekStartState] = useState<WeekStart>(() => loadWeekStart());
   const [reminders, setRemindersState] = useState<ReminderSettings>(() => loadReminderSettings());
+  const [shared, setSharedState] = useState<SharedSettings>(() => loadSharedSettings());
+  const [sharedStatus, setSharedStatus] = useState<SyncStatus>(() => (loadSharedSettings().code ? 'idle' : 'off'));
+  const [sharedMessage, setSharedMessage] = useState<string | null>(null);
+  const [feeds, setFeedsState] = useState<CalendarFeed[]>(() => loadFeeds());
+  const [weather, setWeatherState] = useState<WeatherSettings>(() => loadWeatherSettings());
   const stateRef = useRef(state);
   stateRef.current = state;
   const historyRef = useRef<PlannerState[]>([]);
@@ -229,6 +294,24 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
     noticeTimer.current = window.setTimeout(() => setNotice(null), action ? 5200 : 2800);
   }, []);
+
+  // A small, rotating bit of applause when something gets ticked off — the
+  // reward after the effort, on purpose. Never fires on un-checking.
+  const PRAISES = [
+    () => t("Done. Beautifully ticked. ✨"),
+    () => t("One more off the list. 🎉"),
+    () => t("That counts. Well done. 💛"),
+    () => t("Checked, finished, gone. 🙌"),
+    () => t("Forward motion. Keep it. 🌱"),
+    () => t("You did the thing. ⭐"),
+  ];
+  const praiseStep = useRef(0);
+  const praise = useCallback(() => {
+    flash(PRAISES[praiseStep.current % PRAISES.length]());
+    praiseStep.current += 1;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flash]);
+
 
   const dismissNotice = useCallback(() => {
     if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
@@ -277,6 +360,27 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     if (!boot.persist) return;
     let cancelled = false;
     void idbRead().then((stored) => {
+      // Restore the persisted undo stack too (past only — nothing to redo after a reload).
+      void idbRead(HISTORY_IDB_KEY).then((raw) => {
+        if (cancelled || !raw) return;
+        try {
+          const parsed = JSON.parse(raw) as unknown;
+          if (!Array.isArray(parsed)) return;
+          const states = parsed.flatMap((item) => {
+            try {
+              const clean = sanitizeState(item);
+              return clean ? [clean] : [];
+            } catch {
+              return [];
+            }
+          });
+          if (cancelled || states.length === 0 || historyRef.current.length > 0) return;
+          historyRef.current = states.slice(-HISTORY_PERSIST_LIMIT);
+          setCanUndo(true);
+        } catch {
+          /* unreadable history is dropped silently */
+        }
+      });
       if (cancelled) return;
       let local: string | null = null;
       try {
@@ -298,11 +402,28 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
       } else if (!stored) {
         void idbWrite(serialize(stateRef.current));
       }
+      // Housekeeping: drop attachment bytes whose refs no longer exist (deleted
+      // notes from an earlier session, discarded drafts). Cheap and failure-less.
+      void sweepAttachmentBlobs(stateRef.current);
     });
     return () => {
       cancelled = true;
     };
   }, [boot]);
+
+  // ── Persisted undo stack (IndexedDB, capped; restored at the bottom of boot) ─
+  const historyPersistTimer = useRef<number | null>(null);
+  const persistHistory = useCallback(() => {
+    if (!persistRef.current) return;
+    if (historyPersistTimer.current) window.clearTimeout(historyPersistTimer.current);
+    historyPersistTimer.current = window.setTimeout(() => {
+      try {
+        void idbWrite(JSON.stringify(historyRef.current.slice(-HISTORY_PERSIST_LIMIT)), HISTORY_IDB_KEY);
+      } catch {
+        /* history persistence is best-effort */
+      }
+    }, 700);
+  }, []);
 
   const commit = useCallback((updater: (current: PlannerState) => PlannerState) => {
     try {
@@ -315,10 +436,11 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
       historyRef.current = [...historyRef.current.slice(-HISTORY_LIMIT + 1), prev];
       futureRef.current = [];
       syncHistoryFlags();
+      persistHistory();
     } catch {
       setError(t("Something went wrong with that change."));
     }
-  }, [trySave, syncHistoryFlags]);
+  }, [trySave, syncHistoryFlags, persistHistory]);
 
   const undo = useCallback(() => {
     const history = historyRef.current;
@@ -330,8 +452,9 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     stateRef.current = prev;
     setState(prev);
     syncHistoryFlags();
+    persistHistory();
     flash(t("Undone."));
-  }, [flash, trySave, syncHistoryFlags]);
+  }, [flash, trySave, syncHistoryFlags, persistHistory]);
 
   const redo = useCallback(() => {
     const future = futureRef.current;
@@ -375,6 +498,7 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
   const syncAgain = useRef(false);
   const syncTimer = useRef<number | null>(null);
   const remoteApply = useRef(false);
+  const sharedRemoteApply = useRef(false);
 
   const updateSync = useCallback((next: SyncSettings) => {
     syncRef.current = next;
@@ -390,6 +514,7 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     }
     syncBusy.current = true;
     setSyncStatus('syncing');
+    let arrived = 0;
     try {
       const before = stateRef.current;
       const outcome = await syncOnce(before, syncRef.current);
@@ -399,6 +524,7 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
         // Edited while syncing: keep those edits and send them next round.
         if (outcome.state) {
           const merged = mergeStates(stateRef.current, outcome.state);
+          arrived = countNew(before, merged);
           remoteApply.current = true;
           if (trySave(merged)) {
             stateRef.current = merged;
@@ -408,6 +534,7 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
         settings = { ...settings, dirty: true };
         syncAgain.current = true;
       } else if (outcome.state) {
+        arrived = countNew(before, outcome.state);
         remoteApply.current = true;
         if (trySave(outcome.state)) {
           stateRef.current = outcome.state;
@@ -421,6 +548,7 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
       updateSync(settings);
       setSyncStatus('idle');
       setSyncMessage(null);
+      if (arrived > 0) flash(t("{0} new {1} merged from your other devices.", { 0: arrived, 1: arrived === 1 ? t("item") : t("items") }));
     } catch (caught) {
       const failure = caught instanceof SyncError ? caught : null;
       setSyncStatus(failure?.code === 'network' ? 'offline' : 'error');
@@ -445,6 +573,68 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     syncTimer.current = window.setTimeout(() => void runSync(), delay);
   }, [runSync]);
 
+  // ── Shared space (second encrypted room for "Shared" category items) ────────
+  const sharedRef = useRef(shared);
+  const sharedBusy = useRef(false);
+  const sharedAgain = useRef(false);
+  const sharedTimer = useRef<number | null>(null);
+  const tombstonesRef = useRef<Tombstones>(loadTombstones());
+
+  const updateShared = useCallback((next: SharedSettings) => {
+    sharedRef.current = next;
+    saveSharedSettings(next);
+    setSharedState(next);
+  }, []);
+
+  const runSharedSync = useCallback(async () => {
+    if (!sharedRef.current.code) return;
+    if (sharedBusy.current) {
+      sharedAgain.current = true;
+      return;
+    }
+    sharedBusy.current = true;
+    setSharedStatus('syncing');
+    try {
+      const outcome = await syncSharedOnce(stateRef.current, sharedRef.current, tombstonesRef.current);
+      if (!sharedRef.current.code) return; // turned off meanwhile
+      tombstonesRef.current = outcome.tombstones;
+      saveTombstones(outcome.tombstones);
+      let settings = outcome.settings;
+      if (outcome.state && outcome.state !== stateRef.current) {
+        // Shared items arrived from the room: apply without re-marking this room
+        // dirty (that flag would ping-pong the two devices forever). Personal
+        // sync treats them as normal edits and can still carry them to your devices.
+        sharedRemoteApply.current = true;
+        if (trySave(outcome.state)) {
+          stateRef.current = outcome.state;
+          setState(outcome.state);
+          settings = { ...settings, dirty: false };
+        } else {
+          sharedRemoteApply.current = false;
+        }
+      }
+      updateShared(settings);
+      setSharedStatus('idle');
+      setSharedMessage(null);
+    } catch (caught) {
+      const failure = caught instanceof SyncError ? caught : null;
+      setSharedStatus(failure?.code === 'network' ? 'offline' : 'error');
+      setSharedMessage(failure?.message ?? t('Shared space failed to sync. It will try again.'));
+    } finally {
+      sharedBusy.current = false;
+      if (sharedAgain.current) {
+        sharedAgain.current = false;
+        window.setTimeout(() => void runSharedSync(), 400);
+      }
+    }
+  }, [trySave, updateShared]);
+
+  const scheduleSharedSync = useCallback((delay = 1500) => {
+    if (!sharedRef.current.code) return;
+    if (sharedTimer.current) window.clearTimeout(sharedTimer.current);
+    sharedTimer.current = window.setTimeout(() => void runSharedSync(), delay);
+  }, [runSharedSync]);
+
   // Any local change marks the copy dirty and schedules an upload.
   const firstState = useRef(true);
   useEffect(() => {
@@ -454,12 +644,17 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     }
     if (remoteApply.current) {
       remoteApply.current = false;
-      return;
+    } else if (syncRef.current.code) {
+      if (!syncRef.current.dirty) updateSync({ ...syncRef.current, dirty: true });
+      scheduleSync();
     }
-    if (!syncRef.current.code) return;
-    if (!syncRef.current.dirty) updateSync({ ...syncRef.current, dirty: true });
-    scheduleSync();
-  }, [state, scheduleSync, updateSync]);
+    if (sharedRemoteApply.current) {
+      sharedRemoteApply.current = false;
+    } else if (sharedRef.current.code) {
+      if (!sharedRef.current.dirty) updateShared({ ...sharedRef.current, dirty: true });
+      scheduleSharedSync();
+    }
+  }, [state, scheduleSync, updateSync, scheduleSharedSync, updateShared]);
 
   useEffect(() => {
     if (!sync.code) return;
@@ -478,6 +673,114 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
       document.removeEventListener('visibilitychange', onWake);
     };
   }, [sync.code, runSync]);
+
+
+  useEffect(() => {
+    if (!shared.code || isTestEnv()) return;
+    void runSharedSync();
+    const id = window.setInterval(() => void runSharedSync(), 60000);
+    const onWake = () => {
+      if (document.visibilityState === 'visible') void runSharedSync();
+    };
+    window.addEventListener('online', onWake);
+    document.addEventListener('visibilitychange', onWake);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener('online', onWake);
+      document.removeEventListener('visibilitychange', onWake);
+    };
+  }, [shared.code, runSharedSync]);
+
+  const startShared = useCallback((input?: string): string | null => {
+    const code = input === undefined ? generateCode() : normalizeSharedCode(input);
+    if (!code) return null;
+    updateShared({ ...EMPTY_SHARED, code, dirty: true });
+    setSharedStatus('idle');
+    setSharedMessage(null);
+    return code;
+  }, [updateShared]);
+
+  const stopShared = useCallback(() => {
+    if (sharedTimer.current) window.clearTimeout(sharedTimer.current);
+    updateShared(EMPTY_SHARED);
+    setSharedStatus('off');
+    setSharedMessage(null);
+  }, [updateShared]);
+
+  /** Record a deletion of a shared item so the room removes it everywhere. */
+  const recordTombstone = useCallback((type: 'task' | 'event' | 'note', id: string) => {
+    if (!sharedRef.current.code) return;
+    tombstonesRef.current = { ...tombstonesRef.current, [tombstoneKey(type, id)]: new Date().toISOString() };
+    saveTombstones(tombstonesRef.current);
+    updateShared({ ...sharedRef.current, dirty: true });
+    scheduleSharedSync();
+  }, [updateShared, scheduleSharedSync]);
+
+  // ── Calendar feed subscriptions ─────────────────────────────────────────────
+  const feedsRef = useRef(feeds);
+  const updateFeeds = useCallback((next: CalendarFeed[]) => {
+    feedsRef.current = next;
+    saveFeeds(next);
+    setFeedsState(next);
+  }, []);
+
+  const refreshFeeds = useCallback(async (force = false) => {
+    if (isTestEnv()) return;
+    const staleHours = 20;
+    for (const feed of feedsRef.current) {
+      const stale = !feed.lastFetchedAt || Date.now() - Date.parse(feed.lastFetchedAt) > staleHours * 3600_000;
+      if (!force && !stale) continue;
+      try {
+        const events = await fetchFeedEvents(feed.url);
+        commit((current) => mergeFeedEvents(current, feed.url, events));
+        updateFeeds(feedsRef.current.map((item) => (item.url === feed.url ? { ...item, lastFetchedAt: new Date().toISOString(), lastError: null, count: events.length } : item)));
+      } catch (caught) {
+        const message = caught instanceof Error ? caught.message : t('The calendar could not be refreshed.');
+        updateFeeds(feedsRef.current.map((item) => (item.url === feed.url ? { ...item, lastError: message } : item)));
+      }
+    }
+  }, [commit, updateFeeds]);
+
+  useEffect(() => {
+    if (isTestEnv() || feeds.length === 0) return;
+    void refreshFeeds(false);
+    const id = window.setInterval(() => void refreshFeeds(false), 30 * 60 * 1000);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feeds.length, refreshFeeds]);
+
+  const addFeed = useCallback(async (input: string): Promise<string | null> => {
+    const url = input.trim();
+    if (!/^https?:\/\//i.test(url)) return t('Enter the calendar address starting with https.');
+    if (feedsRef.current.some((feed) => feed.url === url)) return t('That calendar is already subscribed.');
+    try {
+      const events = await fetchFeedEvents(url);
+      const feed: CalendarFeed = { url, addedAt: new Date().toISOString(), lastFetchedAt: new Date().toISOString(), lastError: null, count: events.length };
+      updateFeeds([...feedsRef.current, feed]);
+      commit((current) => mergeFeedEvents(current, url, events));
+      return null;
+    } catch (caught) {
+      return caught instanceof Error ? caught.message : t('The calendar could not be added.');
+    }
+  }, [commit, updateFeeds]);
+
+  const removeFeed = useCallback((url: string) => {
+    updateFeeds(feedsRef.current.filter((feed) => feed.url !== url));
+    commit((current) => ({ ...current, events: current.events.filter((event) => event.source?.url !== url) }));
+  }, [commit, updateFeeds]);
+
+  // ── App icon badge: open items due today (and earlier) ─────────────────────
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('setAppBadge' in navigator)) return;
+    const today = todayISO();
+    const open = state.tasks.filter((task) => !task.completed && !task.waiting && task.dueDate !== null && task.dueDate <= today).length;
+    void (open > 0 ? navigator.setAppBadge?.(open).catch(() => undefined) : navigator.clearAppBadge?.().catch(() => undefined));
+  }, [state]);
+
+  const setWeather = useCallback((settings: WeatherSettings) => {
+    saveWeatherSettings(settings);
+    setWeatherState(settings);
+  }, []);
 
   useEffect(() => {
     if (typeof fetch === 'undefined' || import.meta.env.MODE === 'test') return;
@@ -513,7 +816,7 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     }
   }, [stopSync, flash]);
 
-  const setDisplay = useCallback((prefs: { dateLanguage: DateLanguage; timeFormat: TimeFormat }) => {
+  const setDisplay = useCallback((prefs: DisplayPrefs) => {
     storeDisplayPrefs(prefs);
     setDisplayState(prefs);
   }, []);
@@ -660,12 +963,47 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     stopSync,
     syncNow: () => void runSync(),
     deleteCloudCopy,
+    shared,
+    sharedStatus,
+    sharedMessage,
+    startShared,
+    stopShared,
+    syncSharedNow: () => void runSharedSync(),
+    feeds,
+    addFeed,
+    removeFeed,
+    refreshFeeds,
+    weather,
+    setWeather,
+    importTaskList: (tasks) => {
+      commit((current) => tasks.reduce((next, input) => addTaskTo(next, input), current));
+      flash(t("{0} {1} imported.", { 0: tasks.length, 1: tasks.length === 1 ? t("task") : t("tasks") }));
+    },
     addTask: (input) => commit((current) => addTaskTo(current, input)),
     duplicateTask: (id) => commit((current) => duplicateTaskIn(current, id)),
     updateTask: (id, patch) => commit((current) => updateTaskIn(current, id, patch)),
-    deleteTask: (id) => commit((current) => deleteTaskFrom(current, id)),
+    deleteTask: (id) => {
+      const task = stateRef.current.tasks.find((item) => item.id === id);
+      if (task?.category === SHARED_CATEGORY) recordTombstone('task', id);
+      commit((current) => deleteTaskFrom(current, id));
+    },
+    completeTasksByIds: (ids, complete = true) => commit((current) => completeTasksIn(current, ids, complete)),
+    updateTasksByIds: (ids, patch) => commit((current) => updateTasksIn(current, ids, patch)),
+    deleteTasksByIds: (ids) => {
+      if (sharedRef.current.code) {
+        for (const task of stateRef.current.tasks) {
+          if (ids.includes(task.id) && task.category === SHARED_CATEGORY) recordTombstone('task', task.id);
+        }
+      }
+      commit((current) => deleteTasksIn(current, ids));
+    },
+    moveTasksByIds: (ids, date) => commit((current) => moveTasksIn(current, ids, date)),
     clearCompletedTasks,
-    toggleTask: (id) => commit((current) => toggleTaskIn(current, id)),
+    toggleTask: (id) => {
+      const wasOpen = stateRef.current.tasks.some((task) => task.id === id && !task.completed);
+      commit((current) => toggleTaskIn(current, id));
+      if (wasOpen) praise();
+    },
     toggleSubtask: (taskId, subtaskId) => commit((current) => toggleSubtaskIn(current, taskId, subtaskId)),
     resizeEvent: (id, endTime) => commit((current) => resizeEventIn(current, id, endTime)),
     logFocus: (entry) => commit((current) => logFocusIn(current, entry)),
@@ -694,7 +1032,11 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     rescheduleTasks: (moves) => commit((current) => moves.reduce((next, move) => moveTaskIn(next, move.id, move.date), current)),
     applySchedule: (plan) => commit((current) => plan.reduce((next, item) => updateTaskIn(next, item.id, { dueDate: item.date, dueTime: item.time }), current)),
     updateEvent: (id, patch) => commit((current) => updateEventIn(current, id, patch)),
-    deleteEvent: (id) => commit((current) => deleteEventFrom(current, id)),
+    deleteEvent: (id) => {
+      const event = stateRef.current.events.find((item) => item.id === id);
+      if (event?.category === SHARED_CATEGORY) recordTombstone('event', id);
+      commit((current) => deleteEventFrom(current, id));
+    },
     toggleEvent: (id) => commit((current) => toggleEventIn(current, id)),
     moveEvent: (id, date) => commit((current) => moveEventIn(current, id, date)),
     moveTask: (id, date) => commit((current) => moveTaskIn(current, id, date)),
@@ -707,6 +1049,8 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     deleteHabit: (id) => commit((current) => deleteHabitFrom(current, id)),
     setHabitArchived: (id, archived) => commit((current) => setHabitArchivedIn(current, id, archived)),
     toggleHabit: (habitId, date) => commit((current) => toggleHabitIn(current, habitId, date)),
+    setHabitValue: (habitId, date, value) => commit((current) => setHabitValueIn(current, habitId, date, value)),
+    skipHabit: (habitId, date) => commit((current) => skipHabitIn(current, habitId, date)),
     addGoal: (input) => commit((current) => addGoalTo(current, input)),
     updateGoal: (id, patch) => commit((current) => updateGoalIn(current, id, patch)),
     deleteGoal: (id) => commit((current) => deleteGoalFrom(current, id)),
@@ -715,9 +1059,41 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     deleteMilestone: (goalId, milestoneId) => commit((current) => deleteMilestoneFrom(current, goalId, milestoneId)),
     addNote: (input) => commit((current) => addNoteTo(current, input)),
     updateNote: (id, patch) => commit((current) => updateNoteIn(current, id, patch)),
-    deleteNote: (id) => commit((current) => deleteNoteFrom(current, id)),
+    attachFilesToNote: async (noteId, files) => {
+      const existing = stateRef.current.notes.find((item) => item.id === noteId)?.attachments ?? [];
+      const room = Math.max(0, MAX_ATTACHMENTS_PER_NOTE - existing.length);
+      const overflow = Math.max(0, files.length - room); // never store bytes we can't reference
+      const toStore = files.slice(0, room);
+      const added: AttachmentRef[] = [];
+      let tooLarge = 0;
+      let failed = 0;
+      for (const file of toStore) {
+        // Only persist under the note once it exists — never orphaned bytes.
+        const result = await storeAttachment(file, file.name, file.type);
+        if (result.ref) added.push(result.ref);
+        else if (result.error === 'too-large') tooLarge += 1;
+        else failed += 1;
+      }
+      if (added.length > 0) {
+        commit((current) => {
+          const note = current.notes.find((item) => item.id === noteId);
+          const merged = [...(note?.attachments ?? []), ...added].slice(0, MAX_ATTACHMENTS_PER_NOTE);
+          return updateNoteIn(current, noteId, { attachments: merged });
+        });
+      }
+      const notice = attachmentNotice(added.length, tooLarge, failed, overflow, added[0]?.name ?? '');
+      if (notice) flash(notice);
+    },
+    deleteNote: (id) => {
+      const note = stateRef.current.notes.find((item) => item.id === id);
+      if (note && sharedRef.current.code && isSharedNote(note)) recordTombstone('note', id);
+      // Attachment bytes stay for the whole session: undo restores the note
+      // and its files intact. Truly orphaned bytes are swept on the next boot.
+      commit((current) => deleteNoteFrom(current, id));
+    },
     setIntention: (date, text) => commit((current) => setIntentionIn(current, date, text)),
-  }), [state, ready, error, notice, saveBlocked, route, navigate, composer, confirm, startFresh, exportData, importText, loadSample, flash, dismissNotice, undo, redo, canUndo, canRedo, themeMode, accent, paletteOpen, settingsOpen, focus, confettiSeed, celebrate, clearCompletedTasks, commit, reminders, setReminders, weekStart, setWeekStart, display, setDisplay, sync, syncStatus, syncMessage, syncAvailable, startSync, stopSync, runSync, deleteCloudCopy]);
+    logMood: (date, value, taskId) => commit((current) => setMoodIn(current, date, value, taskId)),
+  }), [state, ready, error, notice, saveBlocked, route, navigate, composer, confirm, startFresh, exportData, importText, loadSample, flash, dismissNotice, praise, undo, redo, canUndo, canRedo, themeMode, accent, paletteOpen, settingsOpen, focus, confettiSeed, celebrate, clearCompletedTasks, commit, reminders, setReminders, weekStart, setWeekStart, display, setDisplay, sync, syncStatus, syncMessage, syncAvailable, startSync, stopSync, runSync, deleteCloudCopy, shared, sharedStatus, sharedMessage, startShared, stopShared, runSharedSync, feeds, addFeed, removeFeed, refreshFeeds, weather, setWeather, recordTombstone]);
 
   return <PlannerContext.Provider value={value}>{children}</PlannerContext.Provider>;
 }
