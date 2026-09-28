@@ -3,7 +3,7 @@ import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { MicIcon, CloseIcon, VolumeIcon, SparklesIcon } from '../icons';
 import { t, getLang } from '../i18n';
-import { speakText, stopSpeaking, voiceTurn, type VoiceCurrentDraft, type VoiceTurn } from '../voiceai';
+import { replyLang, speakText, stopSpeaking, voiceTurn, type VoiceCurrentDraft, type VoiceTurn } from '../voiceai';
 import { useSpeechInput, type SpeechError } from '../speech';
 import type { AIDraft, PlanRange } from '../ai';
 
@@ -94,8 +94,10 @@ export function VoiceTalk({ onDraft, currentDraft = null }: {
       setBubbles((current) => [...current, { role: 'assistant', text: replyText }]);
       scrollLog();
       if (result.draft) onDraft(result.draft, result.range);
+      // The voice follows the reply's own language, not the app's: a Persian
+      // answer to a Persian question is read by a Persian voice either way.
       const spoken = !mutedRef.current && speakText(replyText, {
-        lang: getLang(),
+        lang: replyLang(replyText),
         onend: () => settle('idle'),
       });
       setPhase(spoken ? 'speaking' : 'idle');
@@ -152,9 +154,11 @@ export function VoiceTalk({ onDraft, currentDraft = null }: {
     return t("Tap the mic and just say it");
   })();
 
+  // Both languages show up either way — saying it in the "other" language
+  // works just as well, and the hints make that obvious.
   const hints = getLang() === 'fa'
-    ? ['فردا روز سنگینیه، نظمش بده', 'خسته‌ام — عصرِ آرومی برام بچین']
-    : ['Tomorrow is heavy — sort it out', "I'm wiped — make tonight easy"];
+    ? ['فردا روز سنگینیه، نظمش بده', 'خسته‌ام — عصرِ آرومی برام بچین', 'Two weeks of exams — help me fit it all in']
+    : ['Tomorrow is heavy — sort it out', "I'm wiped — make tonight easy", 'فردا روز سنگینیه، نظمش بده'];
 
   return (
     <section className={cx('card voice-card', `voice-${phase}`)} aria-label={t("Talk to the AI")}>

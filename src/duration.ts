@@ -57,6 +57,26 @@ export function normalizeDigits(text: string): string {
     .replace(/[٠-٩]/g, (ch) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(ch)));
 }
 
+/**
+ * Keyboards and speech engines emit the "same" Persian letter in several
+ * shapes: Arabic ي/ك, alef variants, he-with-hamza, tatweel, and the
+ * zero-width non-joiner that splits «سه‌شنبه» into half-words. Fold all of
+ * them onto plain Persian forms so sloppy input parses like careful input.
+ */
+export function normalizePersianText(text: string): string {
+  return text
+    .replace(/[يیٸ]/g, 'ی')
+    .replace(/[كک]/g, 'ک')
+    .replace(/ٱ/g, 'ا')
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/ؤ/g, 'و')
+    .replace(/[ۀة]/g, 'ه')
+    .replace(/[\u064B-\u065F\u0670]/g, '') // harakat diacritics from Arabic keyboards
+    .replace(/ـ/g, '') // tatweel
+    .replace(/\u200c/g, ' ') // ZWNJ — «پس‌فردا» reads like «پس فردا»
+    .replace(/\s+/g, ' ');
+}
+
 function toDays(amount: number, unit: string): number | null {
   const per = UNIT_DAYS[unit];
   if (!per || !Number.isFinite(amount) || amount <= 0) return null;
@@ -100,7 +120,7 @@ function nextSaturday(today: string): string {
  */
 export function parsePlanDuration(text: string, today = todayISO()): ParsedDuration | null {
   if (typeof text !== 'string' || !isValidISODate(today)) return null;
-  let clean = normalizeDigits(text.toLowerCase()).replace(/\s+/g, ' ').trim();
+  let clean = normalizePersianText(normalizeDigits(text.toLowerCase())).trim();
   if (!clean) return null;
   // Exclamations ("what a day!") are not planning requests.
   clean = clean.replace(/\b(?:what|such) (?:a|an)\b/g, '');
@@ -140,23 +160,28 @@ export function parsePlanDuration(text: string, today = todayISO()): ParsedDurat
   }
 
   // ── Persian: named days ──
-  if (/پس\s*فردا|پس‌فردا/.test(clean)) return duration(1, addDays(today, 2));
+  if (/پس\s*فردا/.test(clean)) return duration(1, addDays(today, 2));
   if (/فردا/.test(clean)) return duration(1, tomorrow);
-  if (/امروز/.test(clean)) return duration(1, today);
+  if (/امروز|امشب/.test(clean)) return duration(1, today);
 
-  // ── Persian: number + unit ("۱۰ روز آینده", "دو هفته بعد") ──
+  // ── Persian: number + unit ("۱۰ روز آینده", "دو هفته بعد", "بیست روز") ──
+  // Colloquial forms included ("یه", "پونزده"). Longest words first; the
+  // lookbehind keeps a number from matching INSIDE a longer word — «شنبه»
+  // ends in «نه» (nine), and «دوشنبه» starts with «دو» (two).
   const faWords: Record<string, number> = {
-    'یک': 1, 'یه': 1, 'دو': 2, 'سه': 3, 'چهار': 4, 'پنج': 5,
-    'شش': 6, 'هفت': 7, 'هشت': 8, 'نه': 9, 'ده': 10,
+    'پانزده': 15, 'پونزده': 15, 'چهارده': 14, 'سیزده': 13, 'دوازده': 12, 'یازده': 11,
+    'بیست': 20, 'ده': 10, 'هشت': 8, 'هفت': 7, 'شش': 6, 'پنج': 5, 'چهار': 4,
+    'سه': 3, 'دو': 2, 'یه': 1, 'یک': 1, 'نه': 9, 'سی': 30,
   };
-  const faUnit = clean.match(/(\d+|یک|یه|دو|سه|چهار|پنج|شش|هفت|هشت|نه|ده)\s*(روز|هفته|ماه|سال)/);
+  const faUnit = clean.match(/(?<![\u0600-\u06FF])(\d+|پانزده|پونزده|چهارده|سیزده|دوازده|یازده|بیست|ده|هشت|هفت|شش|پنج|چهار|سه|دو|یه|یک|نه|سی)\s*(روز|هفته|ماه|سال)/);
   if (faUnit) {
     const amount = faWords[faUnit[1]] ?? Number(faUnit[1]);
     const per = { 'روز': 1, 'هفته': 7, 'ماه': 30, 'سال': 365 }[faUnit[2]];
     if (Number.isFinite(amount) && amount > 0 && per) return duration(amount * per, today);
   }
   // «چند روز آینده» — an unspecified few days.
-  if (/چند\s+روز/.test(clean)) return duration(3, today);
+  const chand = clean.match(/چند\s+(روز|هفته)/);
+  if (chand) return duration(chand[1] === 'هفته' ? 14 : 3, today);
 
   // ── Persian: unit with a future marker ("هفته آینده", "ماه بعد") ──
   const faFuture = clean.match(/(روز|هفته|ماه)\s*(آینده|بعد|دیگه|اینده)/);
@@ -177,6 +202,33 @@ export function parsePlanDuration(text: string, today = todayISO()): ParsedDurat
   if (untilFa && FA_WEEKDAYS[untilFa[1]] !== undefined) {
     return duration(throughWeekday(today, FA_WEEKDAYS[untilFa[1]]), today);
   }
+
+  // ── Finglish: Persian spoken aloud but transcribed into Latin letters ──
+  // ("farda miam", "do hafte kar daram", "hafte dige"). Recognition engines
+  // do this whenever they listen to Persian with a non-Persian locale, so
+  // hearing it as Persian is part of understanding the speaker.
+  if (/\bpas\s*farda\b/.test(clean)) return duration(1, addDays(today, 2));
+  if (/\bfarda\b/.test(clean)) return duration(1, tomorrow);
+  if (/\bemshab\b|\bemrooz\b/.test(clean)) return duration(1, today);
+  const FING_AMOUNTS: Record<string, number> = {
+    yek: 1, ye: 1, do: 2, dota: 2, se: 3, seh: 3, char: 4, chahar: 4, panj: 5, ponj: 5,
+    shish: 6, shesh: 6, haft: 7, hasht: 8, noh: 9, nah: 9, dah: 10, davazdah: 12, davazde: 12,
+    sizdah: 13, sisdah: 13, chardah: 14, chahardah: 14, panzdah: 15, punzdah: 15, bist: 20, si: 30,
+  };
+  const FING_UNITS: Record<string, number> = {
+    rooz: 1, ruz: 1, roz: 1, hafte: 7, hafteh: 7, maah: 30, mah: 30, saal: 365, sal: 365,
+  };
+  const fingUnit = clean.match(/\b(\d+|[a-z]{2,8})\s*(?:ta\s+)?(rooz|ruz|roz|hafte|hafteh|maah|mah|saal|sal)\b/);
+  if (fingUnit) {
+    const amount = FING_AMOUNTS[fingUnit[1]] ?? Number(fingUnit[1]);
+    const per = FING_UNITS[fingUnit[2]];
+    if (Number.isFinite(amount) && amount > 0 && per) return duration(amount * per, today);
+  }
+  if (/\bchand\s+(rooz|ruz|roz)\b/.test(clean)) return duration(3, today);
+  if (/\b(in|hamin)\s+hafte\b/.test(clean)) return duration(7, today);
+  if (/\b(in|hamin)\s+mah\b/.test(clean)) return duration(30, today);
+  if (/\b(hafte|hafteh)\s*(ye|e)?\s+(ayande|dige|digeh|bad|baad)\b/.test(clean)) return duration(7, today);
+  if (/\b(mah|maah)\s*(e)?\s+(ayande|dige|digeh|bad|baad)\b/.test(clean)) return duration(30, today);
 
   return null;
 }

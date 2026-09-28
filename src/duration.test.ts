@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_PLAN_DAYS, normalizeDigits, parsePlanDuration } from './duration';
+import { MAX_PLAN_DAYS, normalizeDigits, normalizePersianText, parsePlanDuration } from './duration';
 
 // 2026-09-28 is a Monday.
 const today = '2026-09-28';
@@ -62,5 +62,43 @@ describe('parsePlanDuration', () => {
   it('normalizes Persian and Arabic digits', () => {
     expect(normalizeDigits('۱۰ روز')).toBe('10 روز');
     expect(normalizeDigits('٥ أيام')).toBe('5 أيام');
+  });
+
+  it('folds messy Persian script onto plain forms', () => {
+    // Arabic-letter variants, he-with-hamza, tatweel and ZWNJ all normalize.
+    expect(normalizePersianText('يكشنبه')).toBe('یکشنبه');
+    expect(normalizePersianText('كِتاب')).toBe('کتاب');
+    expect(normalizePersianText('خانۀ')).toBe('خانه');
+    expect(normalizePersianText('آینده أ')).toBe('اینده ا');
+    expect(normalizePersianText('سه‌شنبه')).toBe('سه شنبه');
+    expect(normalizePersianText('پـس‌فردا')).toBe('پس فردا');
+  });
+
+  it('hears casual spoken Persian, however it is typed', () => {
+    expect(parsePlanDuration('یه هفته دیگه', today)).toMatchObject({ days: 7 });
+    expect(parsePlanDuration('امشب خسته‌ام، یه چیز سبک', today)).toMatchObject({ startDate: today, days: 1 });
+    expect(parsePlanDuration('پس‌فردا میام', today)).toMatchObject({ startDate: '2026-09-30', days: 1 });
+    expect(parsePlanDuration('بیست روز وقت دارم', today)).toMatchObject({ startDate: today, days: 20 });
+    expect(parsePlanDuration('چند هفته مرخصی‌ام', today)).toMatchObject({ startDate: today, days: 14 });
+    // Arabic-letter keyboards and ZWNJ keyboards — still understood.
+    // Monday → through Sunday = 7 days; through Tuesday = 2 days.
+    expect(parsePlanDuration('تا يكشنبه', today)).toMatchObject({ startDate: today, days: 7 });
+    expect(parsePlanDuration('تا سه‌شنبه', today)).toMatchObject({ startDate: today, days: 2 });
+    // Weekday names must not be misread as numbers («دوشنبه» starts with «دو»,
+    // «شنبه» ends with «نه»).
+    expect(parsePlanDuration('دوشنبه هفته بعد', today)).toMatchObject({ startDate: today, days: 7 });
+  });
+
+  it('hears Finglish — Persian transcribed into Latin letters', () => {
+    expect(parsePlanDuration('farda miam', today)).toMatchObject({ startDate: '2026-09-29', days: 1 });
+    expect(parsePlanDuration('pasfarda kar daram', today)).toMatchObject({ startDate: '2026-09-30', days: 1 });
+    expect(parsePlanDuration('emshab khasteam', today)).toMatchObject({ startDate: today, days: 1 });
+    expect(parsePlanDuration('do hafte kar daram', today)).toMatchObject({ startDate: today, days: 14 });
+    expect(parsePlanDuration('ye hafte sabok michazi', today)).toMatchObject({ startDate: today, days: 7 });
+    expect(parsePlanDuration('10 rooz miam', today)).toMatchObject({ startDate: today, days: 10 });
+    expect(parsePlanDuration('hafte dige', today)).toMatchObject({ startDate: today, days: 7 });
+    expect(parsePlanDuration('hafteye ayande', today)).toMatchObject({ startDate: today, days: 7 });
+    expect(parsePlanDuration('mahe ayande', today)).toMatchObject({ startDate: today, days: 30 });
+    expect(parsePlanDuration('in hafte', today)).toMatchObject({ startDate: today, days: 7 });
   });
 });

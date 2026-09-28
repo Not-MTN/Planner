@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { compressHistory, normalizeVoiceReply, pickVoice, speakText, stopSpeaking, voiceRange, voiceSystemPrompt, voiceTurn, VOICE_HISTORY_LIMIT, type VoiceCurrentDraft } from './voiceai';
+import { compressHistory, normalizeVoiceReply, pickVoice, replyLang, speakText, stopSpeaking, voiceRange, voiceSystemPrompt, voiceTurn, VOICE_HISTORY_LIMIT, type VoiceCurrentDraft } from './voiceai';
 import { createEmptyState } from './types';
 
 const today = new Date().toISOString().slice(0, 10);
@@ -67,6 +67,31 @@ describe('voice ai', () => {
     expect(prompt).toContain('no markdown');
     expect(prompt).toContain('tired');
     expect(prompt.toLowerCase()).toContain('persian');
+  });
+
+  it('is fluent in messy real-world Persian: colloquial, Dari, Finglish, typos', () => {
+    const prompt = voiceSystemPrompt();
+    // Colloquial/spoken forms are named explicitly so the model expects them.
+    expect(prompt).toContain('میخوام');
+    expect(prompt).toContain('خسته‌م');
+    // Regional varieties and Latin-letter Persian are understood as Persian.
+    expect(prompt).toContain('Dari');
+    expect(prompt).toContain('Finglish');
+    expect(prompt).toContain('farda miam');
+    // Keyboard-letter typos are called out as normal.
+    expect(prompt).toContain('ي/ی');
+    // The user is never made to repeat or rephrase.
+    expect(prompt).toContain('Never ask the user to repeat');
+    // Answers match the language the user actually spoke.
+    expect(prompt).toContain('IN THE USER\'S LANGUAGE');
+    expect(prompt).toContain('conversational Persian');
+  });
+
+  it('speaks replies with a voice matching the reply text, not the app', () => {
+    expect(replyLang('باشه، فردا رو سبک می‌چینم.')).toBe('fa');
+    expect(replyLang('Sure, keeping tomorrow light.')).toBe('en');
+    // Mostly-Persian with a few Latin words still speaks Persian.
+    expect(replyLang('باشه، deep work رو می‌ذارم عصر.')).toBe('fa');
   });
 
   it('sends the utterance, bounded history and schedule context to the xAI proxy', async () => {
