@@ -224,6 +224,140 @@ export interface MoodEntry {
   updatedAt: string;
 }
 
+/**
+ * The two optional panels. Neither one replaces the personal planner: someone
+ * may run the personal panel alone, add the student panel, add the guardian
+ * panel, or both, and can turn a panel off again without losing the planner.
+ */
+export interface Panels {
+  student: StudentPanel;
+  guardian: GuardianPanel;
+}
+
+export interface StudentPanel {
+  enabled: boolean;
+  /** What they study — required the moment the panel is switched on. */
+  field: string | null;
+  /** Where they are in it: see GRADE_LEVELS. */
+  grade: string | null;
+  /** Guardians this student shares weekly results with. */
+  guardians: StudentGuardian[];
+  /** Subjects the student tracks, with an optional exam date. */
+  subjects: StudentSubject[];
+  /** Why the student changed something significant. Detail kept for the active week only. */
+  explanations: ChangeNote[];
+}
+
+/** Curated so a guardian can read it at a glance; 'other' keeps everyone included. */
+export const GRADE_LEVELS = [
+  'school-9',
+  'school-10',
+  'school-11',
+  'school-12',
+  'university',
+  'postgrad',
+  'other',
+] as const;
+
+export type GradeLevel = (typeof GRADE_LEVELS)[number];
+
+export function isGradeLevel(value: unknown): value is GradeLevel {
+  return typeof value === 'string' && (GRADE_LEVELS as readonly string[]).includes(value);
+}
+
+/** "Your advisor changed the plan for this week" — in-panel, never email. */
+export interface GuardianNotice {
+  id: string;
+  /** The student it concerns, by username. */
+  student: string;
+  /** Who changed it. */
+  author: string;
+  /** What they said, in their own words. */
+  summary: string;
+  weekOf: string;
+  createdAt: string;
+  read: boolean;
+}
+
+export interface GuardianPanel {
+  enabled: boolean;
+  kind: GuardianKind | null;
+  /** What they guide — required the moment the panel is switched on. */
+  field: string | null;
+  /** Students this guardian watches. Only weekly results travel, never detail. */
+  links: GuardianLink[];
+  /** What the other guardians of those students changed, newest first. */
+  notices: GuardianNotice[];
+}
+
+/** A guardian this student accepted. The key for their results lives in the vault. */
+export interface StudentGuardian {
+  linkId: string;
+  guardianUsername: string;
+  guardianDisplayName: string;
+  /** base64 — the results key, wrapped by this vault's key. */
+  wrappedShareKey: string;
+  /** Week these results were last sent for. */
+  sharedWeek: string | null;
+}
+
+export type GuardianKind = 'advisor' | 'parent';
+
+export interface StudentSubject {
+  id: string;
+  name: string;
+  accent: string;
+  examDate: string | null;
+  /** Target study time per week, in minutes. */
+  targetMinutes: number | null;
+}
+
+/** A short explanation the student writes for a significant change. */
+export interface ChangeNote {
+  id: string;
+  createdAt: string;
+  /** Monday of the week this belongs to. */
+  weekOf: string;
+  summary: string;
+  reason: string;
+}
+
+/** One week of results: all a guardian ever sees of a student's planner. */
+/** Minutes per subject, most-focused first. Counts only — never task titles. */
+export interface WeekSubjectMinutes {
+  name: string;
+  minutes: number;
+}
+
+export interface WeekResults {
+  weekOf: string;
+  planned: number;
+  done: number;
+  focusMinutes: number;
+  /** Where the focused time went, top four subjects. */
+  subjects: WeekSubjectMinutes[];
+  /** The student's own words about the week, if they wrote any. */
+  headline: string | null;
+  updatedAt: string;
+}
+
+export interface GuardianLink {
+  id: string;
+  username: string;
+  displayName: string;
+  status: 'pending' | 'linked';
+  /** The last weeks of results, newest first. Capped: nothing accumulates. */
+  history: WeekResults[];
+  /** The server's id for this request, once it exists. */
+  linkId: string | null;
+  /** The pairing code to hand to the student. Gone from here once accepted. */
+  code: string | null;
+  /** base64 — the results key, wrapped by this vault's key. */
+  wrappedShareKey: string | null;
+  /** Latest weekly results. Replaced every week — never accumulated. */
+  results: WeekResults | null;
+}
+
 export interface PlannerState {
   tasks: Task[];
   events: PlannerEvent[];
@@ -239,6 +373,7 @@ export interface PlannerState {
   moods: MoodEntry[];
   intentions: Record<string, string>;
   focusLog: FocusLog[];
+  panels: Panels;
 }
 
 export interface TaskInput {
@@ -326,5 +461,13 @@ export function createEmptyState(): PlannerState {
     intentions: {},
     moods: [],
     focusLog: [],
+    panels: createEmptyPanels(),
+  };
+}
+
+export function createEmptyPanels(): Panels {
+  return {
+    student: { enabled: false, field: null, grade: null, guardians: [], subjects: [], explanations: [] },
+    guardian: { enabled: false, kind: null, field: null, links: [], notices: [] },
   };
 }

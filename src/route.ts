@@ -12,10 +12,14 @@ export type Route =
   | { name: 'notes' }
   | { name: 'insights' }
   | { name: 'plans' }
+  /** Optional panels: off until the user adds them, and never replace the planner. */
+  | { name: 'panels' }
+  | { name: 'student' }
+  | { name: 'guardian' }
   | { name: 'quickadd' }
   | { name: 'ai'; tab?: 'plan' | 'review' };
 
-const PLAIN_NAMES = new Set(['today', 'tasks', 'habits', 'goals', 'notes', 'insights', 'plans']);
+const PLAIN_NAMES = new Set(['today', 'tasks', 'habits', 'goals', 'notes', 'insights', 'plans', 'panels', 'student', 'guardian']);
 const CALENDAR_TABS = new Set(['week', 'month', 'agenda']);
 
 export function calendarDateFor(year: number, month: number): string {
@@ -96,6 +100,12 @@ export function routeTitle(route: Route): string {
       return 'Insights';
     case 'plans':
       return 'Plans';
+    case 'panels':
+      return 'Panels';
+    case 'student':
+      return 'Student panel';
+    case 'guardian':
+      return 'Guardian panel';
     case 'quickadd':
       return 'Quick add';
     case 'ai':

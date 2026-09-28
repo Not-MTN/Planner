@@ -16,8 +16,10 @@ import {
   SearchIcon,
   HelpIcon,
   HeartIcon,
+  HorizonIcon,
   SlidersIcon,
   SparklesIcon,
+  StudyIcon,
   SunIcon,
   UndoIcon,
   RedoIcon,
@@ -43,6 +45,10 @@ const CalendarView = lazy(() => import('../views/CalendarView').then((m) => ({ d
 const InsightsView = lazy(() => import('../views/InsightsView').then((m) => ({ default: m.InsightsView })));
 const AIView = lazy(() => import('../views/AIView').then((m) => ({ default: m.AIView })));
 const PlansView = lazy(() => import('../views/PlansView').then((m) => ({ default: m.PlansView })));
+// Optional panels: only downloaded once someone actually adds one.
+const PanelsView = lazy(() => import('../views/PanelsView').then((m) => ({ default: m.PanelsView })));
+const StudentPanelView = lazy(() => import('../views/StudentPanelView').then((m) => ({ default: m.StudentPanelView })));
+const GuardianPanelView = lazy(() => import('../views/GuardianPanelView').then((m) => ({ default: m.GuardianPanelView })));
 import { applyUpdate, onUpdateAvailable } from '../pwa';
 import { isAIVisited, onTourRequest, requestTour, TOUR_STOPS, tourRouteFor, tourStartIndex } from '../tour';
 import { onAboutRequest, requestAbout } from '../about';
@@ -95,6 +101,11 @@ export function Shell() {
     confettiSeed,
   } = planner;
   const [moreOpen, setMoreOpen] = useState(false);
+  // Panels only show up once they are added — they are extras, never a mode.
+  const panelNav = [
+    ...(planner.panels.student.enabled ? [{ name: 'student' as const, label: t("Student"), icon: StudyIcon }] : []),
+    ...(planner.panels.guardian.enabled ? [{ name: 'guardian' as const, label: t("Guardian"), icon: HeartIcon }] : []),
+  ];
   const importFile = useImportFile(importText);
   const key = routeKey(route);
   const today = todayISO();
@@ -221,6 +232,19 @@ export function Shell() {
           {NAV.slice(4).map((item) => (
             <NavButton key={item.name} item={item} active={route.name === item.name} onClick={() => go(item.name)} />
           ))}
+          {panelNav.length > 0 ? (
+            <>
+              <p className="nav-label">{t("Panels")}</p>
+              {panelNav.map((item) => (
+                <NavButton key={item.name} item={item} active={route.name === item.name} onClick={() => go(item.name)} />
+              ))}
+              <NavButton
+                item={{ name: 'panels', label: t("All panels"), icon: HorizonIcon }}
+                active={route.name === 'panels'}
+                onClick={() => go('panels')}
+              />
+            </>
+          ) : null}
         </nav>
         <div className="side-foot">
           <div className="side-history">
@@ -347,6 +371,9 @@ export function Shell() {
                   {route.name === 'insights' ? <InsightsView /> : null}
                   {route.name === 'ai' ? <AIView /> : null}
                   {route.name === 'plans' ? <PlansView /> : null}
+                  {route.name === 'panels' ? <PanelsView /> : null}
+                  {route.name === 'student' ? <StudentPanelView /> : null}
+                  {route.name === 'guardian' ? <GuardianPanelView /> : null}
                 </Suspense>
               </div>
             </>
@@ -390,6 +417,14 @@ export function Shell() {
             </button>
             <button type="button" className={cx(route.name === 'plans' && 'on')} onClick={() => go('plans')}>
               <WeekIcon size={18} /> {t("Plans")}
+            </button>
+            {panelNav.map((item) => (
+              <button key={item.name} type="button" className={cx(route.name === item.name && 'on')} onClick={() => go(item.name)}>
+                <item.icon size={18} /> {item.label}
+              </button>
+            ))}
+            <button type="button" className={cx(route.name === 'panels' && 'on')} onClick={() => go('panels')}>
+              <HorizonIcon size={18} /> {t("Panels")}
             </button>
             <button type="button" onClick={openSettings}><SlidersIcon size={18} /> {t("Settings")}</button>
             <button type="button" onClick={requestTour}><HelpIcon size={18} /> {t("How Planner works")}</button>

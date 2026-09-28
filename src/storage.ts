@@ -1,8 +1,9 @@
 import { ACCENTS, categoryById, HABIT_ICONS, NOTE_KINDS, PRIORITIES } from './constants';
+import { isBase64 } from './shared/authContract';
 import { isValidISODate, isValidTime, localDateFromTimestamp, timeToMinutes } from './dates';
 import { REPEAT_SET } from './recurrence';
 import { MAX_PLAN_DAYS } from './duration';
-import { AI_PLAN_LIMIT, createEmptyState, type AIMemory, type AttachmentRef, type AIMemoryCategory, type EventInput, type FixedCommitment, type FocusLog, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Subtask, type TaskInput, type TaskRepeat, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task } from './types';
+import { AI_PLAN_LIMIT, createEmptyPanels, createEmptyState, isGradeLevel, type AIMemory, type AttachmentRef, type AIMemoryCategory, type ChangeNote, type EventInput, type FixedCommitment, type FocusLog, type GuardianKind, type GuardianLink, type GuardianNotice, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Panels, type StudentGuardian, type StudentSubject, type Subtask, type TaskInput, type TaskRepeat, type WeekResults, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task } from './types';
 import { t } from './i18n';
 
 export const STORAGE_KEY = 'personal-planner.v1';
@@ -481,6 +482,189 @@ export function sanitizeState(raw: unknown): PlannerState | null {
     moods,
     intentions,
     focusLog: sanitizeFocusLog(source.focusLog),
+    panels: sanitizePanels(source.panels),
+  };
+}
+
+const PANEL_EXPLANATION_LIMIT = 200;
+const PANEL_SUBJECT_LIMIT = 40;
+const PANEL_LINK_LIMIT = 20;
+
+function sanitizeSubject(value: unknown): StudentSubject | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = asString(raw.id, 80);
+  const name = asString(raw.name, 60)?.trim();
+  if (!id || !name) return null;
+  const examDate = asString(raw.examDate, 10);
+  const target = typeof raw.targetMinutes === 'number' && Number.isFinite(raw.targetMinutes) ? Math.round(raw.targetMinutes) : null;
+  return {
+    id,
+    name,
+    accent: ACCENT_SET.has(String(raw.accent)) ? String(raw.accent) : 'sage',
+    examDate: examDate && isValidISODate(examDate) ? examDate : null,
+    targetMinutes: target === null ? null : Math.min(6_000, Math.max(0, target)),
+  };
+}
+
+function sanitizeChangeNote(value: unknown): ChangeNote | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = asString(raw.id, 80);
+  const summary = asString(raw.summary, 140)?.trim();
+  const weekOf = asString(raw.weekOf, 10);
+  if (!id || !summary || !weekOf || !isValidISODate(weekOf)) return null;
+  return {
+    id,
+    createdAt: asString(raw.createdAt, 40) || new Date(0).toISOString(),
+    weekOf,
+    summary,
+    reason: (asString(raw.reason, 400) ?? '').trim(),
+  };
+}
+
+function sanitizeWeekResults(value: unknown): WeekResults | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const weekOf = asString(raw.weekOf, 10);
+  if (!weekOf || !isValidISODate(weekOf)) return null;
+  const number = (input: unknown, max: number) => (typeof input === 'number' && Number.isFinite(input) ? Math.min(max, Math.max(0, Math.round(input))) : 0);
+  return {
+    weekOf,
+    planned: number(raw.planned, 10_000),
+    done: number(raw.done, 10_000),
+    focusMinutes: number(raw.focusMinutes, 100_000),
+    subjects: (Array.isArray(raw.subjects) ? raw.subjects : []).flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') return [];
+      const item = entry as Record<string, unknown>;
+      const name = asString(item.name, 40)?.trim();
+      if (!name) return [];
+      return [{ name, minutes: Math.max(0, Math.round(Number(item.minutes) || 0)) }];
+    }).slice(0, 4),
+    headline: (asString(raw.headline, 160) ?? '').trim() || null,
+    updatedAt: asString(raw.updatedAt, 40) || new Date(0).toISOString(),
+  };
+}
+
+/** How many weeks of results a guardian keeps: enough to see a trend, no more. */
+const WEEKS_KEPT = 12;
+
+function sanitizeGuardianNotice(value: unknown): GuardianNotice | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = asString(raw.id, 80);
+  const student = asString(raw.student, 40)?.trim().toLowerCase();
+  if (!id || !student) return null;
+  return {
+    id,
+    student,
+    author: (asString(raw.author, 60) ?? '').trim() || t('A guardian'),
+    summary: (asString(raw.summary, 160) ?? '').trim(),
+    weekOf: asString(raw.weekOf, 10) ?? '',
+    createdAt: asString(raw.createdAt, 40) ?? new Date(0).toISOString(),
+    read: raw.read === true,
+  };
+}
+
+function sanitizeGuardianLink(value: unknown): GuardianLink | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = asString(raw.id, 80);
+  const username = asString(raw.username, 40)?.trim().toLowerCase();
+  if (!id || !username) return null;
+  const linkId = asString(raw.linkId, 64);
+  return {
+    id,
+    username,
+    displayName: (asString(raw.displayName, 60) ?? '').trim() || username,
+    status: raw.status === 'linked' ? 'linked' : 'pending',
+    history: (Array.isArray(raw.history) ? raw.history : [])
+      .flatMap((week) => {
+        const result = sanitizeWeekResults(week);
+        return result ? [result] : [];
+      })
+      .sort((a, b) => b.weekOf.localeCompare(a.weekOf))
+      .slice(0, WEEKS_KEPT),
+    linkId: linkId && /^[a-f0-9-]{8,64}$/.test(linkId) ? linkId : null,
+    code: asString(raw.code, 40),
+    wrappedShareKey: isBase64(raw.wrappedShareKey, 44, 512) ? String(raw.wrappedShareKey) : null,
+    results: sanitizeWeekResults(raw.results),
+  };
+}
+
+function sanitizeStudentGuardian(value: unknown): StudentGuardian | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const linkId = asString(raw.linkId, 64);
+  const guardianUsername = asString(raw.guardianUsername, 40)?.trim().toLowerCase();
+  if (!linkId || !guardianUsername) return null;
+  if (!/^[a-f0-9-]{8,64}$/.test(linkId)) return null;
+  const wrapped = raw.wrappedShareKey;
+  return {
+    linkId,
+    guardianUsername,
+    guardianDisplayName: (asString(raw.guardianDisplayName, 60) ?? '').trim() || guardianUsername,
+    wrappedShareKey: isBase64(wrapped, 44, 512) ? String(wrapped) : '',
+    sharedWeek: asString(raw.sharedWeek, 10),
+  };
+}
+
+/** Panels are opt-in and additive: turning one off never touches the planner itself. */
+export function sanitizePanels(value: unknown): Panels {
+  const empty = createEmptyPanels();
+  if (!value || typeof value === 'object' === false) return empty;
+  const raw = value as Record<string, unknown>;
+  const student = (raw.student ?? {}) as Record<string, unknown>;
+  const guardian = (raw.guardian ?? {}) as Record<string, unknown>;
+  const subjects = uniqueBy(
+    (Array.isArray(student.subjects) ? student.subjects : []).flatMap((item) => {
+      const subject = sanitizeSubject(item);
+      return subject ? [subject] : [];
+    }),
+    (item) => item.id,
+  ).slice(0, PANEL_SUBJECT_LIMIT);
+  const explanations = uniqueBy(
+    (Array.isArray(student.explanations) ? student.explanations : []).flatMap((item) => {
+      const note = sanitizeChangeNote(item);
+      return note ? [note] : [];
+    }),
+    (item) => item.id,
+  )
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, PANEL_EXPLANATION_LIMIT);
+  const links = uniqueBy(
+    (Array.isArray(guardian.links) ? guardian.links : []).flatMap((item) => {
+      const link = sanitizeGuardianLink(item);
+      return link ? [link] : [];
+    }),
+    (item) => item.id,
+  ).slice(0, PANEL_LINK_LIMIT);
+  const kind = guardian.kind === 'advisor' || guardian.kind === 'parent' ? (guardian.kind as GuardianKind) : null;
+  const field = (value: unknown) => {
+    const text = asString(value, 60)?.trim();
+    return text ? text : null;
+  };
+  const grade = isGradeLevel(student.grade) ? student.grade : null;
+  const guardians = uniqueBy(
+    (Array.isArray(student.guardians) ? student.guardians : []).flatMap((item) => {
+      const guardian = sanitizeStudentGuardian(item);
+      return guardian && guardian.wrappedShareKey ? [guardian] : [];
+    }),
+    (item) => item.linkId,
+  ).slice(0, 20);
+  const notices = uniqueBy(
+    (Array.isArray(guardian.notices) ? guardian.notices : []).flatMap((item) => {
+      const notice = sanitizeGuardianNotice(item);
+      return notice ? [notice] : [];
+    }),
+    (item) => item.id,
+  )
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, 20);
+
+  return {
+    student: { enabled: student.enabled === true, field: field(student.field), grade, guardians, subjects, explanations },
+    guardian: { enabled: guardian.enabled === true && kind !== null, kind, field: field(guardian.field), links, notices },
   };
 }
 

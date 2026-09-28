@@ -30,6 +30,14 @@ How it works: the sync code never leaves your devices. The browser derives an AE
 | `/api/sync/status` | GET | `{ configured: boolean }` |
 | `/api/sync` | GET / PUT / DELETE | Read, compare-and-swap write, or delete the encrypted blob (`X-Sync-Id` header) |
 
+### Accounts use the same database
+
+Sign-in (and guardian linking later) needs the **same `DATABASE_URL`** — there is nothing else to provision, because the API creates its tables on first use just like `planner_sync`. The schema is in `db/auth.sql` if you prefer to run it yourself.
+
+Visit `https://<your-app>/api/auth/status` — it returns `{"configured": true}` when the server can see `DATABASE_URL`.
+
+**The database itself is never pushed to GitHub.** Only schema files (`db/*.sql`) live in the repository. Neon holds the data, and the connection string travels to Vercel as an environment variable: Vercel → Project → Settings → Environment Variables → `DATABASE_URL`, then redeploy. If you used Vercel's Neon integration, it added that variable for you. Locally it goes in `.env.local`, which is git-ignored.
+
 
 ## Languages (English / فارسی)
 
@@ -149,6 +157,17 @@ Never name the variable `VITE_XAI_API_KEY` (or anything starting with `VITE_`): 
 5. Talk instead of typing on the AI Coach screen. If the recognizer keeps mishearing you, set your accent under **Settings → Voice → Listening accent**.
 
 The key is read only on the server from `XAI_API_KEY`; it is never put in the browser bundle, session storage, or planner export, and the status endpoint reports only a boolean. AI requests use xAI's OpenAI-compatible chat-completions endpoint with Grok 4.7 for text and image understanding. If you host the static build somewhere other than Vercel, provide equivalent server-side `/api/xai/*` endpoints (you can reuse `src/server/xaiProxy.ts`).
+
+### If the AI says the key was rejected
+
+That message used to appear for every 401, including ones that had nothing to do with the key. The app now shows xAI's own error, and the proxy cleans up the three paste mistakes that cause a real 401: surrounding quotes, a `Bearer ` prefix, and invisible characters copied from a document.
+
+If it still fails with the key message:
+
+1. Re-copy the key from [console.x.ai](https://console.x.ai) and paste it into `XAI_API_KEY` — do not include quotes or `Bearer `.
+2. Check the model: set `XAI_MODEL` to a model your key can use (the default is `grok-4.7`).
+3. If the error is *"The server returned an unexpected response (401) instead of JSON"*, something in front of the app answered — usually Vercel Authentication or deployment password protection. Turn it off, or exclude `/api/*` from it.
+4. Environment variable changes only apply to **new** deployments, so redeploy after editing.
 
 Old links keep working: `#/daily/…`, `#/weekly/…`, `#/month/…`, `#/future`, and `#/progress` all map to their new homes.
 

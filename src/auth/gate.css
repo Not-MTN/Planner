@@ -1,0 +1,167 @@
+/* The unlock screen that stands in front of /app until the vault is open. */
+.gate {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(120% 90% at 50% -10%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 60%),
+    linear-gradient(180deg, var(--bg), var(--bg-deep));
+}
+
+.gate-card {
+  width: 100%;
+  max-width: 420px;
+  padding: 30px 28px 26px;
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--surface) 94%, white);
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow);
+  animation: gate-rise 0.42s var(--ease) both;
+}
+
+@keyframes gate-rise {
+  from { opacity: 0; transform: translateY(14px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+.gate-mark {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  font-size: 22px;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  margin-bottom: 16px;
+}
+
+.gate-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.gate-sub {
+  margin: 8px 0 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.gate-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 22px;
+}
+
+.gate-label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.gate-input {
+  min-height: 46px;
+  padding: 0 14px;
+  border-radius: 13px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 15px;
+  font-family: inherit;
+  transition: border-color 0.18s, box-shadow 0.18s;
+}
+
+.gate-input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.gate-error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 11px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--danger);
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--danger) 22%, transparent);
+}
+
+.gate-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.gate-check input { width: 16px; height: 16px; accent-color: var(--accent); }
+
+.gate-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.gate-actions .btn { width: 100%; min-height: 46px; font-size: 14.5px; }
+
+.gate-links {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+  font-size: 12.5px;
+}
+
+.gate-links button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.gate-links button:hover { color: var(--ink); }
+
+.gate-note {
+  margin: 18px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.gate-spinner {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent-contrast) 45%, transparent);
+  border-top-color: var(--accent-contrast);
+  animation: gate-spin 0.7s linear infinite;
+}
+
+@keyframes gate-spin { to { transform: rotate(360deg); } }
+
+.gate-loading { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13.5px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .gate-card { animation: none; }
+  .gate-spinner { animation-duration: 2s; }
+}

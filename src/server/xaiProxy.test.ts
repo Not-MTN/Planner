@@ -10,6 +10,8 @@ import {
   XAI_UPSTREAM_CHAT_COMPLETIONS,
   handleXAIChatCompletions,
   handleXAIStatus,
+  normalizeApiKey,
+  upstreamErrorResponse,
   isSameOriginRequest,
   validateChatPayload,
 } from './xaiProxy';
@@ -55,7 +57,26 @@ describe('Vercel function discovery', () => {
       .map((file) => '/api/' + relative(apiRoot, file).split(sep).join('/').replace(/\.(ts|js|mjs)$/, ''))
       .sort();
     // api/sync/index.ts is served by Vercel at /api/sync, api/ics/index.ts at /api/ics.
-    expect(routes).toEqual([XAI_CHAT_URL, XAI_STATUS_URL, '/api/sync/index', '/api/sync/status', '/api/ics/index'].sort());
+    expect(routes).toEqual(
+      [
+        XAI_CHAT_URL,
+        XAI_STATUS_URL,
+        '/api/sync/index',
+        '/api/sync/status',
+        '/api/ics/index',
+        '/api/auth/signup',
+        '/api/auth/salt',
+        '/api/auth/login',
+        '/api/auth/session',
+        '/api/auth/logout',
+        '/api/auth/vault',
+        '/api/auth/status',
+        '/api/auth/links',
+        '/api/auth/link-accept',
+        '/api/auth/share',
+        '/api/auth/note',
+      ].sort(),
+    );
   });
 
   it('exports web handlers for the right HTTP methods', () => {
@@ -208,5 +229,90 @@ describe('same-origin check', () => {
       headers: { origin: 'https://evil.example', 'x-forwarded-host': 'evil.example' },
     });
     expect(isSameOriginRequest(spoofedForwardedHost)).toBe(false);
+  });
+});
+
+describe('xAI key handling', () => {
+  it('cleans up the ways a key usually arrives from a paste', () => {
+    // Surrounding quotes, a "Bearer " prefix and invisible characters all make
+    // xAI answer 401 even though the key itself is valid.
+    expect(normalizeApiKey('  xai-abc123  ')).toBe('xai-abc123');
+    expect(normalizeApiKey('"xai-abc123"')).toBe('xai-abc123');
+    expect(normalizeApiKey("'xai-abc123'")).toBe('xai-abc123');
+    expect(normalizeApiKey('Bearer xai-abc123')).toBe('xai-abc123');
+    expect(normalizeApiKey('xai-\u200Babc\u00A0123')).toBe('xai-abc123');
+    expect(normalizeApiKey(undefined)).toBe('');
+    expect(normalizeApiKey('   ')).toBe('');
+  });
+
+  it('accepts a key that only needed cleaning', async () => {
+    resetRateLimits();
+    let sent = '';
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      sent = String((init.headers as Record<string, string>).Authorization);
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{}' } }] }), { status: 200 });
+    });
+    const response = await handleXAIChatCompletions(
+      request('/api/xai/chat/completions', { method: 'POST', body: chatBody() }),
+      '  "Bearer xai-abc123"\n',
+      { fetchImpl: fetchMock as unknown as typeof fetch },
+    );
+    expect(response.status).toBe(200);
+    expect(sent).toBe('Bearer xai-abc123');
+  });
+
+  it('accepts a model override without a code change', async () => {
+    resetRateLimits();
+    const fetchMock = upstreamOk();
+    const response = await handleXAIChatCompletions(
+      request('/api/xai/chat/completions', {
+        method: 'POST',
+        body: JSON.stringify({ model: 'grok-4.6', messages: [{ role: 'user', content: 'hello' }] }),
+      }),
+      FAKE_KEY,
+      { fetchImpl: fetchMock as unknown as typeof fetch, model: 'grok-4.6' },
+    );
+    expect(response.status).toBe(200);
+  });
+});
+
+describe('upstream error reporting', () => {
+  it('keeps the status but explains what xAI actually said', async () => {
+    const body = JSON.stringify({ error: { message: 'Incorrect API key provided' } });
+    const response = upstreamErrorResponse(401, body);
+    expect(response.status).toBe(401);
+    const parsed = (await response.json()) as { error: { code: string; message: string; upstream: number } };
+    expect(parsed.error.code).toBe('upstream_auth');
+    expect(parsed.error.message).toContain('Incorrect API key provided');
+    expect(parsed.error.upstream).toBe(401);
+  });
+
+  it('distinguishes a missing model from a missing function', async () => {
+    const response = upstreamErrorResponse(404, '{}');
+    expect(response.status).toBe(404);
+    const parsed = (await response.json()) as { error: { code: string; message: string } };
+    expect(parsed.error.code).toBe('model_not_found');
+    expect(parsed.error.message).toContain('XAI_MODEL');
+  });
+
+  it('falls back to actionable advice when xAI sends nothing useful', async () => {
+    const response = upstreamErrorResponse(401, '<html>not json</html>');
+    const parsed = (await response.json()) as { error: { code: string; message: string } };
+    expect(parsed.error.code).toBe('upstream_auth');
+    expect(parsed.error.message).toContain('console.x.ai');
+  });
+
+  it('passes upstream failures through with a code instead of a bare body', async () => {
+    resetRateLimits();
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: 'bad key' }), { status: 401 }));
+    const response = await handleXAIChatCompletions(
+      request('/api/xai/chat/completions', { method: 'POST', body: chatBody() }),
+      FAKE_KEY,
+      { fetchImpl: fetchMock as unknown as typeof fetch },
+    );
+    expect(response.status).toBe(401);
+    const parsed = (await response.json()) as { error: { code: string; message: string } };
+    expect(parsed.error.code).toBe('upstream_auth');
+    expect(parsed.error.message).toBe('bad key');
   });
 });

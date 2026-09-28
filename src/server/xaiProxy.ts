@@ -11,6 +11,7 @@
 import { API_SECURITY_HEADERS, BodyTooLargeError, rateLimitResponse, readLimitedBody } from './security.js';
 
 export const XAI_UPSTREAM_CHAT_COMPLETIONS = 'https://api.x.ai/v1/chat/completions';
+/** Default model; override with the XAI_MODEL environment variable if needed. */
 export const XAI_ALLOWED_MODEL = 'grok-4.7';
 
 /**
@@ -31,6 +32,67 @@ export interface ChatProxyOptions {
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
   maxBodyBytes?: number;
+  /** Overrides the allowed model, e.g. from XAI_MODEL. */
+  model?: string;
+}
+
+/**
+ * Keys are usually pasted into a dashboard field, and a surprising number of
+ * copies pick up surrounding quotes, a "Bearer " prefix, or invisible
+ * characters from a document. Each of those produces a 401 from xAI while the
+ * key itself is perfectly valid, so clean it up before use.
+ */
+export function normalizeApiKey(value: string | undefined): string {
+  if (!value) return '';
+  let key = value.trim();
+  if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
+    key = key.slice(1, -1).trim();
+  }
+  if (/^bearer\s+/i.test(key)) key = key.replace(/^bearer\s+/i, '').trim();
+  return key.replace(/[\u200B-\u200D\uFEFF\u00A0]/g, '');
+}
+
+function defaultUpstreamMessage(code: string): string {
+  if (code === 'upstream_auth') {
+    return 'xAI rejected the API key. Re-copy it from console.x.ai into the XAI_API_KEY environment variable, then redeploy. Watch for stray quotes, spaces or a "Bearer " prefix around the key.';
+  }
+  if (code === 'upstream_forbidden') {
+    return 'xAI refused this request for that key (403). The key may not have access to this model.';
+  }
+  if (code === 'model_not_found') {
+    return 'xAI does not recognise that model name. Set XAI_MODEL on the server to a model your key can use (for example grok-4.7) and redeploy.';
+  }
+  if (code === 'rate_limited') {
+    return 'xAI is rate-limiting this key right now. Wait a moment and try again.';
+  }
+  return 'xAI returned an error for this request.';
+}
+
+/**
+ * Upstream failures keep their status code but gain a stable code and xAI's own
+ * message, so the app can explain what actually happened instead of guessing.
+ */
+export function upstreamErrorResponse(status: number, body: string): Response {
+  let message = '';
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    const error = (parsed as { error?: unknown } | null)?.error;
+    if (typeof error === 'string') message = error;
+    else if (error && typeof error === 'object') message = String((error as { message?: unknown }).message ?? '');
+  } catch {
+    /* not JSON; fall back to the generic message */
+  }
+  const code =
+    status === 401
+      ? 'upstream_auth'
+      : status === 403
+        ? 'upstream_forbidden'
+        : status === 404
+          ? 'model_not_found'
+          : status === 429
+            ? 'rate_limited'
+            : 'upstream_error';
+  return json(status, { error: { message: message || defaultUpstreamMessage(code), code, upstream: status } });
 }
 
 function json(status: number, body: unknown, extraHeaders: Record<string, string> = {}): Response {
@@ -125,10 +187,10 @@ function validMessageContent(value: unknown): { valid: boolean; textBytes: numbe
 }
 
 /** Only the narrow JSON shape used by Planner is allowed through the API-key proxy. */
-export function validateChatPayload(value: unknown): string | null {
+export function validateChatPayload(value: unknown, allowedModel: string = XAI_ALLOWED_MODEL): string | null {
   if (!isRecord(value)) return 'The request body must be a JSON object.';
   if ([...Object.keys(value)].some((key) => !ALLOWED_CHAT_KEYS.has(key))) return 'The request contains an unsupported field.';
-  if (value.model !== XAI_ALLOWED_MODEL) return 'That AI model is not available through this endpoint.';
+  if (value.model !== allowedModel) return 'That AI model is not available through this endpoint.';
   if (!Array.isArray(value.messages) || value.messages.length < 1 || value.messages.length > MAX_MESSAGES) return 'The request must contain a short messages list.';
   let textBytes = 0;
   for (const message of value.messages) {
@@ -182,7 +244,7 @@ export async function handleXAIChatCompletions(
   if (request.method !== 'POST') {
     return errorResponse(405, 'Method not allowed.', { Allow: 'POST' });
   }
-  const key = apiKey?.trim();
+  const key = normalizeApiKey(apiKey);
   if (!key) return errorResponse(503, MISSING_KEY_MESSAGE);
   const limited = rateLimitResponse(request, 'xai-chat', 20, 60_000);
   if (limited) return limited;
@@ -202,7 +264,8 @@ export async function handleXAIChatCompletions(
   } catch {
     return errorResponse(400, 'The request body must be JSON.');
   }
-  const validationError = validateChatPayload(parsed);
+  const model = normalizeApiKey(options.model) || XAI_ALLOWED_MODEL;
+  const validationError = validateChatPayload(parsed, model);
   if (validationError) return errorResponse(400, validationError);
 
   const fetchImpl = options.fetchImpl ?? fetch;
@@ -218,6 +281,11 @@ export async function handleXAIChatCompletions(
       signal: AbortSignal.timeout(options.timeoutMs ?? UPSTREAM_TIMEOUT_MS),
     });
     const responseBody = await readLimitedResponse(upstream, MAX_UPSTREAM_RESPONSE_BYTES);
+    if (!upstream.ok) {
+      // Keep the status, but report why — a 401 can come from a stray character
+      // in the key or from something in front of the app, not only a bad key.
+      return upstreamErrorResponse(upstream.status, responseBody);
+    }
     return new Response(responseBody, {
       status: upstream.status,
       headers: {

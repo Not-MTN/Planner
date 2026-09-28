@@ -29,6 +29,7 @@ import {
 import { fetchWeather, weatherInfo, type WeatherNow } from '../weather';
 import { QuickAddBar } from '../components/QuickAddBar';
 import { WelcomeCard } from '../components/WelcomeCard';
+import { PanelHub, PanelInvite } from '../components/PanelHub';
 import { EventRow, FixedEventRow, HabitRow, IntentionField, NowMark, TaskRow } from '../components/items';
 import { Empty, Meter, Ring } from '../components/ui';
 import { ChevronLeftIcon, ChevronRightIcon, PlusIcon, SparklesIcon, StopwatchIcon } from '../icons';
@@ -198,6 +199,8 @@ export function DayView({ date }: { date: string }) {
 
       {isToday ? <AICoachCard onOpen={() => navigate({ name: 'ai', tab: 'plan' })} /> : null}
       {fresh && isToday ? <WelcomeCard /> : null}
+      {isToday ? <PanelHub /> : null}
+      {isToday ? <PanelInvite /> : null}
       {isToday ? <WeatherCard /> : null}
       {isToday ? <MoodCard date={today} /> : null}
       {essentials.length > 0 ? <EssentialsCard date={date} habits={essentials} /> : null}

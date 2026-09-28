@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { parseHash, toHash, type Route } from './route';
 import { downloadState, loadFrom, parseBackup, sanitizeState, saveTo, serialize, STORAGE_FULL, STORAGE_KEY } from './storage';
+import { flushVaultPush, scheduleVaultPush } from './auth/vault';
+import { readNotices, refreshResults, relayNotices, shareWeeklyResults, syncLinks } from './auth/links';
 import { idbRead, idbWrite, savedAt } from './idb';
 import {
   addAIMemory as addAIMemoryTo,
@@ -81,7 +83,7 @@ import { fetchFeedEvents, loadFeeds, mergeFeedEvents, saveFeeds, type CalendarFe
 import { loadWeatherSettings, saveWeatherSettings, type WeatherSettings } from './weather';
 import { applyTheme, loadAccent, loadThemeMode, resolvedMode, type ThemeMode } from './theme';
 import type { Accent } from './constants';
-import { createEmptyState, type AIMemoryInput, type AttachmentRef, type ComposerState, type EventInput, type FixedCommitmentInput, type GoalInput, type HabitInput, type MoodValue, type NoteInput, type PlannerState, type SavedAIPlanInput, type TaskInput } from './types';
+import { createEmptyState, type AIMemoryInput, type AttachmentRef, type ComposerState, type EventInput, type FixedCommitmentInput, type GoalInput, type HabitInput, type MoodValue, type NoteInput, type Panels, type PlannerState, type SavedAIPlanInput, type TaskInput } from './types';
 import { t } from './i18n';
 import { isTestEnv } from './env';
 import { attachmentNotice, MAX_ATTACHMENTS_PER_NOTE, storeAttachment, sweepAttachmentBlobs } from './files';
@@ -130,6 +132,11 @@ interface PlannerContextValue {
   exportData: () => void;
   importText: (text: string) => void;
   loadSample: () => void;
+  panels: Panels;
+  /** Replaces the panels block. Panels are optional extras on top of the planner. */
+  updatePanels: (next: Panels) => void;
+  /** Adds or removes a panel. The personal planner is never affected. */
+  setPanelEnabled: (panel: 'student' | 'guardian', enabled: boolean) => void;
   flash: (message: string, action?: NoticeAction) => void;
   dismissNotice: () => void;
   undo: () => void;
@@ -258,8 +265,11 @@ const HISTORY_LIMIT = 60;
 const HISTORY_PERSIST_LIMIT = 8;
 const HISTORY_IDB_KEY = 'history';
 
-export function PlannerProvider({ children }: { children: ReactNode }) {
-  const [boot] = useState(() => loadFrom(localStorage));
+export function PlannerProvider({ children, initialState }: { children: ReactNode; initialState?: PlannerState | null }) {
+  // `initialState` wins when the planner was opened from an encrypted vault.
+  const [boot] = useState(() =>
+    initialState ? { state: sanitizeState(initialState) ?? loadFrom(localStorage).state, error: null as string | null, persist: true } : loadFrom(localStorage),
+  );
   const [state, setState] = useState<PlannerState>(boot.state);
   const [ready] = useState(true);
   const [error, setError] = useState<string | null>(boot.error);
@@ -367,8 +377,9 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // On start, prefer the IndexedDB copy if it's newer (localStorage full or cleared).
+  // Skipped when we booted from a vault, which is the authoritative copy.
   useEffect(() => {
-    if (!boot.persist) return;
+    if (!boot.persist || initialState) return;
     let cancelled = false;
     void idbRead().then((stored) => {
       // Restore the persisted undo stack too (past only — nothing to redo after a reload).
@@ -479,6 +490,75 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     syncHistoryFlags();
     flash(t("Redone."));
   }, [flash, trySave, syncHistoryFlags]);
+
+
+  // ── Encrypted vault: keep the copy on the server in step with this device ──
+  // Signed in and unlocked, the vault is what other devices read. Writes are
+  // batched, and the last few seconds of work are flushed when the tab goes away.
+  useEffect(() => {
+    scheduleVaultPush(state);
+  }, [state]);
+
+  /**
+   * Everything that has to travel between accounts, run wherever the user is —
+   * not only on the panel pages:
+   *
+   *   student  → sends this week's results, and passes a guardian's note on
+   *   guardian → picks up new results and whatever the other adults wrote
+   *
+   * All of it is best effort: a phone with no signal simply catches up later.
+   */
+  const syncPanelLinks = useCallback(
+    async (current: PlannerState) => {
+      if (!current.panels.student.enabled && !current.panels.guardian.enabled) return;
+      let panels = current.panels;
+      try {
+        if (current.panels.student.enabled && panels.student.guardians.length > 0) {
+          await relayNotices(panels);
+          const shared = await shareWeeklyResults(current, panels);
+          panels = shared.panels;
+        }
+        if (current.panels.guardian.enabled) {
+          panels = (await syncLinks(panels)).panels;
+          panels = (await refreshResults(panels)).panels;
+          panels = (await readNotices(panels)).panels;
+        }
+        // These helpers always build new objects; only a real change is saved,
+        // otherwise this would quietly loop forever.
+        if (JSON.stringify(panels) !== JSON.stringify(current.panels)) {
+          commit(() => ({ ...current, panels }));
+        }
+      } catch {
+        /* sharing is best effort; the next save tries again */
+      }
+    },
+    [commit],
+  );
+
+  // Runs shortly after the planner changes, and once when it opens.
+  const panelTimer = useRef<number | null>(null);
+  useEffect(() => {
+    const wantsStudent = state.panels.student.enabled && state.panels.student.guardians.length > 0;
+    const wantsGuardian = state.panels.guardian.enabled && state.panels.guardian.links.length > 0;
+    if (!wantsStudent && !wantsGuardian) return;
+    if (panelTimer.current !== null) window.clearTimeout(panelTimer.current);
+    panelTimer.current = window.setTimeout(() => {
+      void syncPanelLinks(stateRef.current);
+    }, 4000);
+    return () => {
+      if (panelTimer.current !== null) window.clearTimeout(panelTimer.current);
+    };
+  }, [state, syncPanelLinks]);
+
+  useEffect(() => {
+    const flush = () => void flushVaultPush();
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', flush);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', flush);
+    };
+  }, []);
 
   const undoRef = useRef(undo);
   undoRef.current = undo;
@@ -729,6 +809,30 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
 
   // ── Calendar feed subscriptions ─────────────────────────────────────────────
   const feedsRef = useRef(feeds);
+  // Panels are additive: switching one on or off never touches tasks, events,
+  // habits or anything else in the personal planner.
+  const updatePanels = useCallback(
+    (next: Panels) => {
+      commit((current) => (current.panels === next ? current : { ...current, panels: next }));
+    },
+    [commit],
+  );
+
+  const setPanelEnabled = useCallback(
+    (panel: 'student' | 'guardian', enabled: boolean) => {
+      commit((current) => {
+        const panels = current.panels;
+        if (panel === 'student') {
+          if (panels.student.enabled === enabled) return current;
+          return { ...current, panels: { ...panels, student: { ...panels.student, enabled } } };
+        }
+        if (panels.guardian.enabled === enabled) return current;
+        return { ...current, panels: { ...panels, guardian: { ...panels.guardian, enabled } } };
+      });
+    },
+    [commit],
+  );
+
   const updateFeeds = useCallback((next: CalendarFeed[]) => {
     feedsRef.current = next;
     saveFeeds(next);
@@ -919,6 +1023,9 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<PlannerContextValue>(() => ({
     state,
+    panels: state.panels,
+    updatePanels,
+    setPanelEnabled,
     ready,
     error,
     notice,
