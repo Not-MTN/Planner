@@ -43,7 +43,8 @@ Settings → **Language** switches the whole interface to Persian with a right-t
 
 **Eight simple places** — Today, Calendar (Week · Month · Upcoming), AI Coach, Tasks, Habits, Goals, Notes, Insights.
 
-- **A gentle first-run tour** — the first time Planner opens, a short tour asks for your language (English / فارسی), then walks quick add, day planning, the timeline, habits, mood and the journal. Replay it anytime from the tiny **?** button in the sidebar, the More sheet, or Settings → New here.
+- **A calm first-run tour** — the very first visit opens a language choice (English / فارسی), then a step-by-step showcase (13 short stops) teaches Today, quick add, day planning, timeline, habits, mood, journal, ⌘K search, Tasks views, Calendar, Insights and Settings. The app is paused while it teaches, so nothing can be mispressed; Escape skips it, and it never appears again on its own. Replay from the **?** button, the More sheet, or Settings → New here. The **Why Planner?** sheet (same places) answers what makes this app worth choosing.
+- **Any file, any note** — attach anything to a note (music, photos, PDFs…). Files up to 20 MB live in local IndexedDB storage, play inline (audio player, image previews), download back out, and travel with backups. No uploads, no accounts — your bytes never leave the device unless you sync them yourself.
 - **Today** — one quiet page for the day: timeline with a live "now" marker, tasks, habits, notes, a daily intention, and a progress ring that celebrates when the day is complete.
 - **Daily essentials** — built-in must-do-every-day jobs (drink water, move 30 minutes, get outside, sleep by 11, tidy, vitamins) pinned to the top of Today with their own progress. First run offers them as a one-tap starter pack.
 - **Habit library** — a shelf of classic habits and routines (body, mind, home, connection) you can add in one tap, with "Add all" per group.

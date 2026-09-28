@@ -75,9 +75,10 @@ import { fetchFeedEvents, loadFeeds, mergeFeedEvents, saveFeeds, type CalendarFe
 import { loadWeatherSettings, saveWeatherSettings, type WeatherSettings } from './weather';
 import { applyTheme, loadAccent, loadThemeMode, resolvedMode, type ThemeMode } from './theme';
 import type { Accent } from './constants';
-import { createEmptyState, type AIMemoryInput, type ComposerState, type EventInput, type FixedCommitmentInput, type GoalInput, type HabitInput, type MoodValue, type NoteInput, type PlannerState, type TaskInput } from './types';
+import { createEmptyState, type AIMemoryInput, type AttachmentRef, type ComposerState, type EventInput, type FixedCommitmentInput, type GoalInput, type HabitInput, type MoodValue, type NoteInput, type PlannerState, type TaskInput } from './types';
 import { t } from './i18n';
 import { isTestEnv } from './env';
+import { deleteAttachmentBlobs, MAX_ATTACHMENTS_PER_NOTE, storeAttachment } from './files';
 
 export interface NoticeAction {
   label: string;
@@ -223,6 +224,7 @@ interface PlannerContextValue {
   deleteMilestone: (goalId: string, milestoneId: string) => void;
   addNote: (input: NoteInput) => void;
   updateNote: (id: string, patch: Partial<NoteInput>) => void;
+  attachFilesToNote: (noteId: string, files: File[]) => Promise<void>;
   deleteNote: (id: string) => void;
   setIntention: (date: string, text: string) => void;
   /** Log how a day felt (1–5); pass null to clear. */
@@ -1054,9 +1056,33 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     deleteMilestone: (goalId, milestoneId) => commit((current) => deleteMilestoneFrom(current, goalId, milestoneId)),
     addNote: (input) => commit((current) => addNoteTo(current, input)),
     updateNote: (id, patch) => commit((current) => updateNoteIn(current, id, patch)),
+    attachFilesToNote: async (noteId, files) => {
+      const added: AttachmentRef[] = [];
+      let skipped = 0;
+      for (const file of files) {
+        // Only persist under the note once it exists — never orphaned bytes.
+        const result = await storeAttachment(file, file.name, file.type);
+        if (result.ref) added.push(result.ref);
+        else skipped += 1;
+      }
+      if (added.length === 0 && skipped === 0) return;
+      commit((current) => {
+        const note = current.notes.find((item) => item.id === noteId);
+        const merged = [...(note?.attachments ?? []), ...added].slice(0, MAX_ATTACHMENTS_PER_NOTE);
+        return updateNoteIn(current, noteId, { attachments: merged });
+      });
+      flash(
+        skipped > 0
+          ? t("Skipped {0} (storage full or file too large)", { 0: skipped })
+          : added.length === 1
+            ? t("Attached {0}", { 0: added[0].name })
+            : t("Attached {0} files", { 0: added.length }),
+      );
+    },
     deleteNote: (id) => {
       const note = stateRef.current.notes.find((item) => item.id === id);
       if (note && sharedRef.current.code && isSharedNote(note)) recordTombstone('note', id);
+      if (note?.attachments?.length) void deleteAttachmentBlobs(note.attachments);
       commit((current) => deleteNoteFrom(current, id));
     },
     setIntention: (date, text) => commit((current) => setIntentionIn(current, date, text)),

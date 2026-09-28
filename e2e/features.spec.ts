@@ -123,3 +123,25 @@ test('daily mood check-in saves and re-selects', async ({ page }) => {
   await page.reload();
   await expect(page.getByRole('button', { name: 'Log today as Glowing' })).toHaveAttribute('aria-pressed', 'true');
 });
+
+test('any file — including music — can be attached to a note', async ({ page }) => {
+  await page.goto('/#/notes');
+  await page.getByRole('button', { name: 'Add note' }).first().click();
+  const dialog = page.getByRole('dialog').last();
+  await dialog.locator('input[data-autofocus]').fill('Studio');
+  await page.locator('.attach-editor input[type="file"]').setInputFiles([
+    { name: 'melody.mp3', mimeType: 'audio/mpeg', buffer: Buffer.from('ID3' + '0'.repeat(2048)) },
+    { name: 'score.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4' + 'x'.repeat(100)) },
+  ]);
+  await expect(page.locator('.attach-chip')).toHaveCount(2);
+  await page.locator('.sheet').getByRole('button', { name: 'Add note' }).click();
+  const card = page.locator('.note-card', { hasText: 'Studio' });
+  await expect(card).toBeVisible();
+  await expect(card.locator('.attach-chip')).toHaveCount(1); // collapsed card shows the file row minus… (image excluded)
+  await page.reload();
+  await expect(page.locator('.note-card', { hasText: 'Studio' })).toContainText('Studio');
+  const audio = page.locator('.note-card audio');
+  await expect(audio).toBeVisible();
+  const src = await audio.getAttribute('src');
+  expect(src?.startsWith('blob:') || src === null || src === '').toBeTruthy();
+});

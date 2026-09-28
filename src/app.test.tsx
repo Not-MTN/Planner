@@ -48,6 +48,8 @@ function pressKey(key: string, options?: KeyboardEventInit): void {
 
 beforeEach(() => {
   window.localStorage.clear();
+  // Tests below are not about the tour; only the dedicated tour test clears this.
+  window.localStorage.setItem('planner-tour-done', '1');
   window.sessionStorage.clear();
   window.history.replaceState(null, '', '#/today');
   window.matchMedia = ((query: string) =>
@@ -303,14 +305,32 @@ describe('app smoke', () => {
     const active = document.querySelector('.tour-lang-btn[aria-pressed="true"]') as HTMLButtonElement;
     expect(active).toBeTruthy();
     act(() => active.click());
-    expect(text()).toContain('Type like you think');
+    expect(text()).toContain('Your day at a glance');
 
     // Walk one more step, then skip → done is remembered.
-    act(() => (document.querySelector('[data-tour-bubble] .btn-primary') as HTMLButtonElement).click());
-    expect(text()).toContain('One tap plans the day');
+    await Promise.resolve();
+    act(() => (document.querySelector('[data-tour-bubble] [data-tour-primary]') as HTMLButtonElement).click());
+    expect(text()).toContain('Type like you think');
     act(() => (document.querySelector('.tour-skip') as HTMLButtonElement).click());
-    expect(text()).not.toContain('One tap plans the day');
+    expect(text()).not.toContain('Type like you think');
     expect(localStorage.getItem('planner-tour-done')).toBe('1');
+  });
+
+  it('opens the Why Planner sheet from the More menu and can start the tour from it', async () => {
+    mountApp();
+    const moreBtn = [...document.querySelectorAll('.tabbar .tab')].find((b) => b.textContent?.includes('More')) as HTMLButtonElement;
+    expect(moreBtn).toBeTruthy();
+    act(() => moreBtn.click());
+    const whyBtn = [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('Why Planner?')) as HTMLButtonElement;
+    expect(whyBtn).toBeTruthy();
+    act(() => whyBtn.click());
+    const text = () => document.body.textContent ?? '';
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(text()).toContain('One quiet place for one wild life');
+    expect(text()).toContain('Private by design');
+    act(() => (document.querySelector('[aria-label="Close"]') as HTMLButtonElement).click());
+    expect(text()).not.toContain('Private by design');
   });
 
   it('has an accessible name on every button and keeps focus styles', async () => {

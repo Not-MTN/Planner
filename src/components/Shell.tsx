@@ -15,6 +15,7 @@ import {
   PlusIcon,
   SearchIcon,
   HelpIcon,
+  HeartIcon,
   SlidersIcon,
   SparklesIcon,
   SunIcon,
@@ -42,7 +43,9 @@ const InsightsView = lazy(() => import('../views/InsightsView').then((m) => ({ d
 const AIView = lazy(() => import('../views/AIView').then((m) => ({ default: m.AIView })));
 import { applyUpdate, onUpdateAvailable } from '../pwa';
 import { onTourRequest, requestTour, tourStartIndex } from '../tour';
+import { onAboutRequest, requestAbout } from '../about';
 import { TourSheet } from './TourSheet';
+import { AboutSheet } from './AboutSheet';
 import { t } from '../i18n';
 
 const NAV = [
@@ -117,6 +120,8 @@ export function Shell() {
     if (start !== null) setTourStep(start);
   }, [ready]);
   useEffect(() => onTourRequest(() => setTourStep(0)), []);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  useEffect(() => onAboutRequest(() => setAboutOpen(true)), []);
 
   // The PWA shortcut / #/today?qa=1 deep link: drop the caret straight into quick add.
   useEffect(() => {
@@ -147,7 +152,7 @@ export function Shell() {
         else undo();
         return;
       }
-      if (typing || composer || confirm || settingsOpen || moreOpen) return;
+      if (typing || composer || confirm || settingsOpen || moreOpen || tourStep !== null || aboutOpen) return;
       if (event.key === '/') {
         event.preventDefault();
         openPalette();
@@ -163,7 +168,7 @@ export function Shell() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [paletteOpen, composer, confirm, settingsOpen, moreOpen, openPalette, closePalette, openComposer, openSettings, navigate, undo, redo, today]);
+  }, [paletteOpen, composer, confirm, settingsOpen, moreOpen, tourStep, aboutOpen, openPalette, closePalette, openComposer, openSettings, navigate, undo, redo, today]);
 
   const go = (name: string) => {
     if (name === 'calendar') navigate({ name: 'calendar', tab: 'week', date: today });
@@ -184,7 +189,7 @@ export function Shell() {
             <span>{t("Calm daily planning")}</span>
           </span>
         </button>
-        <button type="button" className="side-search" onClick={openPalette}>
+        <button type="button" className="side-search" data-tour="search" onClick={openPalette}>
           <SearchIcon size={16} />
           <span>{t("Search or add…")}</span>
           <kbd className="kbd">{t("⌘K")}</kbd>
@@ -235,7 +240,7 @@ export function Shell() {
             <HelpIcon size={16} />
             <span>{t("How it works")}</span>
           </button>
-          <button type="button" className="side-tool" onClick={openSettings} title={t("Settings")}>
+          <button type="button" className="side-tool" data-tour="settings" onClick={openSettings} title={t("Settings")}>
             <SlidersIcon size={16} />
             <span>{t("Settings")}</span>
           </button>
@@ -321,16 +326,17 @@ export function Shell() {
       </div>
 
       <nav className="tabbar" aria-label={t("Primary")}>
-        <Tab icon={SunIcon} label={t("Today")} active={route.name === 'today'} onClick={() => go('today')} />
-        <Tab icon={CalendarIcon} label={t("Calendar")} active={route.name === 'calendar'} onClick={() => go('calendar')} />
-        <Tab icon={CheckIcon} label={t("Tasks")} active={route.name === 'tasks'} onClick={() => go('tasks')} />
-        <Tab icon={DotsIcon} label={t("Habits")} active={route.name === 'habits'} onClick={() => go('habits')} />
+        <Tab icon={SunIcon} name="today" label={t("Today")} active={route.name === 'today'} onClick={() => go('today')} />
+        <Tab icon={CalendarIcon} name="calendar" label={t("Calendar")} active={route.name === 'calendar'} onClick={() => go('calendar')} />
+        <Tab icon={CheckIcon} name="tasks" label={t("Tasks")} active={route.name === 'tasks'} onClick={() => go('tasks')} />
+        <Tab icon={DotsIcon} name="habits" label={t("Habits")} active={route.name === 'habits'} onClick={() => go('habits')} />
         <Tab icon={SlidersIcon} label={t("More")} active={moreActive || moreOpen} onClick={() => setMoreOpen(true)} />
       </nav>
 
       <button
         type="button"
         className="fab"
+        data-tour="search"
         aria-label={t("Quick add")}
         onClick={openPalette}
       >
@@ -355,6 +361,7 @@ export function Shell() {
             <button type="button" onClick={openPalette}><SearchIcon size={18} /> {t("Search & quick add")}</button>
             <button type="button" onClick={openSettings}><SlidersIcon size={18} /> {t("Settings")}</button>
             <button type="button" onClick={requestTour}><HelpIcon size={18} /> {t("How Planner works")}</button>
+            <button type="button" onClick={() => { setMoreOpen(false); window.setTimeout(requestAbout, 60); }}><HeartIcon size={18} /> {t("Why Planner?")}</button>
             <button type="button" onClick={exportData}><DownloadIcon size={18} /> {t("Export backup")}</button>
             <button type="button" onClick={importFile.open}><UploadIcon size={18} /> {t("Import backup")}</button>
           </div>
@@ -417,6 +424,7 @@ export function Shell() {
       {tourStep !== null && ready ? (
         <TourSheet step={tourStep} onStep={setTourStep} onClose={() => setTourStep(null)} />
       ) : null}
+      {aboutOpen ? <AboutSheet onClose={() => setAboutOpen(false)} /> : null}
       <input ref={importFile.ref} className="visually-hidden" tabIndex={-1} aria-hidden="true" type="file" accept="application/json,.json" onChange={importFile.onChange} />
     </div>
   );
@@ -433,7 +441,7 @@ function NavButton({
 }) {
   const Icon = item.icon;
   return (
-    <button type="button" className={cx('nav-link', active && 'active')} aria-current={active ? 'page' : undefined} title={item.label} onClick={onClick}>
+    <button type="button" data-tour-nav={item.name} className={cx('nav-link', active && 'active')} aria-current={active ? 'page' : undefined} title={item.label} onClick={onClick}>
       <Icon size={18} />
       <span className="nav-text">{item.label}</span>
     </button>
@@ -444,15 +452,17 @@ function Tab({
   icon: Icon,
   label,
   active,
+  name,
   onClick,
 }: {
   icon: typeof SunIcon;
   label: string;
   active: boolean;
+  name?: string;
   onClick: () => void;
 }) {
   return (
-    <button type="button" className={cx('tab', active && 'active')} aria-current={active ? 'page' : undefined} onClick={onClick}>
+    <button type="button" data-tour-nav={name} className={cx('tab', active && 'active')} aria-current={active ? 'page' : undefined} onClick={onClick}>
       <span className="tab-icon"><Icon size={20} /></span>
       {label}
     </button>

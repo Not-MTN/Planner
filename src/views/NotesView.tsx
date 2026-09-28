@@ -6,6 +6,7 @@ import { dayNumber, formatEdited, formatMonthShort, todayISO } from '../dates';
 import { matchesQuery, noteBacklinks } from '../logic';
 import { Empty } from '../components/ui';
 import { extractTags, Markdown } from '../components/Markdown';
+import { AttachmentList } from '../components/Attachments';
 import { t } from '../i18n';
 
 export function NotesView() {
@@ -137,6 +138,7 @@ export function NotesView() {
                   ) : (
                     <p>{t("No words yet.")}</p>
                   )}
+                  <AttachmentList refs={note.attachments ?? []} />
                   <small>
                     {formatEdited(note.updatedAt)}
                     {note.date ? ` · ${dayNumber(note.date)} ${formatMonthShort(note.date)}` : ''}

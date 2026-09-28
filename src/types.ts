@@ -165,6 +165,17 @@ export interface Note {
   pinned?: boolean;
   createdAt: string;
   updatedAt: string;
+  /** Files attached to this note; the bytes live in IndexedDB under file:<id>. */
+  attachments?: AttachmentRef[];
+}
+
+/** A file uploaded into the app and stored locally in IndexedDB. */
+export interface AttachmentRef {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  addedAt: string;
 }
 
 export type MoodValue = 1 | 2 | 3 | 4 | 5;
@@ -243,6 +254,7 @@ export interface NoteInput {
   kind: NoteKind;
   date: string | null;
   pinned?: boolean;
+  attachments?: AttachmentRef[];
 }
 
 export type ComposerState =

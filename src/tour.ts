@@ -1,7 +1,8 @@
 /**
- * First-run tour: a short spotlight walkthrough that plays once, and can be
- * replayed from the sidebar (?) or Settings. Storage-only logic lives here so
- * it stays unit-testable; the visual layer is TourSheet.
+ * First-run tour: a spotlight showcase that plays ONCE, on the very first
+ * visit, and can be replayed from the sidebar (?) / More sheet / Settings.
+ * Storage-only logic lives here so it stays unit-testable; the visual layer
+ * is TourSheet.
  *
  * The very first step is a language choice. Switching language reloads the
  * page (the Settings pattern), so the tour persists its resume point across
@@ -12,28 +13,56 @@ const DONE_KEY = 'planner-tour-done';
 const RESUME_KEY = 'planner-tour-resume';
 
 /** Tour stop ids, in order. Step 'lang' is the bilingual language chooser. */
-export const TOUR_STOPS = ['lang', 'quick', 'plan', 'timeline', 'habits', 'mood', 'journal', 'done'] as const;
+export const TOUR_STOPS = [
+  'lang',
+  'today',
+  'quick',
+  'plan',
+  'timeline',
+  'habits',
+  'mood',
+  'journal',
+  'search',
+  'tabs',
+  'calendar',
+  'insights',
+  'settings',
+  'done',
+] as const;
 export type TourStopId = (typeof TOUR_STOPS)[number];
 
-/** CSS anchor for each stop (null = centred card, no spotlight). */
+export const TOUR_LENGTH = TOUR_STOPS.length;
+
+/** Number of teaching stops (everything except the language chooser). */
+export const TOUR_CONTENT_STEPS = TOUR_LENGTH - 1;
+
+/**
+ * Which layout element to spotlight for each stop (null = centred bubble).
+ * Every selector is a data-tour attribute so theme/class renames can't break
+ * the tour; TourSheet resolves the FIRST VISIBLE match (sidebar vs tabbar).
+ */
 export const TOUR_SELECTORS: Record<TourStopId, string | null> = {
   lang: null,
+  today: '.hero-panel',
   quick: '.quick-add',
   plan: '.plan-row',
   timeline: '.timeline-card',
-  habits: '.wash-lav',
+  habits: '[data-tour="habits"]',
   mood: '[data-mood-card]',
   journal: '.journal-card',
+  search: '[data-tour="search"]',
+  tabs: '[data-tour-nav="tasks"]',
+  calendar: '[data-tour-nav="calendar"]',
+  insights: '[data-tour-nav="insights"]',
+  settings: '[data-tour="settings"]',
   done: null,
 };
-
-export const TOUR_LENGTH = TOUR_STOPS.length;
 
 export function tourDone(storage: Pick<Storage, 'getItem'> = localStorage): boolean {
   try {
     return storage.getItem(DONE_KEY) === '1';
   } catch {
-    return true;
+    return true; // storage blocked → never trap the user in a tour
   }
 }
 
@@ -70,7 +99,7 @@ export function writeTourResume(index: number, storage: Pick<Storage, 'setItem'>
  * Decide where the tour should open on this boot:
  * - a saved resume point (after a language switch) always wins;
  * - otherwise the tour starts from the language step on the very first run.
- * Returns null when the tour should stay closed.
+ * Returns null when the tour should stay closed (any later visit).
  */
 export function tourStartIndex(storage: Pick<Storage, 'getItem'> = localStorage): number | null {
   const resume = readTourResume(storage);

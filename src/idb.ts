@@ -62,6 +62,31 @@ export function idbClear(key = KEY): Promise<boolean> {
   return next;
 }
 
+// ── Binary attachments (notes' files/music) ─────────────────────────────
+// Stored as Blobs under `file:<id>` keys in the same kv store — a separate
+// namespace from the serialized planner state and its undo history.
+
+export async function idbReadBlob(key: string): Promise<Blob | null> {
+  try {
+    const value = await run('readonly', (store) => store.get(key) as IDBRequest<unknown>);
+    return value instanceof Blob ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export function idbWriteBlob(key: string, blob: Blob): Promise<boolean> {
+  const next = queue.then(
+    () => run('readwrite', (store) => store.put(blob, key)).then(() => true, () => false),
+  );
+  queue = next;
+  return next;
+}
+
+export function idbDelete(key: string): Promise<boolean> {
+  return idbClear(key);
+}
+
 /** exportedAt of a serialized copy, for picking the newer of two. */
 export function savedAt(serialized: string | null): string {
   if (!serialized) return '';

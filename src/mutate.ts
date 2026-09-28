@@ -676,6 +676,7 @@ export function addNote(state: PlannerState, input: NoteInput, id = uid(), now =
         kind: input.kind,
         date: input.date && isValidISODate(input.date) ? input.date : null,
         pinned: input.pinned === true,
+        attachments: input.attachments && input.attachments.length > 0 ? input.attachments.slice(0, 24) : undefined,
         createdAt: now,
         updatedAt: now,
       },

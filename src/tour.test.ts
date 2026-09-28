@@ -54,6 +54,7 @@ describe('tour', () => {
       index = advanceTour(index);
     }
     expect(seen).toEqual([...Array(TOUR_LENGTH).keys()]);
+    expect(seen).toHaveLength(TOUR_LENGTH);
     expect(backTour(1)).toBe(1);
     expect(backTour(2)).toBe(1);
     expect(backTour(0)).toBe(1); // never behind the first content step

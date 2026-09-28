@@ -313,7 +313,7 @@ export function DayView({ date }: { date: string }) {
             )}
           </section>
 
-          <section className="card wash-lav">
+          <section className="card wash-lav" data-tour="habits">
             <header className="card-head">
               <div>
                 <p className="kicker">{t("Repeat")}</p>

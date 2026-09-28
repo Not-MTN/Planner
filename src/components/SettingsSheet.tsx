@@ -10,6 +10,7 @@ import { DATE_LANGUAGES, todayISO, type DateLanguage } from '../dates';
 import { downloadBusyICS, downloadICS, parseICS } from '../ics';
 import { canInstall, isInstalled, onInstallChange, promptInstall } from '../pwa';
 import { requestTour } from '../tour';
+import { requestAbout } from '../about';
 import { LEAD_CHOICES } from '../reminders';
 import { t, getLang, setLang, LANGUAGES, type Lang } from '../i18n';
 
@@ -412,9 +413,14 @@ export function SettingsSheet() {
             <p className="set-label">{t("The two-minute tour")}</p>
             <p className="set-hint">{t("Walks through quick add, planning, habits, mood and notes — with the language picker first.")}</p>
           </div>
-          <button type="button" className="btn btn-soft" onClick={() => { closeSettings(); requestTour(); }}>
-            {t("Show me around")}
-          </button>
+          <span className="set-actions">
+            <button type="button" className="btn btn-soft" onClick={() => { closeSettings(); window.setTimeout(requestAbout, 60); }}>
+              {t("Why Planner?")}
+            </button>
+            <button type="button" className="btn btn-primary" onClick={() => { closeSettings(); window.setTimeout(requestTour, 60); }}>
+              {t("Show me around")}
+            </button>
+          </span>
         </div>
       </section>
 

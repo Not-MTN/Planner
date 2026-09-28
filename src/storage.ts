@@ -1,7 +1,7 @@
 import { ACCENTS, HABIT_ICONS, NOTE_KINDS, PRIORITIES } from './constants';
 import { isValidISODate, isValidTime, localDateFromTimestamp, timeToMinutes } from './dates';
 import { REPEAT_SET } from './recurrence';
-import { createEmptyState, type AIMemory, type AIMemoryCategory, type FixedCommitment, type FocusLog, type HabitCompletion, type MoodEntry, type MoodValue, type Subtask, type TaskRepeat, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type Task } from './types';
+import { createEmptyState, type AIMemory, type AttachmentRef, type AIMemoryCategory, type FixedCommitment, type FocusLog, type HabitCompletion, type MoodEntry, type MoodValue, type Subtask, type TaskRepeat, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type Task } from './types';
 import { t } from './i18n';
 
 export const STORAGE_KEY = 'personal-planner.v1';
@@ -260,6 +260,22 @@ function sanitizeGoal(value: unknown): Goal | null {
   };
 }
 
+function sanitizeAttachment(value: unknown): AttachmentRef | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = asString(raw.id, 64);
+  const name = asString(raw.name, 180)?.trim();
+  if (!id || !name) return null;
+  const size = Number(raw.size);
+  return {
+    id,
+    name,
+    mime: asString(raw.mime, 80) || 'application/octet-stream',
+    size: Number.isFinite(size) && size >= 0 ? Math.round(size) : 0,
+    addedAt: asString(raw.addedAt, 40) || new Date(0).toISOString(),
+  };
+}
+
 function sanitizeNote(value: unknown): Note | null {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Record<string, unknown>;
@@ -278,6 +294,9 @@ function sanitizeNote(value: unknown): Note | null {
     pinned: raw.pinned === true,
     createdAt: asString(raw.createdAt, 40) || new Date(0).toISOString(),
     updatedAt: asString(raw.updatedAt, 40) || new Date(0).toISOString(),
+    attachments: Array.isArray(raw.attachments)
+      ? raw.attachments.map(sanitizeAttachment).filter((item): item is AttachmentRef => item !== null)
+      : undefined,
   };
 }
 

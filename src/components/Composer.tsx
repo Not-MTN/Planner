@@ -1,14 +1,16 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { ACCENTS, CATEGORIES, HABIT_ICONS, NOTE_KINDS, PRIORITIES, type Accent, type NoteKind, type Priority } from '../constants';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { isValidTime, suggestTime, timeToMinutes, todayISO, WEEKDAY_TOGGLES } from '../dates';
-import { HabitGlyph } from '../icons';
+import { HabitGlyph, UploadIcon } from '../icons';
 import { REPEAT_CHOICES } from '../recurrence';
 import { uid } from '../mutate';
 import { addTemplate, loadTemplates, saveTemplates } from '../templates';
-import type { Subtask, TaskRepeat, ComposerState, EventInput, GoalHorizon, HabitFrequency, HabitInput, NoteInput, PlannerState, TaskInput } from '../types';
+import { deleteAttachmentBlobs, MAX_ATTACHMENTS_PER_NOTE, storeAttachment } from '../files';
+import type { AttachmentRef, Subtask, TaskRepeat, ComposerState, EventInput, GoalHorizon, HabitFrequency, HabitInput, NoteInput, PlannerState, TaskInput } from '../types';
 import { Field, Modal } from './ui';
+import { AttachmentList } from './Attachments';
 import { Markdown } from './Markdown';
 import { t } from '../i18n';
 
@@ -651,7 +653,7 @@ function GoalForm({ composer, onClose, onRemove }: { composer: ComposerState; on
 }
 
 function NoteForm({ composer, onClose, onRemove }: { composer: ComposerState; onClose: () => void; onRemove: () => void }) {
-  const { state, addNote, updateNote } = usePlanner();
+  const { state, addNote, updateNote, attachFilesToNote } = usePlanner();
   const existing = composer.mode === 'edit' ? state.notes.find((note) => note.id === composer.id) : undefined;
   const [title, setTitle] = useState((existing?.title === 'Untitled note' || existing?.title === t('Untitled note')) ? '' : existing?.title ?? '');
   const [kind, setKind] = useState<NoteKind>(existing?.kind ?? 'quick');
@@ -661,6 +663,40 @@ function NoteForm({ composer, onClose, onRemove }: { composer: ComposerState; on
   const [preview, setPreview] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [templates, setTemplates] = useState(() => loadTemplates().filter((item) => item.type === 'note'));
+  const [attachHint, setAttachHint] = useState<string | null>(null);
+  const attachInput = useRef<HTMLInputElement>(null);
+  // Create mode keeps a local list (submitted with the note); edit mode lives
+  // on the store so bytes/refs can never desync or go orphaned.
+  const [draftAttachments, setDraftAttachments] = useState<AttachmentRef[]>([]);
+  const attachments = existing?.attachments ?? draftAttachments;
+
+  const pickAttachments = async (event: ChangeEvent<HTMLInputElement>) => {
+    const list = event.target.files ? Array.from(event.target.files) : [];
+    event.target.value = '';
+    if (!list.length) return;
+    if (existing) {
+      await attachFilesToNote(existing.id, list);
+      return;
+    }
+    const room = Math.max(0, MAX_ATTACHMENTS_PER_NOTE - attachments.length);
+    const results = await Promise.all(list.slice(0, room).map((file) => storeAttachment(file, file.name, file.type)));
+    const good: AttachmentRef[] = [];
+    let skipped = 0;
+    for (const result of results) {
+      if (result.ref) good.push(result.ref);
+      else skipped += 1;
+    }
+    setDraftAttachments((cur) => [...cur, ...good]);
+    if (skipped > 0) setAttachHint(t("Skipped {0} (storage full or file too large)", { 0: skipped }));
+    else if (good.length === 1) setAttachHint(t("Attached {0}", { 0: good[0].name }));
+    else setAttachHint(t("Attached {0} files", { 0: good.length }));
+  };
+
+  const removeAttachment = (ref: AttachmentRef) => {
+    void deleteAttachmentBlobs([ref]);
+    if (existing) updateNote(existing.id, { attachments: attachments.filter((item) => item.id !== ref.id) });
+    else setDraftAttachments((cur) => cur.filter((item) => item.id !== ref.id));
+  };
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -668,7 +704,7 @@ function NoteForm({ composer, onClose, onRemove }: { composer: ComposerState; on
       setError(t("Write a title or a few words."));
       return;
     }
-    const input: NoteInput = { title, body, kind, date: date || null, pinned };
+    const input: NoteInput = { title, body, kind, date: date || null, pinned, attachments };
     if (existing) updateNote(existing.id, input);
     else addNote(input);
     onClose();
@@ -752,7 +788,26 @@ function NoteForm({ composer, onClose, onRemove }: { composer: ComposerState; on
           {t("Save as template")}
         </button>
       ) : null}
-      <Actions editing={Boolean(existing)} label={t("Add note")} onClose={onClose} onRemove={onRemove} />
+            <div className="attach-editor">
+        <input
+          ref={attachInput}
+          className="visually-hidden"
+          tabIndex={-1}
+          aria-hidden="true"
+          type="file"
+          multiple
+          onChange={(event) => void pickAttachments(event)}
+        />
+        <div className="attach-editor-head">
+          <button type="button" className="btn btn-ghost btn-small" onClick={() => attachInput.current?.click()}>
+            <UploadIcon size={14} /> {t("Attach file")}
+          </button>
+          <p className="meta">{t("Any file up to 20 MB — music, pictures, documents — stored on this device.")}</p>
+        </div>
+        {attachHint ? <p className="meta attach-hint">{attachHint}</p> : null}
+        <AttachmentList refs={attachments} onRemove={removeAttachment} />
+      </div>
+<Actions editing={Boolean(existing)} label={t("Add note")} onClose={onClose} onRemove={onRemove} />
     </form>
   );
 }
