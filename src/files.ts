@@ -4,7 +4,8 @@
  * which syncs/exports with the rest of the state. Pure helpers are exported
  * separately so the sync layer (Node, no DOM) stays importable from files.node.
  */
-import { idbClear, idbReadBlob, idbWriteBlob } from './idb';
+import { idbClear, idbKeysWithPrefix, idbReadBlob, idbWriteBlob } from './idb';
+import { t } from './i18n';
 import type { AttachmentRef } from './types';
 
 export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024; // 20 MB — generous for local blobs
@@ -37,6 +38,17 @@ function newId(): string {
 export interface StoreResult {
   ref?: AttachmentRef;
   error?: 'too-large' | 'unavailable';
+}
+
+/** One honest sentence for whatever a batch of files did (shared by composer + context). */
+export function attachmentNotice(attached: number, tooLarge: number, failed: number, overflow: number, firstName: string): string | null {
+  const lines: string[] = [];
+  if (attached === 1) lines.push(t('Attached {0}', { 0: firstName }));
+  else if (attached > 1) lines.push(t('Attached {0} files', { 0: attached }));
+  if (tooLarge > 0) lines.push(t('{0} too large — files are capped at 20 MB each', { 0: tooLarge }));
+  if (failed > 0) lines.push(t("Couldn't save {0} — this device's storage is full", { 0: failed }));
+  if (overflow > 0) lines.push(t("{0} didn't fit — a note holds up to 12 files", { 0: overflow }));
+  return lines.length > 0 ? lines.join('. ') : null;
 }
 
 /** Persist one file's bytes and return its metadata ref. */
@@ -76,6 +88,19 @@ export async function attachmentObjectUrl(ref: AttachmentRef): Promise<string | 
   } catch {
     return null;
   }
+}
+
+/**
+ * Orphan sweep: attachment bytes whose refs no longer exist anywhere in the
+ * state (deleted notes, discarded drafts, removed files). Runs on boot, so
+ * undo always has a full session to restore its blobs first.
+ */
+export async function sweepAttachmentBlobs(state: { notes: Array<{ attachments?: AttachmentRef[] }> }): Promise<number> {
+  const keep = referencedAttachmentIds(state);
+  const keys = await idbKeysWithPrefix(ATTACHMENT_KEY_PREFIX); // full keys like "file:<id>"
+  const orphans = keys.filter((key) => !keep.has(key.slice(ATTACHMENT_KEY_PREFIX.length)));
+  await Promise.all(orphans.map((key) => idbClear(key)));
+  return orphans.length;
 }
 
 /** Every attachment ref across the whole planner state (for orphan cleanup). */

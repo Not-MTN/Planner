@@ -10,6 +10,7 @@ import {
   HomeIcon,
   HorizonIcon,
   LeafIcon,
+  MicIcon,
   NoteIcon,
   SlidersIcon,
   SparklesIcon,
@@ -60,6 +61,7 @@ const STEP_ICON: Partial<Record<TourStopId, (size?: number) => ReactNode>> = {
   mood: (size = 18) => <HeartIcon size={size} />,
   journal: (size = 18) => <NoteIcon size={size} />,
   search: (size = 18) => <CommandIcon size={size} />,
+  voice: (size = 18) => <MicIcon size={size} />,
   tabs: (size = 18) => <BookIcon size={size} />,
   calendar: (size = 18) => <CalendarIcon size={size} />,
   insights: (size = 18) => <ArcIcon size={size} />,
@@ -107,12 +109,17 @@ function stepCopy(id: TourStopId): StepCopy {
     case 'journal':
       return {
         title: t("A few lines stay with the day"),
-        body: t("The journal saves itself while you write and becomes the day's note. Notes can hold tags and [[links]] to each other — a diary that searches itself."),
+        body: t("The journal saves itself while you write and becomes the day's note. Notes hold tags, [[links]] to each other, and keep photos, music and files right inside — all on this device."),
       };
     case 'search':
       return {
         title: t("Find anything in one place"),
         body: t("⌘K (or /) opens the palette: search tasks, notes and events, jump to any page, or add something without lifting your hands. Everything is a keystroke away."),
+      };
+    case 'voice':
+      return {
+        title: t("Or just talk to it"),
+        body: t("The AI page has a glowing mic — tap it and talk the way tired people talk: mid-sentence, mixed English and Persian, approximate times. It answers out loud and sketches a plan you review before anything lands."),
       };
     case 'tabs':
       return {

@@ -4,13 +4,16 @@ import { cx } from '../cx';
 import { MicIcon, CloseIcon, VolumeIcon, SparklesIcon } from '../icons';
 import { t, getLang } from '../i18n';
 import { speakText, stopSpeaking, voiceTurn, type VoiceTurn } from '../voiceai';
-import { useSpeechInput } from '../speech';
+import { useSpeechInput, type SpeechError } from '../speech';
 import type { AIDraft } from '../ai';
 
 /**
  * Voice AI: tap the orb, talk like a tired human, and the AI answers back —
  * out loud when it can — and builds the plan for you from what you said.
  * Draft plans land in the normal review sheet the same way the typed flow does.
+ *
+ * Every phase has a way home: speech errors, network stalls and speech engines
+ * that never call back all settle the UI instead of leaving it spinning.
  */
 
 type Phase = 'idle' | 'listening' | 'thinking' | 'speaking';
@@ -18,6 +21,13 @@ type Phase = 'idle' | 'listening' | 'thinking' | 'speaking';
 interface Bubble {
   role: 'user' | 'assistant';
   text: string;
+}
+
+function speechErrorMessage(error: SpeechError): string {
+  if (error === 'mic-blocked') return t("The mic is off — allow the microphone and tap again");
+  if (error === 'network') return t("The voice service couldn't be reached — check your connection");
+  if (error === 'no-speech') return t("I didn't catch that — say it once more?");
+  return t("Something snagged — try again?");
 }
 
 export function VoiceTalk({ onDraft }: { onDraft: (draft: AIDraft) => void }) {
@@ -29,16 +39,29 @@ export function VoiceTalk({ onDraft }: { onDraft: (draft: AIDraft) => void }) {
   const [muted, setMuted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
+  const mountedRef = useRef(true);
   const busyRef = useRef(false);
   const mutedRef = useRef(false);
+  const phaseRef = useRef<Phase>('idle');
+  const lastUtteranceRef = useRef<string | null>(null);
   mutedRef.current = muted;
+  phaseRef.current = phase;
 
-  // voice sessions stay alive only while this card mounts
-  useEffect(() => () => {
-    speech.stop();
-    stopSpeaking();
+  // Voice sessions stay alive only while this card mounts; never set state
+  // after leaving the page (the in-flight request resolves anyway).
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      speech.stop();
+      stopSpeaking();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const settle = (next: Phase) => {
+    if (mountedRef.current) setPhase(next);
+  };
 
   const scrollLog = () => {
     window.setTimeout(() => {
@@ -46,52 +69,71 @@ export function VoiceTalk({ onDraft }: { onDraft: (draft: AIDraft) => void }) {
     }, 40);
   };
 
-  const answer = async (utterance: string) => {
+  const answer = async (utterance: string, echo = true) => {
     if (busyRef.current) return;
     busyRef.current = true;
     setError(null);
     setInterim('');
+    lastUtteranceRef.current = utterance;
     setPhase('thinking');
-    setBubbles((current) => [...current, { role: 'user', text: utterance }]);
+    if (echo) setBubbles((current) => [...current, { role: 'user', text: utterance }]);
     scrollLog();
     try {
-      const history: VoiceTurn[] = bubbles.slice(-10).map((bubble) => ({
-        role: bubble.role === 'user' ? 'user' : 'assistant',
-        text: bubble.text,
-      }));
+      const history: VoiceTurn[] = bubbles.slice(-10).map((bubble) => ({ role: bubble.role, text: bubble.text }));
       const result = await voiceTurn({ utterance, history, state });
+      if (!mountedRef.current) return;
       const replyText = result.followUp ? `${result.reply} ${result.followUp}` : result.reply;
       setBubbles((current) => [...current, { role: 'assistant', text: replyText }]);
       scrollLog();
       if (result.draft) onDraft(result.draft);
       const spoken = !mutedRef.current && speakText(replyText, {
         lang: getLang(),
-        onend: () => setPhase('idle'),
+        onend: () => settle('idle'),
       });
       setPhase(spoken ? 'speaking' : 'idle');
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("Something snagged — try again?"));
-      setPhase('idle');
+      if (mountedRef.current) setError(cause instanceof Error ? cause.message : t("Something snagged — try again?"));
+      settle('idle');
     } finally {
       busyRef.current = false;
     }
   };
 
   const talk = () => {
-    if (phase === 'listening') {
+    if (phaseRef.current === 'listening') {
       speech.stop();
-      setPhase('idle');
+      settle('idle');
+      setInterim('');
       return;
     }
     stopSpeaking();
     setError(null);
+    setInterim('');
+    setPhase('listening'); // first — an instantly-fired error must settle BACK to idle
     speech.start(
       (spoken) => {
+        setInterim('');
         void answer(spoken);
       },
-      (live) => setInterim(live),
+      {
+        onInterim: (live) => setInterim(live),
+        onError: (kind) => {
+          setInterim('');
+          setError(speechErrorMessage(kind));
+          settle('idle');
+        },
+        onEnd: (heard) => {
+          // Silence without an error: come home quietly, only if still waiting.
+          if (!heard && phaseRef.current === 'listening') settle('idle');
+          setInterim('');
+        },
+      },
     );
-    setPhase('listening');
+    try {
+      (navigator as { vibrate?: (pattern: number) => boolean }).vibrate?.(8); // a small yes on Android
+    } catch {
+      /* haptics are a nicety, never a blocker */
+    }
   };
 
   const phaseLabel = (() => {
@@ -119,20 +161,20 @@ export function VoiceTalk({ onDraft }: { onDraft: (draft: AIDraft) => void }) {
             type="button"
             className={cx('icon-btn', muted && 'off')}
             aria-label={muted ? t("Unmute voice replies") : t("Mute voice replies")}
-            aria-pressed={!muted}
+            aria-pressed={muted}
             onClick={() => { setMuted((m) => !m); if (!muted) stopSpeaking(); }}
           >
             <VolumeIcon size={16} />
           </button>
           {bubbles.length > 0 ? (
-            <button type="button" className="icon-btn" aria-label={t("Clear conversation")} onClick={() => { setBubbles([]); setInterim(''); stopSpeaking(); }}>
+            <button type="button" className="icon-btn" aria-label={t("Clear conversation")} onClick={() => { setBubbles([]); setInterim(''); stopSpeaking(); settle('idle'); }}>
               <CloseIcon size={16} />
             </button>
           ) : null}
         </span>
       </header>
 
-      <div className="voice-log" ref={logRef} aria-live="polite">
+      <div className="voice-log" ref={logRef} role="log" aria-live="polite">
         {bubbles.length === 0 ? (
           <div className="voice-empty">
             <span className="voice-empty-orb" aria-hidden="true"><SparklesIcon size={22} /></span>
@@ -156,7 +198,16 @@ export function VoiceTalk({ onDraft }: { onDraft: (draft: AIDraft) => void }) {
           </p>
         ) : null}
         {interim ? <p className="voice-bubble user interim" dir="auto">{interim}<span className="voice-caret" /></p> : null}
-        {error ? <p className="voice-error">{error}</p> : null}
+        {error ? (
+          <p className="voice-error" role="alert">
+            <span>{error}</span>
+            {lastUtteranceRef.current ? (
+              <button type="button" className="voice-retry" onClick={() => void answer(lastUtteranceRef.current!, false)}>
+                {t("Try again")}
+              </button>
+            ) : null}
+          </p>
+        ) : null}
       </div>
 
       <div className="voice-controls">

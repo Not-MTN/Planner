@@ -103,6 +103,12 @@ export function normalizeVoiceReply(rawValue: unknown, state: PlannerState, rang
   };
 }
 
+const VOICE_TURN_TIMEOUT_MS = 45_000;
+
+/**
+ * One spoken exchange. A hard 45 s ceiling keeps the UI from hanging in
+ * "thinking…" forever when the network stalls mid-request.
+ */
 export async function voiceTurn(options: { utterance: string; history: VoiceTurn[]; state: PlannerState }): Promise<VoiceReply> {
   const utterance = options.utterance.replace(/\s+/g, ' ').trim().slice(0, MAX_UTTERANCE_LEN);
   if (!utterance) throw new Error(t("I couldn't hear anything — try again?"));
@@ -113,8 +119,19 @@ export async function voiceTurn(options: { utterance: string; history: VoiceTurn
     history: compressHistory(options.history),
     context: buildVoiceContext(options.state, range.startDate),
   };
-  const raw = await xaiChatJson(systemForRange(range), JSON.stringify(payload));
-  return normalizeVoiceReply(raw, options.state, range);
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = setTimeout(() => controller?.abort(), VOICE_TURN_TIMEOUT_MS);
+  try {
+    const raw = await xaiChatJson(systemForRange(range), JSON.stringify(payload), controller?.signal);
+    return normalizeVoiceReply(raw, options.state, range);
+  } catch (cause) {
+    if (cause instanceof Error && cause.name === 'AbortError') {
+      throw new Error(t("That took too long — try once more?"));
+    }
+    throw cause;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // ── Text to speech ────────────────────────────────────────────────────
@@ -129,6 +146,7 @@ interface SpeechSynthesisLike {
   getVoices: () => SpeechSynthesisVoiceLike[];
   cancel: () => void;
   speak: (utterance: unknown) => void;
+  resume?: () => void;
 }
 
 interface SpeechSynthesisUtteranceLike {
@@ -166,32 +184,73 @@ export function ttsAvailable(): boolean {
   return synthesis() !== null;
 }
 
+/**
+ * Engines occasionally swallow BOTH onend and onerror (iOS Safari after a
+ * backgrounded resume, Chrome after cancel). This timer settles the UI no
+ * matter what the engine forgets to say.
+ */
+let settleTimer: ReturnType<typeof setTimeout> | null = null;
+let settleFn: (() => void) | null = null;
+
+function clearSettle(): void {
+  if (settleTimer !== null) clearTimeout(settleTimer);
+  settleTimer = null;
+  settleFn = null;
+}
+
 /** Speak a short reply aloud. Returns false when speech synthesis can't start. */
 export function speakText(text: string, options: { lang?: 'en' | 'fa'; onend?: () => void } = {}): boolean {
   const synth = synthesis();
-  if (!synth || !text.trim()) return false;
+  const clean = text.trim().slice(0, 400);
+  if (!synth || !clean) return false;
   try {
-    synth.cancel();
+    stopSpeaking(); // clears any prior watchdog + stops a stale utterance
     const utteranceLang = options.lang ?? getLang();
     const voices = synth.getVoices();
     const voice = pickVoice(voices, utteranceLang);
     if (utteranceLang === 'fa' && !voice) return false; // no Persian voice installed — stay silent
-    const utterance: SpeechSynthesisUtteranceLike = {
-      text: text.slice(0, 400),
-      lang: voice?.lang ?? (utteranceLang === 'fa' ? 'fa-IR' : 'en-US'),
-      rate: 0.98,
-      pitch: 1,
-      voice,
-      onend: options.onend ?? null,
-      onerror: options.onend ?? null,
+    const langTag = voice?.lang ?? (utteranceLang === 'fa' ? 'fa-IR' : 'en-US');
+    // Defer: some engines fire onend synchronously on a broken queue; the UI
+    // must never receive "finished" before it knows it started.
+    const finish = () => {
+      if (settleFn !== null) {
+        const notify = settleFn;
+        clearSettle();
+        setTimeout(notify, 0);
+      }
     };
+    settleFn = options.onend ?? null;
+    // Watchdog: worst-case speech estimate + generous slack.
+    settleTimer = setTimeout(finish, Math.min(20_000, Math.max(4_000, clean.length * 90)));
+    const UtteranceCtor = (globalThis as { SpeechSynthesisUtterance?: new (text: string) => SpeechSynthesisUtteranceLike }).SpeechSynthesisUtterance;
+    let utterance: SpeechSynthesisUtteranceLike;
+    if (UtteranceCtor) {
+      // Real engines (especially iOS Safari) only reliably play REAL utterances.
+      const real = new UtteranceCtor(clean);
+      real.lang = langTag;
+      real.rate = 0.98;
+      real.pitch = 1;
+      if (voice) real.voice = voice;
+      real.onend = finish;
+      real.onerror = finish;
+      utterance = real;
+    } else {
+      utterance = { text: clean, lang: langTag, rate: 0.98, pitch: 1, voice, onend: finish, onerror: finish };
+    }
+    synth.resume?.(); // iOS leaves the queue paused after backgrounding
     synth.speak(utterance);
     return true;
   } catch {
+    clearSettle();
     return false;
   }
 }
 
 export function stopSpeaking(): void {
-  synthesis()?.cancel();
+  clearSettle();
+  try {
+    synthesis()?.cancel();
+  } catch {
+    /* engines can throw on a dead queue */
+  }
 }

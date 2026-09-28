@@ -274,6 +274,99 @@ describe('app smoke', () => {
     }
   });
 
+  it('settles the mic UI on permission denial instead of hanging', async () => {
+    class DenyingRecognition {
+      lang = '';
+      interimResults = false;
+      continuous = false;
+      onresult: ((event: unknown) => void) | null = null;
+      onend: (() => void) | null = null;
+      onerror: ((event: { error: string }) => void) | null = null;
+      start() { this.onerror?.({ error: 'not-allowed' }); }
+      stop() { this.onend?.(); }
+    }
+    (window as unknown as { SpeechRecognition: unknown }).SpeechRecognition = DenyingRecognition;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      if (String(input).includes('/api/xai/status')) {
+        return new Response(JSON.stringify({ configured: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      throw new Error('should never reach the AI');
+    }) as typeof fetch;
+    try {
+      mountApp();
+      const aiNav = [...document.querySelectorAll<HTMLButtonElement>('.nav-link')].find((button) => button.textContent?.includes('AI coach'));
+      await act(async () => {
+        aiNav?.click();
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      });
+      const orb = document.querySelector<HTMLButtonElement>('.voice-orb');
+      act(() => orb?.click());
+      // Denied: the orb goes home, and the user gets told why.
+      expect(document.querySelector('.voice-card')?.className).not.toContain('voice-listening');
+      expect(text()).toContain('allow the microphone');
+      expect(orb?.disabled).toBe(false); // ready to try again
+    } finally {
+      globalThis.fetch = originalFetch;
+      delete (window as unknown as { SpeechRecognition?: unknown }).SpeechRecognition;
+    }
+  });
+
+  it('offers a retry after a voice-turn error without duplicating bubbles', async () => {
+    class FakeRecognition {
+      lang = '';
+      interimResults = false;
+      continuous = false;
+      onresult: ((event: unknown) => void) | null = null;
+      onend: (() => void) | null = null;
+      onerror: ((event: unknown) => void) | null = null;
+      start() { window.setTimeout(() => { this.onresult?.({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: 'fix my friday' } }] }); }, 10); }
+      stop() { this.onend?.(); }
+    }
+    (window as unknown as { SpeechRecognition: unknown }).SpeechRecognition = FakeRecognition;
+    const originalFetch = globalThis.fetch;
+    let attempts = 0;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/xai/status')) {
+        return new Response(JSON.stringify({ configured: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/xai/chat/completions')) {
+        attempts += 1;
+        if (attempts === 1) return new Response('boom', { status: 500 });
+        return new Response(JSON.stringify({
+          choices: [{ message: { content: JSON.stringify({ reply: 'Friday is calm now.', followUp: null, draft: null }) } }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response('not found', { status: 404 });
+    }) as typeof fetch;
+    try {
+      mountApp();
+      const aiNav = [...document.querySelectorAll<HTMLButtonElement>('.nav-link')].find((button) => button.textContent?.includes('AI coach'));
+      await act(async () => {
+        aiNav?.click();
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      });
+      act(() => document.querySelector<HTMLButtonElement>('.voice-orb')?.click());
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 350)); });
+      expect(text()).toContain('fix my friday');
+      expect(document.querySelector('.voice-error')).toBeTruthy();
+      const retries = [...document.querySelectorAll<HTMLButtonElement>('button')].filter((b) => b.textContent === 'Try again');
+      expect(retries).toHaveLength(1);
+      await act(async () => {
+        retries[0].click();
+        await new Promise((resolve) => setTimeout(resolve, 350));
+      });
+      expect(text()).toContain('Friday is calm now.');
+      // the retry must not re-add the same spoken line to the chat
+      const userBubbles = [...document.querySelectorAll('.voice-bubble.user')].filter((b) => b.textContent === 'fix my friday');
+      expect(userBubbles).toHaveLength(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+      delete (window as unknown as { SpeechRecognition?: unknown }).SpeechRecognition;
+    }
+  });
+
   it('dictates a plan request to the AI with the browser voice service', async () => {
     let live: { onresult: ((event: unknown) => void) | null; onend: (() => void) | null; lang: string; started: boolean } | null = null;
     class FakeRecognition {

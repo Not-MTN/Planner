@@ -7,7 +7,7 @@ import { HabitGlyph, UploadIcon } from '../icons';
 import { REPEAT_CHOICES } from '../recurrence';
 import { uid } from '../mutate';
 import { addTemplate, loadTemplates, saveTemplates } from '../templates';
-import { deleteAttachmentBlobs, MAX_ATTACHMENTS_PER_NOTE, storeAttachment } from '../files';
+import { attachmentNotice, MAX_ATTACHMENTS_PER_NOTE, storeAttachment } from '../files';
 import type { AttachmentRef, Subtask, TaskRepeat, ComposerState, EventInput, GoalHorizon, HabitFrequency, HabitInput, NoteInput, PlannerState, TaskInput } from '../types';
 import { Field, Modal } from './ui';
 import { AttachmentList } from './Attachments';
@@ -679,21 +679,23 @@ function NoteForm({ composer, onClose, onRemove }: { composer: ComposerState; on
       return;
     }
     const room = Math.max(0, MAX_ATTACHMENTS_PER_NOTE - attachments.length);
+    const overflow = Math.max(0, list.length - room); // beyond the cap — never touched
     const results = await Promise.all(list.slice(0, room).map((file) => storeAttachment(file, file.name, file.type)));
     const good: AttachmentRef[] = [];
-    let skipped = 0;
+    let tooLarge = 0;
+    let failed = 0;
     for (const result of results) {
       if (result.ref) good.push(result.ref);
-      else skipped += 1;
+      else if (result.error === 'too-large') tooLarge += 1;
+      else failed += 1;
     }
     setDraftAttachments((cur) => [...cur, ...good]);
-    if (skipped > 0) setAttachHint(t("Skipped {0} (storage full or file too large)", { 0: skipped }));
-    else if (good.length === 1) setAttachHint(t("Attached {0}", { 0: good[0].name }));
-    else setAttachHint(t("Attached {0} files", { 0: good.length }));
+    setAttachHint(attachmentNotice(good.length, tooLarge, failed, overflow, good[0]?.name ?? ''));
   };
 
   const removeAttachment = (ref: AttachmentRef) => {
-    void deleteAttachmentBlobs([ref]);
+    // Keep the bytes for this session: undo (or a cancelled edit) can restore
+    // the ref; next boot sweeps whatever stays unreferenced.
     if (existing) updateNote(existing.id, { attachments: attachments.filter((item) => item.id !== ref.id) });
     else setDraftAttachments((cur) => cur.filter((item) => item.id !== ref.id));
   };

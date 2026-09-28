@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { attachmentKind, formatSize, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS_PER_NOTE } from './files';
+import { attachmentKind, attachmentNotice, formatSize, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS_PER_NOTE } from './files';
 import { sanitizeState } from './storage';
 import { createEmptyState } from './types';
 
@@ -18,6 +18,19 @@ describe('attachments', () => {
     expect(formatSize(512)).toBe('512 B');
     expect(formatSize(4096)).toBe('4 KB');
     expect(formatSize(3.5 * 1024 * 1024)).toBe('3.5 MB');
+  });
+
+  it('explains exactly what a file batch did', () => {
+    expect(attachmentNotice(1, 0, 0, 0, 'song.mp3')).toBe('Attached song.mp3');
+    expect(attachmentNotice(3, 0, 0, 0, 'song.mp3')).toBe('Attached 3 files');
+    expect(attachmentNotice(0, 1, 0, 0, '')).toBe('1 too large — files are capped at 20 MB each');
+    expect(attachmentNotice(0, 0, 2, 0, '')).toContain('storage is full');
+    expect(attachmentNotice(0, 0, 0, 3, '')).toContain("didn't fit");
+    const mixed = attachmentNotice(1, 1, 1, 1, 'a.pdf');
+    expect(mixed).toContain('Attached a.pdf');
+    expect(mixed).toContain('too large');
+    expect(mixed).toContain("didn't fit");
+    expect(attachmentNotice(0, 0, 0, 0, '')).toBeNull();
   });
 
   it('caps are generous but bounded', () => {

@@ -62,6 +62,16 @@ export function idbClear(key = KEY): Promise<boolean> {
   return next;
 }
 
+/** All keys in the store that start with `prefix` (attachment sweeping). */
+export async function idbKeysWithPrefix(prefix: string): Promise<string[]> {
+  try {
+    const keys = await run('readonly', (store) => store.getAllKeys() as IDBRequest<IDBValidKey[]>);
+    return keys.filter((key): key is string => typeof key === 'string' && key.startsWith(prefix));
+  } catch {
+    return [];
+  }
+}
+
 // ── Binary attachments (notes' files/music) ─────────────────────────────
 // Stored as Blobs under `file:<id>` keys in the same kv store — a separate
 // namespace from the serialized planner state and its undo history.

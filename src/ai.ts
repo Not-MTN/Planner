@@ -318,7 +318,7 @@ function parseJson(text: string): unknown {
   }
 }
 
-async function xaiJsonInternal(system: string, user: string, imageDataUrl?: string): Promise<unknown> {
+async function xaiJsonInternal(system: string, user: string, imageDataUrl?: string, signal?: AbortSignal): Promise<unknown> {
   const content = imageDataUrl
     ? [
         { type: 'text', text: user },
@@ -329,6 +329,7 @@ async function xaiJsonInternal(system: string, user: string, imageDataUrl?: stri
   try {
     response = await fetch(XAI_CHAT_URL, {
       method: 'POST',
+      signal: signal ?? null,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: imageDataUrl ? XAI_VISION_MODEL : XAI_TEXT_MODEL,
@@ -341,7 +342,8 @@ async function xaiJsonInternal(system: string, user: string, imageDataUrl?: stri
         ],
       }),
     });
-  } catch {
+  } catch (cause) {
+    if (cause instanceof Error && cause.name === 'AbortError') throw cause;
     throw new Error(t(t("Could not reach the xAI proxy. Check the server and try again.")));
   }
   const payload = await response.json().catch(() => null) as unknown;
@@ -359,8 +361,8 @@ async function xaiJsonInternal(system: string, user: string, imageDataUrl?: stri
 }
 
 /** Voice/plain-text JSON chat against the xAI proxy (system + user in, parsed JSON out). */
-export async function xaiChatJson(system: string, user: string): Promise<unknown> {
-  return xaiJsonInternal(system, user);
+export async function xaiChatJson(system: string, user: string, signal?: AbortSignal): Promise<unknown> {
+  return xaiJsonInternal(system, user, undefined, signal);
 }
 
 /** Normalize a raw AI plan payload into a safe AIDraft for a range. */

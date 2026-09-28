@@ -78,7 +78,7 @@ import type { Accent } from './constants';
 import { createEmptyState, type AIMemoryInput, type AttachmentRef, type ComposerState, type EventInput, type FixedCommitmentInput, type GoalInput, type HabitInput, type MoodValue, type NoteInput, type PlannerState, type TaskInput } from './types';
 import { t } from './i18n';
 import { isTestEnv } from './env';
-import { deleteAttachmentBlobs, MAX_ATTACHMENTS_PER_NOTE, storeAttachment } from './files';
+import { attachmentNotice, MAX_ATTACHMENTS_PER_NOTE, storeAttachment, sweepAttachmentBlobs } from './files';
 
 export interface NoticeAction {
   label: string;
@@ -402,6 +402,9 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
       } else if (!stored) {
         void idbWrite(serialize(stateRef.current));
       }
+      // Housekeeping: drop attachment bytes whose refs no longer exist (deleted
+      // notes from an earlier session, discarded drafts). Cheap and failure-less.
+      void sweepAttachmentBlobs(stateRef.current);
     });
     return () => {
       cancelled = true;
@@ -1057,32 +1060,35 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     addNote: (input) => commit((current) => addNoteTo(current, input)),
     updateNote: (id, patch) => commit((current) => updateNoteIn(current, id, patch)),
     attachFilesToNote: async (noteId, files) => {
+      const existing = stateRef.current.notes.find((item) => item.id === noteId)?.attachments ?? [];
+      const room = Math.max(0, MAX_ATTACHMENTS_PER_NOTE - existing.length);
+      const overflow = Math.max(0, files.length - room); // never store bytes we can't reference
+      const toStore = files.slice(0, room);
       const added: AttachmentRef[] = [];
-      let skipped = 0;
-      for (const file of files) {
+      let tooLarge = 0;
+      let failed = 0;
+      for (const file of toStore) {
         // Only persist under the note once it exists — never orphaned bytes.
         const result = await storeAttachment(file, file.name, file.type);
         if (result.ref) added.push(result.ref);
-        else skipped += 1;
+        else if (result.error === 'too-large') tooLarge += 1;
+        else failed += 1;
       }
-      if (added.length === 0 && skipped === 0) return;
-      commit((current) => {
-        const note = current.notes.find((item) => item.id === noteId);
-        const merged = [...(note?.attachments ?? []), ...added].slice(0, MAX_ATTACHMENTS_PER_NOTE);
-        return updateNoteIn(current, noteId, { attachments: merged });
-      });
-      flash(
-        skipped > 0
-          ? t("Skipped {0} (storage full or file too large)", { 0: skipped })
-          : added.length === 1
-            ? t("Attached {0}", { 0: added[0].name })
-            : t("Attached {0} files", { 0: added.length }),
-      );
+      if (added.length > 0) {
+        commit((current) => {
+          const note = current.notes.find((item) => item.id === noteId);
+          const merged = [...(note?.attachments ?? []), ...added].slice(0, MAX_ATTACHMENTS_PER_NOTE);
+          return updateNoteIn(current, noteId, { attachments: merged });
+        });
+      }
+      const notice = attachmentNotice(added.length, tooLarge, failed, overflow, added[0]?.name ?? '');
+      if (notice) flash(notice);
     },
     deleteNote: (id) => {
       const note = stateRef.current.notes.find((item) => item.id === id);
       if (note && sharedRef.current.code && isSharedNote(note)) recordTombstone('note', id);
-      if (note?.attachments?.length) void deleteAttachmentBlobs(note.attachments);
+      // Attachment bytes stay for the whole session: undo restores the note
+      // and its files intact. Truly orphaned bytes are swept on the next boot.
       commit((current) => deleteNoteFrom(current, id));
     },
     setIntention: (date, text) => commit((current) => setIntentionIn(current, date, text)),

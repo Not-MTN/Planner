@@ -16,7 +16,7 @@ test('first visit asks for a language, then teaches the app step by step', async
 
   // Walks the day → quick add → plan … each with a spotlight.
   await expect(bubble).toContainText('Your day at a glance');
-  await expect(bubble).toContainText('Tour 1 of 13');
+  await expect(bubble).toContainText('Tour 1 of 14');
   await expect(page.locator('.tour-spot')).toBeVisible();
 
   // Showcase: the page under the overlay cannot be pressed.
@@ -33,7 +33,7 @@ test('first visit asks for a language, then teaches the app step by step', async
   await expect(bubble).toContainText('One tap plans the day');
 
   // Walk to the end and finish.
-  for (let i = 0; i < 10; i += 1) {
+  for (let i = 0; i < 11; i += 1) {
     await bubble.getByRole('button', { name: 'Next' }).click();
   }
   await expect(bubble).toContainText("That's the whole tour");

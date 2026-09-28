@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from 'vitest';
-import { compressHistory, normalizeVoiceReply, pickVoice, voiceRange, voiceSystemPrompt, voiceTurn, VOICE_HISTORY_LIMIT } from './voiceai';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { compressHistory, normalizeVoiceReply, pickVoice, speakText, stopSpeaking, voiceRange, voiceSystemPrompt, voiceTurn, VOICE_HISTORY_LIMIT } from './voiceai';
 import { createEmptyState } from './types';
 
 const today = new Date().toISOString().slice(0, 10);
@@ -111,5 +111,50 @@ describe('voice ai', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+  it('finish callbacks are deferred and the watchdog settles a silent engine', () => {
+    vi.useFakeTimers();
+    const spoken: string[] = [];
+    type Captured = { text: string; onend?: (() => void) | null; onerror?: (() => void) | null };
+    let captured: Captured | null = null;
+    (window as unknown as { speechSynthesis: unknown }).speechSynthesis = {
+      getVoices: () => [{ lang: 'en-US', name: 'V', default: true }],
+      cancel: () => undefined,
+      resume: () => undefined,
+      speak: (u: { text: string; onend?: (() => void) | null; onerror?: (() => void) | null }) => {
+        captured = u;
+        spoken.push(u.text);
+      },
+    };
+    let ended = 0;
+    expect(speakText('a soft hello', { lang: 'en', onend: () => { ended += 1; } })).toBe(true);
+    // Engine fires onend synchronously: the listener must still fire, deferred.
+    (captured as Captured | null)?.onend?.();
+    expect(ended).toBe(0);
+    vi.runAllTimers();
+    expect(ended).toBe(1);
+    // Second turn: engine forgets BOTH callbacks — the watchdog closes it anyway.
+    ended = 0;
+    captured = null;
+    expect(speakText('another reply', { lang: 'en', onend: () => { ended += 1; } })).toBe(true);
+    vi.advanceTimersByTime(21_000);
+    expect(ended).toBe(1);
+    delete (window as unknown as { speechSynthesis?: unknown }).speechSynthesis;
+    vi.useRealTimers();
+  });
+
+  it('stays silent for Persian without a Persian voice, speaks English', () => {
+    const spoken: string[] = [];
+    (window as unknown as { speechSynthesis: unknown }).speechSynthesis = {
+      getVoices: () => [{ lang: 'en-US', name: 'V', default: true }],
+      cancel: () => undefined,
+      speak: (u: { text: string }) => spoken.push(u.text),
+    };
+    expect(speakText('سلام دنیا', { lang: 'fa' })).toBe(false);
+    expect(spoken).toHaveLength(0);
+    expect(speakText('hello there', { lang: 'en' })).toBe(true);
+    expect(spoken).toEqual(['hello there']);
+    stopSpeaking();
+    delete (window as unknown as { speechSynthesis?: unknown }).speechSynthesis;
   });
 });
