@@ -3,9 +3,9 @@ import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { MicIcon, CloseIcon, VolumeIcon, SparklesIcon } from '../icons';
 import { t, getLang } from '../i18n';
-import { speakText, stopSpeaking, voiceTurn, type VoiceTurn } from '../voiceai';
+import { replyLang, speakText, stopSpeaking, voiceTurn, type VoiceCurrentDraft, type VoiceTurn } from '../voiceai';
 import { useSpeechInput, type SpeechError } from '../speech';
-import type { AIDraft } from '../ai';
+import type { AIDraft, PlanRange } from '../ai';
 
 /**
  * Voice AI: tap the orb, talk like a tired human, and the AI answers back —
@@ -30,7 +30,11 @@ function speechErrorMessage(error: SpeechError): string {
   return t("Something snagged — try again?");
 }
 
-export function VoiceTalk({ onDraft }: { onDraft: (draft: AIDraft) => void }) {
+export function VoiceTalk({ onDraft, currentDraft = null }: {
+  onDraft: (draft: AIDraft, range: PlanRange) => void;
+  /** The draft currently in the review card, so voice can revise it in place. */
+  currentDraft?: VoiceCurrentDraft | null;
+}) {
   const { state } = usePlanner();
   const speech = useSpeechInput();
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
@@ -65,7 +69,11 @@ export function VoiceTalk({ onDraft }: { onDraft: (draft: AIDraft) => void }) {
 
   const scrollLog = () => {
     window.setTimeout(() => {
-      logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' });
+      // scrollTo is absent in some engines/environments (jsdom) — never crash on it.
+      const node = logRef.current;
+      if (node && typeof node.scrollTo === 'function') {
+        node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' });
+      }
     }, 40);
   };
 
@@ -80,14 +88,16 @@ export function VoiceTalk({ onDraft }: { onDraft: (draft: AIDraft) => void }) {
     scrollLog();
     try {
       const history: VoiceTurn[] = bubbles.slice(-10).map((bubble) => ({ role: bubble.role, text: bubble.text }));
-      const result = await voiceTurn({ utterance, history, state });
+      const result = await voiceTurn({ utterance, history, state, currentDraft });
       if (!mountedRef.current) return;
       const replyText = result.followUp ? `${result.reply} ${result.followUp}` : result.reply;
       setBubbles((current) => [...current, { role: 'assistant', text: replyText }]);
       scrollLog();
-      if (result.draft) onDraft(result.draft);
+      if (result.draft) onDraft(result.draft, result.range);
+      // The voice follows the reply's own language, not the app's: a Persian
+      // answer to a Persian question is read by a Persian voice either way.
       const spoken = !mutedRef.current && speakText(replyText, {
-        lang: getLang(),
+        lang: replyLang(replyText),
         onend: () => settle('idle'),
       });
       setPhase(spoken ? 'speaking' : 'idle');
@@ -144,9 +154,11 @@ export function VoiceTalk({ onDraft }: { onDraft: (draft: AIDraft) => void }) {
     return t("Tap the mic and just say it");
   })();
 
+  // Both languages show up either way — saying it in the "other" language
+  // works just as well, and the hints make that obvious.
   const hints = getLang() === 'fa'
-    ? ['فردا روز سنگینیه، نظمش بده', 'خسته‌ام — عصرِ آرومی برام بچین']
-    : ['Tomorrow is heavy — sort it out', "I'm wiped — make tonight easy"];
+    ? ['فردا روز سنگینیه، نظمش بده', 'خسته‌ام — عصرِ آرومی برام بچین', 'Two weeks of exams — help me fit it all in']
+    : ['Tomorrow is heavy — sort it out', "I'm wiped — make tonight easy", 'فردا روز سنگینیه، نظمش بده'];
 
   return (
     <section className={cx('card voice-card', `voice-${phase}`)} aria-label={t("Talk to the AI")}>

@@ -62,7 +62,7 @@ export function NotesView() {
 
   return (
     <div className="view">
-      <header className="page-head">
+      <header className="page-head" data-tour="notes-page">
         <div>
           <p className="kicker">{t("Notes")}</p>
           <h1>{t("Notes")}</h1>

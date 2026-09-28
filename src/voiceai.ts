@@ -7,8 +7,9 @@
  * - Brains: the existing xAI proxy (same as the typed plan builder).
  * - TTS: the browser's speech synthesizer; no audio ever leaves the device.
  */
-import { xaiChatJson, normalizeDraftPlan, type AIDraft, type PlanRange } from './ai';
+import { xaiChatJson, normalizeDraftPlan, draftForModel, type AIDraft, type PlanRange } from './ai';
 import { addDays, todayISO } from './dates';
+import { parsePlanDuration } from './duration';
 import { getLang, t } from './i18n';
 import type { PlannerState } from './types';
 
@@ -24,10 +25,18 @@ export interface VoiceReply {
   followUp: string | null;
   /** A draft plan the AI built from this conversation, if any. */
   draft: AIDraft | null;
+  /** The horizon the draft was built for — the length the user asked for. */
+  range: PlanRange;
 }
 
-/** Voice plans default to "the week ahead, starting today". */
-export function voiceRange(today = todayISO()): PlanRange {
+/**
+ * Voice plans default to "the week ahead, starting today". When the user
+ * names a length — "plan my next two weeks", «سه روز آینده» — we plan for
+ * exactly that long instead, so the AI honors "as long as we say".
+ */
+export function voiceRange(today = todayISO(), utterance = ''): PlanRange {
+  const parsed = utterance ? parsePlanDuration(utterance, today) : null;
+  if (parsed) return { startDate: parsed.startDate, days: parsed.days };
   return { startDate: today, days: 7 };
 }
 
@@ -44,8 +53,8 @@ export function compressHistory(turns: VoiceTurn[]): VoiceTurn[] {
 }
 
 /** Compact, honest context the voice AI needs to plan around. */
-export function buildVoiceContext(state: PlannerState, today: string): unknown {
-  const lastDate = addDays(today, 6);
+export function buildVoiceContext(state: PlannerState, today: string, range: PlanRange = { startDate: today, days: 7 }): unknown {
+  const lastDate = addDays(range.startDate, Math.max(1, range.days) - 1);
   const pending = state.tasks.filter((task) => !task.completed).slice(0, 15);
   const moods = state.moods.slice(-3);
   return {
@@ -53,7 +62,7 @@ export function buildVoiceContext(state: PlannerState, today: string): unknown {
     lastDate,
     pendingTaskTitles: pending.map((task) => ({ title: task.title, date: task.dueDate, time: task.dueTime })),
     existingEvents: state.events
-      .filter((event) => event.date >= today && event.date <= lastDate)
+      .filter((event) => event.date >= range.startDate && event.date <= lastDate)
       .slice(0, 20)
       .map((event) => ({ title: event.title, date: event.date, startTime: event.startTime, endTime: event.endTime })),
     fixedWeeklyTimes: state.fixedCommitments.map((item) => ({ weekday: item.weekday, title: item.title, startTime: item.startTime, endTime: item.endTime })),
@@ -69,12 +78,17 @@ export function buildVoiceContext(state: PlannerState, today: string): unknown {
 export function voiceSystemPrompt(): string {
   return `You are a warm, practical planning companion having a SPOKEN conversation inside a personal planner. The user is tired and talks the way tired people talk: broken sentences, slang, jokes, approximate times ("evening-ish"), half-finished thoughts, sometimes switching Persian and English inside one sentence. Understand intent, not literal words — never make them repeat, and never demand formal phrasing.
 
+The user may speak with ANY accent, and the transcript you receive is imperfect speech recognition, not careful typing. Expect misheard words, homophones ("for"/"four", "to"/"two"/"too", "won"/"one"), phonetic spellings, run-together words, stray punctuation, and Persian written in English letters (finglish) or vice versa. Read for meaning, silently correct obvious recognition errors, and never point out the accent or the messy wording. If a word is ambiguous, use the surrounding context and the planner data to infer it; only ask when the whole request is truly unclear.
+
+Persian must be understood perfectly, however casually it is spoken. Expect fast colloquial Persian with Tehrani contractions and swallowed endings (میخوام، میخوای، میرم، برم، میشه، نیستش، خسته‌م، حوصلم سر رفته، یه کم، دوتا، هیچی), slang and filler words (مثلاً، یعنی، خلاصه، اصلاً، والا), Afghan/Dari or Tajik-flavored phrasing and vocabulary, Arabic-script typos (ي/ی, ك/ک, ة/ه), half-finished sentences, and Persian typed or transcribed in Latin letters — Finglish — such as "farda miam", "khasteam, ye hafte sabok michazi?", "do hafte kar daram". Treat ALL of that as normal Persian speech: read Finglish as Persian, repair recognition damage silently, and infer the meaning from context instead of giving up. Mixing Persian and English inside one breath is normal — understand both halves. Never ask the user to repeat, rephrase, or speak "properly".
+
 Rules:
-1. "reply": plain words meant to be heard out loud — no markdown, no bullet lists, no emojis, at most 60 words. Warm, human, direct. Never say "As requested". Talk like a good friend who plans.
-2. When the user wants anything planned, arranged, moved, or cleared — INCLUDING vague tired asks like "fix tomorrow for me" — include a "draft" built from their context: a realistic, honest plan, never packed, respecting fixed weekly times and existing events. Tasks must have a date inside ${'${range}'}. Use events only when a time is useful. Do not duplicate anything already listed in the context.
+1. "reply": plain words meant to be heard out loud, IN THE USER'S LANGUAGE — if they speak Persian or Finglish, answer in warm, natural, conversational Persian (like a caring friend, not a textbook and not formal news-speak); if English, answer in English; if mixed, follow whichever dominates — no markdown, no bullet lists, no emojis, at most 60 words. Warm, human, direct. Never say "As requested". Dates and times inside the reply stay as plain digits.
+2. When the user wants anything planned, arranged, moved, or cleared — INCLUDING vague tired asks like "fix tomorrow for me" — include a "draft" built from their context: a realistic, honest plan, never packed, respecting fixed weekly times and existing events. Tasks must have a date inside ${'${range}'}. Use events only when a time is useful. Do not duplicate anything already listed in the context. Honor the LENGTH the user asked for: spread the plan across that whole span, and keep longer spans lighter per day.
 3. If one crucial thing is missing (for example they asked to plan "this week" but the draft would depend on a specific day), ask ONE short spoken question in "reply", set "followUp" to the same question, and leave "draft" null.
 4. Keep health ideas gentle and optional; never medical advice. If they sound low, answer kindly first, plan lightly second.
 5. "followUp": null or one short question that would genuinely change the plan. "draft": null or a JSON plan object.
+6. A draft may already be on screen ("currentDraft", with its range). If the user refers to that plan — revise it, lighten it, tighten it, move things in it, add to it, or take things out — return the FULL revised draft for that same range: keep every item they did not ask to change, apply their change, and update the summary. Only build a brand-new plan when they clearly ask for a different one.
 
 Return ONLY a JSON object: {"reply": "…", "followUp": "…|null", "draft": null | {"summary": "…", "tasks": [{"title": "…", "date": "YYYY-MM-DD", "priority": "low|medium|high", "category": "personal|work|health|learning|home|social", "note": "optional"}], "events": [{"title": "…", "date": "YYYY-MM-DD", "startTime": "HH:MM", "endTime": "HH:MM", "category": "personal|work|health|learning|home|social", "important": false, "note": "optional"}], "habits": [{"name": "…", "frequency": {"type": "daily|weekdays|custom|weekly", "days": [1,2], "times": 3}, "category": "health|personal|learning|home", "icon": "water|book|study|moon|sun|walk|heart|leaf|coffee|pencil|home|stretch|spark"}], "suggestions": ["up to three gentle wellbeing ideas"]}}`;
 }
@@ -100,24 +114,50 @@ export function normalizeVoiceReply(rawValue: unknown, state: PlannerState, rang
     ),
     followUp: follow || null,
     draft,
+    range,
   };
 }
 
 const VOICE_TURN_TIMEOUT_MS = 45_000;
 
+/** The draft currently on screen, so voice can revise instead of restart. */
+export interface VoiceCurrentDraft {
+  draft: AIDraft;
+  range: PlanRange;
+}
+
 /**
  * One spoken exchange. A hard 45 s ceiling keeps the UI from hanging in
  * "thinking…" forever when the network stalls mid-request.
+ *
+ * When a draft is already on screen (`currentDraft`), the model can revise it
+ * in place: "make Tuesday lighter" edits the plan instead of starting over.
  */
-export async function voiceTurn(options: { utterance: string; history: VoiceTurn[]; state: PlannerState }): Promise<VoiceReply> {
+export async function voiceTurn(options: { utterance: string; history: VoiceTurn[]; state: PlannerState; currentDraft?: VoiceCurrentDraft | null }): Promise<VoiceReply> {
   const utterance = options.utterance.replace(/\s+/g, ' ').trim().slice(0, MAX_UTTERANCE_LEN);
   if (!utterance) throw new Error(t("I couldn't hear anything — try again?"));
-  const range = voiceRange();
+  const today = todayISO();
+  // Range resolution: (1) a length named right now, (2) a length said earlier
+  // in this conversation, (3) the draft already on screen (revisions keep
+  // their horizon), (4) the week-ahead default.
+  const recentUserTurns = [...options.history].reverse().filter((turn) => turn.role === 'user').map((turn) => turn.text);
+  let range: PlanRange | null = null;
+  for (const said of [utterance, ...recentUserTurns]) {
+    const parsed = parsePlanDuration(said, today);
+    if (parsed) {
+      range = { startDate: parsed.startDate, days: parsed.days };
+      break;
+    }
+  }
+  if (!range && options.currentDraft) range = options.currentDraft.range;
+  if (!range) range = voiceRange(today);
   const payload = {
     utterance,
-    today: todayISO(),
+    today,
+    range: { startDate: range.startDate, endDate: addDays(range.startDate, range.days - 1), days: range.days },
     history: compressHistory(options.history),
-    context: buildVoiceContext(options.state, range.startDate),
+    ...(options.currentDraft ? { currentDraft: draftForModel(options.currentDraft.draft) } : {}),
+    context: buildVoiceContext(options.state, today, range),
   };
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const timer = setTimeout(() => controller?.abort(), VOICE_TURN_TIMEOUT_MS);
@@ -182,6 +222,18 @@ export function pickVoice(voices: SpeechSynthesisVoiceLike[], lang: 'en' | 'fa')
 
 export function ttsAvailable(): boolean {
   return synthesis() !== null;
+}
+
+/**
+ * Which language a reply is actually written in. TTS must follow the TEXT,
+ * not the app language: a Persian answer to a Persian question needs a
+ * Persian voice even when the app UI is English (and vice versa).
+ */
+export function replyLang(text: string): 'en' | 'fa' {
+  const rtl = (text.match(/[\u0600-\u06FF]/g) ?? []).length;
+  const latin = (text.match(/[a-z]/gi) ?? []).length;
+  if (rtl === 0 && latin === 0) return getLang() === 'fa' ? 'fa' : 'en';
+  return rtl >= latin ? 'fa' : 'en';
 }
 
 /**

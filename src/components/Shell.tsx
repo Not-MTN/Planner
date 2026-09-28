@@ -22,6 +22,7 @@ import {
   UndoIcon,
   RedoIcon,
   UploadIcon,
+  WeekIcon,
 } from '../icons';
 import { useImportFile } from '../hooks';
 import { routeKey, routeTitle, type Route } from '../route';
@@ -41,8 +42,9 @@ import { TasksView } from '../views/TasksView';
 const CalendarView = lazy(() => import('../views/CalendarView').then((m) => ({ default: m.CalendarView })));
 const InsightsView = lazy(() => import('../views/InsightsView').then((m) => ({ default: m.InsightsView })));
 const AIView = lazy(() => import('../views/AIView').then((m) => ({ default: m.AIView })));
+const PlansView = lazy(() => import('../views/PlansView').then((m) => ({ default: m.PlansView })));
 import { applyUpdate, onUpdateAvailable } from '../pwa';
-import { onTourRequest, requestTour, tourStartIndex } from '../tour';
+import { isAIVisited, onTourRequest, requestTour, TOUR_STOPS, tourRouteFor, tourStartIndex } from '../tour';
 import { onAboutRequest, requestAbout } from '../about';
 import { TourSheet } from './TourSheet';
 import { AboutSheet } from './AboutSheet';
@@ -52,6 +54,7 @@ const NAV = [
   { name: 'today', label: t("Today"), icon: SunIcon },
   { name: 'calendar', label: t("Calendar"), icon: CalendarIcon },
   { name: 'ai', label: t("AI coach"), icon: SparklesIcon },
+  { name: 'plans', label: t("Plans"), icon: WeekIcon },
   { name: 'tasks', label: t("Tasks"), icon: CheckIcon },
   { name: 'habits', label: t("Habits"), icon: DotsIcon },
   { name: 'goals', label: t("Goals"), icon: FlagIcon },
@@ -120,6 +123,21 @@ export function Shell() {
     if (start !== null) setTourStep(start);
   }, [ready]);
   useEffect(() => onTourRequest(() => setTourStep(0)), []);
+  // The tour walks the real pages: each stop navigates to the tab it teaches.
+  useEffect(() => {
+    if (tourStep === null || !ready) return;
+    const dest = tourRouteFor(TOUR_STOPS[tourStep], today);
+    if (dest) navigate(dest);
+  }, [tourStep, ready, navigate, today]);
+  const closeTour = () => {
+    setTourStep(null);
+    navigate({ name: 'today' });
+  };
+  // One-time attention dot on the AI coach until it has been opened.
+  const [aiSeen, setAiSeen] = useState(isAIVisited);
+  useEffect(() => {
+    setAiSeen(isAIVisited());
+  }, [route.name]);
   const [aboutOpen, setAboutOpen] = useState(false);
   useEffect(() => onAboutRequest(() => setAboutOpen(true)), []);
 
@@ -176,7 +194,7 @@ export function Shell() {
     setMoreOpen(false);
   };
 
-  const moreActive = ['goals', 'notes', 'insights', 'ai'].includes(route.name);
+  const moreActive = ['goals', 'notes', 'insights', 'ai', 'plans'].includes(route.name);
 
   return (
     <div className="app-shell">
@@ -196,11 +214,11 @@ export function Shell() {
         </button>
         <nav className="side-nav" aria-label={t("Planner")}>
           <p className="nav-label">{t("Plan")}</p>
-          {NAV.slice(0, 3).map((item) => (
-            <NavButton key={item.name} item={item} active={route.name === item.name || (item.name === 'calendar' && route.name === 'calendar')} onClick={() => go(item.name)} />
+          {NAV.slice(0, 4).map((item) => (
+            <NavButton key={item.name} item={item} active={route.name === item.name || (item.name === 'calendar' && route.name === 'calendar')} attention={item.name === 'ai' && !aiSeen} onClick={() => go(item.name)} />
           ))}
           <p className="nav-label">{t("Track")}</p>
-          {NAV.slice(3).map((item) => (
+          {NAV.slice(4).map((item) => (
             <NavButton key={item.name} item={item} active={route.name === item.name} onClick={() => go(item.name)} />
           ))}
         </nav>
@@ -262,6 +280,16 @@ export function Shell() {
             <span className="brand-text"><strong>{t("Planner")}</strong></span>
           </button>
           <div className="mobile-bar-actions">
+            <button
+              type="button"
+              className="icon-btn round ai-orb"
+              aria-label={t("AI coach")}
+              title={t("AI coach")}
+              onClick={() => navigate({ name: 'ai', tab: 'plan' })}
+            >
+              <SparklesIcon size={18} />
+              {!aiSeen ? <i className="nav-attention" aria-hidden="true" /> : null}
+            </button>
             <button type="button" className="icon-btn round" aria-label={t("Search")} onClick={openPalette}>
               <SearchIcon size={18} />
             </button>
@@ -318,6 +346,7 @@ export function Shell() {
                   {route.name === 'notes' ? <NotesView /> : null}
                   {route.name === 'insights' ? <InsightsView /> : null}
                   {route.name === 'ai' ? <AIView /> : null}
+                  {route.name === 'plans' ? <PlansView /> : null}
                 </Suspense>
               </div>
             </>
@@ -357,8 +386,11 @@ export function Shell() {
             </button>
             <button type="button" className={cx(route.name === 'ai' && 'on')} onClick={() => go('ai')}>
               <SparklesIcon size={18} /> {t("AI coach")}
+              {!aiSeen ? <i className="nav-attention more-attention" aria-hidden="true" /> : null}
             </button>
-            <button type="button" onClick={openPalette}><SearchIcon size={18} /> {t("Search & quick add")}</button>
+            <button type="button" className={cx(route.name === 'plans' && 'on')} onClick={() => go('plans')}>
+              <WeekIcon size={18} /> {t("Plans")}
+            </button>
             <button type="button" onClick={openSettings}><SlidersIcon size={18} /> {t("Settings")}</button>
             <button type="button" onClick={requestTour}><HelpIcon size={18} /> {t("How Planner works")}</button>
             <button type="button" onClick={() => { setMoreOpen(false); window.setTimeout(requestAbout, 60); }}><HeartIcon size={18} /> {t("Why Planner?")}</button>
@@ -422,7 +454,7 @@ export function Shell() {
         </div>
       ) : null}
       {tourStep !== null && ready ? (
-        <TourSheet step={tourStep} onStep={setTourStep} onClose={() => setTourStep(null)} />
+        <TourSheet step={tourStep} onStep={setTourStep} onClose={closeTour} />
       ) : null}
       {aboutOpen ? <AboutSheet onClose={() => setAboutOpen(false)} /> : null}
       <input ref={importFile.ref} className="visually-hidden" tabIndex={-1} aria-hidden="true" type="file" accept="application/json,.json" onChange={importFile.onChange} />
@@ -433,16 +465,21 @@ export function Shell() {
 function NavButton({
   item,
   active,
+  attention,
   onClick,
 }: {
   item: { name: string; label: string; icon: typeof SunIcon };
   active: boolean;
+  attention?: boolean;
   onClick: () => void;
 }) {
   const Icon = item.icon;
   return (
     <button type="button" data-tour-nav={item.name} className={cx('nav-link', active && 'active')} aria-current={active ? 'page' : undefined} title={item.label} onClick={onClick}>
-      <Icon size={18} />
+      <span className="nav-icon-wrap">
+        <Icon size={18} />
+        {attention && !active ? <i className="nav-attention" aria-hidden="true" /> : null}
+      </span>
       <span className="nav-text">{item.label}</span>
     </button>
   );

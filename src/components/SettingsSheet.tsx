@@ -12,6 +12,7 @@ import { canInstall, isInstalled, onInstallChange, promptInstall } from '../pwa'
 import { requestTour } from '../tour';
 import { requestAbout } from '../about';
 import { LEAD_CHOICES } from '../reminders';
+import { loadSpeechLocaleId, saveSpeechLocaleId, speechAvailable, SPEECH_LOCALES } from '../speech';
 import { t, getLang, setLang, LANGUAGES, type Lang } from '../i18n';
 
 function SyncSection() {
@@ -200,6 +201,40 @@ function RemindersSection() {
           </div>
         </>
       ) : null}
+    </section>
+  );
+}
+
+function VoiceSection() {
+  const { flash } = usePlanner();
+  const [localeId, setLocaleId] = useState(() => loadSpeechLocaleId());
+  const available = speechAvailable();
+  const choose = (id: string) => {
+    setLocaleId(id);
+    saveSpeechLocaleId(id);
+    flash(t("Voice listening updated."));
+  };
+  return (
+    <section className="set-section">
+      <h3 className="kicker">{t("Voice")}</h3>
+      <div className="set-row">
+        <div>
+          <p className="set-label">{t("Listening accent")}</p>
+          <p className="set-hint">
+            {available
+              ? t("Pick the accent that sounds most like you. Speech is understood much better when the listener expects it — any accent is welcome.")
+              : t("This browser has no speech service, so voice input is unavailable. Typing still works everywhere.")}
+          </p>
+        </div>
+        <label className="field set-select">
+          <span className="visually-hidden">{t("Listening accent")}</span>
+          <select value={localeId} disabled={!available} onChange={(event) => choose(event.target.value)}>
+            {SPEECH_LOCALES.map((locale) => (
+              <option key={locale.id} value={locale.id}>{locale.label}</option>
+            ))}
+          </select>
+        </label>
+      </div>
     </section>
   );
 }
@@ -400,6 +435,7 @@ export function SettingsSheet() {
       <SyncSection />
       <SharedSpaceSection />
       <RemindersSection />
+      <VoiceSection />
       <CalendarSection />
       <FeedsSection />
       <TaskImportSection />

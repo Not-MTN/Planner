@@ -5,11 +5,71 @@
  * speech service, same as any dictation.
  */
 import { useEffect, useRef, useState } from 'react';
-import { getLang } from './i18n';
+import { getLang, t } from './i18n';
+
+/**
+ * Speech recognition is far more accurate when the engine is told which
+ * accent to expect. These are the locales we offer for the listening side;
+ * the user picks whichever matches how they actually talk.
+ */
+export interface SpeechLocale {
+  id: string;
+  /** BCP-47 tag handed to the recognition engine. */
+  tag: string;
+  label: string;
+}
+
+export const SPEECH_LOCALES: SpeechLocale[] = [
+  { id: 'auto', tag: '', get label() { return t("Match my language"); } },
+  { id: 'en-US', tag: 'en-US', get label() { return t("English (US)"); } },
+  { id: 'en-GB', tag: 'en-GB', get label() { return t("English (UK)"); } },
+  { id: 'en-IN', tag: 'en-IN', get label() { return t("English (India)"); } },
+  { id: 'en-AU', tag: 'en-AU', get label() { return t("English (Australia)"); } },
+  { id: 'en-NG', tag: 'en-NG', get label() { return t("English (Nigeria)"); } },
+  { id: 'en-ZA', tag: 'en-ZA', get label() { return t("English (South Africa)"); } },
+  { id: 'fa-IR', tag: 'fa-IR', get label() { return t("Persian (فارسی)"); } },
+];
+
+const SPEECH_LOCALE_KEY = 'planner-speech-locale';
+
+export function loadSpeechLocaleId(): string {
+  try {
+    const raw = localStorage.getItem(SPEECH_LOCALE_KEY);
+    return raw && SPEECH_LOCALES.some((locale) => locale.id === raw) ? raw : 'auto';
+  } catch {
+    return 'auto';
+  }
+}
+
+export function saveSpeechLocaleId(id: string): void {
+  try {
+    localStorage.setItem(SPEECH_LOCALE_KEY, id);
+  } catch {
+    /* storage unavailable — recognition falls back to the default */
+  }
+}
+
+/**
+ * The BCP-47 tag the recognizer should listen with. Respects the user's
+ * accent choice; "auto" follows the app language (fa or en-US).
+ */
+export function recognitionLang(localeId = loadSpeechLocaleId()): string {
+  const chosen = SPEECH_LOCALES.find((locale) => locale.id === localeId);
+  if (chosen && chosen.tag) return chosen.tag;
+  return getLang() === 'fa' ? 'fa-IR' : 'en-US';
+}
+
+interface SpeechAlternativeLike {
+  transcript: string;
+  /** Present on final results; higher = the engine is surer about it. */
+  confidence?: number;
+}
 
 interface SpeechRecognitionResultLike {
   isFinal: boolean;
-  0: { transcript: string };
+  length?: number;
+  0: SpeechAlternativeLike;
+  [index: number]: SpeechAlternativeLike | boolean | number | undefined;
 }
 
 interface SpeechRecognitionEventLike {
@@ -25,11 +85,34 @@ interface SpeechRecognitionLike {
   lang: string;
   interimResults: boolean;
   continuous: boolean;
+  /** Ask the engine for several guesses; we keep the most confident one. */
+  maxAlternatives?: number;
   onresult: ((event: SpeechRecognitionEventLike) => void) | null;
   onend: (() => void) | null;
   onerror: ((event: SpeechRecognitionErrorLike) => void) | null;
   start: () => void;
   stop: () => void;
+}
+
+/**
+ * Pick the engine's most confident reading of a result. Accented speech often
+ * lands in alternative 2 or 3 rather than the first guess, so trusting raw
+ * order loses words; confidence order keeps them.
+ */
+export function bestTranscript(result: SpeechRecognitionResultLike): string {
+  const count = typeof result.length === 'number' ? Math.max(1, result.length) : 1;
+  let transcript = result[0]?.transcript ?? '';
+  let confidence = typeof result[0]?.confidence === 'number' ? result[0].confidence : -1;
+  for (let i = 1; i < Math.min(count, 8); i += 1) {
+    const alternative = result[i] as SpeechAlternativeLike | undefined;
+    if (!alternative || typeof alternative.transcript !== 'string') continue;
+    const sure = typeof alternative.confidence === 'number' ? alternative.confidence : -1;
+    if (sure > confidence) {
+      confidence = sure;
+      transcript = alternative.transcript;
+    }
+  }
+  return transcript;
 }
 
 type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
@@ -95,9 +178,16 @@ export function useSpeechInput(): SpeechInput {
       // Legacy callers pass the interim handler as the second argument.
       const opts: SpeechCallbacks = typeof callbacks === 'function' ? { onInterim: callbacks } : callbacks ?? {};
       const recognition = new Ctor();
-      recognition.lang = getLang() === 'fa' ? 'fa-IR' : 'en-US';
+      // The accent the user picked (or the app language default) — matching the
+      // engine to the speaker is the single biggest accuracy win.
+      recognition.lang = recognitionLang();
       recognition.interimResults = true;
       recognition.continuous = false;
+      try {
+        recognition.maxAlternatives = 5;
+      } catch {
+        /* some engines refuse the property — first guess still works */
+      }
       let heard = false;
       let errored = false; // onerror precedes onend — don't report the end twice
       recognition.onresult = (event) => {
@@ -105,7 +195,8 @@ export function useSpeechInput(): SpeechInput {
         let interim = '';
         for (let i = event.resultIndex; i < event.results.length; i += 1) {
           const result = event.results[i];
-          if (result?.isFinal) final += result[0]?.transcript ?? '';
+          if (!result) continue;
+          if (result.isFinal) final += bestTranscript(result);
           else interim += result[0]?.transcript ?? '';
         }
         if (interim.trim() && opts.onInterim) opts.onInterim(interim.replace(/\s+/g, ' ').trim());

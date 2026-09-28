@@ -1,7 +1,8 @@
-import { ACCENTS, HABIT_ICONS, NOTE_KINDS, PRIORITIES } from './constants';
+import { ACCENTS, categoryById, HABIT_ICONS, NOTE_KINDS, PRIORITIES } from './constants';
 import { isValidISODate, isValidTime, localDateFromTimestamp, timeToMinutes } from './dates';
 import { REPEAT_SET } from './recurrence';
-import { createEmptyState, type AIMemory, type AttachmentRef, type AIMemoryCategory, type FixedCommitment, type FocusLog, type HabitCompletion, type MoodEntry, type MoodValue, type Subtask, type TaskRepeat, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type Task } from './types';
+import { MAX_PLAN_DAYS } from './duration';
+import { AI_PLAN_LIMIT, createEmptyState, type AIMemory, type AttachmentRef, type AIMemoryCategory, type EventInput, type FixedCommitment, type FocusLog, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Subtask, type TaskInput, type TaskRepeat, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task } from './types';
 import { t } from './i18n';
 
 export const STORAGE_KEY = 'personal-planner.v1';
@@ -151,6 +152,96 @@ function sanitizeAIMemory(value: unknown): AIMemory[] {
       updatedAt: asString(raw.updatedAt, 40) || createdAt,
     }];
   }).slice(-100);
+}
+
+function sanitizePlanTask(value: unknown): TaskInput | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const title = asString(raw.title, 140)?.trim();
+  if (!title) return null;
+  const dueDate = asString(raw.dueDate, 10);
+  const dueTime = asString(raw.dueTime, 5);
+  return {
+    title,
+    priority: PRIORITY_SET.has(String(raw.priority)) ? (raw.priority as TaskInput['priority']) : 'medium',
+    dueDate: dueDate && isValidISODate(dueDate) ? dueDate : null,
+    dueTime: dueTime && isValidTime(dueTime) ? dueTime : null,
+    category: asString(raw.category, 40) || 'personal',
+    note: asString(raw.note, 1000) ?? '',
+    goalId: null,
+  };
+}
+
+function sanitizePlanEvent(value: unknown): EventInput | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const title = asString(raw.title, 140)?.trim();
+  const date = asString(raw.date, 10);
+  const startTime = asString(raw.startTime, 5);
+  const endTime = asString(raw.endTime, 5);
+  if (!title || !date || !isValidISODate(date) || !startTime || !isValidTime(startTime)) return null;
+  return {
+    title,
+    date,
+    startTime,
+    endTime: endTime && isValidTime(endTime) && timeToMinutes(endTime) > timeToMinutes(startTime) ? endTime : null,
+    category: asString(raw.category, 40) || 'personal',
+    note: asString(raw.note, 1000) ?? '',
+    important: raw.important === true,
+  };
+}
+
+function sanitizePlanHabit(value: unknown): HabitInput | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const name = asString(raw.name, 60)?.trim();
+  if (!name) return null;
+  return {
+    name,
+    icon: asString(raw.icon, 20) || 'leaf',
+    accent: ACCENT_SET.has(String(raw.accent)) ? (raw.accent as HabitInput['accent']) : categoryById(asString(raw.category, 40) || 'personal').accent,
+    frequency: sanitizeFrequency(raw.frequency),
+  };
+}
+
+function sanitizeAIPlans(value: unknown): SavedAIPlan[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const raw = item as Record<string, unknown>;
+    const id = asString(raw.id, 80);
+    const startDate = asString(raw.startDate, 10);
+    const days = typeof raw.days === 'number' && Number.isFinite(raw.days) ? Math.round(raw.days) : 0;
+    if (!id || !startDate || !isValidISODate(startDate) || days < 1 || seen.has(id)) return [];
+    seen.add(id);
+    const summary = asString(raw.summary, 400) ?? '';
+    const prompt = asString(raw.prompt, 2400) ?? '';
+    const createdAt = asString(raw.createdAt, 40) || new Date(0).toISOString();
+    const tasks = Array.isArray(raw.tasks) ? raw.tasks.map(sanitizePlanTask).filter((task): task is TaskInput => task !== null).slice(0, 40) : [];
+    const events = Array.isArray(raw.events) ? raw.events.map(sanitizePlanEvent).filter((event): event is EventInput => event !== null).slice(0, 40) : [];
+    const habits = Array.isArray(raw.habits) ? raw.habits.map(sanitizePlanHabit).filter((habit): habit is HabitInput => habit !== null).slice(0, 12) : [];
+    const suggestions = Array.isArray(raw.suggestions)
+      ? raw.suggestions.flatMap((entry) => { const text = asString(entry, 240)?.trim(); return text ? [text] : []; }).slice(0, 5)
+      : [];
+    const plan: SavedAIPlan = {
+      id,
+      title: asString(raw.title, 140)?.trim() || summary.slice(0, 60) || prompt.slice(0, 60),
+      prompt,
+      summary,
+      startDate,
+      days: Math.min(days, MAX_PLAN_DAYS),
+      status: raw.status === 'added' ? 'added' : 'draft',
+      source: raw.source === 'voice' ? 'voice' : 'typed',
+      tasks,
+      events,
+      habits,
+      suggestions,
+      createdAt,
+      updatedAt: asString(raw.updatedAt, 40) || createdAt,
+    };
+    return [plan];
+  }).slice(0, AI_PLAN_LIMIT);
 }
 
 function sanitizeEvent(value: unknown): PlannerEvent | null {
@@ -382,6 +473,7 @@ export function sanitizeState(raw: unknown): PlannerState | null {
     events,
     fixedCommitments,
     aiMemory,
+    aiPlans: sanitizeAIPlans(source.aiPlans),
     habits,
     completions,
     goals,

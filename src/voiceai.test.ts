@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { compressHistory, normalizeVoiceReply, pickVoice, speakText, stopSpeaking, voiceRange, voiceSystemPrompt, voiceTurn, VOICE_HISTORY_LIMIT } from './voiceai';
+import { compressHistory, normalizeVoiceReply, pickVoice, replyLang, speakText, stopSpeaking, voiceRange, voiceSystemPrompt, voiceTurn, VOICE_HISTORY_LIMIT, type VoiceCurrentDraft } from './voiceai';
 import { createEmptyState } from './types';
 
 const today = new Date().toISOString().slice(0, 10);
+const tomorrow = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
 
 describe('voice ai', () => {
   beforeEach(() => {
@@ -68,6 +69,31 @@ describe('voice ai', () => {
     expect(prompt.toLowerCase()).toContain('persian');
   });
 
+  it('is fluent in messy real-world Persian: colloquial, Dari, Finglish, typos', () => {
+    const prompt = voiceSystemPrompt();
+    // Colloquial/spoken forms are named explicitly so the model expects them.
+    expect(prompt).toContain('میخوام');
+    expect(prompt).toContain('خسته‌م');
+    // Regional varieties and Latin-letter Persian are understood as Persian.
+    expect(prompt).toContain('Dari');
+    expect(prompt).toContain('Finglish');
+    expect(prompt).toContain('farda miam');
+    // Keyboard-letter typos are called out as normal.
+    expect(prompt).toContain('ي/ی');
+    // The user is never made to repeat or rephrase.
+    expect(prompt).toContain('Never ask the user to repeat');
+    // Answers match the language the user actually spoke.
+    expect(prompt).toContain('IN THE USER\'S LANGUAGE');
+    expect(prompt).toContain('conversational Persian');
+  });
+
+  it('speaks replies with a voice matching the reply text, not the app', () => {
+    expect(replyLang('باشه، فردا رو سبک می‌چینم.')).toBe('fa');
+    expect(replyLang('Sure, keeping tomorrow light.')).toBe('en');
+    // Mostly-Persian with a few Latin words still speaks Persian.
+    expect(replyLang('باشه، deep work رو می‌ذارم عصر.')).toBe('fa');
+  });
+
   it('sends the utterance, bounded history and schedule context to the xAI proxy', async () => {
     const calls: Array<{ url: string; body: string }> = [];
     const originalFetch = globalThis.fetch;
@@ -83,7 +109,7 @@ describe('voice ai', () => {
                   followUp: null,
                   draft: {
                     summary: 'a soft tomorrow',
-                    tasks: [{ title: 'Nap', date: today, priority: 'low', category: 'health' }],
+                    tasks: [{ title: 'Nap', date: tomorrow, priority: 'low', category: 'health' }],
                     events: [],
                     habits: [],
                   },
@@ -102,16 +128,134 @@ describe('voice ai', () => {
       expect(calls[0].url).toContain('/api/xai/chat/completions');
       const body = JSON.parse(calls[0].body) as { messages: Array<{ role: string; content: string }>; response_format?: { type: string } };
       expect(body.response_format?.type).toBe('json_object');
-      const userMessage = JSON.parse(body.messages[1].content) as { utterance: string; history: unknown[]; context: { today: string } };
+      const userMessage = JSON.parse(body.messages[1].content) as {
+        utterance: string;
+        history: unknown[];
+        context: { today: string };
+        range: { startDate: string; endDate: string; days: number };
+      };
       expect(userMessage.utterance).toBe("I'm wiped. Make tomorrow soft?");
       expect(Array.isArray(userMessage.history)).toBe(true);
       expect(userMessage.context.today).toBe(today);
+      // The user said "tomorrow" — the AI plans exactly that day.
+      expect(userMessage.range).toEqual({ startDate: tomorrow, endDate: tomorrow, days: 1 });
+      expect(result.range).toEqual({ startDate: tomorrow, days: 1 });
       expect(result.reply).toBe('tomorrow has breathing room');
       expect(result.draft?.tasks[0].title).toBe('Nap');
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
+  it('keeps the horizon from earlier in the conversation when answering a follow-up', async () => {
+    const calls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push(String(init?.body));
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: JSON.stringify({ reply: 'sorted', followUp: null, draft: null }) } }],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }) as typeof fetch;
+    try {
+      // Earlier the user asked for a month; now they just answer a question.
+      const result = await voiceTurn({
+        utterance: 'yes, keep it light',
+        history: [{ role: 'user', text: 'plan my next month' }, { role: 'assistant', text: 'Which part matters most?' }],
+        state: createEmptyState(),
+      });
+      expect(result.range).toEqual({ startDate: today, days: 30 });
+      const body = JSON.parse(calls[0]) as { messages: Array<{ role: string; content: string }> };
+      const payload = JSON.parse(body.messages[1].content) as { range: { days: number; startDate: string } };
+      expect(payload.range.days).toBe(30);
+      expect(payload.range.startDate).toBe(today);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('revises the draft on screen: keeps its range and sends it to the model', async () => {
+    const calls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push(String(init?.body));
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: JSON.stringify({ reply: 'Tuesday is lighter now.', followUp: null, draft: null }) } }],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }) as typeof fetch;
+    try {
+      const draftRange = { startDate: today, days: 14 };
+      const currentDraft: VoiceCurrentDraft = {
+        draft: {
+          summary: 'A two-week push.',
+          tasks: [{ title: 'Deep work block', dueDate: today, dueTime: null, priority: 'high', category: 'work', note: '', goalId: null }],
+          events: [],
+          habits: [],
+          suggestions: ['Rest counts too.'],
+          skippedEvents: [],
+        },
+        range: draftRange,
+      };
+      const result = await voiceTurn({
+        utterance: 'make it lighter on tuesday',
+        history: [],
+        state: createEmptyState(),
+        currentDraft,
+      });
+      // No new length was spoken — the revision keeps the draft's horizon.
+      expect(result.range).toEqual(draftRange);
+      const body = JSON.parse(calls[0]) as { messages: Array<{ role: string; content: string }> };
+      const payload = JSON.parse(body.messages[1].content) as {
+        range: { days: number };
+        currentDraft?: { summary: string; tasks: Array<{ title: string }>; suggestions: string[] };
+      };
+      expect(payload.range.days).toBe(14);
+      expect(payload.currentDraft?.summary).toBe('A two-week push.');
+      expect(payload.currentDraft?.tasks[0].title).toBe('Deep work block');
+      expect(payload.currentDraft?.suggestions).toEqual(['Rest counts too.']);
+      // The model is told it is editing the draft on screen.
+      expect(body.messages[0].content).toContain('currentDraft');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('a freshly spoken length beats the draft range', async () => {
+    const calls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push(String(init?.body));
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: JSON.stringify({ reply: 'done', followUp: null, draft: null }) } }],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }) as typeof fetch;
+    try {
+      const result = await voiceTurn({
+        utterance: 'actually, plan the next three days instead',
+        history: [],
+        state: createEmptyState(),
+        currentDraft: { draft: { summary: 'x', tasks: [], events: [], habits: [], suggestions: [], skippedEvents: [] }, range: { startDate: today, days: 30 } },
+      });
+      expect(result.range.days).toBe(3);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('defaults to the week ahead when no length is mentioned anywhere', () => {
+    const range = voiceRange(today);
+    expect(range).toEqual({ startDate: today, days: 7 });
+    expect(voiceRange(today, 'make it gentle')).toEqual({ startDate: today, days: 7 });
+    expect(voiceRange(today, 'plan the next two weeks')).toEqual({ startDate: today, days: 14 });
+  });
+
   it('finish callbacks are deferred and the watchdog settles a silent engine', () => {
     vi.useFakeTimers();
     const spoken: string[] = [];

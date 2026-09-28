@@ -46,6 +46,20 @@ function pressKey(key: string, options?: KeyboardEventInit): void {
   });
 }
 
+/**
+ * Lazy-loaded views resolve whenever the import resolves — polling beats a
+ * fixed sleep, which flakes under heavier test machines.
+ */
+async function waitForText(needle: string, timeoutMs = 4000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!text().includes(needle)) {
+    if (Date.now() > deadline) throw new Error(`Timed out waiting for "${needle}"`);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    });
+  }
+}
+
 beforeEach(() => {
   window.localStorage.clear();
   // Tests below are not about the tour; only the dedicated tour test clears this.
@@ -246,8 +260,8 @@ describe('app smoke', () => {
       const aiNav = [...document.querySelectorAll<HTMLButtonElement>('.nav-link')].find((button) => button.textContent?.includes('AI coach'));
       await act(async () => {
         aiNav?.click();
-        await new Promise((resolve) => setTimeout(resolve, 150));
       });
+      await waitForText('Make a plan that fits.');
       expect(text()).toContain('Talk to your planner');
       // tap the orb → listening
       const orb = document.querySelector<HTMLButtonElement>('.voice-orb');
@@ -298,8 +312,8 @@ describe('app smoke', () => {
       const aiNav = [...document.querySelectorAll<HTMLButtonElement>('.nav-link')].find((button) => button.textContent?.includes('AI coach'));
       await act(async () => {
         aiNav?.click();
-        await new Promise((resolve) => setTimeout(resolve, 150));
       });
+      await waitForText('Make a plan that fits.');
       const orb = document.querySelector<HTMLButtonElement>('.voice-orb');
       act(() => orb?.click());
       // Denied: the orb goes home, and the user gets told why.
@@ -345,8 +359,8 @@ describe('app smoke', () => {
       const aiNav = [...document.querySelectorAll<HTMLButtonElement>('.nav-link')].find((button) => button.textContent?.includes('AI coach'));
       await act(async () => {
         aiNav?.click();
-        await new Promise((resolve) => setTimeout(resolve, 150));
       });
+      await waitForText('Make a plan that fits.');
       act(() => document.querySelector<HTMLButtonElement>('.voice-orb')?.click());
       await act(async () => { await new Promise((resolve) => setTimeout(resolve, 350)); });
       expect(text()).toContain('fix my friday');
@@ -389,8 +403,8 @@ describe('app smoke', () => {
       const aiNav = [...document.querySelectorAll<HTMLButtonElement>('.nav-link')].find((button) => button.textContent?.includes('AI coach'));
       await act(async () => {
         aiNav?.click();
-        await new Promise((resolve) => setTimeout(resolve, 150));
       });
+      await waitForText('Make a plan that fits.');
       const mic = document.querySelector<HTMLButtonElement>('.voice-mic');
       expect(mic).toBeTruthy(); // mic renders only because dictation is available
       setTextareaValue(document.querySelector('.ai-prompt-field textarea') as HTMLTextAreaElement, 'Keep evenings free.');
@@ -417,8 +431,8 @@ describe('app smoke', () => {
     );
     await act(async () => {
       aiNav?.click();
-      await new Promise((resolve) => setTimeout(resolve, 120));
     });
+    await waitForText('Make a plan that fits.');
     expect(text()).toContain('Make a plan that fits');
     expect(text()).toContain('Weekly fixed times');
     expect(text()).toContain('Add a plan picture');
@@ -439,8 +453,8 @@ describe('app smoke', () => {
     const aiNav = [...document.querySelectorAll<HTMLButtonElement>('.nav-link')].find((button) => button.textContent?.includes('AI coach'));
     await act(async () => {
       aiNav?.click();
-      await new Promise((resolve) => setTimeout(resolve, 120));
     });
+    await waitForText('Make a plan that fits.');
     expect(text()).toContain('AI memory');
     const memory = document.querySelector<HTMLTextAreaElement>('.ai-memory-form textarea');
     expect(memory).toBeTruthy();
@@ -457,8 +471,8 @@ describe('app smoke', () => {
     const aiAgain = [...document.querySelectorAll<HTMLButtonElement>('.nav-link')].find((button) => button.textContent?.includes('AI coach'));
     await act(async () => {
       aiAgain?.click();
-      await new Promise((resolve) => setTimeout(resolve, 120));
     });
+    await waitForText('Make a plan that fits.');
     expect(text()).toContain('I keep Sunday evenings for family.');
   });
 
@@ -467,8 +481,8 @@ describe('app smoke', () => {
     const aiNav = [...document.querySelectorAll<HTMLButtonElement>('.nav-link')].find((button) => button.textContent?.includes('AI coach'));
     await act(async () => {
       aiNav?.click();
-      await new Promise((resolve) => setTimeout(resolve, 120));
     });
+    await waitForText('Make a plan that fits.');
     const settings = [...document.querySelectorAll<HTMLButtonElement>('.ai-head-actions button')].find((button) => button.textContent?.includes('AI settings'));
     act(() => settings?.click());
     expect(text()).toContain('AI coach · xAI');
@@ -530,14 +544,14 @@ describe('app smoke', () => {
     const active = document.querySelector('.tour-lang-btn[aria-pressed="true"]') as HTMLButtonElement;
     expect(active).toBeTruthy();
     act(() => active.click());
-    expect(text()).toContain('Your day at a glance');
+    expect(text()).toContain('Your day, at a glance');
 
-    // Walk one more step, then skip → done is remembered.
+    // Walk one more step (the tour moves to the AI coach page), then skip → done is remembered.
     await Promise.resolve();
     act(() => (document.querySelector('[data-tour-bubble] [data-tour-primary]') as HTMLButtonElement).click());
-    expect(text()).toContain('Type like you think');
+    expect(text()).toContain('Talk to your AI coach');
     act(() => (document.querySelector('.tour-skip') as HTMLButtonElement).click());
-    expect(text()).not.toContain('Type like you think');
+    expect(text()).not.toContain('Talk to your AI coach');
     expect(localStorage.getItem('planner-tour-done')).toBe('1');
   });
 
@@ -601,9 +615,8 @@ describe('app smoke', () => {
     );
     await act(async () => {
       calendar?.click();
-      await new Promise((resolve) => setTimeout(resolve, 120));
     });
-    expect(text()).toContain('Seven days, loosely held');
+    await waitForText('Seven days, loosely held');
     const monthTab = [...document.querySelectorAll<HTMLButtonElement>('.cal-tabs .seg')].find((button) =>
       button.textContent?.includes('Month'),
     );

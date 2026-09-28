@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { advanceTour, backTour, markTourDone, readTourResume, tourDone, TOUR_LENGTH, TOUR_SELECTORS, TOUR_STOPS, tourStartIndex, writeTourResume } from './tour';
+import { advanceTour, backTour, isAIVisited, markAIVisited, markTourDone, readTourResume, tourDone, TOUR_LENGTH, tourRouteFor, TOUR_SELECTORS, TOUR_STOPS, tourStartIndex, writeTourResume } from './tour';
 
 function fakeStorage(initial: Record<string, string> = {}): Storage {
   const map = new Map(Object.entries(initial));
@@ -60,7 +60,7 @@ describe('tour', () => {
     expect(backTour(0)).toBe(1); // never behind the first content step
   });
 
-  it('anchors every content stop at an element of the Today page', () => {
+  it('anchors every content stop at a real element', () => {
     for (const stop of TOUR_STOPS) {
       if (stop === 'lang' || stop === 'done') {
         expect(TOUR_SELECTORS[stop]).toBe(null);
@@ -68,5 +68,25 @@ describe('tour', () => {
         expect(TOUR_SELECTORS[stop], stop).toMatch(/^[.[]/);
       }
     }
+  });
+
+  it('walks one page at a time: page stops navigate, chrome stops do not', () => {
+    // Every tab the app has gets exactly one teaching stop.
+    for (const name of ['ai', 'plans', 'tasks', 'habits', 'goals', 'notes', 'insights', 'calendar'] as const) {
+      const stop = TOUR_STOPS.find((id) => tourRouteFor(id, '2026-01-05')?.name === name);
+      expect(stop, name).toBeTruthy();
+    }
+    // Chrome stops stay where the user is.
+    for (const stop of ['lang', 'today', 'search', 'settings', 'done'] as const) {
+      expect(tourRouteFor(stop, '2026-01-05')).toBe(null);
+    }
+    expect(tourRouteFor('calendar', '2026-01-05')).toMatchObject({ name: 'calendar', tab: 'week', date: '2026-01-05' });
+  });
+
+  it('nudges about the AI coach only until it has been visited', () => {
+    const storage = fakeStorage();
+    expect(isAIVisited(storage)).toBe(false);
+    markAIVisited(storage);
+    expect(isAIVisited(storage)).toBe(true);
   });
 });

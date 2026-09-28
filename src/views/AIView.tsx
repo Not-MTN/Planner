@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { CATEGORIES, categoryById } from '../constants';
 import { usePlanner } from '../context';
-import { addDays, formatFullDate, timeToMinutes, todayISO, weekdayIndex, displayTime } from '../dates';
-import { MAX_PLAN_IMAGE_BYTES, XAI_KEY_MISSING_MESSAGE, checkXAIConfiguration, friendlyXAIError, generateAIPlan, generateAIReview, hasReviewActivity } from '../ai';
-import type { AIReview, AIDraft, PlanRange } from '../ai';
+import { addDays, addMinutes, formatFullDate, timeToMinutes, todayISO, weekdayIndex, displayTime } from '../dates';
+import { analyzeDraft, filterDraftAgainstState, habitFrequencyLabel, MAX_PLAN_IMAGE_BYTES, XAI_KEY_MISSING_MESSAGE, checkXAIConfiguration, friendlyXAIError, generateAIPlan, generateAIReview, hasReviewActivity, refineAIPlan } from '../ai';
+import type { AIReview, AIDraft, DraftWarning, PlanRange } from '../ai';
+import { MAX_PLAN_DAYS, parsePlanDuration } from '../duration';
 import { cx } from '../cx';
 import { useSpeechInput } from '../speech';
 import { VoiceTalk } from '../components/VoiceTalk';
+import { DraftRefine } from '../components/DraftRefine';
 import { CalendarIcon, CheckIcon, LeafIcon, MicIcon, PlusIcon, SparklesIcon, UploadIcon } from '../icons';
 import type { AIMemory, AIMemoryCategory, FixedCommitmentInput } from '../types';
+import { markAIVisited } from '../tour';
 import { t } from '../i18n';
 
 const WEEKDAYS = [
@@ -37,7 +40,14 @@ function periodDays(period: PlanningPeriod, customDays: string): number {
   if (period === 'week') return 7;
   if (period === 'month') return 30;
   const value = Number(customDays);
-  return Number.isFinite(value) ? Math.min(60, Math.max(2, Math.round(value))) : 14;
+  return Number.isFinite(value) ? Math.min(MAX_PLAN_DAYS, Math.max(2, Math.round(value))) : 14;
+}
+
+/** Short label for a saved plan — the request in brief. */
+function planTitleFor(prompt: string, hasImage: boolean): string {
+  const clean = prompt.replace(/\s+/g, ' ').trim();
+  if (clean) return clean.length > 60 ? `${clean.slice(0, 60)}…` : clean;
+  return hasImage ? t("Plan from your picture") : t("Voice plan");
 }
 
 function readFile(file: File): Promise<string> {
@@ -78,6 +88,8 @@ export function AIView() {
     clearAIMemory,
     requestConfirm,
     applyAIPlan,
+    saveAIPlan,
+    updateAIPlan,
     rescheduleTasks,
     flash,
   } = planner;
@@ -101,6 +113,9 @@ export function AIView() {
   };
   const [image, setImage] = useState<{ name: string; dataUrl: string } | null>(null);
   const [draft, setDraft] = useState<AIDraft | null>(null);
+  // The saved-plan id behind the card on screen — so "Add this plan" can mark
+  // the copy on the Plans page as added in the same undoable step.
+  const [draftPlanId, setDraftPlanId] = useState<string | null>(null);
   const [review, setReview] = useState<AIReview | null>(null);
   const [error, setError] = useState('');
   const [working, setWorking] = useState(false);
@@ -116,6 +131,14 @@ export function AIView() {
 
   const days = periodDays(period, customDays);
   const planRange = useMemo<PlanRange>(() => ({ startDate: planStart, days }), [planStart, days]);
+  // The range the on-screen draft was written for (it may differ from the
+  // builder controls once the user switches them). Voice and typed revisions
+  // always follow this range, not whatever the builder says now.
+  const [draftRange, setDraftRange] = useState<PlanRange>(planRange);
+  // "Plan my next two weeks" — hear the length in the request itself so the
+  // AI plans for exactly as long as the user says.
+  const heard = useMemo(() => parsePlanDuration(prompt, today), [prompt, today]);
+  const heardDiffers = heard !== null && (heard.startDate !== planStart || heard.days !== days);
   const reviewRange = useMemo<PlanRange>(() => ({ startDate: addDays(reviewThrough, -(days - 1)), days }), [reviewThrough, days]);
   const planEnd = addDays(planRange.startDate, planRange.days - 1);
   const reviewStart = reviewRange.startDate;
@@ -130,11 +153,17 @@ export function AIView() {
     return () => { active = false; };
   }, []);
 
+  // Opening this page retires the one-time "AI coach" attention dot in the nav.
+  useEffect(() => {
+    markAIVisited();
+  }, []);
+
   const goToTab = (tab: AISection) => navigate({ name: 'ai', tab });
 
   const generatePlan = async () => {
     setError('');
     setDraft(null);
+    setDraftPlanId(null);
     const configured = await checkXAIConfiguration();
     setXaiConfigured(configured);
     if (!configured) {
@@ -150,12 +179,96 @@ export function AIView() {
         state,
         imageDataUrl: image?.dataUrl,
       });
+      // Every draft also lands on the Plans page, so it can be revisited later.
+      const planId = saveAIPlan({
+        title: planTitleFor(prompt, Boolean(image?.dataUrl)),
+        prompt: prompt.trim(),
+        summary: result.summary,
+        startDate: planRange.startDate,
+        days: planRange.days,
+        source: 'typed',
+        tasks: result.tasks,
+        events: result.events,
+        habits: result.habits,
+        suggestions: result.suggestions,
+      });
       setDraft(result);
+      setDraftRange(planRange);
+      setDraftPlanId(planId);
     } catch (reason) {
       setError(friendlyXAIError(reason));
     } finally {
       setWorking(false);
     }
+  };
+
+  /**
+   * "Revise draft" — the AI edits the draft that is on screen and the linked
+   * copy on the Plans page is updated in the same step. The range never
+   * changes: the draft keeps the span it was written for.
+   */
+  const refineDraft = async (request: string) => {
+    if (!draft) return;
+    setError('');
+    const configured = await checkXAIConfiguration();
+    setXaiConfigured(configured);
+    if (!configured) {
+      setError(XAI_KEY_MISSING_MESSAGE);
+      openSettings();
+      return;
+    }
+    setWorking(true);
+    try {
+      const result = await refineAIPlan({ draft, request, range: draftRange, state });
+      setDraft(result);
+      if (draftPlanId) {
+        updateAIPlan(draftPlanId, {
+          summary: result.summary,
+          tasks: result.tasks,
+          events: result.events,
+          habits: result.habits,
+          suggestions: result.suggestions,
+        });
+      }
+      flash(t("Draft updated — review the changes before adding."));
+    } catch (reason) {
+      setError(friendlyXAIError(reason));
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  /** Voice drafts land on the Plans page too — source 'voice'. */
+  const onVoiceDraft = (next: AIDraft, range: PlanRange) => {
+    // Voice asked to change the plan on screen → revise the linked copy in
+    // place when the spans line up; otherwise treat it as a brand-new draft.
+    const linked = draftPlanId ? state.aiPlans.find((plan) => plan.id === draftPlanId) : null;
+    if (linked && linked.startDate === range.startDate && linked.days === range.days) {
+      updateAIPlan(linked.id, {
+        summary: next.summary,
+        tasks: next.tasks,
+        events: next.events,
+        habits: next.habits,
+        suggestions: next.suggestions,
+      });
+    } else {
+      const planId = saveAIPlan({
+        title: t("Voice plan"),
+        prompt: '',
+        summary: next.summary,
+        startDate: range.startDate,
+        days: range.days,
+        source: 'voice',
+        tasks: next.tasks,
+        events: next.events,
+        habits: next.habits,
+        suggestions: next.suggestions,
+      });
+      setDraftPlanId(planId);
+    }
+    setDraft(next);
+    setDraftRange(range);
+    setError('');
   };
 
   const generateReview = async () => {
@@ -208,7 +321,7 @@ export function AIView() {
 
   const addDraft = () => {
     if (!draft) return;
-    const nowSafe = filterPlanAgainstCurrentState(draft, state);
+    const nowSafe = filterDraftAgainstState(draft, state);
     const taskCount = nowSafe.tasks.length;
     const eventCount = nowSafe.events.length;
     const habitCount = nowSafe.habits.length;
@@ -217,8 +330,9 @@ export function AIView() {
       setError(t("Nothing new can be added from this draft. It may already be in your planner or an event time may conflict with protected time."));
       return;
     }
-    applyAIPlan({ tasks: nowSafe.tasks, events: nowSafe.events, habits: nowSafe.habits });
+    applyAIPlan({ tasks: nowSafe.tasks, events: nowSafe.events, habits: nowSafe.habits }, draftPlanId ?? undefined);
     setDraft(null);
+    setDraftPlanId(null);
     flash(t("Added {0} {1}, {2} {3} and {4} {5}. Undo is available.", { 0: taskCount, 1: taskCount === 1 ? t("task") : t("tasks"), 2: eventCount, 3: eventCount === 1 ? t("event") : t("events"), 4: habitCount, 5: habitCount === 1 ? t("habit") : t("habits") }));
   };
 
@@ -326,7 +440,7 @@ export function AIView() {
 
       {currentTab === 'plan' ? (
         <>
-          <VoiceTalk onDraft={(next) => { setDraft(next); setError(''); }} />
+          <VoiceTalk onDraft={onVoiceDraft} currentDraft={draft ? { draft, range: draftRange } : null} />
           <section className="card ai-builder">
             <header className="card-head">
               <div>
@@ -352,11 +466,26 @@ export function AIView() {
               {period === 'custom' ? (
                 <label className="field ai-custom-days">
                   <span>{t("Number of days")}</span>
-                  <input type="number" min={2} max={60} value={customDays} onChange={(event) => setCustomDays(event.target.value)} />
+                  <input type="number" min={2} max={MAX_PLAN_DAYS} value={customDays} onChange={(event) => setCustomDays(event.target.value)} />
                 </label>
               ) : null}
             </div>
             <p className="ai-range-note">{formatFullDate(planRange.startDate)} — {formatFullDate(planEnd)}{t(". Fixed weekly times and existing events are treated as busy, protected slots.")}</p>
+            {heard && heardDiffers ? (
+              <div className="ai-heard-range" role="status">
+                <span><CalendarIcon size={14} /> {heard.clamped
+                  ? t("That's a long stretch — I can plan up to {0} days in one go.", { 0: MAX_PLAN_DAYS })
+                  : t("Sounds like you want {0} {1} planned.", { 0: heard.days, 1: heard.days === 1 ? t("day") : t("days") })}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-soft btn-small"
+                  onClick={() => { setPeriod('custom'); setCustomDays(String(heard.days)); setPlanStart(heard.startDate); }}
+                >
+                  {t("Plan that long")}
+                </button>
+              </div>
+            ) : null}
             <div className="chip-row ai-chips" role="group" aria-label={t("Start from a suggestion")}>
               {PLAN_CHIPS.map((chip) => (
                 <button key={chip} type="button" className="chip" onClick={() => setPrompt(chip)}>
@@ -411,7 +540,16 @@ export function AIView() {
             </div>
           </section>
 
-          {draft ? <PlanDraft draft={draft} onAdd={addDraft} onDiscard={() => setDraft(null)} /> : null}
+          {draft ? (
+            <PlanDraft
+              draft={draft}
+              warnings={analyzeDraft(draft, state, draftRange)}
+              working={working}
+              onRefine={refineDraft}
+              onAdd={addDraft}
+              onDiscard={() => { setDraft(null); setDraftPlanId(null); }}
+            />
+          ) : null}
 
           <section className="card fixed-manager">
             <header className="card-head">
@@ -497,7 +635,7 @@ export function AIView() {
               {period === 'custom' ? (
                 <label className="field">
                   <span>{t("Number of days")}</span>
-                  <input type="number" min={2} max={60} value={customDays} onChange={(event) => setCustomDays(event.target.value)} />
+                  <input type="number" min={2} max={MAX_PLAN_DAYS} value={customDays} onChange={(event) => setCustomDays(event.target.value)} />
                 </label>
               ) : null}
               <button type="button" className="btn btn-primary" disabled={working} onClick={generateReview}>
@@ -664,33 +802,6 @@ function memoryCategoryLabel(category: AIMemoryCategory): string {
   return MEMORY_CATEGORIES.find((item) => item.value === category)?.label ?? t("Life context");
 }
 
-function filterPlanAgainstCurrentState(draft: AIDraft, state: ReturnType<typeof usePlanner>['state']): AIDraft {
-  const tasks = draft.tasks.filter((candidate) => !state.tasks.some((task) =>
-    task.dueDate === candidate.dueDate && task.title.toLowerCase().trim() === candidate.title.toLowerCase().trim(),
-  ));
-  const events: AIDraft['events'] = [];
-  const skippedEvents = [...draft.skippedEvents];
-  for (const candidate of draft.events) {
-    const candidateStart = Number(candidate.startTime.slice(0, 2)) * 60 + Number(candidate.startTime.slice(3, 5));
-    const candidateEnd = candidate.endTime
-      ? Number(candidate.endTime.slice(0, 2)) * 60 + Number(candidate.endTime.slice(3, 5))
-      : candidateStart + 60;
-    const existing = state.events.filter((event) => event.date === candidate.date).map((event) => ({ start: event.startTime, end: event.endTime ?? addMinutes(event.startTime, 60), title: event.title }));
-    const fixed = state.fixedCommitments.filter((item) => item.weekday === weekdayIndex(candidate.date)).map((item) => ({ start: item.startTime, end: item.endTime, title: item.title }));
-    const timedTasks = state.tasks.filter((task) => task.dueDate === candidate.date && task.dueTime).map((task) => ({ start: task.dueTime as string, end: addMinutes(task.dueTime as string, 30), title: task.title }));
-    const accepted = events.filter((event) => event.date === candidate.date).map((event) => ({ start: event.startTime, end: event.endTime ?? addMinutes(event.startTime, 60), title: event.title }));
-    const overlap = [...existing, ...fixed, ...timedTasks, ...accepted].find((item) => {
-      const start = Number(item.start.slice(0, 2)) * 60 + Number(item.start.slice(3, 5));
-      const end = Number(item.end.slice(0, 2)) * 60 + Number(item.end.slice(3, 5));
-      return candidateStart < end && start < candidateEnd;
-    });
-    if (overlap) skippedEvents.push({ title: candidate.title, date: candidate.date, reason: `overlaps protected time: ${overlap.title}` });
-    else events.push(candidate);
-  }
-  const habits = draft.habits.filter((candidate) => !state.habits.some((habit) => habit.name.toLowerCase().trim() === candidate.name.toLowerCase().trim()));
-  return { ...draft, tasks, events, habits, skippedEvents };
-}
-
 function timedTaskConflict(
   state: ReturnType<typeof usePlanner>['state'],
   taskId: string,
@@ -718,12 +829,14 @@ function timedTaskConflict(
   return conflict ? `overlaps ${conflict.title}` : null;
 }
 
-function addMinutes(time: string, amount: number): string {
-  const mins = Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5)) + amount;
-  return `${String(Math.floor(Math.min(mins, 1439) / 60)).padStart(2, '0')}:${String(Math.min(mins, 1439) % 60).padStart(2, '0')}`;
-}
-
-function PlanDraft({ draft, onAdd, onDiscard }: { draft: AIDraft; onAdd: () => void; onDiscard: () => void }) {
+function PlanDraft({ draft, warnings, working, onRefine, onAdd, onDiscard }: {
+  draft: AIDraft;
+  warnings: DraftWarning[];
+  working: boolean;
+  onRefine: (request: string) => void;
+  onAdd: () => void;
+  onDiscard: () => void;
+}) {
   const total = draft.tasks.length + draft.events.length + draft.habits.length;
   return (
     <section className="card ai-draft-card">
@@ -735,6 +848,13 @@ function PlanDraft({ draft, onAdd, onDiscard }: { draft: AIDraft; onAdd: () => v
         <span className="chip">{total} {t('suggestions')}</span>
       </header>
       <p className="ai-draft-summary">{draft.summary}</p>
+      {warnings.length > 0 ? (
+        <div className="draft-warnings" role="status">
+          <strong>{t("A few things to double-check")}</strong>
+          <ul>{warnings.map((warning, index) => <li key={`${warning.kind}-${index}`}>{warning.message}</li>)}</ul>
+        </div>
+      ) : null}
+      <DraftRefine working={working} onRefine={onRefine} />
       {draft.suggestions.length > 0 ? (
         <div className="ai-wellbeing"><LeafIcon size={17} /><div><strong>{t("Gentle wellbeing ideas")}</strong><ul>{draft.suggestions.map((item, index) => <li key={index}>{item}</li>)}</ul></div></div>
       ) : null}
@@ -746,7 +866,7 @@ function PlanDraft({ draft, onAdd, onDiscard }: { draft: AIDraft; onAdd: () => v
         {draft.tasks.map((item, index) => <li key={`t-${index}`}><span className="draft-kind task-kind">{t("Task")}</span><span>{item.title}</span><small>{item.dueDate ? formatFullDate(item.dueDate) : ''}</small></li>)}
       </DraftGroup> : null}
       {draft.habits.length > 0 ? <DraftGroup title={t("Habits")} count={draft.habits.length}>
-        {draft.habits.map((item, index) => <li key={`h-${index}`}><span className="draft-kind habit-kind">{t("Habit")}</span><span>{item.name}</span><small>{frequencyLabel(item.frequency)}</small></li>)}
+        {draft.habits.map((item, index) => <li key={`h-${index}`}><span className="draft-kind habit-kind">{t("Habit")}</span><span>{item.name}</span><small>{habitFrequencyLabel(item.frequency)}</small></li>)}
       </DraftGroup> : null}
       {draft.skippedEvents.length > 0 ? (
         <div className="ai-skipped">
@@ -760,6 +880,7 @@ function PlanDraft({ draft, onAdd, onDiscard }: { draft: AIDraft; onAdd: () => v
         <button type="button" className="btn btn-primary" disabled={total === 0} onClick={onAdd}><CheckIcon size={16} /> {t("Add this plan")}</button>
       </div>
       <p className="meta ai-undo-note">{t("Adding a draft is one undoable change. Review the dates before you add it.")}</p>
+      <p className="meta ai-saved-note">{t("Also saved to your Plans page, so you can come back to it any time.")}</p>
     </section>
   );
 }
@@ -825,10 +946,4 @@ function ReviewCard({
   );
 }
 
-function frequencyLabel(frequency: AIDraft['habits'][number]['frequency']): string {
-  if (frequency.type === 'daily') return t("Every day");
-  if (frequency.type === 'weekdays') return t("Weekdays");
-  if (frequency.type === 'weekly') return t("{0}× a week", { 0: frequency.times });
-  const labels = WEEKDAYS.filter((day) => frequency.days.includes(day.value)).map((day) => day.label.slice(0, 3));
-  return labels.length ? labels.join(', ') : t("Custom schedule");
-}
+

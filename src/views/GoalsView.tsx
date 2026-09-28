@@ -17,7 +17,7 @@ export function GoalsView() {
 
   return (
     <div className="view">
-      <header className="page-head">
+      <header className="page-head" data-tour="goals-page">
         <div>
           <p className="kicker">{t("Goals")}</p>
           <h1>{t("Goals")}</h1>

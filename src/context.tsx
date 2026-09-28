@@ -7,6 +7,11 @@ import {
   clearAIMemory as clearAIMemoryIn,
   deleteAIMemory as deleteAIMemoryFrom,
   updateAIMemory as updateAIMemoryIn,
+  saveAIPlan as saveAIPlanTo,
+  deleteAIPlan as deleteAIPlanFrom,
+  markAIPlanAdded as markAIPlanAddedIn,
+  updateAIPlan as updateAIPlanIn,
+  type AIPlanPatch,
   addEvent as addEventTo,
   addFixedCommitment as addFixedCommitmentTo,
   deleteFixedCommitment as deleteFixedCommitmentFrom,
@@ -52,6 +57,7 @@ import {
   updateHabit as updateHabitIn,
   updateNote as updateNoteIn,
   updateTask as updateTaskIn,
+  uid,
 } from './mutate';
 import { loadDisplayPrefs, loadWeekStart, setDisplayPrefs as storeDisplayPrefs, setWeekStart as storeWeekStart, todayISO, type DisplayPrefs, type WeekStart } from './dates';
 import { dueReminders, loadFired, loadReminderSettings, saveFired, saveReminderSettings, showNotification, type ReminderSettings } from './reminders';
@@ -75,7 +81,7 @@ import { fetchFeedEvents, loadFeeds, mergeFeedEvents, saveFeeds, type CalendarFe
 import { loadWeatherSettings, saveWeatherSettings, type WeatherSettings } from './weather';
 import { applyTheme, loadAccent, loadThemeMode, resolvedMode, type ThemeMode } from './theme';
 import type { Accent } from './constants';
-import { createEmptyState, type AIMemoryInput, type AttachmentRef, type ComposerState, type EventInput, type FixedCommitmentInput, type GoalInput, type HabitInput, type MoodValue, type NoteInput, type PlannerState, type TaskInput } from './types';
+import { createEmptyState, type AIMemoryInput, type AttachmentRef, type ComposerState, type EventInput, type FixedCommitmentInput, type GoalInput, type HabitInput, type MoodValue, type NoteInput, type PlannerState, type SavedAIPlanInput, type TaskInput } from './types';
 import { t } from './i18n';
 import { isTestEnv } from './env';
 import { attachmentNotice, MAX_ATTACHMENTS_PER_NOTE, storeAttachment, sweepAttachmentBlobs } from './files';
@@ -197,7 +203,12 @@ interface PlannerContextValue {
   updateAIMemory: (id: string, patch: Partial<AIMemoryInput>) => void;
   deleteAIMemory: (id: string) => void;
   clearAIMemory: () => void;
-  applyAIPlan: (draft: { tasks: TaskInput[]; events: EventInput[]; habits: HabitInput[] }) => void;
+  applyAIPlan: (draft: { tasks: TaskInput[]; events: EventInput[]; habits: HabitInput[] }, planId?: string) => void;
+  /** Save an AI draft to the Plans page; returns the stored plan id. */
+  saveAIPlan: (input: SavedAIPlanInput) => string;
+  deleteAIPlan: (id: string) => void;
+  /** Replace a saved plan's draft contents after the AI revises it. */
+  updateAIPlan: (id: string, patch: AIPlanPatch) => void;
   rescheduleTasks: (moves: Array<{ id: string; date: string }>) => void;
   applySchedule: (plan: Array<{ id: string; date: string; time: string }>) => void;
   updateEvent: (id: string, patch: Partial<EventInput>) => void;
@@ -1022,13 +1033,21 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
     updateAIMemory: (id, patch) => commit((current) => updateAIMemoryIn(current, id, patch)),
     deleteAIMemory: (id) => commit((current) => deleteAIMemoryFrom(current, id)),
     clearAIMemory: () => commit(clearAIMemoryIn),
-    applyAIPlan: (draft) => commit((current) => {
+    applyAIPlan: (draft, planId) => commit((current) => {
       let next = current;
       for (const input of draft.tasks) next = addTaskTo(next, input);
       for (const input of draft.events) next = addEventTo(next, input);
       for (const input of draft.habits) next = addHabitTo(next, input);
+      if (planId) next = markAIPlanAddedIn(next, planId);
       return next;
     }),
+    saveAIPlan: (input) => {
+      const id = uid();
+      commit((current) => saveAIPlanTo(current, input, id).state);
+      return id;
+    },
+    deleteAIPlan: (id) => commit((current) => deleteAIPlanFrom(current, id)),
+    updateAIPlan: (id, patch) => commit((current) => updateAIPlanIn(current, id, patch)),
     rescheduleTasks: (moves) => commit((current) => moves.reduce((next, move) => moveTaskIn(next, move.id, move.date), current)),
     applySchedule: (plan) => commit((current) => plan.reduce((next, item) => updateTaskIn(next, item.id, { dueDate: item.date, dueTime: item.time }), current)),
     updateEvent: (id, patch) => commit((current) => updateEventIn(current, id, patch)),

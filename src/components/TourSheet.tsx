@@ -5,10 +5,9 @@ import {
   BookIcon,
   CalendarIcon,
   CommandIcon,
+  FlagIcon,
   GlobeIcon,
-  HeartIcon,
   HomeIcon,
-  HorizonIcon,
   LeafIcon,
   MicIcon,
   NoteIcon,
@@ -54,17 +53,15 @@ function targetRect(selector: string | null): Rect | null {
 
 const STEP_ICON: Partial<Record<TourStopId, (size?: number) => ReactNode>> = {
   today: (size = 18) => <HomeIcon size={size} />,
-  quick: (size = 18) => <SparklesIcon size={size} />,
-  plan: (size = 18) => <SparklesIcon size={size} />,
-  timeline: (size = 18) => <HorizonIcon size={size} />,
+  ai: (size = 18) => <MicIcon size={size} />,
+  plans: (size = 18) => <SparklesIcon size={size} />,
+  tasks: (size = 18) => <BookIcon size={size} />,
   habits: (size = 18) => <LeafIcon size={size} />,
-  mood: (size = 18) => <HeartIcon size={size} />,
-  journal: (size = 18) => <NoteIcon size={size} />,
-  search: (size = 18) => <CommandIcon size={size} />,
-  voice: (size = 18) => <MicIcon size={size} />,
-  tabs: (size = 18) => <BookIcon size={size} />,
-  calendar: (size = 18) => <CalendarIcon size={size} />,
+  goals: (size = 18) => <FlagIcon size={size} />,
+  notes: (size = 18) => <NoteIcon size={size} />,
   insights: (size = 18) => <ArcIcon size={size} />,
+  calendar: (size = 18) => <CalendarIcon size={size} />,
+  search: (size = 18) => <CommandIcon size={size} />,
   settings: (size = 18) => <SlidersIcon size={size} />,
   done: (size = 18) => <SparklesIcon size={size} />,
 };
@@ -74,77 +71,71 @@ interface StepCopy {
   body: string;
 }
 
+/**
+ * One headline + the single most useful thing per page. The tour walks the
+ * real pages; it teaches a feel for each place, not every button on it.
+ */
 function stepCopy(id: TourStopId): StepCopy {
   switch (id) {
     case 'today':
       return {
-        title: t("Your day at a glance"),
-        body: t("Today gathers everything: the ring counts events, tasks and habits done, and the tiles add a task, an event or a focus session in one tap. Walk other days with the arrows up top."),
+        title: t("Your day, at a glance"),
+        body: t("The ring counts what's done and the tiles add things in one tap. Below, the add bar understands plain words — “call mom tomorrow 5pm” — and “Plan my day” fits your tasks into free time automatically. ⌘Z undoes anything."),
       };
-    case 'quick':
+    case 'ai':
       return {
-        title: t("Type like you think"),
-        body: t("“Call mom tomorrow 5pm #personal !high” becomes a full task — date, time, category, priority. The microphone accepts your voice, great on the go."),
+        title: t("Talk to your AI coach"),
+        body: t("The planner's brain. Tap the glowing mic or just type — any accent, English or فارسی, however casual — and it drafts a plan for as many days as you ask. You review everything before anything lands."),
       };
-    case 'plan':
+    case 'plans':
       return {
-        title: t("One tap plans the day"),
-        body: t("“Plan my day” fits untimed and overdue tasks into the free hours, using each task's estimate. “Plan with AI” sketches a whole week you review before anything lands."),
+        title: t("Every draft, kept safe"),
+        body: t("All AI plans are saved here automatically. Open one, ask the AI to revise it, and add it whenever you're ready — nothing touches your planner until you press Add."),
       };
-    case 'timeline':
+    case 'tasks':
       return {
-        title: t("Your hours, gently held"),
-        body: t("Timed things live here with a moving “now” line, so you always know where you are. In Calendar → Week you can drag an event to re-time it — and ⌘Z takes any change back."),
+        title: t("All your tasks, your way"),
+        body: t("Filter by today, upcoming or someday, flip to the board, or tap Select to complete, move or delete many at once."),
       };
     case 'habits':
       return {
-        title: t("Habits with a day off"),
-        body: t("One tap checks a habit; counted habits get their own +1. The little moon gives the day a rest without breaking your streak — kindness is built in."),
+        title: t("Small steps, kept kindly"),
+        body: t("One tap checks a habit and streaks grow on their own. The little moon gives any day a rest without breaking your streak."),
       };
-    case 'mood':
+    case 'goals':
       return {
-        title: t("How did today feel?"),
-        body: t("A single tap each evening is all it asks. A glowing day fires confetti, and Insights quietly shows the pattern behind your days."),
+        title: t("The bigger picture"),
+        body: t("Give each goal a horizon and milestones. Progress is counted for you, and the planner nudges you when a deadline gets close."),
       };
-    case 'journal':
+    case 'notes':
       return {
-        title: t("A few lines stay with the day"),
-        body: t("The journal saves itself while you write and becomes the day's note. Notes hold tags, [[links]] to each other, and keep photos, music and files right inside — all on this device."),
-      };
-    case 'search':
-      return {
-        title: t("Find anything in one place"),
-        body: t("⌘K (or /) opens the palette: search tasks, notes and events, jump to any page, or add something without lifting your hands. Everything is a keystroke away."),
-      };
-    case 'voice':
-      return {
-        title: t("Or just talk to it"),
-        body: t("The AI page has a glowing mic — tap it and talk the way tired people talk: mid-sentence, mixed English and Persian, approximate times. It answers out loud and sketches a plan you review before anything lands."),
-      };
-    case 'tabs':
-      return {
-        title: t("Tasks, your way"),
-        body: t("Filter by today, upcoming or someday, flip to the board, or tap Select to handle many at once — complete, move or delete in bulk."),
-      };
-    case 'calendar':
-      return {
-        title: t("See the whole week"),
-        body: t("Week, month and upcoming views, external calendar feeds and the weather. The little load strip shows which days are packed before you commit."),
+        title: t("Thoughts stay with you"),
+        body: t("Notes keep tags, [[links]] to each other, and photos, music or files right inside. Everything stays on this device unless you sync it."),
       };
     case 'insights':
       return {
-        title: t("Notice your patterns"),
-        body: t("Streaks, weekly bars, the year in pixels and plan-vs-focus. Not to judge you — to help you see what actually works for you."),
+        title: t("See what actually works"),
+        body: t("Streaks, your weekly rhythm, and the year in pixels. Quiet patterns to learn from — never scores to judge you."),
+      };
+    case 'calendar':
+      return {
+        title: t("The week, laid out"),
+        body: t("Week, month and upcoming views. In Week view you can drag an event to re-time it, and the little load strips show which days are already full."),
+      };
+    case 'search':
+      return {
+        title: t("Everything, one keystroke"),
+        body: t("⌘K (or /) finds tasks, notes and events, jumps to any page, and adds new things without lifting your hands from the keyboard."),
       };
     case 'settings':
       return {
         title: t("Your data, your rules"),
-        body: t("The gear holds sync between your own devices, shared lists, calendar feeds, weather, imports and backups. From there you can also install Planner for a full offline app."),
+        body: t("The gear holds sync between your own devices, backups, themes, voice accents, and the AI's xAI connection. You can also install Planner as a full offline app."),
       };
     case 'done':
       return {
         title: t("That's the whole tour"),
-        body: t("You know the house now: type to add, tap to plan, ⌘K to find, ⌘Z to forgive. Make today a good one."),
+        body: t("You know the house now: type to add, talk to plan, ⌘K to find, ⌘Z to forgive. Make today a good one."),
       };
     default:
       return { title: '', body: '' };
@@ -189,7 +180,9 @@ export function TourSheet({ step, onStep, onClose }: { step: number; onStep: (in
     if (selector) {
       document.querySelector(selector)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
-    // Re-measure as layout settles, on scroll, resize, and iOS visual-viewport shifts.
+    // Re-measure as layout settles, on scroll, resize, and iOS visual-viewport
+    // shifts. The later ticks also cover lazy-loaded pages the tour navigates
+    // to (AI coach, Calendar…) — their anchors mount a beat after the route.
     let raf = 0;
     const onChange = () => {
       window.cancelAnimationFrame(raf);
@@ -197,6 +190,8 @@ export function TourSheet({ step, onStep, onClose }: { step: number; onStep: (in
     };
     const id1 = window.setTimeout(refresh, 140);
     const id2 = window.setTimeout(refresh, 480);
+    const id3 = window.setTimeout(refresh, 950);
+    const id4 = window.setTimeout(refresh, 1400);
     const vv = window.visualViewport;
     window.addEventListener('resize', onChange);
     window.addEventListener('scroll', onChange, true);
@@ -205,6 +200,8 @@ export function TourSheet({ step, onStep, onClose }: { step: number; onStep: (in
     return () => {
       window.clearTimeout(id1);
       window.clearTimeout(id2);
+      window.clearTimeout(id3);
+      window.clearTimeout(id4);
       window.cancelAnimationFrame(raf);
       window.removeEventListener('resize', onChange);
       window.removeEventListener('scroll', onChange, true);
