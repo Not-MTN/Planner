@@ -128,8 +128,8 @@ The browser never talks to xAI directly. It calls two same-origin endpoints, and
 
 The same handler code (`src/server/xaiProxy.ts`) serves both environments:
 
-- **Vercel** — `api/xai/status.ts` and `api/xai/chat/completions.ts` are Vercel Functions, discovered automatically from the `api/` directory (file path = route).
-- **Local** — `vite.config.ts` mounts the same handlers as middleware for `npm run dev` and `npm run preview`.
+- **Vercel** — `api/[...path].ts` is a single catch-all Vercel Function that routes every `/api/*` request (`src/server/apiRouter.ts` is the route table). One function instead of sixteen keeps the Deployment inside Vercel's Hobby-plan limit of 12 Serverless Functions; the route URLs are unchanged.
+- **Local** — `vite.config.ts` mounts the same router as middleware for `npm run dev` and `npm run preview`.
 
 ### Deploy on Vercel
 

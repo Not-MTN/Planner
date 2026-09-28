@@ -35,7 +35,6 @@ import {
   type VaultResponse,
 } from '../shared/authContract';
 import {
-  authStore,
   hashAuthToken,
   hashToken,
   newId as newStoreId,
@@ -635,9 +634,4 @@ export async function handleShare(request: Request, store: AuthStore | null): Pr
   }
 
   return error(405, 'Method not allowed.', undefined);
-}
-
-/** Lazy store resolution used by the Vercel Functions. */
-export function resolveAuthStore(databaseUrl: string | undefined): Promise<AuthStore | null> {
-  return authStore(databaseUrl);
 }

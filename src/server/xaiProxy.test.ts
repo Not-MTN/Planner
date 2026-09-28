@@ -1,8 +1,7 @@
 import { readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import * as chatRoute from '../../api/xai/chat/completions';
-import * as statusRoute from '../../api/xai/status';
+import vercelFunction from '../../api/[...path]';
 import { MAX_PLAN_IMAGE_BYTES, XAI_CHAT_URL, XAI_STATUS_URL } from '../ai';
 import {
   MAX_PROXY_BODY_BYTES,
@@ -46,50 +45,25 @@ afterEach(() => {
 });
 
 describe('Vercel function discovery', () => {
-  it('maps api/ files to exactly the URLs the frontend calls', () => {
+  it('keeps api/ to a single catch-all function (Hobby plan allows 12) and it routes the status URL', async () => {
     const apiRoot = join(__dirname, '..', '..', 'api');
     const walk = (dir: string): string[] => readdirSync(dir).flatMap((name) => {
       const full = join(dir, name);
       return statSync(full).isDirectory() ? walk(full) : [full];
     });
-    const routes = walk(apiRoot)
-      .filter((file) => /\.(ts|js|mjs)$/.test(file) && !file.includes('.test.'))
-      .map((file) => '/api/' + relative(apiRoot, file).split(sep).join('/').replace(/\.(ts|js|mjs)$/, ''))
-      .sort();
-    // api/sync/index.ts is served by Vercel at /api/sync, api/ics/index.ts at /api/ics.
-    expect(routes).toEqual(
-      [
-        XAI_CHAT_URL,
-        XAI_STATUS_URL,
-        '/api/sync/index',
-        '/api/sync/status',
-        '/api/ics/index',
-        '/api/auth/signup',
-        '/api/auth/salt',
-        '/api/auth/login',
-        '/api/auth/session',
-        '/api/auth/logout',
-        '/api/auth/vault',
-        '/api/auth/status',
-        '/api/auth/links',
-        '/api/auth/link-accept',
-        '/api/auth/share',
-        '/api/auth/note',
-      ].sort(),
-    );
-  });
-
-  it('exports web handlers for the right HTTP methods', () => {
-    expect(typeof statusRoute.GET).toBe('function');
-    expect(typeof chatRoute.POST).toBe('function');
-    expect(Object.keys(chatRoute)).not.toContain('GET');
+    const functions = walk(apiRoot).filter((file) => /\.(ts|js|mjs)$/.test(file) && !file.includes('.test.'));
+    // Vercel's Hobby plan rejects Deployments with more than 12 Serverless
+    // Functions; the API has 16 routes, so they all share the one catch-all.
+    expect(functions.map((file) => relative(apiRoot, file).split(sep).join('/'))).toEqual(['[...path].ts']);
+    expect(typeof vercelFunction).toBe('function');
+    expect(await (await vercelFunction(request(XAI_STATUS_URL))).json()).toEqual({ configured: false });
   });
 });
 
 describe('status route', () => {
   it('reports configured:true from XAI_API_KEY without exposing the key', async () => {
     vi.stubEnv('XAI_API_KEY', FAKE_KEY);
-    const response = statusRoute.GET(request('/api/xai/status'));
+    const response = await vercelFunction(request(XAI_STATUS_URL));
     expect(response.status).toBe(200);
     expect(response.headers.get('cache-control')).toBe('no-store');
     const text = await response.text();
@@ -99,7 +73,7 @@ describe('status route', () => {
 
   it('reports configured:false when the variable is missing or blank', async () => {
     vi.stubEnv('XAI_API_KEY', '   ');
-    expect(await statusRoute.GET(request('/api/xai/status')).json()).toEqual({ configured: false });
+    expect(await (await vercelFunction(request(XAI_STATUS_URL))).json()).toEqual({ configured: false });
     expect(await handleXAIStatus(request('/api/xai/status'), undefined).json()).toEqual({ configured: false });
   });
 
@@ -115,7 +89,7 @@ describe('chat completions route', () => {
     const fetchMock = upstreamOk();
     vi.stubGlobal('fetch', fetchMock);
     const body = chatBody();
-    const response = await chatRoute.POST(request('/api/xai/chat/completions', {
+    const response = await vercelFunction(request(XAI_CHAT_URL, {
       method: 'POST', body, origin: `https://${HOST}`, headers: { 'content-type': 'application/json' },
     }));
     expect(response.status).toBe(200);
