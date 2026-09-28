@@ -8,6 +8,8 @@
 .mkt {
   --mkt-max: 1120px;
   min-height: 100vh;
+  /* dvh is the height you can actually see on mobile Safari. */
+  min-height: 100dvh;
   background: var(--bg);
   color: var(--ink);
   font-family: var(--sans);
@@ -1679,6 +1681,7 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   min-height: calc(100vh - 66px);
+  min-height: calc(100dvh - 66px);
 }
 
 .auth-aside {
@@ -2280,10 +2283,53 @@
 
   .auth {
     grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
     min-height: 0;
   }
 
+  /* The photographs stay: the panel becomes a short banner above the form
+     rather than a column beside it. Hiding it left the sign-in page bare on
+     exactly the phones and tablets most people hold. */
   .auth-aside {
+    min-height: 172px;
+    padding: 22px 24px 18px;
+    justify-content: flex-end;
+    border-inline-end: none;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .auth-aside-veil {
+    background:
+      linear-gradient(200deg, color-mix(in srgb, var(--bg-deep) 42%, transparent), color-mix(in srgb, var(--bg-deep) 82%, transparent) 70%),
+      radial-gradient(80% 70% at 20% 20%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 72%);
+  }
+
+  .auth-quote p {
+    font-size: clamp(17px, 4.4vw, 22px);
+  }
+
+  .auth-mark {
+    margin-bottom: 12px;
+    font-size: 19px;
+  }
+
+  .auth-aside-points {
+    display: none;
+  }
+}
+
+/* Landscape phones: there is no room for a banner, so it becomes a slim strip. */
+@media (max-height: 560px) and (max-width: 900px) {
+  .auth-aside {
+    min-height: 108px;
+    padding: 14px 20px 12px;
+  }
+
+  .auth-quote p {
+    font-size: 16px;
+  }
+
+  .auth-dots {
     display: none;
   }
 }
@@ -2481,5 +2527,172 @@
   .lang-toggle,
   .auth-dots span {
     min-height: 44px;
+  }
+}
+
+/* ---------- Photographs that breathe ---------- */
+.shot {
+  position: relative;
+  margin: 0;
+  overflow: hidden;
+  border-radius: var(--radius, 16px);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: 0 16px 34px color-mix(in srgb, var(--ink) 12%, transparent);
+  /* A slow, small drift: enough to feel alive, never enough to distract. */
+  animation: shot-float 11s ease-in-out infinite alternate;
+  transition: transform 0.45s var(--ease, ease), box-shadow 0.45s var(--ease, ease);
+}
+
+.shot:nth-of-type(even) {
+  animation-duration: 13s;
+  animation-delay: -3s;
+}
+
+.shot:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 22px 46px color-mix(in srgb, var(--ink) 18%, transparent);
+}
+
+.shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+}
+
+.shot figcaption {
+  padding: 12px 15px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+}
+
+/* A light sweep across the photograph on hover. */
+.shot-sheen {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(105deg, transparent 35%, color-mix(in srgb, #fff 22%, transparent) 50%, transparent 65%);
+  transform: translateX(-120%);
+  transition: transform 0.9s ease;
+}
+
+.shot:hover .shot-sheen {
+  transform: translateX(120%);
+}
+
+@keyframes shot-float {
+  from { transform: translateY(0) rotate(0deg); }
+  to { transform: translateY(-8px) rotate(-0.35deg); }
+}
+
+/* Two columns where a list sits beside a photograph. */
+.steps-layout,
+.offline-layout {
+  display: grid;
+  gap: clamp(22px, 4vw, 44px);
+  align-items: start;
+}
+
+.steps-layout {
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+}
+
+.offline-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr);
+}
+
+@media (max-width: 900px) {
+  .steps-layout,
+  .offline-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---------- iOS: the home bar and the notch ---------- */
+/* Content that reaches the bottom of the screen has to clear the home
+   indicator, and landscape has to clear the notch on both sides. */
+.mkt-main,
+.mkt-footer {
+  padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
+}
+
+.mkt-footer,
+.cta {
+  padding-bottom: calc(clamp(28px, 5vw, 56px) + env(safe-area-inset-bottom));
+}
+
+/* ---------- iOS: 100vh is taller than the screen you can see ---------- */
+/* Safari's 100vh includes the area behind the address bar, so anything sized
+   with it is clipped until you scroll. dvh is the visible height. */
+.hero,
+.auth-shell {
+  min-height: 100dvh;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shot {
+    animation: none;
+  }
+
+  .shot:hover {
+    transform: none;
+  }
+
+  .shot-sheen {
+    display: none;
+  }
+}
+
+/* ---------- Fallbacks for browsers without color-mix() ---------- */
+/* See the matching block in styles.css: iOS Safari before 16.2 drops these
+   declarations, so the new sections get plain colours instead. */
+@supports not (color: color-mix(in srgb, red, blue)) {
+  .shot {
+    border-color: var(--line);
+    background: var(--surface);
+    box-shadow: 0 16px 34px rgb(0 0 0 / 12%);
+  }
+
+  .shot-sheen {
+    display: none;
+  }
+
+  .shot:hover {
+    box-shadow: 0 22px 46px rgb(0 0 0 / 18%);
+  }
+
+  .link-rail li {
+    border-color: var(--line);
+    background: var(--surface);
+  }
+
+  .link-rail li:hover {
+    box-shadow: 0 10px 26px rgb(0 0 0 / 12%);
+  }
+
+  .link-extra {
+    border-color: var(--line);
+    background: var(--accent-soft);
+  }
+
+  .auth-aside-veil {
+    background: linear-gradient(200deg, rgb(0 0 0 / 30%), rgb(0 0 0 / 70%));
+  }
+
+  .auth-dots span {
+    background: var(--line-strong, var(--line));
+  }
+
+  .auth-dots span.is-active {
+    background: var(--accent);
+  }
+
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline-color: var(--accent);
   }
 }

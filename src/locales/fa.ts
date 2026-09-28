@@ -1386,4 +1386,5 @@ export const fa: Record<string, string> = {
   "Thinking…": "در حال فکر کردن…",
   "It reads this week's plan and what you have already finished — nothing else in your planner.": "این فقط برنامه‌ی این هفته و کارهایی را که تمام کرده‌اید می‌خواند — هیچ چیز دیگری از برنامه‌ریز شما.",
   "Nothing yet. Ask, and it answers from this week alone.": "هنوز چیزی نیست. بپرسید، و پاسخ فقط بر اساس همین هفته خواهد بود.",
+  "{0} new from the other guardians": "{0} تازه از سرپرست‌های دیگر",
 };

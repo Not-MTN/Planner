@@ -21,6 +21,20 @@ const CHART_NOTES: { key: 'chart1' | 'chart2' | 'chart3' | 'chart4' | 'chart5' |
   { key: 'chart6', kind: 'donut' },
 ];
 
+/**
+ * A photograph with a caption. Decorative, so it keeps its own movement slow
+ * and stops entirely for anyone who asked for less motion.
+ */
+function Shot({ src, caption, delay = 0 }: { src: string; caption: string; delay?: number }) {
+  return (
+    <figure className="shot reveal" data-reveal style={{ transitionDelay: `${delay}ms` }}>
+      <span className="shot-sheen" aria-hidden="true" />
+      <img src={src} alt="" width="900" height="600" loading="lazy" decoding="async" />
+      <figcaption>{caption}</figcaption>
+    </figure>
+  );
+}
+
 const DAYS = [34, 52, 41, 68, 55, 72, 78];
 const HOURS = [2, 1, 0, 0, 4, 9, 14, 11, 6, 8, 12, 7, 3, 5, 10, 16, 13, 9, 6, 4, 3, 2, 1, 1];
 const LOAD = [3, 5, 4, 8, 6, 9, 7];
@@ -177,21 +191,24 @@ export function Landing({ lang, navigate }: { lang: Lang; navigate: Nav }) {
             <h2>{c.stepsTitle}</h2>
             <p className="lede">{c.stepsSub}</p>
           </header>
-          <ol className="steps">
-            {[c.step1T, c.step2T, c.step3T].map((title, index) => (
-              <li
-                key={title}
-                className="step spot reveal"
-                data-reveal
-                style={{ transitionDelay: `${index * 110}ms` }}
-                {...SPOT}
-              >
-                <span className="step-num">{index + 1}</span>
-                <h3>{title}</h3>
-                <p>{[c.step1D, c.step2D, c.step3D][index]}</p>
-              </li>
-            ))}
-          </ol>
+          <div className="steps-layout">
+            <ol className="steps">
+              {[c.step1T, c.step2T, c.step3T].map((title, index) => (
+                <li
+                  key={title}
+                  className="step spot reveal"
+                  data-reveal
+                  style={{ transitionDelay: `${index * 110}ms` }}
+                  {...SPOT}
+                >
+                  <span className="step-num">{index + 1}</span>
+                  <h3>{title}</h3>
+                  <p>{[c.step1D, c.step2D, c.step3D][index]}</p>
+                </li>
+              ))}
+            </ol>
+            <Shot src="/img/mkt-week.jpg" caption={c.shotWeek} delay={220} />
+          </div>
         </div>
       </section>
 
@@ -366,6 +383,7 @@ export function Landing({ lang, navigate }: { lang: Lang; navigate: Nav }) {
           <p className="ai-rule reveal" data-reveal>
             {c.aiRule}
           </p>
+          <Shot src="/img/mkt-ai.jpg" caption={c.shotAI} delay={120} />
         </div>
       </section>
 
@@ -419,8 +437,9 @@ export function Landing({ lang, navigate }: { lang: Lang; navigate: Nav }) {
             <h2>{c.offlineTitle}</h2>
             <p className="lede">{c.offlineSub}</p>
           </header>
-          <div className="offline-row">
-            {[c.offlineL1, c.offlineL2, c.offlineL3].map((line, index) => (
+          <div className="offline-layout">
+            <div className="offline-row">
+              {[c.offlineL1, c.offlineL2, c.offlineL3].map((line, index) => (
               <div
                 key={line}
                 className="offline-card spot reveal"
@@ -433,7 +452,9 @@ export function Landing({ lang, navigate }: { lang: Lang; navigate: Nav }) {
                 </span>
                 <p>{line}</p>
               </div>
-            ))}
+              ))}
+            </div>
+            <Shot src="/img/mkt-devices.jpg" caption={c.shotDevices} delay={200} />
           </div>
         </div>
       </section>

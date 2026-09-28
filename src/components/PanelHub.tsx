@@ -10,6 +10,7 @@ import { t } from '../i18n';
 export function PanelHub() {
   const { panels, navigate } = usePlanner();
   const count = (panels.student.enabled ? 1 : 0) + (panels.guardian.enabled ? 1 : 0);
+  const unread = panels.guardian.notices.filter((notice) => !notice.read).length;
   if (count === 0) return null;
 
   return (
@@ -38,9 +39,16 @@ export function PanelHub() {
             <span className="hub-icon">
               <HeartIcon size={17} />
             </span>
-            <span className="hub-label">{t("Guardian panel")}</span>
+            <span className="hub-label">
+              {t("Guardian panel")}
+              {unread > 0 ? <span className="hub-badge">{unread}</span> : null}
+            </span>
             <span className="hub-note">
-              {panels.guardian.kind === 'parent' ? t("Parent — weekly results") : t("Advisor — weekly results")}
+              {unread > 0
+                ? t("{0} new from the other guardians", { 0: unread })
+                : panels.guardian.kind === 'parent'
+                  ? t("Parent — weekly results")
+                  : t("Advisor — weekly results")}
             </span>
           </button>
         ) : null}

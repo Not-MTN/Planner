@@ -122,18 +122,18 @@ export function CompletionRing({ done, planned }: RingProps) {
   const radius = 42;
   const circumference = 2 * Math.PI * radius;
   return (
-    <div className="ring" role="img">
-      <svg viewBox="0 0 100 100" className="ring-svg">
-        <circle className="ring-track" cx={50} cy={50} r={radius} />
+    <div className="completion-ring" role="img">
+      <svg viewBox="0 0 100 100" className="completion-ring-svg">
+        <circle className="completion-ring-track" cx={50} cy={50} r={radius} />
         <circle
-          className="ring-value"
+          className="completion-ring-value"
           cx={50}
           cy={50}
           r={radius}
           strokeDasharray={`${circumference * ratio} ${circumference}`}
         />
       </svg>
-      <div className="ring-label">
+      <div className="completion-ring-label">
         <strong>{Math.round(ratio * 100)}%</strong>
         <span>
           {done}/{planned}

@@ -240,6 +240,10 @@ export const en = {
   authRecoverKeyLabel: 'Recovery key',
   authRecoverBack: 'Back to sign in',
   authTerms: 'I agree to the Terms and the Privacy Policy.',
+  shotWeek: 'Sunday evening, ten minutes, and the week is set.',
+  shotAI: 'It reads the week ahead — never your diary.',
+  shotDevices: 'Phone in the kitchen, tablet at the desk, laptop at work: the same week, everywhere.',
+
   linkKicker: 'For parents and advisors',
   linkTitle: 'One code, typed once.',
   linkSub:
@@ -604,6 +608,10 @@ export const fa: Record<keyof typeof en, string> = {
   authRecoverKeyLabel: 'کلید بازیابی',
   authRecoverBack: 'بازگشت به ورود',
   authTerms: 'شرایط و سیاست حریم خصوصی را می‌پذیرم.',
+  shotWeek: 'یکشنبه شب، ده دقیقه، و هفته چیده می‌شود.',
+  shotAI: 'هفته‌ی پیش‌رو را می‌خواند — هرگز دفتر خاطرات شما را.',
+  shotDevices: 'گوشی در آشپزخانه، تبلت روی میز، لپ‌تاپ سر کار: یک هفته، همه‌جا.',
+
   linkKicker: 'برای والدین و مشاوران',
   linkTitle: 'یک کد، یک‌بار.',
   linkSub:

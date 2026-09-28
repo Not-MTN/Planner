@@ -105,6 +105,10 @@
 * { box-sizing: border-box; }
 html, body, #root { min-height: 100%; }
 html { scroll-behavior: smooth; }
+/* Some people get motion sickness from smooth scrolling. */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+}
 body { overflow-x: clip; }
 body {
   margin: 0;
@@ -3604,13 +3608,13 @@ html, body { overflow-x: clip; }
 .chart-block .chart-note { margin: 2px 0 10px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .chart-empty { margin: 14px 0 0; font-size: 12.5px; color: var(--muted); }
 
-.ring { position: relative; width: 84px; height: 84px; flex: 0 0 auto; }
-.ring-svg { width: 100%; height: 100%; transform: rotate(-90deg); }
-.ring-track { fill: none; stroke: color-mix(in srgb, var(--muted) 18%, transparent); stroke-width: 9; }
-.ring-value { fill: none; stroke: var(--accent); stroke-width: 9; stroke-linecap: round; transition: stroke-dasharray 0.5s ease; }
-.ring-label { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; }
-.ring-label strong { font-size: 17px; font-variant-numeric: tabular-nums; color: var(--ink); }
-.ring-label span { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.completion-ring { position: relative; width: 84px; height: 84px; flex: 0 0 auto; }
+.completion-ring-svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.completion-ring-track { fill: none; stroke: color-mix(in srgb, var(--muted) 18%, transparent); stroke-width: 9; }
+.completion-ring-value { fill: none; stroke: var(--accent); stroke-width: 9; stroke-linecap: round; transition: stroke-dasharray 0.5s ease; }
+.completion-ring-label { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; }
+.completion-ring-label strong { font-size: 17px; font-variant-numeric: tabular-nums; color: var(--ink); }
+.completion-ring-label span { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .result-stack { display: flex; flex-direction: column; gap: 10px; }
 
 .split { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
@@ -3648,7 +3652,6 @@ html, body { overflow-x: clip; }
 }
 .guidance { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
 .guidance-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.empty-note { margin: 10px 0 0; font-size: 12.5px; color: var(--muted); }
 
 /* ── Thumbs are bigger than a mouse pointer ─────────────────────────────── */
 /* The smallest controls in the app are comfortable with a cursor and fiddly
@@ -3678,4 +3681,62 @@ html, body { overflow-x: clip; }
   .btn-small {
     min-height: 40px;
   }
+}
+
+/* ---------- Panel hub ---------- */
+.hub-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  margin-inline-start: 8px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-contrast, #fff);
+  background: var(--accent);
+  vertical-align: 1px;
+}
+
+/* ---------- Fallbacks for browsers without color-mix() ---------- */
+/* iOS Safari before 16.2 drops any declaration using color-mix, which would
+   leave the panel pieces with no colour at all. These are the same colours
+   written the old way, kept in one place rather than scattered. */
+@supports not (color: color-mix(in srgb, red, blue)) {
+  .guardian-list li,
+  .notice-list li {
+    background: var(--surface-2);
+    border-color: var(--line);
+  }
+
+  .notice-list li.unread {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+  }
+
+  .invite-card {
+    background: var(--accent-soft);
+    border-color: var(--line);
+  }
+
+  .advice-watchout {
+    background: var(--accent-soft);
+    border-color: var(--line);
+  }
+
+  .chart-bar-planned { fill: var(--muted); }
+  .chart-bar-done { fill: var(--accent); }
+  .chart-area { fill: var(--accent-soft); }
+  .chart-line { stroke: var(--accent); }
+  .chart-dot { fill: var(--accent); stroke: var(--surface); }
+  .chart-grid { stroke: var(--line); }
+  .completion-ring-track { stroke: var(--line); }
+  .completion-ring-value { stroke: var(--accent); }
+  .split-fill { background: var(--accent); }
+  .split-track { background: var(--surface-3); }
+  .swatch-planned { background: var(--muted); }
+  .swatch-done { background: var(--accent); }
+  .spinner { border-color: currentColor; border-top-color: currentColor; }
 }

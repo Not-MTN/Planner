@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { parseHash, toHash, type Route } from './route';
 import { downloadState, loadFrom, parseBackup, sanitizeState, saveTo, serialize, STORAGE_FULL, STORAGE_KEY } from './storage';
 import { flushVaultPush, scheduleVaultPush } from './auth/vault';
-import { shareWeeklyResults } from './auth/links';
+import { readNotices, refreshResults, relayNotices, shareWeeklyResults, syncLinks } from './auth/links';
 import { idbRead, idbWrite, savedAt } from './idb';
 import {
   addAIMemory as addAIMemoryTo,
@@ -499,12 +499,35 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     scheduleVaultPush(state);
   }, [state]);
 
-  const shareResults = useCallback(
+  /**
+   * Everything that has to travel between accounts, run wherever the user is —
+   * not only on the panel pages:
+   *
+   *   student  → sends this week's results, and passes a guardian's note on
+   *   guardian → picks up new results and whatever the other adults wrote
+   *
+   * All of it is best effort: a phone with no signal simply catches up later.
+   */
+  const syncPanelLinks = useCallback(
     async (current: PlannerState) => {
-      if (!current.panels.student.enabled || current.panels.student.guardians.length === 0) return;
+      if (!current.panels.student.enabled && !current.panels.guardian.enabled) return;
+      let panels = current.panels;
       try {
-        const result = await shareWeeklyResults(current, current.panels);
-        if (result.panels !== current.panels) commit(() => ({ ...current, panels: result.panels }));
+        if (current.panels.student.enabled && panels.student.guardians.length > 0) {
+          await relayNotices(panels);
+          const shared = await shareWeeklyResults(current, panels);
+          panels = shared.panels;
+        }
+        if (current.panels.guardian.enabled) {
+          panels = (await syncLinks(panels)).panels;
+          panels = (await refreshResults(panels)).panels;
+          panels = (await readNotices(panels)).panels;
+        }
+        // These helpers always build new objects; only a real change is saved,
+        // otherwise this would quietly loop forever.
+        if (JSON.stringify(panels) !== JSON.stringify(current.panels)) {
+          commit(() => ({ ...current, panels }));
+        }
       } catch {
         /* sharing is best effort; the next save tries again */
       }
@@ -512,18 +535,20 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     [commit],
   );
 
-  // Results are sent with the save, so the week on the server is never behind.
-  const shareTimer = useRef<number | null>(null);
+  // Runs shortly after the planner changes, and once when it opens.
+  const panelTimer = useRef<number | null>(null);
   useEffect(() => {
-    if (!state.panels.student.enabled || state.panels.student.guardians.length === 0) return;
-    if (shareTimer.current !== null) window.clearTimeout(shareTimer.current);
-    shareTimer.current = window.setTimeout(() => {
-      void shareResults(stateRef.current);
+    const wantsStudent = state.panels.student.enabled && state.panels.student.guardians.length > 0;
+    const wantsGuardian = state.panels.guardian.enabled && state.panels.guardian.links.length > 0;
+    if (!wantsStudent && !wantsGuardian) return;
+    if (panelTimer.current !== null) window.clearTimeout(panelTimer.current);
+    panelTimer.current = window.setTimeout(() => {
+      void syncPanelLinks(stateRef.current);
     }, 4000);
     return () => {
-      if (shareTimer.current !== null) window.clearTimeout(shareTimer.current);
+      if (panelTimer.current !== null) window.clearTimeout(panelTimer.current);
     };
-  }, [state, shareResults]);
+  }, [state, syncPanelLinks]);
 
   useEffect(() => {
     const flush = () => void flushVaultPush();
