@@ -32,3 +32,12 @@ test('secondary light text and category labels remain readable on paper surfaces
     }
   }
 });
+test('dark-theme text tokens stay readable on dark surfaces', () => {
+  // muted / ink-soft from the [data-theme="dark"] block vs the dark surfaces.
+  const colors = ['#b0a594', '#c6bcaa'];
+  for (const color of colors) {
+    for (const surface of ['#1f1b15', '#262117', '#2d271d']) {
+      expect(contrast(color, surface)).toBeGreaterThanOrEqual(4.5);
+    }
+  }
+});

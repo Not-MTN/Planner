@@ -105,6 +105,13 @@ export function timeToMinutes(value: string): number {
   return (hours || 0) * 60 + (minutes || 0);
 }
 
+/** HH:MM plus a number of minutes, clamped inside the day. */
+export function addMinutes(time: string, amount: number): string {
+  const mins = Math.max(0, timeToMinutes(time) + amount);
+  const capped = Math.min(mins, 24 * 60 - 1);
+  return `${String(Math.floor(capped / 60)).padStart(2, '0')}:${String(capped % 60).padStart(2, '0')}`;
+}
+
 export function formatClock(date: Date): string {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }

@@ -42,7 +42,7 @@ export function HabitsView() {
 
   return (
     <div className="view">
-      <header className="page-head">
+      <header className="page-head" data-tour="habits-page">
         <div>
           <p className="kicker">{t("Habit tracker")}</p>
           <h1>{t("Habits")}</h1>

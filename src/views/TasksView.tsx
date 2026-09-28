@@ -111,7 +111,7 @@ export function TasksView() {
 
   return (
     <div className="view">
-      <header className="page-head">
+      <header className="page-head" data-tour="tasks-page">
         <div>
           <p className="kicker">{t("Tasks")}</p>
           <h1>{t("Tasks")}</h1>

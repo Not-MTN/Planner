@@ -544,14 +544,14 @@ describe('app smoke', () => {
     const active = document.querySelector('.tour-lang-btn[aria-pressed="true"]') as HTMLButtonElement;
     expect(active).toBeTruthy();
     act(() => active.click());
-    expect(text()).toContain('Your day at a glance');
+    expect(text()).toContain('Your day, at a glance');
 
-    // Walk one more step, then skip → done is remembered.
+    // Walk one more step (the tour moves to the AI coach page), then skip → done is remembered.
     await Promise.resolve();
     act(() => (document.querySelector('[data-tour-bubble] [data-tour-primary]') as HTMLButtonElement).click());
-    expect(text()).toContain('Type like you think');
+    expect(text()).toContain('Talk to your AI coach');
     act(() => (document.querySelector('.tour-skip') as HTMLButtonElement).click());
-    expect(text()).not.toContain('Type like you think');
+    expect(text()).not.toContain('Talk to your AI coach');
     expect(localStorage.getItem('planner-tour-done')).toBe('1');
   });
 

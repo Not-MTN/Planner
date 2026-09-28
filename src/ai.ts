@@ -2,7 +2,7 @@ import { getLang, t } from './i18n';
 import { CATEGORIES, HABIT_ICONS, PRIORITIES, categoryById } from './constants';
 import type { Priority } from './constants';
 import { MAX_PLAN_DAYS } from './duration';
-import { addDays, isValidISODate, isValidTime, timeToMinutes, weekdayIndex } from './dates';
+import { addDays, addMinutes, isValidISODate, isValidTime, timeToMinutes, weekdayIndex } from './dates';
 import { eventsForDate, isDone, isPlannedDay } from './logic';
 import type {
   EventInput,
@@ -371,12 +371,6 @@ export function normalizeDraftPlan(rawValue: unknown, state: PlannerState, range
   return normalizePlan(rawValue, state, range);
 }
 
-function addDraftMinutes(time: string, amount: number): string {
-  const mins = timeToMinutes(time) + amount;
-  const capped = Math.min(mins, 24 * 60 - 1);
-  return `${String(Math.floor(capped / 60)).padStart(2, '0')}:${String(capped % 60).padStart(2, '0')}`;
-}
-
 /**
  * Re-check a stored or fresh draft against the CURRENT planner state. Time
  * passes between drafting and adding, so overlaps and duplicates that were
@@ -392,10 +386,10 @@ export function filterDraftAgainstState(draft: AIDraft, state: PlannerState): AI
   for (const candidate of draft.events) {
     const candidateStart = timeToMinutes(candidate.startTime);
     const candidateEnd = candidate.endTime ? timeToMinutes(candidate.endTime) : candidateStart + 60;
-    const existing = state.events.filter((event) => event.date === candidate.date).map((event) => ({ start: event.startTime, end: event.endTime ?? addDraftMinutes(event.startTime, 60), title: event.title }));
+    const existing = state.events.filter((event) => event.date === candidate.date).map((event) => ({ start: event.startTime, end: event.endTime ?? addMinutes(event.startTime, 60), title: event.title }));
     const fixed = state.fixedCommitments.filter((item) => item.weekday === weekdayIndex(candidate.date)).map((item) => ({ start: item.startTime, end: item.endTime, title: item.title }));
-    const timedTasks = state.tasks.filter((task) => task.dueDate === candidate.date && task.dueTime).map((task) => ({ start: task.dueTime as string, end: addDraftMinutes(task.dueTime as string, 30), title: task.title }));
-    const accepted = events.filter((event) => event.date === candidate.date).map((event) => ({ start: event.startTime, end: event.endTime ?? addDraftMinutes(event.startTime, 60), title: event.title }));
+    const timedTasks = state.tasks.filter((task) => task.dueDate === candidate.date && task.dueTime).map((task) => ({ start: task.dueTime as string, end: addMinutes(task.dueTime as string, 30), title: task.title }));
+    const accepted = events.filter((event) => event.date === candidate.date).map((event) => ({ start: event.startTime, end: event.endTime ?? addMinutes(event.startTime, 60), title: event.title }));
     const overlap = [...existing, ...fixed, ...timedTasks, ...accepted].find((item) => {
       const start = timeToMinutes(item.start);
       const end = timeToMinutes(item.end);

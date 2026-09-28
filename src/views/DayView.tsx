@@ -196,6 +196,7 @@ export function DayView({ date }: { date: string }) {
         </aside>
       </header>
 
+      {isToday ? <AICoachCard onOpen={() => navigate({ name: 'ai', tab: 'plan' })} /> : null}
       {fresh && isToday ? <WelcomeCard /> : null}
       {isToday ? <WeatherCard /> : null}
       {isToday ? <MoodCard date={today} /> : null}
@@ -313,7 +314,7 @@ export function DayView({ date }: { date: string }) {
             )}
           </section>
 
-          <section className="card wash-lav" data-tour="habits">
+          <section className="card wash-lav">
             <header className="card-head">
               <div>
                 <p className="kicker">{t("Repeat")}</p>
@@ -349,6 +350,26 @@ export function DayView({ date }: { date: string }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * The AI coach is the planner's most powerful feature — give it a home on
+ * Today so nobody has to hunt through Settings to discover it.
+ */
+function AICoachCard({ onOpen }: { onOpen: () => void }) {
+  return (
+    <button type="button" className="card ai-coach-card" onClick={onOpen}>
+      <span className="ai-coach-orb" aria-hidden="true"><SparklesIcon size={22} /></span>
+      <span className="ai-coach-copy">
+        <span className="ai-coach-kicker">{t("AI coach")}</span>
+        <strong className="ai-coach-title">{t("Let the AI coach plan with you")}</strong>
+        <span className="ai-coach-body">{t("Speak or type — English or فارسی, however casual. It drafts the day around your real schedule; you approve everything.")}</span>
+      </span>
+      <span className="btn btn-primary btn-small ai-coach-btn" aria-hidden="true">
+        <SparklesIcon size={15} /> {t("Open")}
+      </span>
+    </button>
   );
 }
 

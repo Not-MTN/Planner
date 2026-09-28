@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { CATEGORIES, categoryById } from '../constants';
 import { usePlanner } from '../context';
-import { addDays, formatFullDate, timeToMinutes, todayISO, weekdayIndex, displayTime } from '../dates';
+import { addDays, addMinutes, formatFullDate, timeToMinutes, todayISO, weekdayIndex, displayTime } from '../dates';
 import { analyzeDraft, filterDraftAgainstState, habitFrequencyLabel, MAX_PLAN_IMAGE_BYTES, XAI_KEY_MISSING_MESSAGE, checkXAIConfiguration, friendlyXAIError, generateAIPlan, generateAIReview, hasReviewActivity, refineAIPlan } from '../ai';
 import type { AIReview, AIDraft, DraftWarning, PlanRange } from '../ai';
 import { MAX_PLAN_DAYS, parsePlanDuration } from '../duration';
@@ -11,6 +11,7 @@ import { VoiceTalk } from '../components/VoiceTalk';
 import { DraftRefine } from '../components/DraftRefine';
 import { CalendarIcon, CheckIcon, LeafIcon, MicIcon, PlusIcon, SparklesIcon, UploadIcon } from '../icons';
 import type { AIMemory, AIMemoryCategory, FixedCommitmentInput } from '../types';
+import { markAIVisited } from '../tour';
 import { t } from '../i18n';
 
 const WEEKDAYS = [
@@ -150,6 +151,11 @@ export function AIView() {
       if (active) setXaiConfigured(configured);
     });
     return () => { active = false; };
+  }, []);
+
+  // Opening this page retires the one-time "AI coach" attention dot in the nav.
+  useEffect(() => {
+    markAIVisited();
   }, []);
 
   const goToTab = (tab: AISection) => navigate({ name: 'ai', tab });
@@ -821,11 +827,6 @@ function timedTaskConflict(
     return start < slotEnd && slotStart < end;
   });
   return conflict ? `overlaps ${conflict.title}` : null;
-}
-
-function addMinutes(time: string, amount: number): string {
-  const mins = Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5)) + amount;
-  return `${String(Math.floor(Math.min(mins, 1439) / 60)).padStart(2, '0')}:${String(Math.min(mins, 1439) % 60).padStart(2, '0')}`;
 }
 
 function PlanDraft({ draft, warnings, working, onRefine, onAdd, onDiscard }: {

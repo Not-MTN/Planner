@@ -66,7 +66,7 @@ export function CalendarView() {
 
   return (
     <div className="view">
-      <header className="page-head">
+      <header className="page-head" data-tour="calendar-page">
         <div>
           <p className="kicker">{t("Calendar")}</p>
           <h1>{title}</h1>

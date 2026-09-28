@@ -33,7 +33,7 @@ export function InsightsView() {
 
   return (
     <div className="view">
-      <header className="page-head">
+      <header className="page-head" data-tour="insights-page">
         <div>
           <p className="kicker">{t("Insights")}</p>
           <h1>{t("Insights")}</h1>

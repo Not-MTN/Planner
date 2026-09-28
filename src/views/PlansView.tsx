@@ -94,7 +94,7 @@ export function PlansView() {
 
   return (
     <div className="view plans-view">
-      <header className="page-head plans-head">
+      <header className="page-head plans-head" data-tour="plans-page">
         <div>
           <p className="kicker">{t("Made with your AI coach")}</p>
           <h1>{t("Plans")}</h1>

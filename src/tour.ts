@@ -1,13 +1,16 @@
 /**
- * First-run tour: a spotlight showcase that plays ONCE, on the very first
- * visit, and can be replayed from the sidebar (?) / More sheet / Settings.
- * Storage-only logic lives here so it stays unit-testable; the visual layer
- * is TourSheet.
+ * First-run tour: a showcase that plays ONCE, on the very first visit, and
+ * can be replayed from the sidebar (?) / More sheet / Settings. It walks the
+ * actual pages — one stop per tab, teaching only the most useful thing on
+ * each — instead of listing every button on one screen. Storage-only logic
+ * lives here so it stays unit-testable; the visual layer is TourSheet.
  *
  * The very first step is a language choice. Switching language reloads the
  * page (the Settings pattern), so the tour persists its resume point across
  * that reload.
  */
+
+import type { Route } from './route';
 
 const DONE_KEY = 'planner-tour-done';
 const RESUME_KEY = 'planner-tour-resume';
@@ -16,17 +19,15 @@ const RESUME_KEY = 'planner-tour-resume';
 export const TOUR_STOPS = [
   'lang',
   'today',
-  'quick',
-  'plan',
-  'timeline',
+  'ai',
+  'plans',
+  'tasks',
   'habits',
-  'mood',
-  'journal',
-  'search',
-  'voice',
-  'tabs',
-  'calendar',
+  'goals',
+  'notes',
   'insights',
+  'calendar',
+  'search',
   'settings',
   'done',
 ] as const;
@@ -39,26 +40,44 @@ export const TOUR_CONTENT_STEPS = TOUR_LENGTH - 1;
 
 /**
  * Which layout element to spotlight for each stop (null = centred bubble).
- * Every selector is a data-tour attribute so theme/class renames can't break
- * the tour; TourSheet resolves the FIRST VISIBLE match (sidebar vs tabbar).
+ * Every selector is a data-tour attribute (or a stable card class) so
+ * theme/class renames can't break the tour; TourSheet resolves the FIRST
+ * VISIBLE match (sidebar vs tabbar duplicates).
  */
 export const TOUR_SELECTORS: Record<TourStopId, string | null> = {
   lang: null,
   today: '.hero-panel',
-  quick: '.quick-add',
-  plan: '.plan-row',
-  timeline: '.timeline-card',
-  habits: '[data-tour="habits"]',
-  mood: '[data-mood-card]',
-  journal: '.journal-card',
+  ai: '.voice-card',
+  plans: '[data-tour="plans-page"]',
+  tasks: '[data-tour="tasks-page"]',
+  habits: '[data-tour="habits-page"]',
+  goals: '[data-tour="goals-page"]',
+  notes: '[data-tour="notes-page"]',
+  insights: '[data-tour="insights-page"]',
+  calendar: '[data-tour="calendar-page"]',
   search: '[data-tour="search"]',
-  voice: '[data-tour-nav="ai"]',
-  tabs: '[data-tour-nav="tasks"]',
-  calendar: '[data-tour-nav="calendar"]',
-  insights: '[data-tour-nav="insights"]',
   settings: '[data-tour="settings"]',
   done: null,
 };
+
+/**
+ * The page each stop teaches — the shell navigates there before the bubble
+ * appears, so the tour actually walks the app instead of pointing at the
+ * sidebar. Stops without a route stay on the current page.
+ */
+export function tourRouteFor(stop: TourStopId, today: string): Route | null {
+  switch (stop) {
+    case 'ai': return { name: 'ai', tab: 'plan' };
+    case 'plans': return { name: 'plans' };
+    case 'tasks': return { name: 'tasks' };
+    case 'habits': return { name: 'habits' };
+    case 'goals': return { name: 'goals' };
+    case 'notes': return { name: 'notes' };
+    case 'insights': return { name: 'insights' };
+    case 'calendar': return { name: 'calendar', tab: 'week', date: today };
+    default: return null;
+  }
+}
 
 export function tourDone(storage: Pick<Storage, 'getItem'> = localStorage): boolean {
   try {
@@ -118,6 +137,28 @@ export function advanceTour(index: number): number | null {
 /** Back, but never behind the first content step (the language step is one-way). */
 export function backTour(index: number): number {
   return Math.max(1, index - 1);
+}
+
+// ── AI coach first-visit nudge ─────────────────────────────────────────
+// The AI coach is easy to miss, so the nav shows a one-time attention dot
+// until the AI page has actually been opened.
+
+const AI_VISITED_KEY = 'planner-ai-visited';
+
+export function isAIVisited(storage: Pick<Storage, 'getItem'> = localStorage): boolean {
+  try {
+    return storage.getItem(AI_VISITED_KEY) === '1';
+  } catch {
+    return true; // storage blocked → never nag
+  }
+}
+
+export function markAIVisited(storage: Pick<Storage, 'setItem'> = localStorage): void {
+  try {
+    storage.setItem(AI_VISITED_KEY, '1');
+  } catch {
+    /* ignore */
+  }
 }
 
 // ── Replay requests (same pattern as pwa.ts listeners) ─────────────────
