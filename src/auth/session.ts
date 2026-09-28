@@ -4,7 +4,8 @@
  * trusted-device flow (phase 2) is built.
  */
 import type { LoginResponse, PublicUser, SessionResponse, VaultResponse } from '../shared/authContract';
-import { createVaultKeys, decryptState, deriveFromPassword, encryptState, formatRecoveryKey, unwrapKey } from './crypto';
+import { createVaultKeys, decryptState, deriveFromPassword, encryptState, formatRecoveryKey, importDek, unwrapKeyRaw } from './crypto';
+import { rememberOnDevice } from './device';
 import type { PlannerState } from '../types';
 
 export type AuthErrorCode = 'bad_credentials' | 'taken' | 'email_taken' | 'not_configured' | 'conflict' | 'network' | 'unknown';
@@ -76,11 +77,13 @@ export interface SignUpInput {
   password: string;
   /** Existing local planner data to carry into the new account. */
   initialState: PlannerState;
+  /** Trust this device so the planner opens without the password again. Default true. */
+  remember?: boolean;
 }
 
 export async function signUp(input: SignUpInput): Promise<{ recoveryKey: string; session: ActiveSession }> {
   const recoveryKey = formatRecoveryKey();
-  const { salt, authToken, dek, wrappedDek, wrappedRecovery } = await createVaultKeys(input.password, recoveryKey);
+  const { salt, authToken, dek, dekRaw, wrappedDek, wrappedRecovery } = await createVaultKeys(input.password, recoveryKey);
   const ciphertext = await encryptState(input.initialState, dek);
 
   const result = await request<{ user: PublicUser }>('/api/auth/signup', {
@@ -99,10 +102,13 @@ export async function signUp(input: SignUpInput): Promise<{ recoveryKey: string;
   });
 
   active = { user: result.user, dek, vault: { version: 1, ciphertext } };
+  // This is the device they signed up on, so open straight into the planner.
+  if (input.remember !== false) await rememberOnDevice(result.user.id, dekRaw);
+  dekRaw.fill(0);
   return { recoveryKey, session: active };
 }
 
-export async function signIn(identifier: string, password: string): Promise<ActiveSession> {
+export async function signIn(identifier: string, password: string, remember = true): Promise<ActiveSession> {
   // The salt is stored with the account, so fetch it before stretching. Unknown
   // accounts receive a decoy salt and simply fail the next step.
   const { kdfSalt } = await request<{ kdfSalt: string }>('/api/auth/salt', {
@@ -116,7 +122,10 @@ export async function signIn(identifier: string, password: string): Promise<Acti
     body: JSON.stringify({ username: identifier.trim(), authToken }),
   });
 
-  const dek = await unwrapKey(result.wrappedDek, kek);
+  const raw = await unwrapKeyRaw(result.wrappedDek, kek);
+  if (remember) await rememberOnDevice(result.user.id, raw);
+  const dek = await importDek(raw, false);
+  raw.fill(0);
   active = { user: result.user, dek, vault: result.vault };
   return active;
 }

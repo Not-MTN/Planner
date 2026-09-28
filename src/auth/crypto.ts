@@ -109,9 +109,12 @@ export async function createVaultKeys(password: string, recoveryKey: string) {
   const wrappedDek = await wrapKey(wrappingKey, kek);
   const wrappedRecovery = await wrapKey(wrappingKey, recoveryKek);
   const dek = await importAes(raw, false);
+  // Kept only so the caller can re-wrap the key for a trusted device; the live
+  // copy below is cleared, and this one should be too as soon as it is used.
+  const dekRaw = copyToBuffer(raw);
   raw.fill(0);
 
-  return { salt, authToken, dek, wrappedDek, wrappedRecovery };
+  return { salt, authToken, dek, dekRaw, wrappedDek, wrappedRecovery };
 }
 
 export async function wrapKey(key: CryptoKey, wrappingKey: CryptoKey): Promise<string> {

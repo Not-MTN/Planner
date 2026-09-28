@@ -161,7 +161,9 @@ function authHandler(databaseUrl: string | undefined): NextHandleFunction {
                 ? (webRequest) => authStore(databaseUrl).then((store) => handleLogout(webRequest, store))
                 : pathname === '/vault'
                   ? (webRequest) => authStore(databaseUrl).then((store) => handleAccountVault(webRequest, store))
-                  : null;
+                  : pathname === '/status'
+                    ? (webRequest) => Promise.resolve(handleAuthStatus(webRequest, databaseUrl))
+                    : null;
     if (!run) {
       next();
       return;

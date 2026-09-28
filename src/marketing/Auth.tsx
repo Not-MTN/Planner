@@ -91,7 +91,7 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
     setBusy(true);
     setError(null);
     try {
-      await signIn(identifier, password);
+      await signIn(identifier, password, remember);
       navigate('/app');
     } catch (caught) {
       setError(errorText(caught instanceof AuthError ? caught.code : null, c));
@@ -221,6 +221,7 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
         displayName: name,
         role: chosen,
         password,
+        // Signed up on this device, so trust it by default; Settings can forget it.
         initialState: { ...state, panels },
       });
       setBusy(false);
