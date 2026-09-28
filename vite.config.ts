@@ -9,6 +9,8 @@ import type { NextHandleFunction } from 'connect';
 import { handleXAIChatCompletions, handleXAIStatus } from './src/server/xaiProxy';
 import { API_SECURITY_HEADERS } from './src/server/security';
 import { handleSync, handleSyncStatus, neonStore } from './src/server/sync';
+import { handleAccountVault, handleLogin, handleLogout, handleSalt, handleSession, handleSignup, handleSession as _session } from './src/server/authApi';
+import { authStore } from './src/server/authStore';
 import { handleICS } from './src/server/icsProxy';
 
 // API responses can use a deny-all CSP; the HTML document needs its own app CSP,
@@ -141,13 +143,58 @@ function icsApi(): Plugin {
   };
 }
 
+function authHandler(databaseUrl: string | undefined): NextHandleFunction {
+  return (request, response, next) => {
+    const pathname = (request.url ?? '').split('?')[0];
+    const run: ((webRequest: Request) => Promise<Response>) | null =
+      pathname === '/signup'
+        ? (webRequest) => authStore(databaseUrl).then((store) => handleSignup(webRequest, store))
+        : pathname === '/salt'
+          ? (webRequest) => authStore(databaseUrl).then((store) => handleSalt(webRequest, store))
+          : pathname === '/login'
+            ? (webRequest) => authStore(databaseUrl).then((store) => handleLogin(webRequest, store))
+            : pathname === '/session'
+              ? (webRequest) => authStore(databaseUrl).then((store) => handleSession(webRequest, store))
+              : pathname === '/logout'
+                ? (webRequest) => authStore(databaseUrl).then((store) => handleLogout(webRequest, store))
+                : pathname === '/vault'
+                  ? (webRequest) => authStore(databaseUrl).then((store) => handleAccountVault(webRequest, store))
+                  : null;
+    if (!run) {
+      next();
+      return;
+    }
+    void run(toWebRequest(request, `/api/auth${pathname}`))
+      .then((webResponse) => sendWebResponse(webResponse, response))
+      .catch(() => {
+        if (response.headersSent) return;
+        response.statusCode = 500;
+        response.setHeader('Content-Type', 'application/json');
+        response.end(JSON.stringify({ error: { message: 'The local accounts API failed.' } }));
+      });
+  };
+}
+
+function authApi(databaseUrl: string | undefined): Plugin {
+  const middleware = authHandler(databaseUrl);
+  return {
+    name: 'planner-auth-api',
+    configureServer(server) {
+      server.middlewares.use('/api/auth', middleware);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use('/api/auth', middleware);
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => {
   // Read the secret only inside the Vite/Node process. It is never defined into the browser bundle.
   const fileEnv = loadEnv(mode, cwd(), '');
   const apiKey = env.XAI_API_KEY || fileEnv.XAI_API_KEY;
   const databaseUrl = env.DATABASE_URL || fileEnv.DATABASE_URL;
   return {
-    plugins: [react(), xaiProxy(apiKey), syncApi(databaseUrl), icsApi()],
+    plugins: [react(), xaiProxy(apiKey), syncApi(databaseUrl), authApi(databaseUrl), icsApi()],
     build: {
       rollupOptions: {
         output: {

@@ -1956,6 +1956,32 @@
   background: currentColor;
 }
 
+.auth-error {
+  margin-bottom: 14px;
+  padding: 11px 14px;
+  border-radius: 14px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 1.5;
+  animation: rise 0.35s var(--ease) both;
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, currentColor 35%, transparent);
+  border-top-color: currentColor;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .auth-hint {
   text-align: center;
   font-size: 12px;

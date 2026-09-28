@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { COPY, type Lang } from './copy';
+import { AuthError, signIn, signUp, type AuthErrorCode } from '../auth/session';
+import { loadFrom } from '../storage';
 
 type Nav = (to: string) => void;
 type Mode = 'signin' | 'signup' | 'recover';
@@ -22,6 +24,16 @@ function strength(password: string, lang: Lang): { score: 0 | 1 | 2 | 3; label: 
   if (password.length >= 16 && variety >= 3) return { score: 3, label: c.authStrengthStrong };
   if (password.length >= 12 || variety >= 3) return { score: 2, label: c.authStrengthGood };
   return { score: 1, label: c.authStrengthFair };
+}
+
+/** Maps an API failure onto translated copy. */
+function errorText(code: AuthErrorCode | null, c: Record<string, string>): string {
+  if (code === 'bad_credentials') return c.errBadCredentials;
+  if (code === 'email_taken') return c.errEmailTaken;
+  if (code === 'taken') return c.errTaken;
+  if (code === 'not_configured') return c.errNotConfigured;
+  if (code === 'network') return c.errNetwork;
+  return c.errUnknown;
 }
 
 const QUOTES: { key: 'authQuote1' | 'authQuote2'; by: 'authQuote1By' | 'authQuote2By' }[] = [
@@ -70,6 +82,22 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
   const [remember, setRemember] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await signIn(identifier, password);
+      navigate('/app');
+    } catch (caught) {
+      setError(errorText(caught instanceof AuthError ? caught.code : null, c));
+      setBusy(false);
+    }
+  };
 
   return (
     <div className="auth">
@@ -84,10 +112,7 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
           <form
             className="auth-fields reveal-in"
             style={{ animationDelay: '60ms' }}
-            onSubmit={(event) => {
-              event.preventDefault();
-              navigate('/app');
-            }}
+            onSubmit={submit}
           >
             <label className="field">
               <span>{c.authUsername}</span>
@@ -118,8 +143,14 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
               </span>
             </label>
 
-            <button type="submit" className="btn btn-primary btn-block">
-              {c.authSignInAction}
+            {error ? (
+              <p className="auth-error" role="alert">
+                {error}
+              </p>
+            ) : null}
+            <button type="submit" className="btn btn-primary btn-block" disabled={busy}>
+              {busy ? <span className="spinner" aria-hidden="true" /> : null}
+              {busy ? c.authBusy : c.authSignInAction}
             </button>
           </form>
 
@@ -142,7 +173,6 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
             <p>
               {c.authNoAccount} <button type="button" className="link" onClick={() => navigate('/signup')}>{c.authCreate}</button>
             </p>
-            <p className="auth-note">{c.authDemoNote}</p>
           </footer>
         </div>
       </section>
@@ -164,6 +194,31 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
   const [agreed, setAgreed] = useState(false);
   const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const createAccount = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      // Anything already planned in this browser becomes the first vault.
+      const { state } = loadFrom(window.localStorage);
+      await signUp({
+        username,
+        email,
+        displayName: name,
+        role,
+        password,
+        initialState: state,
+      });
+      setBusy(false);
+      setStep('recovery');
+    } catch (caught) {
+      setError(errorText(caught instanceof AuthError ? caught.code : null, c));
+      setBusy(false);
+    }
+  };
 
   const key = useMemo(makeRecoveryKey, []);
   const meter = strength(password, lang);
@@ -293,8 +348,14 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
                 <button type="button" className="link" onClick={() => setStep('details')}>
                   {c.authBack}
                 </button>
-                <button type="button" className="btn btn-primary btn-block" onClick={() => setStep('recovery')}>
-                  {c.authContinue}
+                {error ? (
+                  <p className="auth-error" role="alert">
+                    {error}
+                  </p>
+                ) : null}
+                <button type="button" className="btn btn-primary btn-block" disabled={busy} onClick={createAccount}>
+                  {busy ? <span className="spinner" aria-hidden="true" /> : null}
+                  {busy ? c.authBusy : c.authContinue}
                 </button>
               </footer>
             </>
