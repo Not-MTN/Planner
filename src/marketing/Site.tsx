@@ -4,7 +4,9 @@ import { Landing } from './Landing';
 import { Auth } from './Auth';
 import { applyTheme, loadThemeMode, type ThemeMode } from '../theme';
 import type { Accent } from '../constants';
+import { useScrollProgress, useScrolled } from './effects';
 import './marketing.css';
+import './showcase.css';
 
 const LANG_KEY = 'planner-site-lang';
 const ACCENT: Accent = 'sage';
@@ -29,6 +31,8 @@ export function Site() {
   const [lang, setLang] = useState<Lang>(readLang);
   const [theme, setTheme] = useState<ThemeMode>(loadThemeMode);
   const [menu, setMenu] = useState(false);
+  const scrolled = useScrolled(10);
+  const progress = useScrollProgress();
   const c = COPY[lang];
 
   useEffect(() => {
@@ -92,7 +96,8 @@ export function Site() {
 
   return (
     <div className="mkt" dir={lang === 'fa' ? 'rtl' : 'ltr'} data-lang={lang}>
-      <header className="nav">
+      <span className="progress" aria-hidden="true" style={{ ['--p' as string]: progress }} />
+      <header className={`nav ${scrolled ? 'is-scrolled' : ''}`}>
         <div className="wrap nav-inner">
           <button type="button" className="brand" onClick={() => navigate('/')}>
             <span className="brand-mark" aria-hidden="true" />
@@ -163,27 +168,52 @@ export function Site() {
       )}
 
       <footer className="foot">
-        <div className="wrap foot-inner">
-          <p className="foot-brand">
-            <span className="brand-mark" aria-hidden="true" /> {c.brand}
-          </p>
-          <p className="foot-note">{c.footerBuilt}</p>
-          <nav className="foot-links" aria-label={c.footerRights}>
-            <button type="button" className="link" onClick={() => goToSection('privacy')}>
-              {c.footerPrivacy}
-            </button>
-            <span className="foot-sep">·</span>
-            <button type="button" className="link" onClick={() => goToSection('privacy')}>
-              {c.footerTerms}
-            </button>
-            <span className="foot-sep">·</span>
-            <button type="button" className="link" onClick={() => goToSection('privacy')}>
-              {c.footerSecurity}
-            </button>
-          </nav>
-          <p className="foot-fine">
-            © {new Date().getFullYear()} {c.brand}. {c.footerRights}
-          </p>
+        <div className="wrap">
+          <div className="foot-grid">
+            <div className="foot-col">
+              <p className="foot-brand">
+                <span className="brand-mark" aria-hidden="true" /> {c.brand}
+              </p>
+              <p className="foot-note">{c.footerBuilt}</p>
+              <p className="foot-fine">
+                © {new Date().getFullYear()} {c.brand}. {c.footerRights}
+              </p>
+            </div>
+            <div className="foot-col">
+              <h4>{c.footProduct}</h4>
+              <button type="button" onClick={() => goToSection('how')}>
+                {c.footTour}
+              </button>
+              <button type="button" onClick={() => goToSection('roles')}>
+                {c.navRoles}
+              </button>
+              <button type="button" onClick={() => goToSection('guardians')}>
+                {c.navGuardians}
+              </button>
+            </div>
+            <div className="foot-col">
+              <h4>{c.footCompany}</h4>
+              <button type="button" onClick={() => goToSection('ai')}>
+                {c.footAbout}
+              </button>
+              <a href="mailto:hello@example.com">{c.footContact}</a>
+              <a href="https://github.com/Not-MTN/Planner" rel="noreferrer noopener" target="_blank">
+                {c.footGithub}
+              </a>
+            </div>
+            <div className="foot-col">
+              <h4>{c.footLegal}</h4>
+              <button type="button" onClick={() => goToSection('privacy')}>
+                {c.footerPrivacy}
+              </button>
+              <button type="button" onClick={() => goToSection('privacy')}>
+                {c.footerTerms}
+              </button>
+              <button type="button" onClick={() => goToSection('privacy')}>
+                {c.footerSecurity}
+              </button>
+            </div>
+          </div>
         </div>
       </footer>
     </div>

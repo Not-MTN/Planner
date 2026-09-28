@@ -1,8 +1,16 @@
 import { useState } from 'react';
 import { COPY, type Lang } from './copy';
 import { DemoStage } from './DemoStage';
+import { AppWindow } from './AppWindow';
+import { AiProposal, DashboardBuild, Quotes, RetentionSlider, RoleSwitcher, Stats, VisibilityMatrix } from './Showcase';
+import { pointerLeave, pointerMove } from './effects';
 
 type Nav = (to: string) => void;
+
+const SPOT = {
+  onMouseMove: (event: React.MouseEvent<HTMLElement>) => pointerMove(event, { tilt: 2 }),
+  onMouseLeave: pointerLeave,
+};
 
 const CHART_NOTES: { key: 'chart1' | 'chart2' | 'chart3' | 'chart4' | 'chart5' | 'chart6'; kind: string }[] = [
   { key: 'chart1', kind: 'spark' },
@@ -52,7 +60,11 @@ function TinyChart({ kind }: { kind: string }) {
     return (
       <div className="tiny-grid" aria-hidden="true">
         {Array.from({ length: 35 }, (_, index) => (
-          <span key={index} className={index % 7 === 3 && index > 14 ? 'is-rest' : index % 5 === 0 ? 'is-off' : 'is-on'} style={{ animationDelay: `${index * 12}ms` }} />
+          <span
+            key={index}
+            className={index % 7 === 3 && index > 14 ? 'is-rest' : index % 5 === 0 ? 'is-off' : 'is-on'}
+            style={{ animationDelay: `${index * 12}ms` }}
+          />
         ))}
       </div>
     );
@@ -88,24 +100,26 @@ export function Landing({ lang, navigate }: { lang: Lang; navigate: Nav }) {
     [c.faq4q, c.faq4a],
     [c.faq5q, c.faq5a],
   ];
+  const strip = [c.strip1, c.strip2, c.strip3, c.strip4, c.strip5];
 
   return (
     <main className="mkt-main">
-      {/* ---------------- Hero ---------------- */}
+      {/* ------------------------------- hero ------------------------------- */}
       <section className="hero">
         <div className="hero-glow" aria-hidden="true" />
         <div className="hero-grain" aria-hidden="true" />
         <div className="wrap hero-inner">
-          <p className="kicker reveal" data-reveal>
-            {c.heroKicker}
+          <p className="pill reveal" data-reveal>
+            <span className="pill-dot" aria-hidden="true" />
+            {c.heroBadge}
           </p>
-          <h1 className="hero-title reveal" data-reveal style={{ transitionDelay: '80ms' }}>
-            {c.heroTitle}
+          <h1 className="hero-title reveal" data-reveal style={{ transitionDelay: '70ms' }}>
+            {c.heroTitleLead} <span className="grad-text">{c.heroTitleAccent}</span>
           </h1>
-          <p className="hero-sub reveal" data-reveal style={{ transitionDelay: '160ms' }}>
+          <p className="hero-sub reveal" data-reveal style={{ transitionDelay: '140ms' }}>
             {c.heroSub}
           </p>
-          <div className="hero-actions reveal" data-reveal style={{ transitionDelay: '240ms' }}>
+          <div className="hero-actions reveal" data-reveal style={{ transitionDelay: '210ms' }}>
             <button type="button" className="btn btn-primary btn-lg" onClick={() => navigate('/signup')}>
               {c.heroCta}
             </button>
@@ -113,17 +127,50 @@ export function Landing({ lang, navigate }: { lang: Lang; navigate: Nav }) {
               {c.heroCta2}
             </a>
           </div>
-          <p className="hero-trust reveal" data-reveal style={{ transitionDelay: '320ms' }}>
-            {c.heroTrust}
-          </p>
-          <div className="reveal" data-reveal style={{ transitionDelay: '400ms' }}>
-            <DemoStage lang={lang} />
+          <ul className="hero-trust reveal" data-reveal style={{ transitionDelay: '280ms' }}>
+            {[c.trustEncrypted, c.trustOffline, c.trustAds].map((item) => (
+              <li key={item}>
+                <span aria-hidden="true">✓</span> {item}
+              </li>
+            ))}
+          </ul>
+          <div className="reveal" data-reveal style={{ transitionDelay: '360ms' }}>
+            <AppWindow lang={lang} />
+            <p className="hero-note">{c.heroNote}</p>
           </div>
         </div>
       </section>
 
-      {/* ---------------- How it works ---------------- */}
+      {/* ------------------------------ marquee ----------------------------- */}
+      <div className="strip" aria-hidden="true">
+        <div className="strip-track">
+          {[0, 1].map((copy) => (
+            <div className="strip-group" key={copy}>
+              {strip.map((item) => (
+                <span key={item}>
+                  <i />
+                  {item}
+                </span>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* --------------------- two sides, one loop -------------------------- */}
       <section className="section" id="how">
+        <div className="wrap">
+          <header className="section-head center reveal" data-reveal>
+            <p className="kicker">{c.stepsKicker}</p>
+            <h2>{lang === 'fa' ? 'دو طرف، یک هفته' : 'Two sides, one week'}</h2>
+            <p className="lede">{c.heroSub}</p>
+          </header>
+          <DemoStage lang={lang} />
+        </div>
+      </section>
+
+      {/* ------------------------------- steps ------------------------------ */}
+      <section className="section section-tint">
         <div className="wrap">
           <header className="section-head reveal" data-reveal>
             <p className="kicker">{c.stepsKicker}</p>
@@ -132,7 +179,13 @@ export function Landing({ lang, navigate }: { lang: Lang; navigate: Nav }) {
           </header>
           <ol className="steps">
             {[c.step1T, c.step2T, c.step3T].map((title, index) => (
-              <li key={title} className="step reveal" data-reveal style={{ transitionDelay: `${index * 110}ms` }}>
+              <li
+                key={title}
+                className="step spot reveal"
+                data-reveal
+                style={{ transitionDelay: `${index * 110}ms` }}
+                {...SPOT}
+              >
                 <span className="step-num">{index + 1}</span>
                 <h3>{title}</h3>
                 <p>{[c.step1D, c.step2D, c.step3D][index]}</p>
@@ -142,73 +195,50 @@ export function Landing({ lang, navigate }: { lang: Lang; navigate: Nav }) {
         </div>
       </section>
 
-      {/* ---------------- Roles ---------------- */}
-      <section className="section section-tint" id="roles">
+      {/* ------------------------------ roles ------------------------------- */}
+      <section className="section" id="roles">
         <div className="wrap">
           <header className="section-head reveal" data-reveal>
-            <p className="kicker">{c.rolesKicker}</p>
-            <h2>{c.rolesTitle}</h2>
-            <p className="lede">{c.rolesSub}</p>
+            <p className="kicker">{c.switcherKicker}</p>
+            <h2>{c.switcherTitle}</h2>
+            <p className="lede">{c.switcherSub}</p>
           </header>
-          <div className="roles">
-            <article className="role reveal" data-reveal>
-              <span className="role-tag">{c.rolePersonalTag}</span>
-              <img src="/img/spot-tasks.jpg" alt="" width="160" height="120" loading="lazy" />
-              <h3>{c.rolePersonalT}</h3>
-              <p>{c.rolePersonalD}</p>
-              <ul>
-                <li>{c.rolePersonalL1}</li>
-                <li>{c.rolePersonalL2}</li>
-                <li>{c.rolePersonalL3}</li>
-              </ul>
-            </article>
-            <article className="role reveal" data-reveal style={{ transitionDelay: '110ms' }}>
-              <img src="/img/mkt-student.jpg" alt="" width="160" height="120" loading="lazy" />
-              <h3>{c.roleStudentT}</h3>
-              <p>{c.roleStudentD}</p>
-              <ul>
-                <li>{c.roleStudentL1}</li>
-                <li>{c.roleStudentL2}</li>
-                <li>{c.roleStudentL3}</li>
-              </ul>
-            </article>
-            <article className="role reveal" data-reveal style={{ transitionDelay: '220ms' }}>
-              <img src="/img/mkt-guardian.jpg" alt="" width="160" height="120" loading="lazy" />
-              <h3>{c.roleGuardianT}</h3>
-              <p>{c.roleGuardianD}</p>
-              <ul>
-                <li>{c.roleGuardianL1}</li>
-                <li>{c.roleGuardianL2}</li>
-                <li>{c.roleGuardianL3}</li>
-              </ul>
-            </article>
-          </div>
+          <RoleSwitcher lang={lang} />
         </div>
       </section>
 
-      {/* ---------------- Guardian ---------------- */}
+      {/* ------------------------------ matrix ------------------------------ */}
+      <section className="section section-tint">
+        <div className="wrap">
+          <header className="section-head reveal" data-reveal>
+            <p className="kicker">{c.matrixKicker}</p>
+            <h2>{c.matrixTitle}</h2>
+            <p className="lede">{c.matrixSub}</p>
+          </header>
+          <VisibilityMatrix lang={lang} />
+        </div>
+      </section>
+
+      {/* ----------------------------- guardian ----------------------------- */}
       <section className="section" id="guardians">
         <div className="wrap">
           <header className="section-head reveal" data-reveal>
-            <p className="kicker">{c.guardianKicker}</p>
-            <h2>{c.guardianTitle}</h2>
-            <p className="lede">{c.guardianSub}</p>
+            <p className="kicker">{c.dashKicker}</p>
+            <h2>{c.dashTitle}</h2>
           </header>
+          <DashboardBuild lang={lang} />
+        </div>
 
-          <div className="panel reveal" data-reveal>
-            <div className="panel-score">
-              <p className="panel-label">{c.guardianHeroLabel}</p>
-              <p className="panel-big">
-                78<span>%</span>
-              </p>
-              <span className="panel-delta">{c.guardianHeroDelta}</span>
-            </div>
-            <p className="panel-narrative">{c.guardianNarrative}</p>
-          </div>
-
+        <div className="wrap">
           <div className="charts">
             {CHART_NOTES.map(({ key, kind }, index) => (
-              <article key={key} className="chart reveal" data-reveal style={{ transitionDelay: `${index * 70}ms` }}>
+              <article
+                key={key}
+                className="chart spot reveal"
+                data-reveal
+                style={{ transitionDelay: `${index * 70}ms` }}
+                {...SPOT}
+              >
                 <TinyChart kind={kind} />
                 <h3>{c[key]}</h3>
                 <p>{c[`${key}d` as keyof typeof c]}</p>
@@ -240,7 +270,7 @@ export function Landing({ lang, navigate }: { lang: Lang; navigate: Nav }) {
         </div>
       </section>
 
-      {/* ---------------- Student ---------------- */}
+      {/* ------------------------------ student ----------------------------- */}
       <section className="section section-tint">
         <div className="wrap split">
           <div className="split-copy reveal" data-reveal>
@@ -278,7 +308,7 @@ export function Landing({ lang, navigate }: { lang: Lang; navigate: Nav }) {
         </div>
       </section>
 
-      {/* ---------------- AI ---------------- */}
+      {/* -------------------------------- AI -------------------------------- */}
       <section className="section" id="ai">
         <div className="wrap">
           <header className="section-head reveal" data-reveal>
@@ -287,14 +317,11 @@ export function Landing({ lang, navigate }: { lang: Lang; navigate: Nav }) {
             <p className="lede">{c.aiSub}</p>
           </header>
           <div className="ai-grid">
-            <article className="ai-card reveal" data-reveal>
+            <article className="ai-card spot reveal" data-reveal {...SPOT}>
               <span className="ai-badge">{c.aiStudentT}</span>
               <p>{c.aiStudentD}</p>
             </article>
-            <article className="ai-card reveal" data-reveal style={{ transitionDelay: '120ms' }}>
-              <span className="ai-badge">{c.aiGuardianT}</span>
-              <p>{c.aiGuardianD}</p>
-            </article>
+            <AiProposal lang={lang} />
           </div>
           <p className="ai-rule reveal" data-reveal>
             {c.aiRule}
@@ -302,7 +329,7 @@ export function Landing({ lang, navigate }: { lang: Lang; navigate: Nav }) {
         </div>
       </section>
 
-      {/* ---------------- Privacy ---------------- */}
+      {/* ------------------------------ privacy ----------------------------- */}
       <section className="section section-deep" id="privacy">
         <div className="wrap split">
           <div className="split-copy reveal" data-reveal>
@@ -339,22 +366,12 @@ export function Landing({ lang, navigate }: { lang: Lang; navigate: Nav }) {
               <h3>{c.retentionT}</h3>
               <p>{c.retentionD}</p>
             </div>
-            <div className="retention-viz" aria-hidden="true">
-              <span className="ret-week is-live">
-                <b>{lang === 'fa' ? 'هفتهٔ جاری' : 'Live week'}</b>
-                <i>{lang === 'fa' ? 'جزئیات کامل' : 'full detail'}</i>
-              </span>
-              <span className="ret-arrow">→</span>
-              <span className="ret-week is-folded">
-                <b>{lang === 'fa' ? 'بعد از بسته شدن' : 'After it closes'}</b>
-                <i>{lang === 'fa' ? 'فقط نتایج' : 'results only'}</i>
-              </span>
-            </div>
+            <RetentionSlider lang={lang} />
           </div>
         </div>
       </section>
 
-      {/* ---------------- Offline ---------------- */}
+      {/* ------------------------------ offline ----------------------------- */}
       <section className="section">
         <div className="wrap">
           <header className="section-head reveal" data-reveal>
@@ -364,7 +381,13 @@ export function Landing({ lang, navigate }: { lang: Lang; navigate: Nav }) {
           </header>
           <div className="offline-row">
             {[c.offlineL1, c.offlineL2, c.offlineL3].map((line, index) => (
-              <div key={line} className="offline-card reveal" data-reveal style={{ transitionDelay: `${index * 100}ms` }}>
+              <div
+                key={line}
+                className="offline-card spot reveal"
+                data-reveal
+                style={{ transitionDelay: `${index * 100}ms` }}
+                {...SPOT}
+              >
                 <span className="offline-icon" aria-hidden="true">
                   {['✈', '⬇', '🔔'][index]}
                 </span>
@@ -375,10 +398,32 @@ export function Landing({ lang, navigate }: { lang: Lang; navigate: Nav }) {
         </div>
       </section>
 
-      {/* ---------------- FAQ ---------------- */}
+      {/* ------------------------------- stats ------------------------------ */}
+      <section className="section section-tint">
+        <div className="wrap">
+          <header className="section-head center reveal" data-reveal>
+            <p className="kicker">{c.statsKicker}</p>
+            <h2>{c.statsTitle}</h2>
+          </header>
+          <Stats lang={lang} />
+        </div>
+      </section>
+
+      {/* ------------------------------- quotes ----------------------------- */}
+      <section className="section">
+        <div className="wrap">
+          <header className="section-head center reveal" data-reveal>
+            <p className="kicker">{c.quotesKicker}</p>
+            <h2>{c.quotesTitle}</h2>
+          </header>
+          <Quotes lang={lang} />
+        </div>
+      </section>
+
+      {/* -------------------------------- FAQ ------------------------------- */}
       <section className="section section-tint">
         <div className="wrap wrap-narrow">
-          <header className="section-head reveal" data-reveal>
+          <header className="section-head center reveal" data-reveal>
             <p className="kicker">{c.faqKicker}</p>
             <h2>{c.faqTitle}</h2>
           </header>
@@ -398,10 +443,11 @@ export function Landing({ lang, navigate }: { lang: Lang; navigate: Nav }) {
         </div>
       </section>
 
-      {/* ---------------- CTA ---------------- */}
+      {/* -------------------------------- CTA ------------------------------- */}
       <section className="section cta">
         <div className="cta-glow" aria-hidden="true" />
         <div className="wrap wrap-narrow cta-inner reveal" data-reveal>
+          <p className="pill">{c.ctaBadge}</p>
           <h2>{c.ctaTitle}</h2>
           <p>{c.ctaSub}</p>
           <div className="hero-actions">
