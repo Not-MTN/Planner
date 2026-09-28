@@ -137,10 +137,17 @@ export function SharedSpaceSection() {
               const created = startShared();
               if (created) {
                 setReveal(true);
-                void navigator.clipboard.writeText(created).then(
-                  () => flash(t("Shared space created — code copied to your clipboard.")),
-                  () => flash(t("Shared space created. Tap Show to see the code.")),
-                );
+                // Clipboard can be missing entirely (older browsers, embedded
+                // webviews, test engines) — fall back to the reveal instead of crashing.
+                const clipboard = typeof navigator !== 'undefined' ? navigator.clipboard : undefined;
+                if (clipboard?.writeText) {
+                  void clipboard.writeText(created).then(
+                    () => flash(t("Shared space created — code copied to your clipboard.")),
+                    () => flash(t("Shared space created. Tap Show to see the code.")),
+                  );
+                } else {
+                  flash(t("Shared space created. Tap Show to see the code."));
+                }
               }
             }}
           >
