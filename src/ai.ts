@@ -3,6 +3,7 @@ import { CATEGORIES, HABIT_ICONS, PRIORITIES, categoryById } from './constants';
 import type { Priority } from './constants';
 import { MAX_PLAN_DAYS } from './duration';
 import { addDays, addMinutes, isValidISODate, isValidTime, timeToMinutes, weekdayIndex } from './dates';
+import { weekOf } from './panels';
 import { eventsForDate, isDone, isPlannedDay } from './logic';
 import type {
   EventInput,
@@ -11,6 +12,7 @@ import type {
   HabitInput,
   PlannerState,
   TaskInput,
+  WeekResults,
 } from './types';
 
 export const XAI_CHAT_URL = '/api/xai/chat/completions';
@@ -740,6 +742,167 @@ export async function generateAIReview(options: {
     wellness: cleanText(raw.wellness, 300) || t(t("Leave a little room for rest and a short stretch or walk if that feels good.")),
     carryForward: reviewCarryForward(raw.carryForward, openTasks, today),
   };
+}
+
+/* ------------------------------------------------------- panel advice (AI) */
+
+export interface StudentAdvice {
+  /** One or two sentences on where the week stands. */
+  summary: string;
+  /** Three to five concrete next steps, in the student's own subjects. */
+  focus: string[];
+  /** One thing worth protecting or cutting, if any. */
+  watchOut: string | null;
+}
+
+export interface GuardianGuidance {
+  summary: string;
+  /** Open questions, not accusations: something to ask over dinner. */
+  questions: string[];
+  /** Something true and kind to lead with. */
+  encouragement: string | null;
+}
+
+/**
+ * What the student's own AI is allowed to see: their week, their subjects, and
+ * their words. Notes, journals, moods and anything outside this week stay out of
+ * the prompt — the student is the only person this request is about, but a
+ * smaller prompt is still a safer one.
+ */
+export function buildStudentAdvicePayload(state: PlannerState, week = weekOf()): Record<string, unknown> {
+  const days = new Set<string>();
+  for (let index = 0; index < 7; index += 1) days.add(addDays(week, index));
+  const inWeek = (iso: string | null): boolean => !!iso && days.has(iso);
+
+  const tasks = state.tasks
+    .filter((task) => inWeek(task.dueDate))
+    .map((task) => ({
+      title: task.title.slice(0, 120),
+      date: task.dueDate,
+      done: task.completed,
+      priority: task.priority,
+      subject: task.category ?? null,
+      minutes: task.estimatedMinutes ?? null,
+    }));
+
+  const minutesBySubject = new Map<string, number>();
+  for (const entry of state.focusLog) {
+    if (!inWeek(entry.date)) continue;
+    const name = state.tasks.find((task) => task.id === entry.taskId)?.category ?? 'Other';
+    minutesBySubject.set(name, (minutesBySubject.get(name) ?? 0) + (entry.minutes ?? 0));
+  }
+
+  return {
+    week,
+    subjects: state.panels.student.subjects.map((subject) => ({ name: subject.name })),
+    field: state.panels.student.field,
+    grade: state.panels.student.grade,
+    tasks,
+    focusedMinutesBySubject: [...minutesBySubject].map(([name, minutes]) => ({ name, minutes })),
+    focusedMinutesTotal: [...minutesBySubject.values()].reduce((sum, value) => sum + value, 0),
+    whatTheySaid: state.panels.student.explanations
+      .filter((note) => note.weekOf === week)
+      .map((note) => note.summary.slice(0, 160)),
+  };
+}
+
+/**
+ * What a guardian's AI is allowed to see. There is no task title here and no way
+ * to put one here: only counts, minutes, subject names, and the student's own
+ * headline. This is the whole privacy promise of the guardian panel, expressed
+ * in code.
+ */
+export function buildGuardianGuidancePayload(
+  results: WeekResults,
+  history: WeekResults[] = [],
+): Record<string, unknown> {
+  const older = history.filter((week) => week.weekOf !== results.weekOf).slice(0, 11);
+  return {
+    thisWeek: {
+      weekOf: results.weekOf,
+      planned: results.planned,
+      done: results.done,
+      focusMinutes: results.focusMinutes,
+      subjects: results.subjects.map((subject) => ({ name: subject.name, minutes: subject.minutes })),
+      whatTheySaid: results.headline,
+    },
+    earlierWeeks: older.map((week) => ({
+      weekOf: week.weekOf,
+      planned: week.planned,
+      done: week.done,
+      focusMinutes: week.focusMinutes,
+    })),
+  };
+}
+
+export function normalizeAdvice(raw: unknown): StudentAdvice {
+  const record = asRecord(raw) ?? {};
+  const focus = stringList(record.focus, 5);
+  return {
+    summary: cleanText(record.summary, 400),
+    focus,
+    watchOut: cleanText(record.watchOut, 240) || null,
+  };
+}
+
+export function normalizeGuidance(raw: unknown): GuardianGuidance {
+  const record = asRecord(raw) ?? {};
+  return {
+    summary: cleanText(record.summary, 400),
+    questions: stringList(record.questions, 4),
+    encouragement: cleanText(record.encouragement, 240) || null,
+  };
+}
+
+/** Student: "what should I actually do this week?" */
+export async function generateStudentAdvice(options: {
+  state: PlannerState;
+  week?: string;
+  signal?: AbortSignal;
+}): Promise<StudentAdvice> {
+  const week = options.week ?? weekOf();
+  const payload = buildStudentAdvicePayload(options.state, week);
+  const system =
+    'You are a calm study coach for one student, working from their own planner for a single week. ' +
+    'Suggest at most five concrete next steps drawn from the tasks and subjects actually listed; never invent tasks, deadlines, or facts about their life. ' +
+    'Be honest about overload: if the plan is bigger than the week, say so plainly and suggest what to drop. ' +
+    'Never shame, never equate output with worth, and never claim to know how they feel. ' +
+    'Return ONLY JSON: {"summary":"1-2 sentences","focus":["short, specific next step"],"watchOut":"one risk or nothing"}.';
+  const raw = await xaiJsonInternal(
+    system,
+    `Here is the week's plan and what got done. Empty days are not failures.\n${JSON.stringify(payload)}`,
+    undefined,
+    options.signal,
+    1200,
+  );
+  const advice = normalizeAdvice(raw);
+  if (!advice.summary && advice.focus.length === 0) throw new Error(t("xAI returned advice in an unexpected format. Try again."));
+  return advice;
+}
+
+/** Guardian: "what should I ask about these results?" */
+export async function generateGuardianGuidance(options: {
+  results: WeekResults;
+  history?: WeekResults[];
+  signal?: AbortSignal;
+}): Promise<GuardianGuidance> {
+  const payload = buildGuardianGuidancePayload(options.results, options.history ?? []);
+  const system =
+    'You help a parent or advisor talk to a student about their week, using only weekly totals: how much was planned, how much got done, focused minutes, subject names, and any words the student chose to send. ' +
+    'You have no access to their tasks, notes, or schedule, and must never imply that you do. ' +
+    'Offer two to four open, kind questions that invite a conversation rather than an interrogation, plus one true and encouraging observation drawn only from the numbers. ' +
+    'Never diagnose, never moralise, never suggest punishment or rewards, and never guess at causes. ' +
+    'Return ONLY JSON: {"summary":"1-2 sentences","questions":["open question"],"encouragement":"one kind, true observation"}.';
+  const raw = await xaiJsonInternal(
+    system,
+    `Here are the weekly results the student chose to share.\n${JSON.stringify(payload)}`,
+    undefined,
+    options.signal,
+    1200,
+  );
+  const guidance = normalizeGuidance(raw);
+  if (!guidance.summary && guidance.questions.length === 0) throw new Error(t("xAI returned questions in an unexpected format. Try again."));
+  return guidance;
 }
 
 export function hasReviewActivity(state: PlannerState, range: PlanRange): boolean {

@@ -8,7 +8,8 @@
 import { useEffect, useState } from 'react';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
-import { HeartIcon, PlusIcon, TrashIcon } from '../icons';
+import { HeartIcon, PlusIcon, SparkIcon, TrashIcon } from '../icons';
+import { friendlyXAIError, generateGuardianGuidance, type GuardianGuidance } from '../ai';
 import { t } from '../i18n';
 import { Field, Empty } from '../components/ui';
 import { CompletionRing, FocusTrend, SubjectSplit, WeekBars, minutesLabel } from '../components/charts';
@@ -25,6 +26,8 @@ export function GuardianPanelView() {
   const [draft, setDraft] = useState({ username: '', displayName: '' });
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [sending, setSending] = useState<string | null>(null);
+  const [guidance, setGuidance] = useState<Record<string, GuardianGuidance>>({});
+  const [guiding, setGuiding] = useState<string | null>(null);
   const guardian = panels.guardian;
   const unread = guardian.notices.filter((notice) => !notice.read).length;
 
@@ -76,6 +79,19 @@ export function GuardianPanelView() {
       window.setTimeout(() => setCopied(false), 2200);
     } catch {
       setCopied(false);
+    }
+  };
+
+  const ask = async (link: GuardianLink) => {
+    if (!link.results || guiding) return;
+    setGuiding(link.id);
+    try {
+      const result = await generateGuardianGuidance({ results: link.results, history: link.history });
+      setGuidance((current) => ({ ...current, [link.id]: result }));
+    } catch (error) {
+      flash(friendlyXAIError(error));
+    } finally {
+      setGuiding(null);
     }
   };
 
@@ -329,6 +345,40 @@ export function GuardianPanelView() {
                         <SubjectSplit subjects={link.results.subjects} />
                       </section>
                     ) : null}
+
+                    <div className="guidance">
+                      <div className="guidance-head">
+                        <p className="chart-title">{t("What should I ask?")}</p>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-tiny"
+                          disabled={guiding === link.id}
+                          onClick={() => void ask(link)}
+                        >
+                          {guiding === link.id ? <span className="spinner" aria-hidden="true" /> : <SparkIcon size={13} />}
+                          {guidance[link.id] ? t("Ask again") : t("Ask")}
+                        </button>
+                      </div>
+                      {guidance[link.id] ? (
+                        <div className="advice">
+                          {guidance[link.id].summary ? <p className="advice-summary">{guidance[link.id].summary}</p> : null}
+                          {guidance[link.id].questions.length > 0 ? (
+                            <ul className="advice-list">
+                              {guidance[link.id].questions.map((question) => (
+                                <li key={question}>{question}</li>
+                              ))}
+                            </ul>
+                          ) : null}
+                          {guidance[link.id].encouragement ? (
+                            <p className="advice-watchout">{guidance[link.id].encouragement}</p>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <p className="chart-note">
+                          {t("Questions come from these results only — never from their tasks or notes.")}
+                        </p>
+                      )}
+                    </div>
 
                     <div className="notice-form">
                       <Field label={t("Tell the other guardians what you changed")}>

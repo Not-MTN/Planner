@@ -12,6 +12,8 @@ import { BookIcon, FlagIcon, PlusIcon, StopwatchIcon, TrashIcon } from '../icons
 import { t } from '../i18n';
 import { daysUntil, GRADE_LABELS, gradeLabel, newId, splitExplanations, subjectMinutes, subjectProgress, weekOf, weekResults, withExplanation, withSubject, withoutExplanation, withoutSubject } from '../panels';
 import { normalizeLinkCode } from '../auth/crypto';
+import { friendlyXAIError, generateStudentAdvice, type StudentAdvice } from '../ai';
+import { SparkIcon } from '../icons';
 import { acceptInvitation, relayNotices, removeLink, shareWeeklyResults, syncLinks } from '../auth/links';
 import { AuthError } from '../auth/session';
 import type { ChangeNote, StudentSubject } from '../types';
@@ -24,6 +26,8 @@ export function StudentPanelView() {
   const [details, setDetails] = useState({ field: panels.student.field ?? '', grade: panels.student.grade ?? '' });
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
+  const [advice, setAdvice] = useState<StudentAdvice | null>(null);
+  const [asking, setAsking] = useState(false);
 
   // Keep in step with the server: a guardian may have ended the link.
   useEffect(() => {
@@ -39,6 +43,18 @@ export function StudentPanelView() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const ask = async () => {
+    if (asking) return;
+    setAsking(true);
+    try {
+      setAdvice(await generateStudentAdvice({ state }));
+    } catch (error) {
+      flash(friendlyXAIError(error));
+    } finally {
+      setAsking(false);
+    }
+  };
 
   const accept = async () => {
     if (busy) return;
@@ -380,6 +396,38 @@ export function StudentPanelView() {
             </button>
           </div>
         </div>
+      </section>
+
+      <section className="card">
+        <header className="card-head">
+          <div>
+            <p className="kicker">{t("AI")}</p>
+            <h2 className="card-title">{t("What should I do this week?")}</h2>
+          </div>
+          <button type="button" className="btn btn-outline btn-small" disabled={asking} onClick={() => void ask()}>
+            {asking ? <span className="spinner" aria-hidden="true" /> : <SparkIcon size={14} />}
+            {asking ? t("Thinking…") : advice ? t("Ask again") : t("Ask")}
+          </button>
+        </header>
+        <p className="view-sub">
+          {t("It reads this week's plan and what you have already finished — nothing else in your planner.")}
+        </p>
+
+        {advice ? (
+          <div className="advice">
+            {advice.summary ? <p className="advice-summary">{advice.summary}</p> : null}
+            {advice.focus.length > 0 ? (
+              <ol className="advice-list">
+                {advice.focus.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ol>
+            ) : null}
+            {advice.watchOut ? <p className="advice-watchout">{advice.watchOut}</p> : null}
+          </div>
+        ) : (
+          <p className="empty-note">{t("Nothing yet. Ask, and it answers from this week alone.")}</p>
+        )}
       </section>
 
       <section className="card">

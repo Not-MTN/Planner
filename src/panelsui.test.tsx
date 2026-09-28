@@ -4,7 +4,7 @@
  * promise: nothing is required, adding one keeps the planner, and the dashboard
  * becomes the way in.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StrictMode, act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { App } from './App';
@@ -156,6 +156,51 @@ describe('optional panels', () => {
     expect(text()).toContain('Personal Planner');
     expect(text()).toContain('Your panels');
     expect(text()).toContain('Student panel');
+  });
+
+  it('asks the AI from the student panel, and sends only this week', async () => {
+    const sent: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        if (url.includes('/api/xai/chat/completions')) {
+          sent.push(String(init?.body ?? ''));
+          const content = JSON.stringify({
+            summary: 'A steady week.',
+            focus: ['Revise chapter 4 for 25 minutes'],
+            watchOut: 'Thursday is already full.',
+          });
+          return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response('not found', { status: 404 });
+      }),
+    );
+
+    mountApp();
+    await settle();
+    await clickText('See the panels');
+    await clickText('Add student panel');
+    setValue(document.querySelector('.panel-form input.input') as HTMLInputElement, 'Physics');
+    setSelect(document.querySelector('.panel-form select.input') as HTMLSelectElement, 'school-11');
+    await clickText('Add student panel');
+    await clickText('Open student panel');
+
+    await clickText('Ask');
+    for (let attempt = 0; attempt < 12 && !text().includes('Revise chapter 4'); attempt += 1) await settle(2);
+
+    expect(text()).toContain('A steady week.');
+    expect(text()).toContain('Revise chapter 4 for 25 minutes');
+    expect(text()).toContain('Thursday is already full.');
+
+    // One request, and it carried the week rather than the whole planner.
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain('Physics');
+    expect(sent[0]).not.toContain('SECRET');
+    vi.unstubAllGlobals();
   });
 
   it('asks which kind of guardian before adding that panel', async () => {

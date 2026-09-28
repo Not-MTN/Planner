@@ -330,7 +330,15 @@ guardian.
 
 ---
 
-## 9. Charts — simple, but telling everything
+## 9. Charts
+
+**What each AI may see (built).** The student's own AI reads one week of their
+planner — tasks due that week, subjects, focused minutes, and what they wrote.
+The guardian's AI reads weekly results and nothing else: counts, minutes, subject
+names, the student's headline, and at most eleven earlier weeks. Both prompts are
+built by one function each, and both are covered by tests that fail if a task
+title or a note ever reaches the wrong one.
+ — simple, but telling everything
 
 **Hero:** one **week score** (completion vs. the student's own 4-week baseline) with
 a sparkline, plus 2–3 AI-written sentences:
