@@ -6,6 +6,7 @@ import { MAX_PLAN_IMAGE_BYTES, XAI_KEY_MISSING_MESSAGE, checkXAIConfiguration, f
 import type { AIReview, AIDraft, PlanRange } from '../ai';
 import { cx } from '../cx';
 import { useSpeechInput } from '../speech';
+import { VoiceTalk } from '../components/VoiceTalk';
 import { CalendarIcon, CheckIcon, LeafIcon, MicIcon, PlusIcon, SparklesIcon, UploadIcon } from '../icons';
 import type { AIMemory, AIMemoryCategory, FixedCommitmentInput } from '../types';
 import { t } from '../i18n';
@@ -325,6 +326,7 @@ export function AIView() {
 
       {currentTab === 'plan' ? (
         <>
+          <VoiceTalk onDraft={(next) => { setDraft(next); setError(''); }} />
           <section className="card ai-builder">
             <header className="card-head">
               <div>

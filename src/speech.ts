@@ -44,7 +44,7 @@ export interface SpeechInput {
   available: boolean;
   listening: boolean;
   /** Start dictation; every recognised sentence is handed to onText. */
-  start: (onText: (text: string) => void) => void;
+  start: (onText: (text: string) => void, onInterim?: (text: string) => void) => void;
   stop: () => void;
 }
 
@@ -63,7 +63,7 @@ export function useSpeechInput(): SpeechInput {
   return {
     available,
     listening,
-    start: (onText) => {
+    start: (onText, onInterim) => {
       const Ctor = ctor();
       if (!Ctor || listening) return;
       const recognition = new Ctor();
@@ -71,12 +71,15 @@ export function useSpeechInput(): SpeechInput {
       recognition.interimResults = true;
       recognition.continuous = false;
       recognition.onresult = (event) => {
-        let text = '';
+        let final = '';
+        let interim = '';
         for (let i = event.resultIndex; i < event.results.length; i += 1) {
           const result = event.results[i];
-          if (result?.isFinal) text += result[0]?.transcript ?? '';
+          if (result?.isFinal) final += result[0]?.transcript ?? '';
+          else interim += result[0]?.transcript ?? '';
         }
-        if (text.trim()) onText(text.replace(/\s+/g, ' ').trim());
+        if (interim.trim() && onInterim) onInterim(interim.replace(/\s+/g, ' ').trim());
+        if (final.trim()) onText(final.replace(/\s+/g, ' ').trim());
       };
       recognition.onend = () => setListening(false);
       recognition.onerror = () => setListening(false);

@@ -193,6 +193,87 @@ describe('app smoke', () => {
     });
   }
 
+  it('has a voice chat with the AI that answers and builds the plan', async () => {
+    // Stub speech in: one final utterance after Dictate is tapped.
+    let recognition: { onresult: ((e: unknown) => void) | null; onend: (() => void) | null } | null = null;
+    class FakeRecognition {
+      lang = '';
+      interimResults = false;
+      continuous = false;
+      onresult: ((event: unknown) => void) | null = null;
+      onend: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      start() { recognition = this as unknown as typeof recognition; }
+      stop() { this.onend?.(); }
+    }
+    (window as unknown as { SpeechRecognition: unknown }).SpeechRecognition = FakeRecognition;
+    // Stub speech out: capture what gets spoken.
+    const spoken: string[] = [];
+    (window as unknown as { speechSynthesis: unknown }).speechSynthesis = {
+      getVoices: () => [{ lang: 'en-US', name: 'Test voice', default: true }],
+      cancel: () => undefined,
+      speak: (utterance: { text: string; onend?: (() => void) | null; onerror?: (() => void) | null }) => {
+        spoken.push(utterance.text);
+        utterance.onend?.();
+      },
+    };
+    // Stub the xAI proxy: chat completions answers with a spoken reply + a draft.
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/xai/status')) {
+        return new Response(JSON.stringify({ configured: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/xai/chat/completions')) {
+        return new Response(JSON.stringify({
+          choices: [{ message: { content: JSON.stringify({
+            reply: 'Got you — a gentle Tuesday, with one hour to breathe before the gym.',
+            followUp: null,
+            draft: {
+              summary: 'Gentle Tuesday',
+              tasks: [{ title: 'Gym bag', date: '2026-09-29', priority: 'low', category: 'health' }],
+              events: [],
+              habits: [],
+              suggestions: [],
+            },
+          }) } }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response('not found', { status: 404 });
+    }) as typeof fetch;
+    try {
+      mountApp();
+      const aiNav = [...document.querySelectorAll<HTMLButtonElement>('.nav-link')].find((button) => button.textContent?.includes('AI coach'));
+      await act(async () => {
+        aiNav?.click();
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      });
+      expect(text()).toContain('Talk to your planner');
+      // tap the orb → listening
+      const orb = document.querySelector<HTMLButtonElement>('.voice-orb');
+      expect(orb).toBeTruthy();
+      act(() => orb?.click());
+      expect(document.querySelector('.voice-card')?.className).toContain('voice-listening');
+      expect(text()).toContain("I'm listening");
+      // final utterance arrives → thinking → reply + draft
+      await act(async () => {
+        (recognition as unknown as { onresult: ((e: unknown) => void) | null })?.onresult?.({
+          resultIndex: 0,
+          results: [{ isFinal: true, 0: { transcript: 'make tomorrow gentle, gym late afternoon' } }],
+        });
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      });
+      expect(text()).toContain('make tomorrow gentle, gym late afternoon');
+      expect(text()).toContain('a gentle Tuesday');
+      expect(text()).toContain('Gentle Tuesday'); // the draft landed in the review card
+      expect(spoken.join(' ')).toContain('gentle Tuesday'); // and it was spoken aloud
+    } finally {
+      globalThis.fetch = originalFetch;
+      delete (window as unknown as { SpeechRecognition?: unknown }).SpeechRecognition;
+      delete (window as unknown as { speechSynthesis?: unknown }).speechSynthesis;
+    }
+  });
+
   it('dictates a plan request to the AI with the browser voice service', async () => {
     let live: { onresult: ((event: unknown) => void) | null; onend: (() => void) | null; lang: string; started: boolean } | null = null;
     class FakeRecognition {

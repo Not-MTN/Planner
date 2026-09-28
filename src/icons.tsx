@@ -143,6 +143,16 @@ export function GlobeIcon(props: IconProps) {
   );
 }
 
+export function VolumeIcon({ size = 24 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M11 5.5 6.5 9H4a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h2.5L11 18.5a.6.6 0 0 0 .96-.48V5.98A.6.6 0 0 0 11 5.5Z" fill="currentColor" stroke="none" />
+      <path d="M15 9.3a4 4 0 0 1 0 5.4" />
+      <path d="M17.8 6.8a7.2 7.2 0 0 1 0 10.4" />
+    </svg>
+  );
+}
+
 export function MicIcon(props: IconProps) {
   return (
     <Svg {...props}>
