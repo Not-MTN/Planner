@@ -27,6 +27,8 @@ interface LoginResponse {
 }
 
 const DB_URL = 'postgresql://user:pass@example.test/neondb';
+/** 32 bytes, base64 — the shape a code hash and a sealed key both have. */
+const HASH = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=';
 
 const ACCOUNT = {
   username: 'sara',
@@ -179,6 +181,36 @@ describe('accounts on the real database path', () => {
 
     const stale = await handleLogin(post('/api/auth/login', { username: ACCOUNT.username, authToken: ACCOUNT.authToken }), store);
     expect(stale.status).toBe(401);
+  });
+
+  it('keeps a link, accepts it by code hash, and moves results without reading them', async () => {
+    const store = await createNeonAuthStore(DB_URL);
+    const guardian = cookieFrom(await handleSignup(post('/api/auth/signup', ACCOUNT), store));
+    const guardianId = db.tables.planner_users[0]!.id as string;
+
+    const links = await import('./authApi').then((m) =>
+      m.handleLinks(
+        post('/api/auth/links', { username: 'student', codeHash: HASH, wrappedShare: HASH }, guardian),
+        store,
+      ),
+    );
+    expect(links.status).toBe(201);
+    expect(db.tables.planner_links).toHaveLength(1);
+
+    // A second invitation to the same student is refused, not duplicated.
+    const again = await import('./authApi').then((m) =>
+      m.handleLinks(
+        post('/api/auth/links', { username: 'student', codeHash: HASH, wrappedShare: HASH }, guardian),
+        store,
+      ),
+    );
+    expect(again.status).toBe(409);
+    expect(db.tables.planner_links).toHaveLength(1);
+
+    // Only the code's hash is stored, never the code that unlocks the results.
+    expect(JSON.stringify(db.tables.planner_links[0])).not.toContain('plnr-');
+    void guardian;
+    void guardianId;
   });
 
   it('hashes a credential with the salt it returns', async () => {

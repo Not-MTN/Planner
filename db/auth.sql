@@ -53,6 +53,30 @@ CREATE TABLE IF NOT EXISTS planner_sessions (
 
 CREATE INDEX IF NOT EXISTS planner_sessions_user_idx ON planner_sessions (user_id);
 
+-- A guardian's request to follow a student. code_hash is all the server ever
+-- sees of the pairing code; wrapped_share is the results key sealed by a key
+-- derived from that code, so the server cannot read the results either. The
+-- results themselves (share_ciphertext) are replaced every week — only the
+-- newest week is kept.
+CREATE TABLE IF NOT EXISTS planner_links (
+  id                     text PRIMARY KEY,
+  guardian_id            text NOT NULL REFERENCES planner_users(id) ON DELETE CASCADE,
+  student_id             text REFERENCES planner_users(id) ON DELETE CASCADE,
+  student_username_lower text NOT NULL,
+  code_hash              text NOT NULL,
+  wrapped_share          text NOT NULL,
+  share_ciphertext       text,
+  share_week             text,
+  share_updated_at       timestamptz,
+  status                 text NOT NULL CHECK (status IN ('pending','linked','revoked')),
+  created_at             timestamptz NOT NULL DEFAULT now(),
+  updated_at             timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (guardian_id, student_username_lower)
+);
+
+CREATE INDEX IF NOT EXISTS planner_links_student_idx ON planner_links (student_username_lower);
+CREATE INDEX IF NOT EXISTS planner_links_student_id_idx ON planner_links (student_id);
+
 -- ---------------------------------------------------------------------------
 -- Starting over (optional)
 -- ---------------------------------------------------------------------------

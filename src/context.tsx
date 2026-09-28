@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { parseHash, toHash, type Route } from './route';
 import { downloadState, loadFrom, parseBackup, sanitizeState, saveTo, serialize, STORAGE_FULL, STORAGE_KEY } from './storage';
+import { flushVaultPush, scheduleVaultPush } from './auth/vault';
+import { shareWeeklyResults } from './auth/links';
 import { idbRead, idbWrite, savedAt } from './idb';
 import {
   addAIMemory as addAIMemoryTo,
@@ -488,6 +490,50 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     syncHistoryFlags();
     flash(t("Redone."));
   }, [flash, trySave, syncHistoryFlags]);
+
+
+  // ── Encrypted vault: keep the copy on the server in step with this device ──
+  // Signed in and unlocked, the vault is what other devices read. Writes are
+  // batched, and the last few seconds of work are flushed when the tab goes away.
+  useEffect(() => {
+    scheduleVaultPush(state);
+  }, [state]);
+
+  const shareResults = useCallback(
+    async (current: PlannerState) => {
+      if (!current.panels.student.enabled || current.panels.student.guardians.length === 0) return;
+      try {
+        const result = await shareWeeklyResults(current, current.panels);
+        if (result.panels !== current.panels) commit(() => ({ ...current, panels: result.panels }));
+      } catch {
+        /* sharing is best effort; the next save tries again */
+      }
+    },
+    [commit],
+  );
+
+  // Results are sent with the save, so the week on the server is never behind.
+  const shareTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (!state.panels.student.enabled || state.panels.student.guardians.length === 0) return;
+    if (shareTimer.current !== null) window.clearTimeout(shareTimer.current);
+    shareTimer.current = window.setTimeout(() => {
+      void shareResults(stateRef.current);
+    }, 4000);
+    return () => {
+      if (shareTimer.current !== null) window.clearTimeout(shareTimer.current);
+    };
+  }, [state, shareResults]);
+
+  useEffect(() => {
+    const flush = () => void flushVaultPush();
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', flush);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', flush);
+    };
+  }, []);
 
   const undoRef = useRef(undo);
   undoRef.current = undo;

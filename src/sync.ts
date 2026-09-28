@@ -141,10 +141,11 @@ function mergeById<T extends Stamped>(local: T[], remote: T[]): T[] {
  * panels are optional extras on top of the personal planner.)
  */
 export function mergePanels(local: Panels, remote: Panels): Panels {
-  const byId = <T extends { id: string }>(a: T[], b: T[]): T[] => {
+  const byId = <T extends { id: string }>(a: T[], b: T[]): T[] => byIdKey(a, b, (item) => item.id);
+  const byIdKey = <T>(a: T[], b: T[], key: (item: T) => string): T[] => {
     const map = new Map<string, T>();
-    for (const item of b) map.set(item.id, item);
-    for (const item of a) map.set(item.id, item);
+    for (const item of b) map.set(key(item), item);
+    for (const item of a) map.set(key(item), item);
     return [...map.values()];
   };
   return {
@@ -152,6 +153,7 @@ export function mergePanels(local: Panels, remote: Panels): Panels {
       enabled: local.student.enabled || remote.student.enabled,
       field: local.student.field ?? remote.student.field,
       grade: local.student.grade ?? remote.student.grade,
+      guardians: byIdKey(local.student.guardians ?? [], remote.student.guardians ?? [], (item) => item.linkId).slice(0, 20),
       subjects: byId(local.student.subjects, remote.student.subjects).slice(0, 40),
       explanations: byId(local.student.explanations, remote.student.explanations)
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))

@@ -98,3 +98,95 @@ export function cleanDisplayName(value: unknown): string | null {
 export function cleanRole(value: unknown): AccountRole | null {
   return ACCOUNT_ROLES.includes(value as AccountRole) ? (value as AccountRole) : null;
 }
+
+/* ------------------------------------------------------------------- links */
+
+/** Weekly results are small: counts, minutes and one line of words. */
+export const MAX_SHARE_BYTES = 16 * 1024;
+export const MAX_LINKS_PER_SIDE = 20;
+
+export type LinkStatus = 'pending' | 'linked' | 'revoked';
+
+/** What a guardian sees: their request to a student. */
+export interface OutgoingLink {
+  id: string;
+  studentUsername: string;
+  status: LinkStatus;
+  /** Week of the results waiting to be read, if any. */
+  weekOf: string | null;
+  updatedAt: string | null;
+}
+
+/** What a student sees: a guardian asking to follow them. */
+export interface IncomingLink {
+  id: string;
+  guardianUsername: string;
+  guardianDisplayName: string;
+  status: LinkStatus;
+}
+
+export interface LinksResponse {
+  outgoing: OutgoingLink[];
+  incoming: IncomingLink[];
+}
+
+export interface CreateLinkRequest {
+  /** The student's username. */
+  username: string;
+  /** base64 sha256 of the pairing code — the server cannot derive the key from it. */
+  codeHash: string;
+  /** base64 — the results key, wrapped by a key derived from the code. */
+  wrappedShare: string;
+}
+
+export interface AcceptLinkRequest {
+  /** The code the guardian handed over, typed in full. */
+  code: string;
+}
+
+export interface AcceptLinkResponse {
+  linkId: string;
+  guardianUsername: string;
+  guardianDisplayName: string;
+  /** base64 — the results key, still wrapped by the code key. */
+  wrappedShare: string;
+}
+
+export interface SharePutRequest {
+  linkId: string;
+  /** base64 — this week's results, encrypted with the link's key. */
+  ciphertext: string;
+  /** Monday of the week these results describe. */
+  weekOf: string;
+}
+
+export interface ShareResponse {
+  linkId: string;
+  ciphertext: string | null;
+  weekOf: string | null;
+  updatedAt: string | null;
+}
+
+export function cleanCodeHash(value: unknown): string | null {
+  return isBase64(value, 40, 64) ? (value as string) : null;
+}
+
+export function cleanWrappedShare(value: unknown): string | null {
+  return isBase64(value, 44, 512) ? (value as string) : null;
+}
+
+export function cleanLinkId(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return /^[a-f0-9-]{8,64}$/.test(trimmed) ? trimmed : null;
+}
+
+export function cleanWeekOf(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+}
+
+export function cleanShareCiphertext(value: unknown): string | null {
+  if (typeof value !== 'string' || !value) return null;
+  return value.length <= MAX_SHARE_BYTES * 2 && BASE64_PATTERN.test(value) ? value : null;
+}

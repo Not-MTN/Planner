@@ -10,27 +10,38 @@ import { createHash } from 'node:crypto';
 import { isSameOriginRequest } from './xaiProxy';
 import { API_SECURITY_HEADERS, BodyTooLargeError, rateLimitResponse, readLimitedBody } from './security';
 import {
+  cleanCodeHash,
   cleanDisplayName,
   cleanEmail,
+  cleanLinkId,
   cleanRole,
+  cleanShareCiphertext,
   cleanUsername,
+  cleanWeekOf,
+  cleanWrappedShare,
   isBase64,
   MAX_AUTH_BODY_BYTES,
   MAX_VAULT_BYTES,
+  MAX_LINKS_PER_SIDE,
   SESSION_COOKIE,
   SESSION_TTL_DAYS,
+  type LinksResponse,
   type LoginResponse,
+  type OutgoingLink,
   type PublicUser,
   type SessionResponse,
+  type ShareResponse,
   type VaultResponse,
 } from '../shared/authContract';
 import {
   authStore,
   hashAuthToken,
   hashToken,
+  newId as newStoreId,
   newToken,
   safeEqual,
   type AuthStore,
+  type LinkRow,
   type UserRow,
 } from './authStore';
 
@@ -357,6 +368,212 @@ export async function handleAccountVault(request: Request, store: AuthStore | nu
   } catch {
     return error(502, 'The accounts database could not be reached. Try again shortly.');
   }
+}
+
+/* ------------------------------------------------------------------- links */
+
+/**
+ * Every link endpoint needs a live session. `linkUser` returns the signed-in
+ * user (without the cookie handling leaking into each handler).
+ */
+async function linkUser(request: Request, store: AuthStore | null): Promise<{ user: UserRow; store: AuthStore } | null> {
+  if (!store) return null;
+  const token = readSessionToken(request);
+  if (!token) return null;
+  try {
+    const found = await store.findSession(hashToken(token));
+    return found ? { user: found.user, store } : null;
+  } catch {
+    return null;
+  }
+}
+
+function outgoingView(row: LinkRow): OutgoingLink {
+  return {
+    id: row.id,
+    studentUsername: row.student_username_lower,
+    status: row.status,
+    weekOf: row.share_week,
+    updatedAt: row.share_updated_at ? new Date(row.share_updated_at).toISOString() : null,
+  };
+}
+
+/** GET lists both sides: requests I have sent, and requests waiting for me. */
+export async function handleLinks(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'auth-links', 90) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method === 'GET') {
+    const session = await linkUser(request, store);
+    if (!session) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+    try {
+      const [outgoing, incoming] = await Promise.all([
+        session.store.listOutgoingLinks(session.user.id),
+        session.store.listIncomingLinks({ id: session.user.id, usernameLower: session.user.username_lower }),
+      ]);
+      const payload: LinksResponse = {
+        outgoing: outgoing.map(outgoingView),
+        incoming: incoming.map((row) => ({
+          id: row.id,
+          guardianUsername: row.guardian_username,
+          guardianDisplayName: row.guardian_display_name,
+          status: row.status,
+        })),
+      };
+      return json(200, payload);
+    } catch {
+      return error(502, 'The accounts database could not be reached. Try again shortly.');
+    }
+  }
+
+  if (request.method === 'POST') {
+    // Guardian: ask a student to be followed.
+    const session = await linkUser(request, store);
+    if (!session) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+    const body = await readJsonBody(request);
+    if (!body) return error(400, 'Expected a JSON body.');
+    const username = cleanUsername(body.username);
+    const codeHash = cleanCodeHash(body.codeHash);
+    const wrappedShare = cleanWrappedShare(body.wrappedShare);
+    if (!username) return error(400, 'That username does not look right.');
+    if (!codeHash) return error(400, 'Missing or invalid link code.');
+    if (!wrappedShare) return error(400, 'Missing or invalid link key.');
+    if (username.toLowerCase() === session.user.username_lower) return error(400, 'You cannot follow yourself.');
+
+    try {
+      const existing = await session.store.listOutgoingLinks(session.user.id);
+      if (existing.length >= MAX_LINKS_PER_SIDE) {
+        return error(409, 'You already follow as many students as this panel can hold.', 'limit');
+      }
+      const row = await session.store.createLink({
+        id: newStoreId(),
+        guardianId: session.user.id,
+        studentUsernameLower: username.toLowerCase(),
+        codeHash,
+        wrappedShare,
+      });
+      if (!row) return error(409, 'You have already invited that student.', 'taken');
+      return json(201, { link: outgoingView(row) });
+    } catch {
+      return error(502, 'The accounts database could not be reached. Try again shortly.');
+    }
+  }
+
+  if (request.method === 'DELETE') {
+    // Either side can end a link.
+    const session = await linkUser(request, store);
+    if (!session) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+    const body = await readJsonBody(request);
+    const linkId = cleanLinkId(body?.linkId);
+    if (!linkId) return error(400, 'Expected { linkId }.');
+    try {
+      const removed = await session.store.deleteLink(linkId, session.user.id);
+      if (!removed) return error(404, 'That link is no longer there.', 'not_found');
+      return json(200, { ok: true });
+    } catch {
+      return error(502, 'The accounts database could not be reached. Try again shortly.');
+    }
+  }
+
+  return error(405, 'Method not allowed.', undefined);
+}
+
+/** Student: hand over the code their guardian gave them and open the link. */
+export async function handleLinkAccept(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'auth-link-accept', 20) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'POST') return error(405, 'Method not allowed.', undefined);
+
+  const session = await linkUser(request, store);
+  if (!session) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+  const body = await readJsonBody(request);
+  const code = typeof body?.code === 'string' ? body.code.trim() : '';
+  if (!code || code.length > 64) return error(400, 'Enter the code your guardian gave you.');
+
+  // The code itself never touches the database: only its hash does, and the key
+  // the results are sealed with is derived from it in the browser.
+  const codeHash = await hashLinkCode(code);
+  if (!codeHash) return error(400, 'That code is not right. Check it and try again.', 'bad_code');
+
+  try {
+    const row = await session.store.acceptLink(codeHash, { id: session.user.id, usernameLower: session.user.username_lower });
+    if (!row) return error(404, 'No invitation matches that code.', 'not_found');
+    const guardian = await guardianOf(session.store, row.guardian_id);
+    return json(200, {
+      linkId: row.id,
+      guardianUsername: guardian?.username ?? '',
+      guardianDisplayName: guardian?.display_name ?? '',
+      wrappedShare: row.wrapped_share,
+    });
+  } catch {
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
+}
+
+async function guardianOf(store: AuthStore, guardianId: string): Promise<UserRow | null> {
+  try {
+    return await store.findUserById(guardianId);
+  } catch {
+    return null;
+  }
+}
+
+/** sha256 of the normalised code, base64 — mirrors linkCodeHash in the browser. */
+/**
+ * sha256 of the code in its canonical form (plnr-XXXX-XXXX-XXXX), base64.
+ * This must match linkCodeHash in the browser exactly — the canonical form is
+ * what both sides hash, and the code itself is never stored.
+ */
+export function hashLinkCode(code: string): string | null {
+  const clean = code.toUpperCase().replace(/^PLNR[-\s]*/, '').replace(/[\s-]/g, '');
+  if (!/^[A-Z0-9]{12}$/.test(clean)) return null;
+  const canonical = `plnr-${clean.match(/.{4}/g)!.join('-')}`;
+  return createHash('sha256').update(canonical).digest('base64');
+}
+
+/* ------------------------------------------------------------------- share */
+
+/** Student writes this week's results; guardian reads them. Both see only ciphertext. */
+export async function handleShare(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'auth-share', 120) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+
+  const session = await linkUser(request, store);
+  if (!session) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+
+  if (request.method === 'PUT') {
+    const body = await readJsonBody(request);
+    const linkId = cleanLinkId(body?.linkId);
+    const ciphertext = cleanShareCiphertext(body?.ciphertext);
+    const weekOf = cleanWeekOf(body?.weekOf);
+    if (!linkId || !ciphertext || !weekOf) return error(400, 'Expected { linkId, ciphertext, weekOf }.');
+    try {
+      const row = await session.store.putShare(linkId, session.user.id, ciphertext, weekOf);
+      if (!row) return error(404, 'That link is not active.', 'not_found');
+      return json(200, { ok: true, weekOf: row.share_week });
+    } catch {
+      return error(502, 'The accounts database could not be reached. Try again shortly.');
+    }
+  }
+
+  if (request.method === 'GET') {
+    const linkId = cleanLinkId(new URL(request.url).searchParams.get('linkId'));
+    if (!linkId) return error(400, 'Expected ?linkId=.');
+    try {
+      const row = await session.store.getShare(linkId, session.user.id);
+      if (!row) return error(404, 'That link is not there.', 'not_found');
+      const payload: ShareResponse = {
+        linkId: row.id,
+        ciphertext: row.share_ciphertext,
+        weekOf: row.share_week,
+        updatedAt: row.share_updated_at ? new Date(row.share_updated_at).toISOString() : null,
+      };
+      return json(200, payload);
+    } catch {
+      return error(502, 'The accounts database could not be reached. Try again shortly.');
+    }
+  }
+
+  return error(405, 'Method not allowed.', undefined);
 }
 
 /** Lazy store resolution used by the Vercel Functions. */

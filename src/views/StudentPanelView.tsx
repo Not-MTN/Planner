@@ -5,20 +5,75 @@
  * Detail stays inside the active week. When the week rolls over, only the
  * results remain — that is the rule that keeps a planner light.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { BookIcon, FlagIcon, PlusIcon, StopwatchIcon, TrashIcon } from '../icons';
 import { t } from '../i18n';
 import { daysUntil, GRADE_LABELS, gradeLabel, newId, splitExplanations, subjectMinutes, subjectProgress, weekOf, weekResults, withExplanation, withSubject, withoutExplanation, withoutSubject } from '../panels';
+import { normalizeLinkCode } from '../auth/crypto';
+import { acceptInvitation, removeLink, shareWeeklyResults, syncLinks } from '../auth/links';
+import { AuthError } from '../auth/session';
 import type { ChangeNote, StudentSubject } from '../types';
 import { Field, Empty } from '../components/ui';
 import { ACCENTS } from '../constants';
 
 export function StudentPanelView() {
-  const { state, panels, updatePanels, flash, navigate, setPanelEnabled } = usePlanner();
+  const { state, panels, updatePanels, flash, navigate, setPanelEnabled, requestConfirm } = usePlanner();
   const [editing, setEditing] = useState(false);
   const [details, setDetails] = useState({ field: panels.student.field ?? '', grade: panels.student.grade ?? '' });
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  // Keep in step with the server: a guardian may have ended the link.
+  useEffect(() => {
+    let cancelled = false;
+    void syncLinks(panels)
+      .then((result) => {
+        if (!cancelled && result.changed) updatePanels(result.panels);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const accept = async () => {
+    if (busy) return;
+    if (!normalizeLinkCode(code)) {
+      flash(t("That code is not right. It looks like plnr-XXXX-XXXX-XXXX."));
+      return;
+    }
+    setBusy(true);
+    try {
+      const next = await acceptInvitation(panels, code);
+      updatePanels(next);
+      setCode('');
+      // Send this week straight away so their panel is not empty.
+      const shared = await shareWeeklyResults(state, next, true);
+      if (shared.panels !== next) updatePanels(shared.panels);
+      flash(t("Linked. Your weekly results now reach {0}.", { 0: next.student.guardians[0]?.guardianDisplayName ?? '' }));
+    } catch (error) {
+      flash(error instanceof AuthError || error instanceof Error ? error.message : t("That code could not be used."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const stopSharing = (guardian: { linkId: string; guardianDisplayName: string }) => {
+    requestConfirm({
+      title: t("Stop sharing with {0}?", { 0: guardian.guardianDisplayName }),
+      body: t("They keep the results they already have; nothing new is sent, and nothing is deleted from your planner."),
+      confirmLabel: t("Stop sharing"),
+      onConfirm: () => {
+        void removeLink(panels, guardian.linkId).then((next) => {
+          updatePanels(next);
+          flash(t("Stopped sharing with {0}.", { 0: guardian.guardianDisplayName }));
+        });
+      },
+    });
+  };
   const week = useMemo(() => weekOf(), []);
   const results = useMemo(() => weekResults(state, week), [state, week]);
   const { current, past } = useMemo(() => splitExplanations(panels.student.explanations, week), [panels.student.explanations, week]);
@@ -270,6 +325,60 @@ export function StudentPanelView() {
             })}
           </ul>
         )}
+      </section>
+
+      <section className="card">
+        <header className="card-head">
+          <div>
+            <p className="kicker">{t("Guardians")}</p>
+            <h2 className="card-title">{t("Who sees your week")}</h2>
+          </div>
+        </header>
+        <p className="view-sub">
+          {t("They receive your weekly results — how much was planned, how much got done, how long you focused, and the headline you write. Nothing else leaves this planner.")}
+        </p>
+
+        {panels.student.guardians.length === 0 ? (
+          <p className="empty-note">{t("Nobody yet. Add a code from a parent or advisor to start sharing results.")}</p>
+        ) : (
+          <ul className="guardian-list">
+            {panels.student.guardians.map((guardian) => (
+              <li key={guardian.linkId}>
+                <div>
+                  <p className="guardian-name">{guardian.guardianDisplayName}</p>
+                  <p className="guardian-state">
+                    {guardian.sharedWeek ? t("Shared for the week of {0}", { 0: guardian.sharedWeek }) : t("Not shared yet")}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-tiny"
+                  onClick={() => stopSharing(guardian)}
+                >
+                  {t("Stop sharing")}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="panel-form">
+          <Field label={t("Have a code from a parent or advisor?")}>
+            <input
+              className="input"
+              value={code}
+              autoComplete="off"
+              placeholder="plnr-XXXX-XXXX-XXXX"
+              onChange={(event) => setCode(event.target.value)}
+            />
+          </Field>
+          <div className="panel-form-actions">
+            <button type="button" className="btn btn-primary btn-small" disabled={busy || !code.trim()} onClick={() => void accept()}>
+              {busy ? <span className="spinner" aria-hidden="true" /> : null}
+              {busy ? t("Linking…") : t("Link")}
+            </button>
+          </div>
+        </div>
       </section>
 
       <section className="card">

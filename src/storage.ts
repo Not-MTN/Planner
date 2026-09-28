@@ -1,8 +1,9 @@
 import { ACCENTS, categoryById, HABIT_ICONS, NOTE_KINDS, PRIORITIES } from './constants';
+import { isBase64 } from './shared/authContract';
 import { isValidISODate, isValidTime, localDateFromTimestamp, timeToMinutes } from './dates';
 import { REPEAT_SET } from './recurrence';
 import { MAX_PLAN_DAYS } from './duration';
-import { AI_PLAN_LIMIT, createEmptyPanels, createEmptyState, isGradeLevel, type AIMemory, type AttachmentRef, type AIMemoryCategory, type ChangeNote, type EventInput, type FixedCommitment, type FocusLog, type GuardianKind, type GuardianLink, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Panels, type StudentSubject, type Subtask, type TaskInput, type TaskRepeat, type WeekResults, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task } from './types';
+import { AI_PLAN_LIMIT, createEmptyPanels, createEmptyState, isGradeLevel, type AIMemory, type AttachmentRef, type AIMemoryCategory, type ChangeNote, type EventInput, type FixedCommitment, type FocusLog, type GuardianKind, type GuardianLink, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Panels, type StudentGuardian, type StudentSubject, type Subtask, type TaskInput, type TaskRepeat, type WeekResults, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task } from './types';
 import { t } from './i18n';
 
 export const STORAGE_KEY = 'personal-planner.v1';
@@ -544,12 +545,33 @@ function sanitizeGuardianLink(value: unknown): GuardianLink | null {
   const id = asString(raw.id, 80);
   const username = asString(raw.username, 40)?.trim().toLowerCase();
   if (!id || !username) return null;
+  const linkId = asString(raw.linkId, 64);
   return {
     id,
     username,
     displayName: (asString(raw.displayName, 60) ?? '').trim() || username,
     status: raw.status === 'linked' ? 'linked' : 'pending',
+    linkId: linkId && /^[a-f0-9-]{8,64}$/.test(linkId) ? linkId : null,
+    code: asString(raw.code, 40),
+    wrappedShareKey: isBase64(raw.wrappedShareKey, 44, 512) ? String(raw.wrappedShareKey) : null,
     results: sanitizeWeekResults(raw.results),
+  };
+}
+
+function sanitizeStudentGuardian(value: unknown): StudentGuardian | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const linkId = asString(raw.linkId, 64);
+  const guardianUsername = asString(raw.guardianUsername, 40)?.trim().toLowerCase();
+  if (!linkId || !guardianUsername) return null;
+  if (!/^[a-f0-9-]{8,64}$/.test(linkId)) return null;
+  const wrapped = raw.wrappedShareKey;
+  return {
+    linkId,
+    guardianUsername,
+    guardianDisplayName: (asString(raw.guardianDisplayName, 60) ?? '').trim() || guardianUsername,
+    wrappedShareKey: isBase64(wrapped, 44, 512) ? String(wrapped) : '',
+    sharedWeek: asString(raw.sharedWeek, 10),
   };
 }
 
@@ -589,8 +611,15 @@ export function sanitizePanels(value: unknown): Panels {
     return text ? text : null;
   };
   const grade = isGradeLevel(student.grade) ? student.grade : null;
+  const guardians = uniqueBy(
+    (Array.isArray(student.guardians) ? student.guardians : []).flatMap((item) => {
+      const guardian = sanitizeStudentGuardian(item);
+      return guardian && guardian.wrappedShareKey ? [guardian] : [];
+    }),
+    (item) => item.linkId,
+  ).slice(0, 20);
   return {
-    student: { enabled: student.enabled === true, field: field(student.field), grade, subjects, explanations },
+    student: { enabled: student.enabled === true, field: field(student.field), grade, guardians, subjects, explanations },
     guardian: { enabled: guardian.enabled === true && kind !== null, kind, field: field(guardian.field), links },
   };
 }

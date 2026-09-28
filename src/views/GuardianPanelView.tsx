@@ -5,50 +5,89 @@
  * the student's own reason for a significant change. Parent and advisor are two
  * separate roles; either can follow several students.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { HeartIcon, PlusIcon, TrashIcon } from '../icons';
 import { t } from '../i18n';
 import { Field, Empty } from '../components/ui';
-import { newId } from '../panels';
+import { inviteStudent, refreshResults, removeLink, syncLinks, type Invitation } from '../auth/links';
+import { AuthError } from '../auth/session';
 import type { GuardianLink } from '../types';
 
 export function GuardianPanelView() {
   const { panels, updatePanels, flash, navigate, requestConfirm } = usePlanner();
   const [adding, setAdding] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [invitation, setInvitation] = useState<Invitation | null>(null);
+  const [copied, setCopied] = useState(false);
   const [draft, setDraft] = useState({ username: '', displayName: '' });
   const guardian = panels.guardian;
 
-  const addLink = () => {
+  // Once signed in, results arrive on their own: check when the panel opens and
+  // whenever the planner is saved again.
+  useEffect(() => {
+    let cancelled = false;
+    void syncLinks(panels)
+      .then((sync) => (cancelled ? null : refreshResults(sync.panels)))
+      .then((refreshed) => {
+        if (cancelled || !refreshed) return;
+        if (refreshed.changed) updatePanels(refreshed.panels);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const addLink = async () => {
     const username = draft.username.trim().replace(/^@/, '').toLowerCase();
-    if (!username) return;
+    if (!username || busy) return;
     if (guardian.links.some((link) => link.username === username)) {
       flash(t("You already follow that student."));
       return;
     }
-    const link: GuardianLink = {
-      id: newId('link'),
-      username,
-      displayName: draft.displayName.trim() || username,
-      status: 'pending',
-      results: null,
-    };
-    updatePanels({ ...panels, guardian: { ...guardian, links: [...guardian.links, link] } });
-    setDraft({ username: '', displayName: '' });
-    setAdding(false);
-    flash(t("Invitation prepared. Results appear once they accept."));
+    setBusy(true);
+    try {
+      const { panels: next, invitation: made } = await inviteStudent(panels, username, draft.displayName);
+      updatePanels(next);
+      setInvitation(made);
+      setDraft({ username: '', displayName: '' });
+      setAdding(false);
+      flash(t("Invitation ready. Give the code to your student."));
+    } catch (error) {
+      flash(error instanceof AuthError || error instanceof Error ? error.message : t("That invitation could not be sent."));
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const removeLink = (link: GuardianLink) => {
+  const copyCode = async () => {
+    if (!invitation) return;
+    try {
+      await navigator.clipboard.writeText(invitation.code);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2200);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  const stopFollowing = (link: GuardianLink) => {
+    const end = async () => {
+      const next = link.linkId ? await removeLink(panels, link.linkId) : {
+        ...panels,
+        guardian: { ...guardian, links: guardian.links.filter((item) => item.id !== link.id) },
+      };
+      updatePanels(next);
+      flash(t("Stopped following {0}.", { 0: link.displayName }));
+    };
     requestConfirm({
       title: t("Stop following {0}?", { 0: link.displayName }),
       body: t("Their weekly results will no longer appear here. Nothing is deleted from their planner."),
       confirmLabel: t("Stop following"),
-      onConfirm: () => {
-        updatePanels({ ...panels, guardian: { ...guardian, links: guardian.links.filter((item) => item.id !== link.id) } });
-        flash(t("Stopped following {0}.", { 0: link.displayName }));
-      },
+      onConfirm: () => void end(),
     });
   };
 
@@ -117,7 +156,8 @@ export function GuardianPanelView() {
               />
             </Field>
             <div className="panel-form-actions">
-              <button type="button" className="btn btn-primary btn-small" disabled={!draft.username.trim()} onClick={addLink}>
+              <button type="button" className="btn btn-primary btn-small" disabled={!draft.username.trim() || busy} onClick={() => void addLink()}>
+                {busy ? <span className="spinner" aria-hidden="true" /> : null}
                 {t("Add student")}
               </button>
               <button type="button" className="btn btn-ghost btn-small" onClick={() => setAdding(false)}>
@@ -125,6 +165,24 @@ export function GuardianPanelView() {
               </button>
             </div>
             <p className="hint">{t("They choose whether to share. Until they accept, nothing of theirs is shown here.")}</p>
+          </div>
+        ) : null}
+
+        {invitation ? (
+          <div className="invite-card">
+            <p className="invite-lead">{t("Give this code to {0}", { 0: invitation.link.displayName })}</p>
+            <code className="invite-code">{invitation.code}</code>
+            <div className="invite-actions">
+              <button type="button" className="btn btn-outline btn-small" onClick={copyCode}>
+                {copied ? t("Code copied") : t("Copy code")}
+              </button>
+              <button type="button" className="btn btn-ghost btn-small" onClick={() => setInvitation(null)}>
+                {t("Done")}
+              </button>
+            </div>
+            <p className="hint">
+              {t("They type it once in their own panel. After that their weekly results come to you on their own — the code is never stored on our servers.")}
+            </p>
           </div>
         ) : null}
 
@@ -142,13 +200,23 @@ export function GuardianPanelView() {
                     <p className="student-name">{link.displayName}</p>
                     <p className="student-user">@{link.username}</p>
                   </div>
-                  <button type="button" className="icon-btn round" aria-label={t("Delete")} onClick={() => removeLink(link)}>
+                  <button type="button" className="icon-btn round" aria-label={t("Delete")} onClick={() => stopFollowing(link)}>
                     <TrashIcon size={14} />
                   </button>
                 </div>
 
                 {link.status === 'pending' || !link.results ? (
-                  <p className="student-pending">{t("Waiting for them to accept — no results yet.")}</p>
+                  <p className="student-pending">
+                    {t("Waiting for them to accept — no results yet.")}
+                    {link.code ? (
+                      <>
+                        {' '}
+                        <button type="button" className="text-btn" onClick={() => setInvitation({ link, code: link.code! })}>
+                          {t("Show the code again")}
+                        </button>
+                      </>
+                    ) : null}
+                  </p>
                 ) : (
                   <>
                     <div className="result-row">

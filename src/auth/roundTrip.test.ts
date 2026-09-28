@@ -100,7 +100,8 @@ function sampleState(): PlannerState {
       student: {
         enabled: true,
         field: 'Mathematics',
-        grade: 'grade-11',
+        grade: 'school-11',
+        guardians: [],
         subjects: [],
         explanations: [],
       },
@@ -129,7 +130,7 @@ describe('accounts end to end', () => {
     expect(reopened?.notes[0]?.body).toBe('Private thoughts');
     // The panel choices made at sign-up travelled inside the encrypted vault.
     expect(reopened?.panels.student.field).toBe('Mathematics');
-    expect(reopened?.panels.student.grade).toBe('grade-11');
+    expect(reopened?.panels.student.grade).toBe('school-11');
   }, 60_000);
 
   it('signs in with the email address instead of the username', async () => {

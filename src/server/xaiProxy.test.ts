@@ -71,6 +71,9 @@ describe('Vercel function discovery', () => {
         '/api/auth/logout',
         '/api/auth/vault',
         '/api/auth/status',
+        '/api/auth/links',
+        '/api/auth/link-accept',
+        '/api/auth/share',
       ].sort(),
     );
   });

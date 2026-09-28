@@ -3546,3 +3546,37 @@ html, body { overflow-x: clip; }
   transition: background 0.18s var(--ease), color 0.18s var(--ease);
 }
 .segment.on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-soft); }
+
+/* ---------- Linking a guardian and a student ---------- */
+.guardian-list { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.guardian-list li {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 14px; border-radius: var(--radius-small);
+  background: color-mix(in srgb, var(--surface-2) 70%, transparent); border: 1px solid var(--line);
+}
+.guardian-name { margin: 0; font-size: 14px; font-weight: 620; color: var(--ink); overflow-wrap: anywhere; }
+.guardian-state { margin: 3px 0 0; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.invite-card {
+  margin-top: 14px; padding: 16px; border-radius: var(--radius-small);
+  border: 1px dashed color-mix(in srgb, var(--accent) 40%, var(--line));
+  background: var(--accent-soft);
+}
+.invite-lead { margin: 0 0 10px; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.invite-code {
+  display: block; padding: 12px 14px; border-radius: 12px; text-align: center;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 17px; letter-spacing: 0.08em; color: var(--ink);
+  background: var(--surface); border: 1px solid var(--line-strong);
+  overflow-wrap: anywhere;
+}
+.invite-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.invite-card .hint { display: block; margin-top: 10px; font-size: 12.5px; line-height: 1.6; color: var(--muted); }
+
+.spinner {
+  display: inline-block; width: 13px; height: 13px; margin-right: 8px; vertical-align: -1px;
+  border-radius: 50%; border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor; animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2s; } }

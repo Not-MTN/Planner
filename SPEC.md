@@ -263,6 +263,15 @@ sign-up, sign-in, and linking need a connection.
 
 ## 7. Linking and consent
 
+**How the pairing works (built).** The guardian generates a one-time code
+(`plnr-XXXX-XXXX-XXXX`) and a per-link results key. The server keeps only
+`sha256(code)` and the key sealed *by* the code; the code itself is never stored.
+The student types it once, derives the same key, opens the sealed results key and
+re-seals it inside their own vault. From then on the student encrypts each week's
+results with that key and the guardian decrypts them — the server moves
+ciphertext it can never open.
+
+
 1. Guardian enters the student's username (or email) or generates an **invite code**
    (short, expires in 24–72h).
 2. The student sees the request with the proposed preset and scopes, and either

@@ -58,6 +58,28 @@ CREATE TABLE IF NOT EXISTS planner_sessions (
 );
 
 CREATE INDEX IF NOT EXISTS planner_sessions_user_idx ON planner_sessions (user_id);
+
+-- A guardian's request to follow a student. code_hash is all the server ever
+-- sees of the pairing code; wrapped_share is the results key sealed by a key
+-- derived from that code, so the server cannot read the results either.
+CREATE TABLE IF NOT EXISTS planner_links (
+  id                     text PRIMARY KEY,
+  guardian_id            text NOT NULL REFERENCES planner_users(id) ON DELETE CASCADE,
+  student_id             text REFERENCES planner_users(id) ON DELETE CASCADE,
+  student_username_lower text NOT NULL,
+  code_hash              text NOT NULL,
+  wrapped_share          text NOT NULL,
+  share_ciphertext       text,
+  share_week             text,
+  share_updated_at       timestamptz,
+  status                 text NOT NULL CHECK (status IN ('pending','linked','revoked')),
+  created_at             timestamptz NOT NULL DEFAULT now(),
+  updated_at             timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (guardian_id, student_username_lower)
+);
+
+CREATE INDEX IF NOT EXISTS planner_links_student_idx ON planner_links (student_username_lower);
+CREATE INDEX IF NOT EXISTS planner_links_student_id_idx ON planner_links (student_id);
 `.trim();
 
 export interface UserRow {
@@ -107,15 +129,52 @@ export interface SessionRow {
   expires_at: string | Date;
 }
 
+export interface LinkRow {
+  id: string;
+  guardian_id: string;
+  student_id: string | null;
+  student_username_lower: string;
+  code_hash: string;
+  wrapped_share: string;
+  share_ciphertext: string | null;
+  share_week: string | null;
+  share_updated_at: string | null;
+  status: 'pending' | 'linked' | 'revoked';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NewLink {
+  id: string;
+  guardianId: string;
+  studentUsernameLower: string;
+  codeHash: string;
+  wrappedShare: string;
+}
+
 export interface AuthStore {
   createAccount(input: NewAccount): Promise<CreateResult>;
   findAccount(login: string): Promise<AccountRow | null>;
+  findUserById(id: string): Promise<UserRow | null>;
   getVault(userId: string): Promise<VaultRow | null>;
   putVault(userId: string, baseVersion: number, ciphertext: string): Promise<VaultRow | null>;
   updateCredential(userId: string, kdfSalt: string, authToken: string): Promise<void>;
   createSession(userId: string, tokenHash: string, label: string, expiresAt: Date): Promise<void>;
   findSession(tokenHash: string): Promise<{ session: SessionRow; user: UserRow } | null>;
   deleteSession(id: string): Promise<void>;
+  /** Guardian: ask a student to be followed. Returns null when already asked. */
+  createLink(input: NewLink): Promise<LinkRow | null>;
+  /** Guardian's own requests. */
+  listOutgoingLinks(guardianId: string): Promise<LinkRow[]>;
+  /** Waiting invitations (matched by username) plus accepted links (matched by id). */
+  listIncomingLinks(user: { id: string; usernameLower: string }): Promise<Array<LinkRow & { guardian_username: string; guardian_display_name: string }>>;
+  /** Student: turns a pending request into a link, if the code matches. */
+  acceptLink(codeHash: string, student: { id: string; usernameLower: string }): Promise<LinkRow | null>;
+  /** Student writes this week's results; guardian reads them. */
+  putShare(linkId: string, studentId: string, ciphertext: string, weekOf: string): Promise<LinkRow | null>;
+  getShare(linkId: string, guardianId: string): Promise<LinkRow | null>;
+  /** Either side can end a link; it disappears from both. */
+  deleteLink(linkId: string, userId: string): Promise<boolean>;
 }
 
 /* ------------------------------------------------------------------ hashing */
@@ -176,6 +235,7 @@ export function createMemoryAuthStore(): AuthStore {
   const credentials = new Map<string, { kdfSalt: string; hashSalt: string; authHash: string }>();
   const vaults = new Map<string, VaultRow>();
   const sessions = new Map<string, SessionRow>();
+  const links: LinkRow[] = [];
 
   return {
     async createAccount(input) {
@@ -220,6 +280,10 @@ export function createMemoryAuthStore(): AuthStore {
       }
       return null;
     },
+    async findUserById(id) {
+      return users.get(id) ?? null;
+    },
+
     async getVault(userId) {
       return vaults.get(userId) ?? null;
     },
@@ -251,6 +315,81 @@ export function createMemoryAuthStore(): AuthStore {
       for (const [hash, session] of sessions) {
         if (session.id === id) sessions.delete(hash);
       }
+    },
+    async createLink(input) {
+      const clash = links.some(
+        (link) => link.guardian_id === input.guardianId && link.student_username_lower === input.studentUsernameLower,
+      );
+      if (clash) return null;
+      const row: LinkRow = {
+        id: input.id,
+        guardian_id: input.guardianId,
+        student_id: null,
+        student_username_lower: input.studentUsernameLower,
+        code_hash: input.codeHash,
+        wrapped_share: input.wrappedShare,
+        share_ciphertext: null,
+        share_week: null,
+        share_updated_at: null,
+        status: 'pending',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      links.push(row);
+      return row;
+    },
+    async listOutgoingLinks(guardianId) {
+      return links.filter((link) => link.guardian_id === guardianId && link.status !== 'revoked');
+    },
+    async listIncomingLinks(user) {
+      return links
+        .filter(
+          (link) =>
+            (link.student_username_lower === user.usernameLower && link.status === 'pending') ||
+            (link.student_id === user.id && link.status === 'linked'),
+        )
+        .map((link) => {
+          const guardian = users.get(link.guardian_id);
+          return {
+            ...link,
+            guardian_username: guardian?.username ?? '',
+            guardian_display_name: guardian?.display_name ?? '',
+          };
+        });
+    },
+    async acceptLink(codeHash, student) {
+      const link = links.find(
+        (item) =>
+          item.code_hash === codeHash &&
+          item.status === 'pending' &&
+          item.student_username_lower === student.usernameLower,
+      );
+      if (!link) return null;
+      link.status = 'linked';
+      link.student_id = student.id;
+      link.updated_at = new Date().toISOString();
+      return link;
+    },
+    async putShare(linkId, studentId, ciphertext, weekOf) {
+      const link = links.find((item) => item.id === linkId && item.student_id === studentId && item.status === 'linked');
+      if (!link) return null;
+      link.share_ciphertext = ciphertext;
+      link.share_week = weekOf;
+      link.share_updated_at = new Date().toISOString();
+      link.updated_at = link.share_updated_at;
+      return link;
+    },
+    async getShare(linkId, guardianId) {
+      const link = links.find((item) => item.id === linkId && item.guardian_id === guardianId);
+      return link ? { ...link } : null;
+    },
+    async deleteLink(linkId, userId) {
+      const index = links.findIndex(
+        (item) => item.id === linkId && (item.guardian_id === userId || item.student_id === userId),
+      );
+      if (index < 0) return false;
+      links.splice(index, 1);
+      return true;
     },
   };
 }
@@ -299,6 +438,23 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
         expires_at   timestamptz NOT NULL
       )`;
       await sql`CREATE INDEX IF NOT EXISTS planner_sessions_user_idx ON planner_sessions (user_id)`;
+      await sql`CREATE TABLE IF NOT EXISTS planner_links (
+        id                     text PRIMARY KEY,
+        guardian_id            text NOT NULL REFERENCES planner_users(id) ON DELETE CASCADE,
+        student_id             text REFERENCES planner_users(id) ON DELETE CASCADE,
+        student_username_lower text NOT NULL,
+        code_hash              text NOT NULL,
+        wrapped_share          text NOT NULL,
+        share_ciphertext       text,
+        share_week             text,
+        share_updated_at       timestamptz,
+        status                 text NOT NULL CHECK (status IN ('pending','linked','revoked')),
+        created_at             timestamptz NOT NULL DEFAULT now(),
+        updated_at             timestamptz NOT NULL DEFAULT now(),
+        UNIQUE (guardian_id, student_username_lower)
+      )`;
+      await sql`CREATE INDEX IF NOT EXISTS planner_links_student_idx ON planner_links (student_username_lower)`;
+      await sql`CREATE INDEX IF NOT EXISTS planner_links_student_id_idx ON planner_links (student_id)`;
     })().catch((error: unknown) => {
       ready = null;
       throw error;
@@ -364,6 +520,12 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
       const row = rows[0];
       if (!row) return null;
       return { user: row, kdfSalt: row.kdf_salt, hashSalt: row.hash_salt, authHash: row.auth_hash };
+    },
+
+    async findUserById(id) {
+      await ensure();
+      const rows = (await sql`SELECT * FROM planner_users WHERE id = ${id}`) as UserRow[];
+      return rows[0] ?? null;
     },
 
     async getVault(userId) {
@@ -435,6 +597,73 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
     async deleteSession(id) {
       await ensure();
       await sql`DELETE FROM planner_sessions WHERE id = ${id}`;
+    },
+
+    async createLink(input) {
+      await ensure();
+      const rows = (await sql`
+        INSERT INTO planner_links (id, guardian_id, student_username_lower, code_hash, wrapped_share, status)
+        VALUES (${input.id}, ${input.guardianId}, ${input.studentUsernameLower}, ${input.codeHash}, ${input.wrappedShare}, 'pending')
+        ON CONFLICT (guardian_id, student_username_lower) DO NOTHING
+        RETURNING *
+      `) as LinkRow[];
+      return rows[0] ?? null;
+    },
+
+    async listOutgoingLinks(guardianId) {
+      await ensure();
+      const rows = (await sql`
+        SELECT * FROM planner_links WHERE guardian_id = ${guardianId} AND status <> 'revoked' ORDER BY created_at
+      `) as LinkRow[];
+      return rows;
+    },
+
+    async listIncomingLinks(user) {
+      await ensure();
+      const rows = (await sql`
+        SELECT l.*, u.username AS guardian_username, u.display_name AS guardian_display_name
+        FROM planner_links l
+        JOIN planner_users u ON u.id = l.guardian_id
+        WHERE (l.student_username_lower = ${user.usernameLower} AND l.status = 'pending')
+           OR (l.student_id = ${user.id} AND l.status = 'linked')
+        ORDER BY l.created_at
+      `) as (LinkRow & { guardian_username: string; guardian_display_name: string })[];
+      return rows;
+    },
+
+    async acceptLink(codeHash, student) {
+      await ensure();
+      const rows = (await sql`
+        UPDATE planner_links SET status = 'linked', student_id = ${student.id}, updated_at = now()
+        WHERE code_hash = ${codeHash} AND student_username_lower = ${student.usernameLower} AND status = 'pending'
+        RETURNING *
+      `) as LinkRow[];
+      return rows[0] ?? null;
+    },
+
+    async putShare(linkId, studentId, ciphertext, weekOf) {
+      await ensure();
+      const rows = (await sql`
+        UPDATE planner_links
+        SET share_ciphertext = ${ciphertext}, share_week = ${weekOf}, share_updated_at = now(), updated_at = now()
+        WHERE id = ${linkId} AND student_id = ${studentId} AND status = 'linked'
+        RETURNING *
+      `) as LinkRow[];
+      return rows[0] ?? null;
+    },
+
+    async getShare(linkId, guardianId) {
+      await ensure();
+      const rows = (await sql`SELECT * FROM planner_links WHERE id = ${linkId} AND guardian_id = ${guardianId}`) as LinkRow[];
+      return rows[0] ?? null;
+    },
+
+    async deleteLink(linkId, userId) {
+      await ensure();
+      const rows = (await sql`
+        DELETE FROM planner_links WHERE id = ${linkId} AND (guardian_id = ${userId} OR student_id = ${userId}) RETURNING id
+      `) as { id: string }[];
+      return rows.length > 0;
     },
   };
 }

@@ -240,6 +240,8 @@ export interface StudentPanel {
   field: string | null;
   /** Where they are in it: see GRADE_LEVELS. */
   grade: string | null;
+  /** Guardians this student shares weekly results with. */
+  guardians: StudentGuardian[];
   /** Subjects the student tracks, with an optional exam date. */
   subjects: StudentSubject[];
   /** Why the student changed something significant. Detail kept for the active week only. */
@@ -270,6 +272,17 @@ export interface GuardianPanel {
   field: string | null;
   /** Students this guardian watches. Only weekly results travel, never detail. */
   links: GuardianLink[];
+}
+
+/** A guardian this student accepted. The key for their results lives in the vault. */
+export interface StudentGuardian {
+  linkId: string;
+  guardianUsername: string;
+  guardianDisplayName: string;
+  /** base64 — the results key, wrapped by this vault's key. */
+  wrappedShareKey: string;
+  /** Week these results were last sent for. */
+  sharedWeek: string | null;
 }
 
 export type GuardianKind = 'advisor' | 'parent';
@@ -309,6 +322,12 @@ export interface GuardianLink {
   username: string;
   displayName: string;
   status: 'pending' | 'linked';
+  /** The server's id for this request, once it exists. */
+  linkId: string | null;
+  /** The pairing code to hand to the student. Gone from here once accepted. */
+  code: string | null;
+  /** base64 — the results key, wrapped by this vault's key. */
+  wrappedShareKey: string | null;
   /** Latest weekly results. Replaced every week — never accumulated. */
   results: WeekResults | null;
 }
@@ -422,7 +441,7 @@ export function createEmptyState(): PlannerState {
 
 export function createEmptyPanels(): Panels {
   return {
-    student: { enabled: false, field: null, grade: null, subjects: [], explanations: [] },
+    student: { enabled: false, field: null, grade: null, guardians: [], subjects: [], explanations: [] },
     guardian: { enabled: false, kind: null, field: null, links: [] },
   };
 }

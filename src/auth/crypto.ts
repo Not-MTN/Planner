@@ -145,21 +145,81 @@ export async function unwrapKey(wrapped: string, wrappingKey: CryptoKey): Promis
   return importDek(await unwrapKeyRaw(wrapped, wrappingKey), false);
 }
 
-export async function encryptState(state: PlannerState, dek: CryptoKey): Promise<string> {
+export async function encryptJson(value: unknown, key: CryptoKey): Promise<string> {
+  return encryptBytes(JSON.stringify(value), key);
+}
+
+export async function decryptJson<T>(ciphertext: string, key: CryptoKey): Promise<T> {
+  const parsed: unknown = JSON.parse(await decryptBytes(ciphertext, key));
+  if (!parsed || typeof parsed !== 'object') throw new VaultError('That data is not valid.');
+  return parsed as T;
+}
+
+/** iv || ciphertext, base64 — the shape the server stores. */
+export async function encryptBytes(text: string, key: CryptoKey): Promise<string> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const data = new TextEncoder().encode(JSON.stringify(state));
-  const cipher = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, dek, data));
+  const data = new TextEncoder().encode(text);
+  const cipher = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data));
   const out = new Uint8Array(iv.length + cipher.length);
   out.set(iv);
   out.set(cipher, iv.length);
   return toBase64(out);
 }
 
-export async function decryptState(ciphertext: string, dek: CryptoKey): Promise<PlannerState> {
+export async function decryptBytes(ciphertext: string, key: CryptoKey): Promise<string> {
   const bytes = fromBase64(ciphertext);
-  if (bytes.length < 13) throw new VaultError('That vault is not valid.');
-  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytes.subarray(0, 12) }, dek, bytes.subarray(12));
-  const parsed: unknown = JSON.parse(new TextDecoder().decode(plain));
-  if (!parsed || typeof parsed !== 'object') throw new VaultError('That vault is not valid.');
-  return parsed as PlannerState;
+  if (bytes.length < 13) throw new VaultError('That data is not valid.');
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytes.subarray(0, 12) }, key, bytes.subarray(12));
+  return new TextDecoder().decode(plain);
+}
+
+export async function encryptState(state: PlannerState, dek: CryptoKey): Promise<string> {
+  return encryptJson(state, dek);
+}
+
+export async function decryptState(ciphertext: string, dek: CryptoKey): Promise<PlannerState> {
+  const state = await decryptJson<PlannerState>(ciphertext, dek);
+  if (!Array.isArray(state.tasks)) throw new VaultError('That vault is not valid.');
+  return state;
+}
+
+/* --------------------------------------------------------------- link codes */
+
+const LINK_INFO = 'planner-link-v1';
+
+/** Pairing code a guardian hands to their student, e.g. plnr-k7m2-9qxf-3rtv. */
+export function formatLinkCode(): string {
+  const bytes = randomBuffer(12);
+  const chars = Array.from(bytes, (byte) => ALPHABET[byte % ALPHABET.length]).join('');
+  return `plnr-${chars.match(/.{4}/g)!.join('-')}`;
+}
+
+/** Accepts the code typed with or without spaces, dashes, and in either case. */
+export function normalizeLinkCode(input: string): string | null {
+  const clean = input.trim().toUpperCase().replace(/^PLNR[-\s]*/, '').replace(/[\s-]/g, '');
+  if (clean.length !== 12 || [...clean].some((char) => !ALPHABET.includes(char))) return null;
+  return `plnr-${clean.match(/.{4}/g)!.join('-')}`;
+}
+
+/**
+ * What the server keeps of a code: enough to recognise the right one, never
+ * enough to derive the key the results are encrypted with.
+ */
+export async function linkCodeHash(code: string): Promise<string> {
+  const normalised = normalizeLinkCode(code);
+  if (!normalised) throw new VaultError('That link code is not right.');
+  return toBase64(sha256(new TextEncoder().encode(normalised)));
+}
+
+/** Both sides derive this from the code alone, so the key never crosses the wire. */
+export async function keyFromLinkCode(code: string): Promise<CryptoKey> {
+  const normalised = normalizeLinkCode(code);
+  if (!normalised) throw new VaultError('That link code is not right.');
+  const material = hkdf(sha256, new TextEncoder().encode(normalised), new Uint8Array(0), new TextEncoder().encode(LINK_INFO), 32);
+  return importAes(copyToBuffer(material), false);
+}
+
+/** A fresh per-link key for weekly results. Wrapped twice: by the code, then by each vault. */
+export async function createShareKey(): Promise<CryptoKey> {
+  return importDek(randomBuffer(32), true);
 }

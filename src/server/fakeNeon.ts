@@ -38,6 +38,7 @@ export function createFakeNeon(): FakeDb {
     planner_credentials: [],
     planner_vaults: [],
     planner_sessions: [],
+    planner_links: [],
   };
 
   const now = () => new Date().toISOString();
@@ -102,6 +103,93 @@ export function createFakeNeon(): FakeDb {
       row.hash_salt = hash_salt;
       row.updated_at = now();
       return [];
+    }
+
+    if (/^INSERT INTO planner_links /i.test(q)) {
+      const [id, guardian_id, student_username_lower, code_hash, wrapped_share] = values;
+      const clash = tables.planner_links.some(
+        (row) => row.guardian_id === guardian_id && row.student_username_lower === student_username_lower,
+      );
+      if (clash) return [];
+      const row: Row = {
+        id,
+        guardian_id,
+        student_id: null,
+        student_username_lower,
+        code_hash,
+        wrapped_share,
+        share_ciphertext: null,
+        share_week: null,
+        share_updated_at: null,
+        status: 'pending',
+        created_at: now(),
+        updated_at: now(),
+      };
+      tables.planner_links.push(row);
+      return [{ ...row }];
+    }
+
+    if (/^SELECT \* FROM planner_links WHERE guardian_id = /i.test(q)) {
+      return tables.planner_links
+        .filter((row) => row.guardian_id === values[0] && row.status !== 'revoked')
+        .map((row) => ({ ...row }));
+    }
+
+    if (/^SELECT l\.\*, u\.username AS guardian_username/i.test(q)) {
+      const [usernameLower, userId] = values;
+      return tables.planner_links
+        .filter(
+          (row) =>
+            (row.student_username_lower === usernameLower && row.status === 'pending') ||
+            (row.student_id === userId && row.status === 'linked'),
+        )
+        .map((row) => {
+          const guardian = tables.planner_users.find((user) => user.id === row.guardian_id);
+          return { ...row, guardian_username: guardian?.username ?? '', guardian_display_name: guardian?.display_name ?? '' };
+        });
+    }
+
+    if (/^UPDATE planner_links SET status = /i.test(q)) {
+      const [student_id, code_hash, student_username_lower] = values;
+      const row = tables.planner_links.find(
+        (item) =>
+          item.code_hash === code_hash &&
+          item.student_username_lower === student_username_lower &&
+          item.status === 'pending',
+      );
+      if (!row) return [];
+      row.student_id = student_id;
+      row.status = 'linked';
+      row.updated_at = now();
+      return [{ ...row }];
+    }
+
+    if (/^UPDATE planner_links SET share_ciphertext = /i.test(q)) {
+      const [ciphertext, weekOf, id, student_id] = values;
+      const row = tables.planner_links.find(
+        (item) => item.id === id && item.student_id === student_id && item.status === 'linked',
+      );
+      if (!row) return [];
+      row.share_ciphertext = ciphertext;
+      row.share_week = weekOf;
+      row.share_updated_at = now();
+      row.updated_at = row.share_updated_at;
+      return [{ ...row }];
+    }
+
+    if (/^SELECT \* FROM planner_links WHERE id = /i.test(q)) {
+      const [id, guardian_id] = values;
+      return tables.planner_links.filter((row) => row.id === id && row.guardian_id === guardian_id).map((row) => ({ ...row }));
+    }
+
+    if (/^DELETE FROM planner_links WHERE id = /i.test(q)) {
+      const [id, user_id] = values;
+      const kept = tables.planner_links.filter(
+        (row) => !(row.id === id && (row.guardian_id === user_id || row.student_id === user_id)),
+      );
+      const removed = kept.length !== tables.planner_links.length;
+      tables.planner_links = kept;
+      return removed ? [{ id }] : [];
     }
 
     if (/^DELETE FROM planner_users WHERE id = /i.test(q)) {

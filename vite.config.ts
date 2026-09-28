@@ -9,7 +9,18 @@ import type { NextHandleFunction } from 'connect';
 import { handleXAIChatCompletions, handleXAIStatus } from './src/server/xaiProxy';
 import { API_SECURITY_HEADERS } from './src/server/security';
 import { handleSync, handleSyncStatus, neonStore } from './src/server/sync';
-import { handleAccountVault, handleAuthStatus, handleLogin, handleLogout, handleSalt, handleSession, handleSignup } from './src/server/authApi';
+import {
+  handleAccountVault,
+  handleAuthStatus,
+  handleLinkAccept,
+  handleLinks,
+  handleLogin,
+  handleLogout,
+  handleSalt,
+  handleSession,
+  handleShare,
+  handleSignup,
+} from './src/server/authApi';
 import { authStore } from './src/server/authStore';
 import { handleICS } from './src/server/icsProxy';
 
@@ -163,7 +174,13 @@ function authHandler(databaseUrl: string | undefined): NextHandleFunction {
                   ? (webRequest) => authStore(databaseUrl).then((store) => handleAccountVault(webRequest, store))
                   : pathname === '/status'
                     ? (webRequest) => Promise.resolve(handleAuthStatus(webRequest, databaseUrl))
-                    : null;
+                    : pathname === '/links'
+                      ? (webRequest) => authStore(databaseUrl).then((store) => handleLinks(webRequest, store))
+                      : pathname === '/link-accept'
+                        ? (webRequest) => authStore(databaseUrl).then((store) => handleLinkAccept(webRequest, store))
+                        : pathname === '/share'
+                          ? (webRequest) => authStore(databaseUrl).then((store) => handleShare(webRequest, store))
+                          : null;
     if (!run) {
       next();
       return;
