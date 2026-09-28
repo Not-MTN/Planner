@@ -80,6 +80,23 @@ describe('account API', () => {
     expect(sameEmail.status).toBe(409);
   });
 
+  it('accepts a vault-sized body that is larger than the ordinary auth cap', async () => {
+    resetRateLimits();
+    const store = STORE();
+    // A planner with real local data encrypts to far more than the 64 KB cap
+    // that guards the small auth endpoints — sign-up must still go through.
+    const bigCiphertext = 'x'.repeat(100 * 1024);
+    const signup = await handleSignup(post('/api/auth/signup', { ...ACCOUNT, ciphertext: bigCiphertext }), store);
+    expect(signup.status).toBe(201);
+
+    const cookie = cookieFrom(signup);
+    const updated = await handleAccountVault(
+      put('/api/auth/vault', { baseVersion: 1, ciphertext: bigCiphertext }, cookie),
+      store,
+    );
+    expect(updated.status).toBe(200);
+  });
+
   it('validates the payload instead of trusting the client', async () => {
     resetRateLimits();
     const store = STORE();

@@ -172,6 +172,7 @@ export const en = {
   authNameHint: 'What your guardian or students will see',
   authUsername: 'Username or email',
   authUsernameOnly: 'Username',
+  authUsernameHint: '3–24 letters, numbers or underscores',
   authEmail: 'Email (optional)',
   authEmailHint: 'For security alerts only — we never email your planner',
   authPassword: 'Password',
@@ -261,7 +262,6 @@ export const en = {
   linkGuardianD:
     'A parent and an advisor are different roles. When one of them changes something for a student, the student’s own planner passes the word to the other — still encrypted, still in the app.',
 
-  authDemoNote: 'Preview build — the forms are not connected to a server yet.',
   authGoToApp: 'Open my planner',
   authOr: 'or',
   authQuote1: 'I stopped arguing about homework. We just look at the week together.',
@@ -278,6 +278,9 @@ export const en = {
   errNetwork: 'Could not reach the server. Check your connection.',
   errUnknown: 'Something went wrong. Please try again.',
   errShortPassword: 'Use at least 10 characters.',
+  errNameRules: 'Please enter a name — up to 60 characters.',
+  errUsernameRules: 'Username must be 3–24 letters, numbers or underscores.',
+  errEmailRules: 'That email address does not look right.',
 
   navBadge: 'New',
   heroBadge: 'Now with shared planning',
@@ -540,6 +543,7 @@ export const fa: Record<keyof typeof en, string> = {
   authNameHint: 'همان چیزی که سرپرست یا دانش‌آموزانتان می‌بینند',
   authUsername: 'نام کاربری یا ایمیل',
   authUsernameOnly: 'نام کاربری',
+  authUsernameHint: '۳ تا ۲۴ حرف، عدد یا زیرخط',
   authEmail: 'ایمیل (اختیاری)',
   authEmailHint: 'فقط برای هشدارهای امنیتی — برنامه‌تان را هرگز ایمیل نمی‌کنیم',
   authPassword: 'رمز عبور',
@@ -629,7 +633,6 @@ export const fa: Record<keyof typeof en, string> = {
   linkGuardianD:
     'والد و مشاور دو نقش متفاوت‌اند. وقتی یکی از آن‌ها چیزی را برای دانش‌آموز تغییر می‌دهد، برنامه‌ریز خودِ دانش‌آموز خبر را به دیگری می‌رساند — باز هم رمز‌شده، باز هم درون برنامه.',
 
-  authDemoNote: 'نسخهٔ نمایشی — فرم‌ها هنوز به سرور وصل نشده‌اند.',
   authGoToApp: 'باز کردن برنامه‌ام',
   authOr: 'یا',
   authQuote1: 'دیگر سر تکالیف بحث نمی‌کنیم. فقط با هم هفته را نگاه می‌کنیم.',
@@ -646,6 +649,9 @@ export const fa: Record<keyof typeof en, string> = {
   errNetwork: 'به سرور دسترسی نیست. اتصال‌تان را بررسی کنید.',
   errUnknown: 'مشکلی پیش آمد. دوباره تلاش کنید.',
   errShortPassword: 'حداقل ۱۰ کاراکتر وارد کنید.',
+  errNameRules: 'لطفاً نامی وارد کنید — تا ۶۰ کاراکتر.',
+  errUsernameRules: 'نام کاربری باید ۳ تا ۲۴ حرف، عدد یا زیرخط باشد.',
+  errEmailRules: 'آن ایمیل درست به نظر نمی‌رسد.',
 
   navBadge: 'جدید',
   heroBadge: 'با امکان برنامه‌ریزی مشترک',

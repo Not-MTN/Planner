@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { COPY, type Lang } from './copy';
 import { AuthError, signIn, signUp, type AuthErrorCode } from '../auth/session';
+import { EMAIL_PATTERN, USERNAME_PATTERN } from '../shared/authContract';
 import { loadFrom } from '../storage';
 
 type Nav = (to: string) => void;
@@ -26,14 +27,16 @@ function strength(password: string, lang: Lang): { score: 0 | 1 | 2 | 3; label: 
   return { score: 1, label: c.authStrengthFair };
 }
 
-/** Maps an API failure onto translated copy. */
-function errorText(code: AuthErrorCode | null, c: Record<string, string>): string {
+/** Maps an API failure onto translated copy; unknown failures say what the server said. */
+function errorText(code: AuthErrorCode | null, detail: string | null, c: Record<string, string>): string {
   if (code === 'bad_credentials') return c.errBadCredentials;
   if (code === 'email_taken') return c.errEmailTaken;
   if (code === 'taken') return c.errTaken;
   if (code === 'not_configured') return c.errNotConfigured;
   if (code === 'network') return c.errNetwork;
-  return c.errUnknown;
+  // Validation rejections, rate limits, database outages… the server's own
+  // sentence is the only one that says what to do next.
+  return detail ?? c.errUnknown;
 }
 
 /**
@@ -123,7 +126,7 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
       await signIn(identifier, password, remember);
       navigate('/app');
     } catch (caught) {
-      setError(errorText(caught instanceof AuthError ? caught.code : null, c));
+      setError(errorText(caught instanceof AuthError ? caught.code : null, caught instanceof AuthError ? caught.detail : null, c));
       setBusy(false);
     }
   };
@@ -293,7 +296,7 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
       setBusy(false);
       setStep('recovery');
     } catch (caught) {
-      setError(errorText(caught instanceof AuthError ? caught.code : null, c));
+      setError(errorText(caught instanceof AuthError ? caught.code : null, caught instanceof AuthError ? caught.detail : null, c));
       setBusy(false);
     }
   };
@@ -343,6 +346,21 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
                 style={{ animationDelay: '60ms' }}
                 onSubmit={(event) => {
                   event.preventDefault();
+                  // The server enforces the same rules; catching them here keeps
+                  // the real message from ever being needed.
+                  if (!name.trim() || name.trim().length > 60) {
+                    setError(c.errNameRules);
+                    return;
+                  }
+                  if (!USERNAME_PATTERN.test(username.trim())) {
+                    setError(c.errUsernameRules);
+                    return;
+                  }
+                  if (email.trim() && !EMAIL_PATTERN.test(email.trim())) {
+                    setError(c.errEmailRules);
+                    return;
+                  }
+                  setError(null);
                   setStep('role');
                 }}
               >
@@ -354,6 +372,7 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
                 <label className="field">
                   <span>{c.authUsernameOnly}</span>
                   <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required />
+                  <em>{c.authUsernameHint}</em>
                 </label>
                 <label className="field">
                   <span>{c.authEmail}</span>
@@ -386,6 +405,11 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
                   <input type="checkbox" checked={agreed} onChange={(event) => setAgreed(event.target.checked)} required />
                   <span>{c.authTerms}</span>
                 </label>
+                {error ? (
+                  <p className="auth-error" role="alert">
+                    {error}
+                  </p>
+                ) : null}
                 <button type="submit" className="btn btn-primary btn-block" disabled={!agreed || password.length < 10}>
                   {c.authContinue}
                 </button>
@@ -545,12 +569,11 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
           ) : null}
 
           {step === 'details' ? (
-            <footer className="auth-foot reveal-in" style={{ animationDelay: '220ms' }}>
-              <p>
-                {c.authHasAccount} <button type="button" className="link" onClick={() => navigate('/login')}>{c.authSignInAction}</button>
-              </p>
-              <p className="auth-note">{c.authDemoNote}</p>
-            </footer>
+              <footer className="auth-foot reveal-in" style={{ animationDelay: '220ms' }}>
+                <p>
+                  {c.authHasAccount} <button type="button" className="link" onClick={() => navigate('/login')}>{c.authSignInAction}</button>
+                </p>
+              </footer>
           ) : null}
         </div>
       </section>

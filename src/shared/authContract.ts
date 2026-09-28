@@ -11,6 +11,12 @@ export const SESSION_COOKIE = 'planner_session';
 export const SESSION_TTL_DAYS = 30;
 export const MAX_VAULT_BYTES = 3_000_000;
 export const MAX_AUTH_BODY_BYTES = 64 * 1024;
+/**
+ * Bodies that carry an encrypted vault (sign-up, PUT /api/auth/vault) hold the
+ * whole planner as base64, so the ordinary 64 KB cap would reject any account
+ * with real local data. Sized to the vault's own ceiling plus JSON overhead.
+ */
+export const MAX_VAULT_BODY_BYTES = MAX_VAULT_BYTES * 2 + 32 * 1024;
 
 export type AccountRole = 'personal' | 'student' | 'guardian';
 export const ACCOUNT_ROLES: readonly AccountRole[] = ['personal', 'student', 'guardian'] as const;

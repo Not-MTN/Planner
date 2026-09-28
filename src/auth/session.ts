@@ -20,9 +20,16 @@ export type AuthErrorCode =
 
 export class AuthError extends Error {
   readonly code: AuthErrorCode;
-  constructor(code: AuthErrorCode, message: string) {
+  /**
+   * What the server actually said (untranslated), when it said anything. UI
+   * copy has the final word for known codes; everything else shows this
+   * instead of a vague "something went wrong".
+   */
+  readonly detail: string | null;
+  constructor(code: AuthErrorCode, message: string, detail: string | null = null) {
     super(message);
     this.code = code;
+    this.detail = detail;
   }
 }
 
@@ -72,7 +79,11 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
     const code = (error?.code ?? 'unknown') as AuthErrorCode;
     const mapped: AuthErrorCode =
       code === 'taken' ? (error?.message?.toLowerCase().includes('email') ? 'email_taken' : 'taken') : code;
-    throw new AuthError(mapped, error?.message ?? 'Something went wrong. Please try again.');
+    const serverMessage = typeof error?.message === 'string' && error.message.trim() ? error.message : null;
+    // No structured message (an error page, a proxy, a bare status): say which
+    // status came back, the same way the AI proxy does — silence helps nobody.
+    const detail = serverMessage ?? `The server returned an unexpected response (${response.status}).`;
+    throw new AuthError(mapped, detail, detail);
   }
   return body as T;
 }

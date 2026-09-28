@@ -21,6 +21,7 @@ import {
   cleanWrappedShare,
   isBase64,
   MAX_AUTH_BODY_BYTES,
+  MAX_VAULT_BODY_BYTES,
   MAX_VAULT_BYTES,
   MAX_LINKS_PER_SIDE,
   SESSION_COOKIE,
@@ -113,10 +114,10 @@ export function readSessionToken(request: Request): string | null {
   return null;
 }
 
-async function readJsonBody(request: Request): Promise<Record<string, unknown> | null> {
+async function readJsonBody(request: Request, maxBytes: number = MAX_AUTH_BODY_BYTES): Promise<Record<string, unknown> | null> {
   let text: string;
   try {
-    text = await readLimitedBody(request, MAX_AUTH_BODY_BYTES);
+    text = await readLimitedBody(request, maxBytes);
   } catch (err) {
     if (err instanceof BodyTooLargeError) return null;
     return null;
@@ -142,7 +143,9 @@ export async function handleSignup(request: Request, store: AuthStore | null): P
   if (blocked) return blocked;
   if (request.method !== 'POST') return error(405, 'Method not allowed.', undefined);
 
-  const body = await readJsonBody(request);
+  // The vault rides along with sign-up, so this body is far larger than the
+  // ordinary auth cap — a planner with real data must still fit.
+  const body = await readJsonBody(request, MAX_VAULT_BODY_BYTES);
   if (!body) return error(400, 'Expected a JSON body.');
 
   const username = cleanUsername(body.username);
@@ -346,7 +349,7 @@ export async function handleAccountVault(request: Request, store: AuthStore | nu
     }
 
     if (request.method === 'PUT') {
-      const body = await readJsonBody(request);
+      const body = await readJsonBody(request, MAX_VAULT_BODY_BYTES);
       if (!body) return error(400, 'Expected a JSON body.');
       const baseVersion = typeof body.baseVersion === 'number' && Number.isInteger(body.baseVersion) && body.baseVersion >= 0 ? body.baseVersion : -1;
       const ciphertext = body.ciphertext;
