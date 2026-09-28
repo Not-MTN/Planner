@@ -11,6 +11,8 @@ import { t } from '../i18n';
 import { App } from '../App';
 import { bootAccount, signOut, unlockWithPassword, type AccountBoot } from './vault';
 import { AuthError } from './session';
+// The planner's component styles, for the unlock screen and the app behind it.
+import '../styles.css';
 import './gate.css';
 
 type Boot = AccountBoot | { status: 'offline' } | null;

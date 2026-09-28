@@ -23,7 +23,11 @@
   box-sizing: border-box;
 }
 
-.mkt button {
+/* Wrapped in :where() so this reset carries no specificity of its own.
+   As `.mkt button` it outranked `.btn` and stripped the padding off every
+   button-styled call to action — the same button rendered as an <a> kept its
+   full height, so the pair looked broken side by side. */
+:where(.mkt button) {
   font: inherit;
   color: inherit;
   cursor: pointer;
@@ -32,30 +36,24 @@
   padding: 0;
 }
 
-.mkt img {
+:where(.mkt img) {
   display: block;
   max-width: 100%;
   height: auto;
 }
 
+/* The browser's own margins for headings, paragraphs and lists are already
+   removed once, at the lowest possible specificity, in tokens.css. Repeating
+   that reset here — as `.mkt p { margin: 0 }` — outranks every component
+   class below (`.kicker`, `.hero-title`, `.hero-sub`, ...), so each one
+   silently lost the spacing that gives the page its rhythm. Keep the
+   typography here; leave the box model to the component. */
 .mkt h1,
 .mkt h2,
 .mkt h3 {
   font-family: var(--serif);
   font-weight: 460;
   letter-spacing: -0.015em;
-  margin: 0;
-}
-
-.mkt p {
-  margin: 0;
-}
-
-.mkt ul,
-.mkt ol {
-  margin: 0;
-  padding: 0;
-  list-style: none;
 }
 
 .wrap {
@@ -2694,5 +2692,47 @@
 
   :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
     outline-color: var(--accent);
+  }
+}
+
+/* ---------- Phones held sideways ---------- */
+/* Landscape has height to spare but almost none to waste: a 390px-tall screen
+   fits the headline and nothing else, pushing the call to action below the
+   fold. Tighten the hero so the promise and the button are both in view. */
+@media (max-height: 560px) and (orientation: landscape) {
+  .hero {
+    padding: clamp(26px, 4.5vw, 44px) 0 clamp(22px, 3.5vw, 36px);
+  }
+
+  .hero-title {
+    font-size: clamp(28px, 5.2vw, 44px);
+    margin-bottom: 14px;
+  }
+
+  .hero-sub {
+    font-size: clamp(15px, 1.5vw, 17px);
+    line-height: 1.5;
+    margin-bottom: 18px;
+  }
+
+  .pill {
+    margin-bottom: 16px;
+  }
+
+  .hero-actions {
+    margin-bottom: 10px;
+  }
+
+  .hero-trust {
+    margin-bottom: 0;
+  }
+
+  /* The photograph mock-up is the first thing to go when height runs out. */
+  .hero-note {
+    display: none;
+  }
+
+  .section {
+    padding: clamp(36px, 6vw, 64px) 0;
   }
 }

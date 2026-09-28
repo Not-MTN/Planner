@@ -2,7 +2,10 @@ import { StrictMode, Suspense, lazy } from 'react';
 import { createRoot } from 'react-dom/client';
 import { registerPWA } from './pwa';
 import '@fontsource-variable/estedad';
-import './styles.css';
+// Tokens and base resets only. styles.css holds the planner's components and
+// is imported by the gate, so the public site never inherits them (and the two
+// bundles cannot re-style each other's .check, .hero, .field, .btn, ...).
+import './tokens.css';
 
 // The marketing site and the planner are two separate bundles: opening the app
 // never downloads the landing page, and vice versa.
