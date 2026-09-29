@@ -190,6 +190,24 @@ The key is read only on the server from `GROQ_API_KEY`; it is never put in the b
 
 Both must be listed in the current [model catalogue](https://console.groq.com/docs/models) — Groq retires models regularly, and a retired id comes back as a 404 the proxy reports as *"Groq does not recognise that model name"*. If you host the static build somewhere other than Vercel, provide equivalent server-side `/api/groq/*` endpoints (you can reuse `src/server/groqProxy.ts`).
 
+**Changing a model needs no client change.** The browser always names the role it needs — the
+text id or the vision id above — and the proxy resolves that onto whatever `GROQ_MODEL` /
+`GROQ_VISION_MODEL` this deployment picked. Setting `GROQ_MODEL=openai/gpt-oss-20b` and redeploying
+is enough; the bundle does not have to be rebuilt to match. Set `GROQ_VISION_MODEL` to an empty
+string to turn image input off, and image requests are then refused with that stated plainly
+rather than failing inside Groq.
+
+Two more things the proxy settles on the way out, both because Groq's reasoning models behave
+differently from a plain chat model:
+
+- **Reasoning effort is pinned per model** (`low` for GPT-OSS, `none` for Qwen, so it reads a photo
+  in instruct mode). Reasoning tokens come out of `max_completion_tokens` too, so leaving the
+  effort at the model's default lets the thinking quietly eat the budget meant for the answer and
+  the reply arrives as truncated JSON. Models that do not take the knob get no invented parameter.
+- **The OpenAI-only `detail` hint is stripped from image parts.** Groq does not document it and
+  charges a flat 2048 input tokens per image regardless, so forwarding it would buy nothing and
+  risk a 400 from a provider that validates strictly.
+
 ### If the AI says the key was rejected
 
 That message used to appear for every 401, including ones that had nothing to do with the key. The app now shows Groq's own error, and the proxy cleans up the three paste mistakes that cause a real 401: surrounding quotes, a `Bearer ` prefix, and invisible characters copied from a document.

@@ -11,19 +11,68 @@
 import { API_SECURITY_HEADERS, BodyTooLargeError, rateLimitResponse, readLimitedBody } from './security.js';
 
 export const GROQ_UPSTREAM_CHAT_COMPLETIONS = 'https://api.groq.com/openai/v1/chat/completions';
+
 /**
- * Default text model; override with the GROQ_MODEL environment variable.
- * GPT-OSS 120B is a Groq *production* model with JSON object mode, 131K context
- * and 65,536 max output tokens.
+ * The model id the browser sends for a text request. The browser cannot know
+ * which model this deployment picked, so it always names this one and the proxy
+ * maps it onto `GROQ_MODEL` (defaulting to the same id). Keeping the browser's
+ * vocabulary fixed is what lets GROQ_MODEL be changed without shipping a new
+ * bundle — otherwise every request would be rejected as an unknown model.
+ *
+ * GPT-OSS 120B is a Groq *production* model: JSON object mode, 131K context,
+ * 65,536 max output tokens.
  */
-export const GROQ_ALLOWED_MODEL = 'openai/gpt-oss-120b';
+export const GROQ_DEFAULT_TEXT_MODEL = 'openai/gpt-oss-120b';
 /**
- * Default image model; override with GROQ_VISION_MODEL. Groq's text models
- * reject array content outright ("messages[1].content must be a string"), so
- * image requests need a model that actually accepts `image_url` parts.
- * Override GROQ_VISION_MODEL to '' to disable image input.
+ * The model id the browser sends when it has an image to read. Groq's text
+ * models reject array content outright ("messages[1].content must be a
+ * string"), so images go to a model that accepts `image_url` parts. Mapped onto
+ * `GROQ_VISION_MODEL`; set that to an empty string to disable image input.
  */
-export const GROQ_ALLOWED_VISION_MODEL = 'qwen/qwen3.8-27b';
+export const GROQ_DEFAULT_VISION_MODEL = 'qwen/qwen3.8-27b';
+
+/**
+ * Reasoning tokens count against `max_completion_tokens`, so leaving the effort
+ * unspecified on a reasoning model lets the model's own default quietly eat the
+ * budget meant for the answer — the reply arrives as truncated JSON. Only models
+ * known to accept the knob get one; anything else, including a GROQ_MODEL
+ * override, is sent untouched.
+ *
+ * 'low' is enough for turning a schedule into JSON; 'none' puts Qwen in
+ * instruct mode, which is what reading a photo of a written plan needs.
+ */
+const REASONING_EFFORT_BY_MODEL: Record<string, string> = {
+  'openai/gpt-oss-120b': 'low',
+  'openai/gpt-oss-20b': 'low',
+  'qwen/qwen3.8-27b': 'none',
+};
+
+/**
+ * The last thing that touches a request before it leaves the proxy: the model
+ * this deployment actually resolved, its reasoning effort, and image parts with
+ * the OpenAI-only `detail` hint removed. Groq does not document `detail` and
+ * charges a flat 2048 input tokens per image whatever it says, so forwarding it
+ * buys nothing and risks a 400 from a provider that validates strictly.
+ */
+export function finalizeUpstreamBody(value: unknown, model: string, reasoningEffort?: string): string {
+  const record: Record<string, unknown> = isRecord(value) ? { ...value } : {};
+  record.model = model;
+  if (reasoningEffort) record.reasoning_effort = reasoningEffort;
+  else delete record.reasoning_effort;
+  if (Array.isArray(record.messages)) {
+    record.messages = (record.messages as unknown[]).map((message) => {
+      if (!isRecord(message) || !Array.isArray(message.content)) return message;
+      const content = (message.content as unknown[]).map((part) => {
+        if (!isRecord(part) || !isRecord(part.image_url)) return part;
+        const image: Record<string, unknown> = { ...(part.image_url as Record<string, unknown>) };
+        delete image.detail;
+        return { ...part, image_url: image };
+      });
+      return { ...message, content };
+    });
+  }
+  return JSON.stringify(record);
+}
 
 /**
  * Vercel rejects function request bodies over 4.5 MB before our code runs, so
@@ -252,8 +301,8 @@ function validMessageContent(value: unknown): { valid: boolean; textBytes: numbe
 /** Only the narrow JSON shape used by Planner is allowed through the API-key proxy. */
 export function validateChatPayload(
   value: unknown,
-  allowedModels: string[] = [GROQ_ALLOWED_MODEL],
-  visionModel?: string,
+  allowedModels: string[] = [GROQ_DEFAULT_TEXT_MODEL],
+  visionModels: string[] = [],
 ): string | null {
   if (!isRecord(value)) return 'The request body must be a JSON object.';
   if ([...Object.keys(value)].some((key) => !ALLOWED_CHAT_KEYS.has(key))) return 'The request contains an unsupported field.';
@@ -273,8 +322,8 @@ export function validateChatPayload(
   if (textBytes > MAX_MESSAGE_TEXT_BYTES) return 'The text in this request is too long.';
   // Groq's text models answer image parts with "content must be a string", so
   // name the real problem instead of forwarding a confusing upstream 400.
-  if (hasImage && visionModel && value.model !== visionModel) {
-    return `Image input needs the vision model (${visionModel}), not ${String(value.model)}.`;
+  if (hasImage && visionModels.length > 0 && !visionModels.includes(value.model)) {
+    return `Image input needs the vision model (${visionModels[0]}), not ${String(value.model)}.`;
   }
   if (value.temperature !== undefined && (typeof value.temperature !== 'number' || !Number.isFinite(value.temperature) || value.temperature < 0 || value.temperature > 2)) {
     return 'The temperature value is invalid.';
@@ -345,14 +394,33 @@ export async function handleGroqChatCompletions(
   } catch {
     return errorResponse(400, 'The request body must be JSON.');
   }
-  const textModel = normalizeApiKey(options.model) || GROQ_ALLOWED_MODEL;
+  const textModel = normalizeApiKey(options.model) || GROQ_DEFAULT_TEXT_MODEL;
   // An explicitly blank GROQ_VISION_MODEL disables image input instead of
   // quietly routing images to a text model that rejects array content upstream.
   const visionModel =
-    options.visionModel === undefined ? GROQ_ALLOWED_VISION_MODEL : normalizeApiKey(options.visionModel);
-  const allowedModels = visionModel && visionModel !== textModel ? [textModel, visionModel] : [textModel];
-  const validationError = validateChatPayload(parsed, allowedModels, visionModel || undefined);
+    options.visionModel === undefined ? GROQ_DEFAULT_VISION_MODEL : normalizeApiKey(options.visionModel);
+  const requested = isRecord(parsed) && typeof parsed.model === 'string' ? parsed.model : '';
+  /**
+   * The browser can only name the role it needs — it has no way to know which
+   * model this deployment picked. So the ids accepted here are the role
+   * defaults *plus* any configured model, and the request is resolved to a role
+   * before validation, not after. Validating the requested id against the
+   * resolved model would reject every request the moment GROQ_MODEL is set.
+   */
+  const visionIds = visionModel ? [GROQ_DEFAULT_VISION_MODEL, visionModel] : [];
+  const isVisionRequest = visionIds.includes(requested);
+  if (requested === GROQ_DEFAULT_VISION_MODEL && !visionModel) {
+    return errorResponse(
+      400,
+      'Image input is turned off on this deployment. Set GROQ_VISION_MODEL to a multimodal model such as qwen/qwen3.8-27b, or send the request without an image.',
+    );
+  }
+  const isTextRequest = requested === GROQ_DEFAULT_TEXT_MODEL || requested === textModel;
+  const effectiveModel = isVisionRequest ? visionModel : isTextRequest ? textModel : requested;
+  const allowedModels = [...new Set([GROQ_DEFAULT_TEXT_MODEL, textModel, ...visionIds])];
+  const validationError = validateChatPayload(parsed, allowedModels, visionIds);
   if (validationError) return errorResponse(400, validationError);
+  const outgoingBody = finalizeUpstreamBody(parsed, effectiveModel, REASONING_EFFORT_BY_MODEL[effectiveModel]);
 
   const fetchImpl = options.fetchImpl ?? fetch;
   try {
@@ -363,7 +431,7 @@ export async function handleGroqChatCompletions(
         'Content-Type': 'application/json',
         Accept: 'application/json',
       },
-      body,
+      body: outgoingBody,
       signal: AbortSignal.timeout(options.timeoutMs ?? UPSTREAM_TIMEOUT_MS),
     });
     const responseBody = await readLimitedResponse(upstream, MAX_UPSTREAM_RESPONSE_BYTES);

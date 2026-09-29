@@ -2,11 +2,12 @@ import { readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import vercelFunction from '../../api/[...path]';
-import { MAX_PLAN_IMAGE_BYTES, GROQ_CHAT_URL, GROQ_STATUS_URL } from '../ai';
+import { MAX_PLAN_IMAGE_BYTES, GROQ_CHAT_URL, GROQ_STATUS_URL, GROQ_TEXT_MODEL, GROQ_VISION_MODEL } from '../ai';
 import {
   MAX_PROXY_BODY_BYTES,
-  GROQ_ALLOWED_MODEL,
-  GROQ_ALLOWED_VISION_MODEL,
+  GROQ_DEFAULT_TEXT_MODEL,
+  GROQ_DEFAULT_VISION_MODEL,
+  finalizeUpstreamBody,
   GROQ_UPSTREAM_CHAT_COMPLETIONS,
   handleGroqChatCompletions,
   handleGroqStatus,
@@ -29,7 +30,7 @@ function request(path: string, init: RequestInit & { origin?: string } = {}): Re
 }
 
 function chatBody(extra: Record<string, unknown> = {}): string {
-  return JSON.stringify({ model: GROQ_ALLOWED_MODEL, messages: [{ role: 'user', content: 'Plan my day' }], ...extra });
+  return JSON.stringify({ model: GROQ_DEFAULT_TEXT_MODEL, messages: [{ role: 'user', content: 'Plan my day' }], ...extra });
 }
 
 function imageChatBody(model: string): string {
@@ -106,7 +107,12 @@ describe('chat completions route', () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe(GROQ_UPSTREAM_CHAT_COMPLETIONS);
     expect(new Headers(init?.headers).get('authorization')).toBe(`Bearer ${FAKE_KEY}`);
-    expect(init?.body).toBe(body);
+    // Not byte-identical to what the browser sent: the proxy resolves the model
+    // and sets the reasoning effort on the way out.
+    const sent = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    expect(sent).toMatchObject(JSON.parse(body));
+    expect(sent.model).toBe(GROQ_DEFAULT_TEXT_MODEL);
+    expect(sent.reasoning_effort).toBe('low');
   });
 
   it('returns 503 with setup guidance when the key is missing, without calling Groq', async () => {
@@ -146,8 +152,8 @@ describe('chat completions route', () => {
     const valid = JSON.parse(chatBody()) as Record<string, unknown>;
     expect(validateChatPayload(valid)).toBeNull();
     expect(validateChatPayload({ ...valid, model: 'another-model' })).toContain('model');
-    expect(GROQ_ALLOWED_MODEL).toBe('openai/gpt-oss-120b');
-    expect(GROQ_ALLOWED_VISION_MODEL).toBe('qwen/qwen3.8-27b');
+    expect(GROQ_DEFAULT_TEXT_MODEL).toBe('openai/gpt-oss-120b');
+    expect(GROQ_DEFAULT_VISION_MODEL).toBe('qwen/qwen3.8-27b');
     expect(validateChatPayload({ ...valid, stream: true })).toContain('unsupported');
     expect(validateChatPayload({
       ...valid,
@@ -162,12 +168,12 @@ describe('chat completions route', () => {
   });
 
   it('sends images only to a model that can read them', () => {
-    const models = [GROQ_ALLOWED_MODEL, GROQ_ALLOWED_VISION_MODEL];
+    const models = [GROQ_DEFAULT_TEXT_MODEL, GROQ_DEFAULT_VISION_MODEL];
     // Groq's text models reject array content, so the proxy names the real fix.
-    expect(validateChatPayload(JSON.parse(imageChatBody(GROQ_ALLOWED_MODEL)), models, GROQ_ALLOWED_VISION_MODEL)).toContain('vision model');
-    expect(validateChatPayload(JSON.parse(imageChatBody(GROQ_ALLOWED_VISION_MODEL)), models, GROQ_ALLOWED_VISION_MODEL)).toBeNull();
+    expect(validateChatPayload(JSON.parse(imageChatBody(GROQ_DEFAULT_TEXT_MODEL)), models, [GROQ_DEFAULT_VISION_MODEL])).toContain('vision model');
+    expect(validateChatPayload(JSON.parse(imageChatBody(GROQ_DEFAULT_VISION_MODEL)), models, [GROQ_DEFAULT_VISION_MODEL])).toBeNull();
     // A deployment that turned the vision model off refuses the image outright.
-    expect(validateChatPayload(JSON.parse(imageChatBody(GROQ_ALLOWED_VISION_MODEL)), [GROQ_ALLOWED_MODEL], undefined)).toContain('not available');
+    expect(validateChatPayload(JSON.parse(imageChatBody(GROQ_DEFAULT_VISION_MODEL)), [GROQ_DEFAULT_TEXT_MODEL], [])).toContain('not available');
   });
 
   it('passes upstream errors through and maps network failures and timeouts', async () => {
@@ -382,5 +388,71 @@ describe('billing errors', () => {
     expect(parsed.error.code).toBe('billing');
     expect(parsed.error.message).toContain('console.groq.com/settings/billing');
     expect(parsed.error.message).toContain('no redeploy');
+  });
+});
+
+describe('what actually reaches Groq', () => {
+  it('keeps the browser and the server agreeing on the default model ids', () => {
+    // The browser names a role, the proxy resolves the model. If these drift,
+    // every request would be rejected as an unknown model.
+    expect(GROQ_TEXT_MODEL).toBe(GROQ_DEFAULT_TEXT_MODEL);
+    expect(GROQ_VISION_MODEL).toBe(GROQ_DEFAULT_VISION_MODEL);
+  });
+
+  it('maps the browser\'s model onto the one this deployment configured', async () => {
+    resetRateLimits();
+    let sent = '';
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      sent = String(init.body);
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{}' } }] }), { status: 200 });
+    });
+    // GROQ_MODEL points elsewhere; the browser still sends the shipped default.
+    const response = await handleGroqChatCompletions(
+      request('/api/groq/chat/completions', { method: 'POST', body: chatBody() }),
+      FAKE_KEY,
+      { fetchImpl: fetchMock as unknown as typeof fetch, model: 'llama-3.3-70b-versatile' },
+    );
+    expect(response.status).toBe(200);
+    expect(JSON.parse(sent).model).toBe('llama-3.3-70b-versatile');
+  });
+
+  it('gives reasoning models an effort, so thinking cannot eat the answer budget', () => {
+    const text = JSON.parse(finalizeUpstreamBody({ model: 'x', messages: [] }, 'openai/gpt-oss-120b', 'low'));
+    expect(text.reasoning_effort).toBe('low');
+    const vision = JSON.parse(finalizeUpstreamBody({ model: 'x', messages: [] }, 'qwen/qwen3.8-27b', 'none'));
+    expect(vision.reasoning_effort).toBe('none');
+    // A model that does not take the knob gets no invented parameter.
+    const other = JSON.parse(finalizeUpstreamBody({ model: 'x', messages: [] }, 'llama-3.3-70b-versatile', undefined));
+    expect(other.reasoning_effort).toBeUndefined();
+  });
+
+  it('drops the OpenAI-only image `detail` hint before forwarding', () => {
+    const body = {
+      model: 'qwen/qwen3.8-27b',
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'read' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA', detail: 'high' } }] },
+        { role: 'assistant', content: 'plain string stays alone' },
+      ],
+    };
+    const sent = JSON.parse(finalizeUpstreamBody(body, 'qwen/qwen3.8-27b', 'none')) as {
+      messages: Array<{ content: unknown }>;
+    };
+    const parts = sent.messages[0].content as Array<{ type: string; image_url?: { url: string; detail?: string } }>;
+    expect(parts[1].image_url).toEqual({ url: 'data:image/png;base64,AAAA' });
+    expect(sent.messages[1].content).toBe('plain string stays alone');
+  });
+
+  it('refuses an image outright when the vision model is switched off', async () => {
+    resetRateLimits();
+    const fetchMock = upstreamOk();
+    const response = await handleGroqChatCompletions(
+      request('/api/groq/chat/completions', { method: 'POST', body: imageChatBody(GROQ_DEFAULT_VISION_MODEL) }),
+      FAKE_KEY,
+      { fetchImpl: fetchMock as unknown as typeof fetch, visionModel: '' },
+    );
+    expect(response.status).toBe(400);
+    const parsed = (await response.json()) as { error: { message: string } };
+    expect(parsed.error.message).toContain('GROQ_VISION_MODEL');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

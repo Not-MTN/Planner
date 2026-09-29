@@ -31,6 +31,14 @@ export const GROQ_VISION_MODEL = 'qwen/qwen3.8-27b';
 export const MAX_PLAN_IMAGE_BYTES = 3 * 1024 * 1024;
 /** Groq's recommended range for GPT-OSS is 0.5-0.7; the proxy allows 0-2. */
 export const AI_TEMPERATURE = 0.6;
+/**
+ * Token budgets. Both Groq models are reasoning models, and reasoning tokens
+ * come out of `max_completion_tokens` too, so the budget has to cover the
+ * thinking *and* the JSON answer. A long-range draft is a lot of JSON, hence the
+ * larger figure. Both stay under qwen/qwen3.8-27b's 16,384 output ceiling.
+ */
+export const DEFAULT_MAX_TOKENS = 4_000;
+export const LONG_RANGE_MAX_TOKENS = 8_000;
 export const GROQ_KEY_MISSING_MESSAGE = 'GROQ_API_KEY is not configured on the server. On Vercel, add it under Project Settings → Environment Variables and redeploy. Locally, add it to .env.local and restart the dev server.';
 /**
  * Used only when the proxy flagged `billing` without a message. The wording
@@ -335,11 +343,13 @@ function parseJson(text: string): unknown {
   }
 }
 
-async function groqJsonInternal(system: string, user: string, imageDataUrl?: string, signal?: AbortSignal, maxTokens = 3500): Promise<unknown> {
+async function groqJsonInternal(system: string, user: string, imageDataUrl?: string, signal?: AbortSignal, maxTokens = DEFAULT_MAX_TOKENS): Promise<unknown> {
+  // No `detail` hint: Groq does not document the field and charges a flat 2048
+  // input tokens per image regardless, so it would only risk a strict 400.
   const content = imageDataUrl
     ? [
         { type: 'text', text: user },
-        { type: 'image_url', image_url: { url: imageDataUrl, detail: 'high' } },
+        { type: 'image_url', image_url: { url: imageDataUrl } },
       ]
     : user;
   let response: Response;
@@ -417,8 +427,13 @@ function parseJsonSafely(text: string): unknown {
 }
 
 /** Voice/plain-text JSON chat against the Groq proxy (system + user in, parsed JSON out). */
-export async function groqChatJson(system: string, user: string, signal?: AbortSignal): Promise<unknown> {
-  return groqJsonInternal(system, user, undefined, signal);
+export async function groqChatJson(
+  system: string,
+  user: string,
+  signal?: AbortSignal,
+  maxTokens: number = DEFAULT_MAX_TOKENS,
+): Promise<unknown> {
+  return groqJsonInternal(system, user, undefined, signal, maxTokens);
 }
 
 /** Normalize a raw AI plan payload into a safe AIDraft for a range. */
@@ -582,7 +597,7 @@ export async function generateAIPlan(options: {
   const currentPlans = buildPlanningContext(state, range);
   const system = `You are a supportive, practical planning assistant inside a personal planner. Create a realistic plan, not a packed schedule. ${planSafetyRules(range)} ${spanGuidance(range.days)} ${PLAN_JSON_SHAPE}. Tasks must have a date inside the range. Use events only when a time is useful. Habits should be repeatable and few; do not add a habit that already exists. Avoid duplicating the user's current tasks and events. If the user uploaded a handwritten or printed plan, transcribe what is clear, preserve dates/times, and put unclear details in the summary rather than guessing.`;
   const user = `Planning request: ${prompt.trim() || 'Read the uploaded image and turn the plan into planner tasks, timed events, and a few repeatable habits where appropriate.'}\n\nCurrent schedule and constraints (do not add over existing times):\n${JSON.stringify(currentPlans)}`;
-  const raw = await groqJsonInternal(system, user, imageDataUrl, undefined, range.days > 30 ? 6000 : 3500);
+  const raw = await groqJsonInternal(system, user, imageDataUrl, undefined, range.days > 30 ? LONG_RANGE_MAX_TOKENS : DEFAULT_MAX_TOKENS);
   return normalizePlan(raw, state, range);
 }
 
@@ -614,7 +629,7 @@ export async function refineAIPlan(options: {
   const currentPlans = buildPlanningContext(state, range);
   const system = `You are a supportive, practical planning assistant inside a personal planner, now EDITING an existing draft plan. ${planSafetyRules(range)} Apply the user's change request precisely and minimally: keep every item they did not ask to change (same title, date, time), modify/move/remove only what the request affects, and add new items only when the request needs them. ${spanGuidance(range.days)} ${PLAN_JSON_SHAPE}. Return the FULL revised plan — not just the changed parts. Keep the summary accurate for the revised plan. Never re-add items the user already deleted from the draft; the currentDraft is the source of truth, not the planner history.`;
   const user = `Change request: ${request.trim()}\n\nCurrent draft to revise:\n${JSON.stringify(draftForModel(draft))}\n\nCurrent schedule and constraints (do not add over existing times):\n${JSON.stringify(currentPlans)}`;
-  const raw = await groqJsonInternal(system, user, undefined, undefined, range.days > 30 ? 6000 : 3500);
+  const raw = await groqJsonInternal(system, user, undefined, undefined, range.days > 30 ? LONG_RANGE_MAX_TOKENS : DEFAULT_MAX_TOKENS);
   return normalizePlan(raw, state, range);
 }
 
