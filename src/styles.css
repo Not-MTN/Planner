@@ -74,6 +74,9 @@
     border-inline-end: 1px solid var(--line);
     background: color-mix(in srgb, var(--surface) 55%, transparent);
     backdrop-filter: blur(8px);
+    /* The rail never spills: the tab list scrolls inside `.side-nav` instead,
+       so Settings and the tools below it stay on screen at any height. */
+    overflow: hidden;
   }
 }
 .brand {
@@ -85,6 +88,7 @@
   background: transparent;
   text-align: start;
   width: 100%;
+  flex: none;
 }
 .brand-mark {
   width: 38px;
@@ -119,11 +123,32 @@
   width: 100%;
   margin-bottom: 8px;
   transition: border-color 0.2s, color 0.2s;
+  flex: none;
 }
 .side-search span { flex: 1; text-align: start; font-size: 14px; }
 .side-search:hover { border-color: var(--accent); color: var(--ink); }
 
-.side-nav { display: flex; flex-direction: column; gap: 2px; }
+/* The rail is a fixed 100dvh column, so the tab list has to scroll inside
+   itself. Without `min-height: 0` a flex item refuses to shrink below its
+   content, the nav overflows the sidebar, and everything after it — Settings,
+   "How it works", the theme switch — is pushed off-screen where you can only
+   reach it by scrolling the whole page. */
+.side-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+}
+.side-nav::-webkit-scrollbar { width: 8px; }
+.side-nav::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--ink) 14%, transparent);
+  border-radius: 99px;
+}
 .nav-label {
   margin: 16px 12px 6px;
   font-size: 10.5px;
@@ -162,7 +187,7 @@
   color: var(--accent-deep);
   font-weight: 650;
 }
-.side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 2px; padding-top: 14px; }
+.side-foot { margin-top: auto; flex: none; display: flex; flex-direction: column; gap: 2px; padding-top: 14px; }
 .side-history { display: flex; gap: 6px; padding: 0 6px 6px; }
 .side-tool {
   display: flex;
