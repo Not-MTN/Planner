@@ -8,6 +8,7 @@ import { FlameIcon, SparklesIcon } from '../icons';
 import { Meter } from '../components/ui';
 import type { PlannerState } from '../types';
 import { RhythmCard } from './RhythmCard';
+import { FocusHistory } from '../components/FocusHistory';
 import { t } from '../i18n';
 
 export function InsightsView() {
@@ -170,6 +171,9 @@ export function InsightsView() {
         <MoodStrip state={state} today={today} />
         <PlanVsFocusCard state={state} today={today} />
         <YearPixelsCard state={state} today={today} />
+        <section className="card">
+          <FocusHistory state={state} />
+        </section>
       </div>
     </div>
   );

@@ -197,6 +197,17 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const server = useServerNotice(c, lang);
 
+  // If already signed in, go straight to app
+  useEffect(() => {
+    let cancelled = false;
+    import('../auth/session').then(({ fetchSession }) => {
+      fetchSession().then((user) => {
+        if (!cancelled && user) navigate('/app');
+      }).catch(() => {});
+    });
+    return () => { cancelled = true; };
+  }, [navigate]);
+
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (busy) return;
@@ -385,6 +396,16 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [passkeyAdded, setPasskeyAdded] = useState(false);
   const server = useServerNotice(c, lang);
+
+  useEffect(() => {
+    let cancelled = false;
+    import('../auth/session').then(({ fetchSession }) => {
+      fetchSession().then((user) => {
+        if (!cancelled && user) navigate('/app');
+      }).catch(() => {});
+    });
+    return () => { cancelled = true; };
+  }, [navigate]);
 
   /**
    * SPEC ladder, first rung after "trusted device": enrol a passkey right
