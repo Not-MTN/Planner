@@ -83,6 +83,23 @@ CREATE TABLE IF NOT EXISTS planner_links (
 
 CREATE INDEX IF NOT EXISTS planner_links_student_idx ON planner_links (student_username_lower);
 CREATE INDEX IF NOT EXISTS planner_links_student_id_idx ON planner_links (student_id);
+
+-- WebAuthn passkeys. The public key verifies assertions; prf_wrapped_dek is
+-- the vault key sealed by a key the passkey's PRF derives, so a browser with
+-- PRF support opens the planner with a touch and no password.
+CREATE TABLE IF NOT EXISTS planner_passkeys (
+  credential_id   text PRIMARY KEY,
+  user_id         text NOT NULL REFERENCES planner_users(id) ON DELETE CASCADE,
+  public_key      text NOT NULL,
+  label           text NOT NULL DEFAULT '',
+  sign_count      integer NOT NULL DEFAULT 0,
+  prf_wrapped_dek text,
+  transports      text NOT NULL DEFAULT '',
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  last_used_at    timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS planner_passkeys_user_idx ON planner_passkeys (user_id);
 `.trim();
 
 export interface UserRow {
@@ -158,6 +175,30 @@ export interface NewLink {
   wrappedShare: string;
 }
 
+/** A registered passkey. The wrapped DEK is the PRF-derived copy that lets a
+ *  capable browser open the vault with a touch instead of a password. */
+export interface PasskeyRow {
+  credential_id: string;
+  user_id: string;
+  public_key: string;
+  label: string;
+  sign_count: number;
+  prf_wrapped_dek: string | null;
+  transports: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+export interface NewPasskey {
+  credentialId: string;
+  userId: string;
+  publicKey: string;
+  label: string;
+  signCount: number;
+  prfWrappedDek: string | null;
+  transports: string;
+}
+
 export interface AuthStore {
   createAccount(input: NewAccount): Promise<CreateResult>;
   findAccount(login: string): Promise<AccountRow | null>;
@@ -189,6 +230,14 @@ export interface AuthStore {
   putNote(linkId: string, userId: string, to: 'student' | 'guardian', ciphertext: string | null, weekOf: string): Promise<LinkRow | null>;
   /** Reads the note addressed to the caller. */
   getNote(linkId: string, userId: string): Promise<{ ciphertext: string | null; weekOf: string | null } | null>;
+
+  /* WebAuthn passkeys: one row per credential, keyed by its id. */
+  createPasskey(input: NewPasskey): Promise<PasskeyRow | null>;
+  listPasskeys(userId: string): Promise<PasskeyRow[]>;
+  findPasskey(credentialId: string): Promise<PasskeyRow | null>;
+  /** Records an assertion: the counter only ever moves forward. */
+  touchPasskey(credentialId: string, signCount: number): Promise<void>;
+  deletePasskey(userId: string, credentialId: string): Promise<boolean>;
 }
 
 /* ------------------------------------------------------------------ hashing */
@@ -250,6 +299,7 @@ export function createMemoryAuthStore(): AuthStore {
   const vaults = new Map<string, VaultRow>();
   const sessions = new Map<string, SessionRow>();
   const links: LinkRow[] = [];
+  const passkeys: PasskeyRow[] = [];
 
   return {
     async createAccount(input) {
@@ -427,6 +477,45 @@ export function createMemoryAuthStore(): AuthStore {
       links.splice(index, 1);
       return true;
     },
+
+    async createPasskey(input) {
+      if (passkeys.some((item) => item.credential_id === input.credentialId)) return null;
+      const row: PasskeyRow = {
+        credential_id: input.credentialId,
+        user_id: input.userId,
+        public_key: input.publicKey,
+        label: input.label,
+        sign_count: input.signCount,
+        prf_wrapped_dek: input.prfWrappedDek,
+        transports: input.transports,
+        created_at: new Date().toISOString(),
+        last_used_at: null,
+      };
+      passkeys.push(row);
+      return { ...row };
+    },
+    async listPasskeys(userId) {
+      return passkeys
+        .filter((item) => item.user_id === userId)
+        .sort((a, b) => a.created_at.localeCompare(b.created_at))
+        .map((item) => ({ ...item }));
+    },
+    async findPasskey(credentialId) {
+      const row = passkeys.find((item) => item.credential_id === credentialId);
+      return row ? { ...row } : null;
+    },
+    async touchPasskey(credentialId, signCount) {
+      const row = passkeys.find((item) => item.credential_id === credentialId);
+      if (!row) return;
+      row.sign_count = Math.max(row.sign_count, signCount);
+      row.last_used_at = new Date().toISOString();
+    },
+    async deletePasskey(userId, credentialId) {
+      const index = passkeys.findIndex((item) => item.credential_id === credentialId && item.user_id === userId);
+      if (index < 0) return false;
+      passkeys.splice(index, 1);
+      return true;
+    },
   };
 }
 
@@ -494,6 +583,18 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
       )`;
       await sql`CREATE INDEX IF NOT EXISTS planner_links_student_idx ON planner_links (student_username_lower)`;
       await sql`CREATE INDEX IF NOT EXISTS planner_links_student_id_idx ON planner_links (student_id)`;
+      await sql`CREATE TABLE IF NOT EXISTS planner_passkeys (
+        credential_id   text PRIMARY KEY,
+        user_id         text NOT NULL REFERENCES planner_users(id) ON DELETE CASCADE,
+        public_key      text NOT NULL,
+        label           text NOT NULL DEFAULT '',
+        sign_count      integer NOT NULL DEFAULT 0,
+        prf_wrapped_dek text,
+        transports      text NOT NULL DEFAULT '',
+        created_at      timestamptz NOT NULL DEFAULT now(),
+        last_used_at    timestamptz
+      )`;
+      await sql`CREATE INDEX IF NOT EXISTS planner_passkeys_user_idx ON planner_passkeys (user_id)`;
     })().catch((error: unknown) => {
       ready = null;
       throw error;
@@ -731,6 +832,42 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
       const rows = (await sql`
         DELETE FROM planner_links WHERE id = ${linkId} AND (guardian_id = ${userId} OR student_id = ${userId}) RETURNING id
       `) as { id: string }[];
+      return rows.length > 0;
+    },
+
+    async createPasskey(input) {
+      await ensure();
+      const rows = (await sql`
+        INSERT INTO planner_passkeys (credential_id, user_id, public_key, label, sign_count, prf_wrapped_dek, transports, created_at, last_used_at)
+        VALUES (${input.credentialId}, ${input.userId}, ${input.publicKey}, ${input.label}, ${input.signCount}, ${input.prfWrappedDek}, ${input.transports}, now(), NULL)
+        ON CONFLICT (credential_id) DO NOTHING
+        RETURNING *
+      `) as PasskeyRow[];
+      return rows[0] ?? null;
+    },
+
+    async listPasskeys(userId) {
+      await ensure();
+      const rows = (await sql`SELECT * FROM planner_passkeys WHERE user_id = ${userId} ORDER BY created_at`) as PasskeyRow[];
+      return rows;
+    },
+
+    async findPasskey(credentialId) {
+      await ensure();
+      const rows = (await sql`SELECT * FROM planner_passkeys WHERE credential_id = ${credentialId} LIMIT 1`) as PasskeyRow[];
+      return rows[0] ?? null;
+    },
+
+    async touchPasskey(credentialId, signCount) {
+      await ensure();
+      await sql`UPDATE planner_passkeys SET sign_count = ${signCount}, last_used_at = now() WHERE credential_id = ${credentialId}`;
+    },
+
+    async deletePasskey(userId, credentialId) {
+      await ensure();
+      const rows = (await sql`
+        DELETE FROM planner_passkeys WHERE credential_id = ${credentialId} AND user_id = ${userId} RETURNING credential_id
+      `) as { credential_id: string }[];
       return rows.length > 0;
     },
   };

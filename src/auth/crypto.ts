@@ -127,6 +127,21 @@ export async function wrapKey(key: CryptoKey, wrappingKey: CryptoKey): Promise<s
   return toBase64(out);
 }
 
+/**
+ * Wraps raw key bytes — the session's own copy of the DEK — with the same
+ * iv||ciphertext shape as wrapKey, so unwrapKeyRaw opens both. Used to hand
+ * the vault key to a passkey's PRF without the DEK ever becoming extractable
+ * from its CryptoKey.
+ */
+export async function wrapRawKey(raw: Uint8Array, wrappingKey: CryptoKey): Promise<string> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const cipher = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, wrappingKey, new Uint8Array(raw)));
+  const out = new Uint8Array(iv.length + cipher.length);
+  out.set(iv);
+  out.set(cipher, iv.length);
+  return toBase64(out);
+}
+
 /** Returns the raw key bytes. Only used to re-wrap the key for a device. */
 export async function unwrapKeyRaw(wrapped: string, wrappingKey: CryptoKey): Promise<Uint8Array<ArrayBuffer>> {
   const bytes = fromBase64(wrapped);

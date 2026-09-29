@@ -5,7 +5,7 @@ import { useImportFile } from '../hooks';
 import { DownloadIcon, SparklesIcon, UploadIcon } from '../icons';
 import { Modal } from './ui';
 import { useEffect, useState } from 'react';
-import { FeedsSection, SharedSpaceSection, TaskImportSection, TemplatesSection, WeatherSection } from './SettingsExtras';
+import { FeedsSection, SecuritySection, SharedSpaceSection, TaskImportSection, TemplatesSection, WeatherSection } from './SettingsExtras';
 import { DATE_LANGUAGES, todayISO, type DateLanguage } from '../dates';
 import { downloadBusyICS, downloadICS, parseICS } from '../ics';
 import { canInstall, isInstalled, onInstallChange, promptInstall } from '../pwa';
@@ -442,6 +442,7 @@ export function SettingsSheet() {
       <WeatherSection />
       <TemplatesSection />
       <InstallSection />
+      <SecuritySection />
       <section className="set-section">
         <h3 className="kicker">{t("New here?")}</h3>
         <div className="set-row">

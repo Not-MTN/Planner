@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { COPY, type Lang } from './copy';
 import { AuthError, signIn, signUp, type AuthErrorCode } from '../auth/session';
+import { PasskeyError, passkeySignIn, passkeysSupported, registerPasskey } from '../auth/passkey';
+import { EMAIL_PATTERN, USERNAME_PATTERN } from '../shared/authContract';
 import { loadFrom } from '../storage';
 
 type Nav = (to: string) => void;
@@ -26,13 +28,33 @@ function strength(password: string, lang: Lang): { score: 0 | 1 | 2 | 3; label: 
   return { score: 1, label: c.authStrengthFair };
 }
 
-/** Maps an API failure onto translated copy. */
-function errorText(code: AuthErrorCode | null, c: Record<string, string>): string {
+/** Maps an API failure onto translated copy; unknown failures say what the server said. */
+function errorText(code: AuthErrorCode | null, detail: string | null, c: Record<string, string>): string {
   if (code === 'bad_credentials') return c.errBadCredentials;
   if (code === 'email_taken') return c.errEmailTaken;
   if (code === 'taken') return c.errTaken;
   if (code === 'not_configured') return c.errNotConfigured;
   if (code === 'network') return c.errNetwork;
+  // Validation rejections, rate limits, database outages… the server's own
+  // sentence is the only one that says what to do next.
+  return detail ?? c.errUnknown;
+}
+
+/** Maps a passkey failure onto translated copy. */
+function passkeyErrorText(caught: unknown, c: Record<string, string>): string {
+  if (caught instanceof PasskeyError) {
+    if (caught.code === 'cancelled') return c.errPasskeyCancelled;
+    if (caught.code === 'no_prf') return c.errPasskeyNoPrf;
+    if (caught.code === 'unsupported') return c.errPasskeyUnsupported;
+    if (caught.code === 'no_session') return c.errPasskeySession;
+    return c.errPasskeyRejected;
+  }
+  if (caught instanceof AuthError) {
+    if (caught.code === 'bad_credentials') return c.errPasskeyRejected;
+    if (caught.code === 'not_configured') return c.errNotConfigured;
+    if (caught.code === 'network') return c.errNetwork;
+    return caught.detail ?? c.errUnknown;
+  }
   return c.errUnknown;
 }
 
@@ -123,7 +145,22 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
       await signIn(identifier, password, remember);
       navigate('/app');
     } catch (caught) {
-      setError(errorText(caught instanceof AuthError ? caught.code : null, c));
+      setError(errorText(caught instanceof AuthError ? caught.code : null, caught instanceof AuthError ? caught.detail : null, c));
+      setBusy(false);
+    }
+  };
+
+  // Passwordless: one touch with the passkey, then straight in (with the
+  // vault already open where the passkey carries the wrapped key).
+  const withPasskey = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await passkeySignIn(identifier);
+      navigate('/app');
+    } catch (caught) {
+      setError(passkeyErrorText(caught, c));
       setBusy(false);
     }
   };
@@ -187,9 +224,15 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
             <span>{c.authOr}</span>
           </div>
 
-          <button type="button" className="btn btn-outline btn-block reveal-in" style={{ animationDelay: '150ms' }}>
+          <button
+            type="button"
+            className="btn btn-outline btn-block reveal-in"
+            style={{ animationDelay: '150ms' }}
+            disabled={busy}
+            onClick={() => void withPasskey()}
+          >
             <span className="btn-key" aria-hidden="true" />
-            {c.authPasskey}
+            {busy ? c.authPasskeyBusy : c.authPasskey}
           </button>
           <p className="auth-hint reveal-in" style={{ animationDelay: '180ms' }}>
             {c.authPasskeyHint}
@@ -238,6 +281,26 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [passkeyAdded, setPasskeyAdded] = useState(false);
+
+  /**
+   * SPEC ladder, first rung after "trusted device": enrol a passkey right
+   * after sign-up while the freshly unwrapped vault key is in memory. With
+   * PRF this passkey later opens the planner without a password at all.
+   */
+  const addPasskey = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await registerPasskey();
+      setPasskeyAdded(true);
+    } catch (caught) {
+      setError(passkeyErrorText(caught, c));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   /** A panel without its details is not a panel yet. */
   const panelDetails = (chosen: Role): { field: string | null; grade: string | null } | null => {
@@ -293,7 +356,7 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
       setBusy(false);
       setStep('recovery');
     } catch (caught) {
-      setError(errorText(caught instanceof AuthError ? caught.code : null, c));
+      setError(errorText(caught instanceof AuthError ? caught.code : null, caught instanceof AuthError ? caught.detail : null, c));
       setBusy(false);
     }
   };
@@ -343,6 +406,21 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
                 style={{ animationDelay: '60ms' }}
                 onSubmit={(event) => {
                   event.preventDefault();
+                  // The server enforces the same rules; catching them here keeps
+                  // the real message from ever being needed.
+                  if (!name.trim() || name.trim().length > 60) {
+                    setError(c.errNameRules);
+                    return;
+                  }
+                  if (!USERNAME_PATTERN.test(username.trim())) {
+                    setError(c.errUsernameRules);
+                    return;
+                  }
+                  if (email.trim() && !EMAIL_PATTERN.test(email.trim())) {
+                    setError(c.errEmailRules);
+                    return;
+                  }
+                  setError(null);
                   setStep('role');
                 }}
               >
@@ -354,6 +432,7 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
                 <label className="field">
                   <span>{c.authUsernameOnly}</span>
                   <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required />
+                  <em>{c.authUsernameHint}</em>
                 </label>
                 <label className="field">
                   <span>{c.authEmail}</span>
@@ -386,6 +465,11 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
                   <input type="checkbox" checked={agreed} onChange={(event) => setAgreed(event.target.checked)} required />
                   <span>{c.authTerms}</span>
                 </label>
+                {error ? (
+                  <p className="auth-error" role="alert">
+                    {error}
+                  </p>
+                ) : null}
                 <button type="submit" className="btn btn-primary btn-block" disabled={!agreed || password.length < 10}>
                   {c.authContinue}
                 </button>
@@ -535,7 +619,29 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
                 <span>{c.authRecoverySaved}</span>
               </label>
 
-              <footer className="auth-foot reveal-in" style={{ animationDelay: '150ms' }}>
+              {passkeysSupported() ? (
+                <>
+                  <div className="auth-or reveal-in" style={{ animationDelay: '130ms' }}>
+                    <span>{c.authOr}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-block reveal-in"
+                    style={{ animationDelay: '150ms' }}
+                    disabled={busy || passkeyAdded}
+                    onClick={() => void addPasskey()}
+                  >
+                    <span className="btn-key" aria-hidden="true" />
+                    {passkeyAdded ? c.authPasskeyAdded : c.authPasskeyAdd}
+                  </button>
+                  <p className="auth-hint reveal-in" style={{ animationDelay: '170ms' }}>
+                    {c.authPasskeyAddHint}
+                  </p>
+                  {error ? <p className="auth-error reveal-in">{error}</p> : null}
+                </>
+              ) : null}
+
+              <footer className="auth-foot reveal-in" style={{ animationDelay: '190ms' }}>
                 <button type="button" className="btn btn-primary btn-block" disabled={!saved} onClick={() => navigate('/app')}>
                   {c.authGoToApp}
                 </button>
@@ -545,12 +651,11 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
           ) : null}
 
           {step === 'details' ? (
-            <footer className="auth-foot reveal-in" style={{ animationDelay: '220ms' }}>
-              <p>
-                {c.authHasAccount} <button type="button" className="link" onClick={() => navigate('/login')}>{c.authSignInAction}</button>
-              </p>
-              <p className="auth-note">{c.authDemoNote}</p>
-            </footer>
+              <footer className="auth-foot reveal-in" style={{ animationDelay: '220ms' }}>
+                <p>
+                  {c.authHasAccount} <button type="button" className="link" onClick={() => navigate('/login')}>{c.authSignInAction}</button>
+                </p>
+              </footer>
           ) : null}
         </div>
       </section>
@@ -563,6 +668,23 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
 function Recover({ lang, navigate }: { lang: Lang; navigate: Nav }) {
   const c = COPY[lang];
   const [key, setKey] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // The passkey *is* the recovery for the trusted-device → passkey → key
+  // ladder: sign in with the credential on any browser, no identifier needed.
+  const recoverWithPasskey = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await passkeySignIn();
+      navigate('/app');
+    } catch (caught) {
+      setError(passkeyErrorText(caught, c));
+      setBusy(false);
+    }
+  };
 
   return (
     <div className="auth">
@@ -575,7 +697,7 @@ function Recover({ lang, navigate }: { lang: Lang; navigate: Nav }) {
           </header>
 
           <div className="auth-fields reveal-in" style={{ animationDelay: '60ms' }}>
-            <button type="button" className="recover-option">
+            <button type="button" className="recover-option" disabled>
               <span className="recover-icon" aria-hidden="true">
                 📱
               </span>
@@ -584,23 +706,31 @@ function Recover({ lang, navigate }: { lang: Lang; navigate: Nav }) {
                 <em>{c.authRecoverDeviceD}</em>
               </span>
             </button>
-            <button type="button" className="recover-option">
-              <span className="recover-icon" aria-hidden="true">
-                🔑
-              </span>
-              <span>
-                <strong>{c.authRecoverPasskey}</strong>
-                <em>{c.authRecoverPasskeyD}</em>
-              </span>
-            </button>
+            {passkeysSupported() ? (
+              <button
+                type="button"
+                className="recover-option"
+                disabled={busy}
+                onClick={() => void recoverWithPasskey()}
+              >
+                <span className="recover-icon" aria-hidden="true">
+                  🔑
+                </span>
+                <span>
+                  <strong>{c.authRecoverPasskey}</strong>
+                  <em>{c.authRecoverPasskeyD}</em>
+                </span>
+              </button>
+            ) : null}
 
             <label className="field">
               <span>{c.authRecoverKeyLabel}</span>
               <input value={key} onChange={(event) => setKey(event.target.value)} placeholder="plnr-••••-••••-••••-••••" />
               <em>{c.authRecoverKeyD}</em>
             </label>
-            <button type="button" className="btn btn-primary btn-block" disabled={key.trim().length < 8}>
-              {c.authContinue}
+            {error ? <p className="auth-error">{error}</p> : null}
+            <button type="button" className="btn btn-primary btn-block" disabled={busy || key.trim().length < 8}>
+              {busy ? c.authPasskeyBusy : c.authContinue}
             </button>
           </div>
 

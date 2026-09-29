@@ -67,6 +67,14 @@ export function Site() {
   }, [path]);
 
   const navigate = useCallback((to: string) => {
+    // The planner is a separate bundle booted by main.tsx (account gate, vault,
+    // offline start). Entering it must be a real page load — a pushState here
+    // would change the URL while the marketing site keeps rendering, and the
+    // user would never reach the panel they just signed up for.
+    if (to === '/app' || to.startsWith('/app/')) {
+      window.location.assign(to);
+      return;
+    }
     if (window.location.pathname !== to) window.history.pushState({}, '', to);
     setPath(to);
     setMenu(false);

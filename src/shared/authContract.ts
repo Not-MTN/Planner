@@ -11,6 +11,12 @@ export const SESSION_COOKIE = 'planner_session';
 export const SESSION_TTL_DAYS = 30;
 export const MAX_VAULT_BYTES = 3_000_000;
 export const MAX_AUTH_BODY_BYTES = 64 * 1024;
+/**
+ * Bodies that carry an encrypted vault (sign-up, PUT /api/auth/vault) hold the
+ * whole planner as base64, so the ordinary 64 KB cap would reject any account
+ * with real local data. Sized to the vault's own ceiling plus JSON overhead.
+ */
+export const MAX_VAULT_BODY_BYTES = MAX_VAULT_BYTES * 2 + 32 * 1024;
 
 export type AccountRole = 'personal' | 'student' | 'guardian';
 export const ACCOUNT_ROLES: readonly AccountRole[] = ['personal', 'student', 'guardian'] as const;
@@ -51,6 +57,21 @@ export interface LoginResponse {
   kdfSalt: string;
   wrappedDek: string;
   vault: { version: number; ciphertext: string };
+}
+
+/** Challenge for a WebAuthn ceremony; allowCredentials narrows the chooser
+ *  when the account is known, and is empty for a discoverable-credential flow. */
+export interface PasskeyOptionsResponse {
+  challenge: string;
+  allowCredentials: string[];
+}
+
+/** A passkey signs the session in; wrappedDek is null when the authenticator
+ *  cannot derive the vault key (the password unlocks in that case). */
+export interface PasskeyLoginResponse {
+  user: PublicUser;
+  vault: { version: number; ciphertext: string };
+  wrappedDek: string | null;
 }
 
 export interface SessionResponse {

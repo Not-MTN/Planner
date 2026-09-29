@@ -17,6 +17,12 @@ import {
   handleLogin,
   handleNote,
   handleLogout,
+  handlePasskeyDelete,
+  handlePasskeyList,
+  handlePasskeyLoginOptions,
+  handlePasskeyLoginVerify,
+  handlePasskeyRegisterOptions,
+  handlePasskeyRegisterVerify,
   handleSalt,
   handleSession,
   handleShare,
@@ -171,9 +177,21 @@ function authHandler(databaseUrl: string | undefined): NextHandleFunction {
               ? (webRequest) => authStore(databaseUrl).then((store) => handleSession(webRequest, store))
               : pathname === '/logout'
                 ? (webRequest) => authStore(databaseUrl).then((store) => handleLogout(webRequest, store))
-                : pathname === '/vault'
-                  ? (webRequest) => authStore(databaseUrl).then((store) => handleAccountVault(webRequest, store))
-                  : pathname === '/status'
+          : pathname === '/vault'
+            ? (webRequest) => authStore(databaseUrl).then((store) => handleAccountVault(webRequest, store))
+          : pathname === '/passkey/register/options'
+            ? (webRequest) => authStore(databaseUrl).then((store) => handlePasskeyRegisterOptions(webRequest, store))
+          : pathname === '/passkey/register/verify'
+            ? (webRequest) => authStore(databaseUrl).then((store) => handlePasskeyRegisterVerify(webRequest, store))
+          : pathname === '/passkey/login/options'
+            ? (webRequest) => authStore(databaseUrl).then((store) => handlePasskeyLoginOptions(webRequest, store))
+          : pathname === '/passkey/login/verify'
+            ? (webRequest) => authStore(databaseUrl).then((store) => handlePasskeyLoginVerify(webRequest, store))
+          : pathname === '/passkey/delete'
+            ? (webRequest) => authStore(databaseUrl).then((store) => handlePasskeyDelete(webRequest, store))
+          : pathname === '/passkey/list'
+            ? (webRequest) => authStore(databaseUrl).then((store) => handlePasskeyList(webRequest, store))
+          : pathname === '/status'
                     ? (webRequest) => Promise.resolve(handleAuthStatus(webRequest, databaseUrl))
                     : pathname === '/links'
                       ? (webRequest) => authStore(databaseUrl).then((store) => handleLinks(webRequest, store))

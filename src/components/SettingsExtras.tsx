@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { cx } from '../cx';
 import { usePlanner } from '../context';
 import { UploadIcon } from '../icons';
@@ -6,6 +6,8 @@ import { parseTaskCSV } from '../importers';
 import { displayTime, formatEdited } from '../dates';
 import { geocode } from '../weather';
 import { loadTemplates, removeTemplate, saveTemplates, type PlannerTemplate } from '../templates';
+import { PasskeyError, listPasskeys, passkeysSupported, registerPasskey, removePasskey, type ListedPasskey } from '../auth/passkey';
+import { AuthError } from '../auth/session';
 import { t } from '../i18n';
 
 /**
@@ -451,6 +453,125 @@ export function TemplatesSection() {
           ))}
         </ul>
       )}
+    </section>
+  );
+}
+
+// ── Passkeys ───────────────────────────────────────────────────────────
+
+/** Best sentence for a failed passkey action: the server's, then the specific local cause. */
+function passkeyNote(caught: unknown): string {
+  if (caught instanceof AuthError) return caught.detail ?? t("Something went wrong with that change.");
+  if (caught instanceof PasskeyError) {
+    if (caught.code === 'no_prf') return t("This browser's passkeys cannot open the planner — your password still will.");
+    if (caught.code === 'cancelled') return t("Cancelled — nothing was added.");
+    if (caught.code === 'unsupported') return t("Passkeys need a modern browser on a secure connection.");
+    if (caught.code === 'no_session') return t("That session has expired. Please sign in again.");
+    return t("Something went wrong with that change.");
+  }
+  return t("Something went wrong with that change.");
+}
+
+/**
+ * Settings → Security: list, add and remove the account's passkeys. The
+ * ladder after a trusted device — a passkey still beats losing the recovery
+ * key. Hidden entirely where WebAuthn is unavailable.
+ */
+export function SecuritySection() {
+  const { flash } = usePlanner();
+  const [rows, setRows] = useState<ListedPasskey[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const supported = passkeysSupported();
+
+  const refresh = async () => {
+    setRows(await listPasskeys());
+  };
+
+  useEffect(() => {
+    if (!supported) return;
+    let live = true;
+    listPasskeys()
+      .then((found) => {
+        if (live) setRows(found);
+      })
+      .catch(() => {
+        if (live) setRows([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [supported]);
+
+  const add = async () => {
+    if (busy) return;
+    setBusy('add');
+    setError(null);
+    try {
+      await registerPasskey();
+      await refresh();
+      flash(t("Passkey added."));
+    } catch (caught) {
+      setError(passkeyNote(caught));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const drop = async (credentialId: string) => {
+    if (busy) return;
+    setBusy(credentialId);
+    setError(null);
+    try {
+      await removePasskey(credentialId);
+      await refresh();
+      flash(t("Passkey removed."));
+    } catch (caught) {
+      setError(passkeyNote(caught));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (!supported) return null;
+
+  return (
+    <section className="set-section">
+      <h3 className="kicker">{t("Passkeys")}</h3>
+      <p className="set-hint">
+        {t("Sign in with your face, fingerprint or device PIN. Your passkey replaces the password — and on browsers that support it, it opens the planner with no password at all.")}
+      </p>
+      {error ? <p className="set-hint is-error" role="alert">{error}</p> : null}
+      {rows && rows.length === 0 ? <p className="empty-inline">{t("No passkeys yet.")}</p> : null}
+      {rows && rows.length > 0 ? (
+        <ul className="feed-list">
+          {rows.map((row) => (
+            <li key={row.credentialId} className="feed-item">
+              <div className="feed-copy">
+                <strong>{row.label}</strong>
+                <small className="set-hint">{t("Added {0}", { 0: new Date(row.createdAt).toLocaleDateString() })}</small>
+              </div>
+              <button
+                type="button"
+                className="btn btn-tiny danger"
+                disabled={busy === row.credentialId}
+                onClick={() => void drop(row.credentialId)}
+              >
+                {t("Remove")}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <div className="set-row">
+        <div>
+          <p className="set-label">{t("Add a passkey")}</p>
+          <p className="set-hint">{t("One for this browser or your phone. Lost one? Remove it and add another.")}</p>
+        </div>
+        <button type="button" className="btn btn-soft" disabled={busy !== null} onClick={() => void add()}>
+          {busy === 'add' ? t("Adding…") : t("Add")}
+        </button>
+      </div>
     </section>
   );
 }

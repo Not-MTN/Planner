@@ -111,7 +111,7 @@ function errorResponse(status: number, message: string, extraHeaders?: Record<st
   return json(status, { error: { message } }, extraHeaders);
 }
 
-function hostOf(value: string | null): string {
+export function hostOf(value: string | null): string {
   if (!value) return '';
   try {
     return new URL(value).host.toLowerCase();

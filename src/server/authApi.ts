@@ -8,6 +8,7 @@
  */
 import { createHash } from 'node:crypto';
 import { isSameOriginRequest } from './xaiProxy';
+import { WebAuthnError, fromBase64Url, verifyAssertion, verifyRegistration } from './webauthn';
 import { API_SECURITY_HEADERS, BodyTooLargeError, rateLimitResponse, readLimitedBody } from './security';
 import {
   cleanCodeHash,
@@ -21,6 +22,7 @@ import {
   cleanWrappedShare,
   isBase64,
   MAX_AUTH_BODY_BYTES,
+  MAX_VAULT_BODY_BYTES,
   MAX_VAULT_BYTES,
   MAX_LINKS_PER_SIDE,
   SESSION_COOKIE,
@@ -29,6 +31,8 @@ import {
   type NoteResponse,
   type LoginResponse,
   type OutgoingLink,
+  type PasskeyLoginResponse,
+  type PasskeyOptionsResponse,
   type PublicUser,
   type SessionResponse,
   type ShareResponse,
@@ -113,10 +117,10 @@ export function readSessionToken(request: Request): string | null {
   return null;
 }
 
-async function readJsonBody(request: Request): Promise<Record<string, unknown> | null> {
+async function readJsonBody(request: Request, maxBytes: number = MAX_AUTH_BODY_BYTES): Promise<Record<string, unknown> | null> {
   let text: string;
   try {
-    text = await readLimitedBody(request, MAX_AUTH_BODY_BYTES);
+    text = await readLimitedBody(request, maxBytes);
   } catch (err) {
     if (err instanceof BodyTooLargeError) return null;
     return null;
@@ -142,7 +146,9 @@ export async function handleSignup(request: Request, store: AuthStore | null): P
   if (blocked) return blocked;
   if (request.method !== 'POST') return error(405, 'Method not allowed.', undefined);
 
-  const body = await readJsonBody(request);
+  // The vault rides along with sign-up, so this body is far larger than the
+  // ordinary auth cap — a planner with real data must still fit.
+  const body = await readJsonBody(request, MAX_VAULT_BODY_BYTES);
   if (!body) return error(400, 'Expected a JSON body.');
 
   const username = cleanUsername(body.username);
@@ -321,6 +327,289 @@ export async function handleLogout(request: Request, store: AuthStore | null): P
   return json(200, { ok: true }, { 'Set-Cookie': clearedCookie(isHttps(request)) });
 }
 
+/* ---------------------------------------------------------------- passkeys */
+
+const PASSKEY_CHALLENGE_COOKIE = 'planner_passkey_challenge';
+const PASSKEY_CHALLENGE_TTL_SECONDS = 300;
+const MAX_PASSKEYS_PER_USER = 10;
+const CREDENTIAL_ID_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
+const TRANSPORTS_PATTERN = /^([a-z]+)(,[a-z]+)*$/;
+
+type CeremonyPurpose = 'register' | 'login';
+
+/**
+ * The challenge rides in an HttpOnly cookie: the browser cannot read it, so a
+ * script that somehow runs on this origin still cannot answer its own
+ * challenge. `purpose` keeps a registration challenge from being replayed as a
+ * sign-in one.
+ */
+function challengeCookie(purpose: CeremonyPurpose, challenge: string, secure: boolean): string {
+  const parts = [
+    `${PASSKEY_CHALLENGE_COOKIE}=${purpose}.${challenge}`,
+    'Path=/api/auth/passkey',
+    'HttpOnly',
+    'SameSite=Lax',
+    `Max-Age=${PASSKEY_CHALLENGE_TTL_SECONDS}`,
+  ];
+  if (secure) parts.push('Secure');
+  return parts.join('; ');
+}
+
+function clearedChallengeCookie(secure: boolean): string {
+  return `${PASSKEY_CHALLENGE_COOKIE}=; Path=/api/auth/passkey; HttpOnly; SameSite=Lax; Max-Age=0${secure ? '; Secure' : ''}`;
+}
+
+function readChallenge(request: Request, purpose: CeremonyPurpose): string | null {
+  const header = request.headers.get('cookie');
+  if (!header) return null;
+  for (const part of header.split(';')) {
+    const [name, ...rest] = part.trim().split('=');
+    if (name !== PASSKEY_CHALLENGE_COOKIE) continue;
+    const value = decodeURIComponent(rest.join('='));
+    const [storedPurpose, ...challengeParts] = value.split('.');
+    if (storedPurpose !== purpose || challengeParts.length === 0) return null;
+    const joined = challengeParts.join('.');
+    return CREDENTIAL_ID_PATTERN.test(joined) ? joined : null;
+  }
+  return null;
+}
+
+function cleanLabel(value: unknown): string {
+  if (typeof value !== 'string') return 'Passkey';
+  const trimmed = value.trim().replace(/\s+/g, ' ');
+  return trimmed ? trimmed.slice(0, 40) : 'Passkey';
+}
+
+function cleanTransports(value: unknown): string {
+  if (typeof value !== 'string' || !TRANSPORTS_PATTERN.test(value) || value.length > 40) return '';
+  return value
+    .split(',')
+    .filter((item) => ['usb', 'nfc', 'ble', 'internal', 'hybrid'].includes(item))
+    .join(',');
+}
+
+/** Registration step 1: hand out a challenge, bound to this session. */
+export async function handlePasskeyRegisterOptions(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'auth-passkey-reg-options', 10) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'POST') return error(405, 'Method not allowed.', undefined);
+
+  const session = await linkUser(request, store);
+  if (!session) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+
+  try {
+    const existing = await session.store.listPasskeys(session.user.id);
+    if (existing.length >= MAX_PASSKEYS_PER_USER) {
+      return error(409, 'This account already has as many passkeys as it can hold.', 'limit');
+    }
+    const challenge = newToken();
+    return json(200, { challenge, allowCredentials: [] }, { 'Set-Cookie': challengeCookie('register', challenge, isHttps(request)) });
+  } catch {
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
+}
+
+/** Registration step 2: verify the ceremony and store the credential. */
+export async function handlePasskeyRegisterVerify(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'auth-passkey-reg-verify', 10) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'POST') return error(405, 'Method not allowed.', undefined);
+
+  const session = await linkUser(request, store);
+  if (!session) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+
+  const challenge = readChallenge(request, 'register');
+  if (!challenge) {
+    return json(400, { error: { message: 'That passkey setup has expired. Start again.' } }, { 'Set-Cookie': clearedChallengeCookie(isHttps(request)) });
+  }
+
+  const body = await readJsonBody(request);
+  if (!body) return error(400, 'Expected a JSON body.');
+  const id = typeof body.id === 'string' && CREDENTIAL_ID_PATTERN.test(body.id) ? body.id : null;
+  const clientDataJSON = isBase64(body.clientDataJSON, 32, 16 * 1024) ? body.clientDataJSON : null;
+  const attestationObject = isBase64(body.attestationObject, 64, 256 * 1024) ? body.attestationObject : null;
+  if (!id || !clientDataJSON || !attestationObject) return error(400, 'That registration response is not complete.');
+
+  const prfWrappedDek =
+    body.prfWrappedDek === undefined || body.prfWrappedDek === null
+      ? null
+      : isBase64(body.prfWrappedDek, 32, 1024)
+        ? (body.prfWrappedDek as string)
+        : null;
+  if (body.prfWrappedDek !== undefined && body.prfWrappedDek !== null && !prfWrappedDek) {
+    return error(400, 'That wrapped key is not valid.');
+  }
+
+  try {
+    const verified = await verifyRegistration({
+      request,
+      clientDataJSON: fromBase64Url(clientDataJSON),
+      attestationObject: fromBase64Url(attestationObject),
+      expectedChallenge: challenge,
+    });
+    if (verified.credentialId !== id) return error(400, 'That credential id does not match its response.');
+
+    const created = await session.store.createPasskey({
+      credentialId: verified.credentialId,
+      userId: session.user.id,
+      publicKey: verified.publicKey,
+      label: cleanLabel(body.label),
+      signCount: verified.signCount,
+      prfWrappedDek,
+      transports: cleanTransports(body.transports),
+    });
+    if (!created) return error(409, 'That passkey is already registered.', 'taken');
+
+    return json(
+      201,
+      { passkey: { credentialId: created.credential_id, label: created.label, prf: created.prf_wrapped_dek !== null } },
+      { 'Set-Cookie': clearedChallengeCookie(isHttps(request)) },
+    );
+  } catch (caught) {
+    const message = caught instanceof WebAuthnError ? caught.message : 'That passkey could not be registered. Try again.';
+    return json(400, { error: { message } }, { 'Set-Cookie': clearedChallengeCookie(isHttps(request)) });
+  }
+}
+
+/** Sign-in step 1: a challenge, narrowed to the account's passkeys if known. */
+export async function handlePasskeyLoginOptions(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'auth-passkey-login-options', 15) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'POST') return error(405, 'Method not allowed.', undefined);
+
+  const body = await readJsonBody(request);
+  const login = typeof body?.username === 'string' ? body.username.trim() : '';
+  if (login.length > 200) return error(400, 'Enter your username or email.');
+
+  try {
+    let allowCredentials: string[] = [];
+    if (login) {
+      // Unknown accounts answer with the same empty list as accounts without
+      // passkeys, so this endpoint cannot be used to discover who has one.
+      const account = await store!.findAccount(login);
+      if (account) {
+        const passkeys = await store!.listPasskeys(account.user.id);
+        allowCredentials = passkeys.map((row) => row.credential_id);
+      }
+    }
+    const challenge = newToken();
+    const payload: PasskeyOptionsResponse = { challenge, allowCredentials };
+    return json(200, payload, { 'Set-Cookie': challengeCookie('login', challenge, isHttps(request)) });
+  } catch {
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
+}
+
+/** Sign-in step 2: verify the assertion, open a session, hand back the vault. */
+export async function handlePasskeyLoginVerify(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'auth-passkey-login-verify', 15) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'POST') return error(405, 'Method not allowed.', undefined);
+
+  const challenge = readChallenge(request, 'login');
+  if (!challenge) {
+    return json(400, { error: { message: 'That sign-in has expired. Start again.' } }, { 'Set-Cookie': clearedChallengeCookie(isHttps(request)) });
+  }
+
+  const body = await readJsonBody(request);
+  if (!body) return error(400, 'Expected a JSON body.');
+  const id = typeof body.id === 'string' && CREDENTIAL_ID_PATTERN.test(body.id) ? body.id : null;
+  const clientDataJSON = isBase64(body.clientDataJSON, 32, 16 * 1024) ? body.clientDataJSON : null;
+  const authenticatorData = isBase64(body.authenticatorData, 37, 4 * 1024) ? body.authenticatorData : null;
+  const signature = isBase64(body.signature, 32, 1024) ? body.signature : null;
+  if (!id || !clientDataJSON || !authenticatorData || !signature) return error(400, 'That sign-in response is not complete.');
+
+  try {
+    const passkey = await store!.findPasskey(id);
+    // An unknown credential is indistinguishable from a wrong password.
+    if (!passkey) return error(401, 'Wrong username or password.', 'bad_credentials');
+    const user = await store!.findUserById(passkey.user_id);
+    if (!user) return error(401, 'Wrong username or password.', 'bad_credentials');
+    if (typeof body.userHandle === 'string' && body.userHandle && body.userHandle !== user.id) {
+      return error(401, 'Wrong username or password.', 'bad_credentials');
+    }
+
+    const signCount = await verifyAssertion({
+      request,
+      clientDataJSON: fromBase64Url(clientDataJSON),
+      authenticatorData: fromBase64Url(authenticatorData),
+      signature: fromBase64Url(signature),
+      publicKeyRaw: Buffer.from(passkey.public_key, 'base64'),
+      expectedChallenge: challenge,
+    });
+    if (passkey.sign_count > 0 && signCount > 0 && signCount <= passkey.sign_count) {
+      // Two authenticators answering with the same key means one was cloned.
+      return error(400, "That passkey's counter moved backwards. Remove it and register it again.");
+    }
+
+    const vault = await store!.getVault(user.id);
+    if (!vault) return error(500, 'This account has no vault. Please contact support.', 'no_vault');
+
+    const token = newToken();
+    const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * DAY_MS);
+    await Promise.all([
+      store!.createSession(user.id, hashToken(token), 'Passkey', expiresAt),
+      store!.touchPasskey(id, signCount),
+    ]);
+
+    const payload: PasskeyLoginResponse = {
+      user: toPublicUser(user),
+      vault: { version: vault.version, ciphertext: vault.ciphertext },
+      wrappedDek: passkey.prf_wrapped_dek,
+    };
+    return json(200, payload, { 'Set-Cookie': sessionCookie(token, isHttps(request)) });
+  } catch (caught) {
+    const message = caught instanceof WebAuthnError ? caught.message : 'That sign-in could not be verified. Try again.';
+    return json(400, { error: { message } }, { 'Set-Cookie': clearedChallengeCookie(isHttps(request)) });
+  }
+}
+
+/** The signed-in account's passkeys — Settings → Security. */
+export async function handlePasskeyList(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'auth-passkey-list', 60) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'GET' && request.method !== 'HEAD') return error(405, 'Method not allowed.', undefined);
+
+  const session = await linkUser(request, store);
+  if (!session) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+  try {
+    const rows = await session.store.listPasskeys(session.user.id);
+    return json(200, {
+      passkeys: rows.map((row) => ({
+        credentialId: row.credential_id,
+        label: row.label,
+        prf: row.prf_wrapped_dek !== null,
+        transports: row.transports,
+        createdAt: new Date(row.created_at).toISOString(),
+        lastUsedAt: row.last_used_at ? new Date(row.last_used_at).toISOString() : null,
+      })),
+    });
+  } catch {
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
+}
+
+/** Remove one of your own passkeys. */
+export async function handlePasskeyDelete(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'auth-passkey-delete', 15) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'DELETE') return error(405, 'Method not allowed.', undefined);
+
+  const session = await linkUser(request, store);
+  if (!session) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+
+  const body = await readJsonBody(request);
+  const credentialId = typeof body?.credentialId === 'string' && CREDENTIAL_ID_PATTERN.test(body.credentialId) ? body.credentialId : null;
+  if (!credentialId) return error(400, 'Expected { credentialId }.');
+  try {
+    const removed = await session.store.deletePasskey(session.user.id, credentialId);
+    if (!removed) return error(404, 'That passkey is no longer here.', 'not_found');
+    return json(200, { ok: true });
+  } catch {
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
+}
+
 /* ------------------------------------------------------------------- vault */
 
 /** Requires a session; returns the caller's own encrypted vault. */
@@ -346,7 +635,7 @@ export async function handleAccountVault(request: Request, store: AuthStore | nu
     }
 
     if (request.method === 'PUT') {
-      const body = await readJsonBody(request);
+      const body = await readJsonBody(request, MAX_VAULT_BODY_BYTES);
       if (!body) return error(400, 'Expected a JSON body.');
       const baseVersion = typeof body.baseVersion === 'number' && Number.isInteger(body.baseVersion) && body.baseVersion >= 0 ? body.baseVersion : -1;
       const ciphertext = body.ciphertext;

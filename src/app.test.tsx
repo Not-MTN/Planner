@@ -245,7 +245,8 @@ describe('app smoke', () => {
             followUp: null,
             draft: {
               summary: 'Gentle Tuesday',
-              tasks: [{ title: 'Gym bag', date: '2026-09-29', priority: 'low', category: 'health' }],
+              // Relative so the draft always lands in the future the review card expects.
+              tasks: [{ title: 'Gym bag', date: new Date(Date.now() + 86_400_000).toISOString().slice(0, 10), priority: 'low', category: 'health' }],
               events: [],
               habits: [],
               suggestions: [],
