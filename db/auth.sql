@@ -82,6 +82,23 @@ CREATE TABLE IF NOT EXISTS planner_links (
 CREATE INDEX IF NOT EXISTS planner_links_student_idx ON planner_links (student_username_lower);
 CREATE INDEX IF NOT EXISTS planner_links_student_id_idx ON planner_links (student_id);
 
+-- WebAuthn passkeys. The public key verifies assertions; prf_wrapped_dek is
+-- the vault key sealed by a key the passkey's PRF derives, so a browser with
+-- PRF support opens the planner with a touch and no password.
+CREATE TABLE IF NOT EXISTS planner_passkeys (
+  credential_id   text PRIMARY KEY,
+  user_id         text NOT NULL REFERENCES planner_users(id) ON DELETE CASCADE,
+  public_key      text NOT NULL,
+  label           text NOT NULL DEFAULT '',
+  sign_count      integer NOT NULL DEFAULT 0,
+  prf_wrapped_dek text,
+  transports      text NOT NULL DEFAULT '',
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  last_used_at    timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS planner_passkeys_user_idx ON planner_passkeys (user_id);
+
 -- ---------------------------------------------------------------------------
 -- Starting over (optional)
 -- ---------------------------------------------------------------------------
@@ -91,6 +108,6 @@ CREATE INDEX IF NOT EXISTS planner_links_student_id_idx ON planner_links (studen
 -- server). If you created an account while that bug was live, clear the tables
 -- and sign up again:
 --
---   DROP TABLE IF EXISTS planner_sessions, planner_vaults, planner_credentials, planner_users;
+--   DROP TABLE IF EXISTS planner_passkeys, planner_sessions, planner_vaults, planner_credentials, planner_users;
 --
 -- The API recreates them, empty, on the next request.

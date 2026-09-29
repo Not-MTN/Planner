@@ -90,15 +90,16 @@ export async function rememberOnDevice(userId: string, rawKey: Uint8Array<ArrayB
   }
 }
 
-/** Returns the cached vault key, or null when this device was not trusted. */
-export async function recallFromDevice(userId: string): Promise<CryptoKey | null> {
+/** Returns the cached vault key (and its bytes, for passkey enrolment), or null when this device was not trusted. */
+export async function recallFromDevice(userId: string): Promise<{ dek: CryptoKey; raw: Uint8Array<ArrayBuffer> } | null> {
   if (!deviceCacheSupported()) return null;
   try {
     const stored = await run('readonly', (store) => store.get(WRAP_PREFIX + userId) as IDBRequest<unknown>);
     if (!(stored instanceof Uint8Array) || stored.length < 13) return null;
     const key = await deviceKey();
     const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: toBuffer(stored.subarray(0, 12)) }, key, toBuffer(stored.subarray(12)));
-    return crypto.subtle.importKey('raw', plain, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+    const dek = await crypto.subtle.importKey('raw', plain, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+    return { dek, raw: new Uint8Array(plain) };
   } catch {
     return null;
   }

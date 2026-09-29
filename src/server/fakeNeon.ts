@@ -39,6 +39,7 @@ export function createFakeNeon(): FakeDb {
     planner_vaults: [],
     planner_sessions: [],
     planner_links: [],
+    planner_passkeys: [],
   };
 
   const now = () => new Date().toISOString();
@@ -275,6 +276,55 @@ export function createFakeNeon(): FakeDb {
     if (/^DELETE FROM planner_sessions WHERE id = /i.test(q)) {
       tables.planner_sessions = tables.planner_sessions.filter((row) => row.id !== values[0]);
       return [];
+    }
+
+    if (/^INSERT INTO planner_passkeys /i.test(q)) {
+      const [credential_id, user_id, public_key, label, sign_count, prf_wrapped_dek, transports] = values;
+      const clash = tables.planner_passkeys.some((row) => row.credential_id === credential_id);
+      if (clash) return [];
+      const row: Row = {
+        credential_id,
+        user_id,
+        public_key,
+        label,
+        sign_count,
+        prf_wrapped_dek,
+        transports,
+        created_at: now(),
+        last_used_at: null,
+      };
+      tables.planner_passkeys.push(row);
+      return [{ ...row }];
+    }
+
+    if (/^SELECT \* FROM planner_passkeys WHERE user_id = /i.test(q)) {
+      return tables.planner_passkeys
+        .filter((row) => row.user_id === values[0])
+        .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+        .map((row) => ({ ...row }));
+    }
+
+    if (/^SELECT \* FROM planner_passkeys WHERE credential_id = /i.test(q)) {
+      return tables.planner_passkeys.filter((row) => row.credential_id === values[0]).map((row) => ({ ...row }));
+    }
+
+    if (/^UPDATE planner_passkeys SET sign_count = /i.test(q)) {
+      const [sign_count, credential_id] = values;
+      const row = tables.planner_passkeys.find((item) => item.credential_id === credential_id);
+      if (!row) return [];
+      row.sign_count = sign_count;
+      row.last_used_at = now();
+      return [];
+    }
+
+    if (/^DELETE FROM planner_passkeys WHERE credential_id = /i.test(q)) {
+      const [credential_id, user_id] = values;
+      const kept = tables.planner_passkeys.filter(
+        (row) => !(row.credential_id === credential_id && row.user_id === user_id),
+      );
+      const removed = kept.length !== tables.planner_passkeys.length;
+      tables.planner_passkeys = kept;
+      return removed ? [{ credential_id }] : [];
     }
 
     throw new Error(`Fake Neon does not understand: ${q}`);

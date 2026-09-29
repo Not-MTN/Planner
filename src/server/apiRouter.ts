@@ -22,6 +22,12 @@ import {
   handleLogin,
   handleLogout,
   handleNote,
+  handlePasskeyDelete,
+  handlePasskeyList,
+  handlePasskeyLoginOptions,
+  handlePasskeyLoginVerify,
+  handlePasskeyRegisterOptions,
+  handlePasskeyRegisterVerify,
   handleSalt,
   handleSession,
   handleShare,
@@ -66,6 +72,18 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
       return (request) => authStore(env.DATABASE_URL).then((store) => handleLogin(request, store));
     case '/api/auth/logout':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleLogout(request, store));
+    case '/api/auth/passkey/register/options':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handlePasskeyRegisterOptions(request, store));
+    case '/api/auth/passkey/register/verify':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handlePasskeyRegisterVerify(request, store));
+    case '/api/auth/passkey/login/options':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handlePasskeyLoginOptions(request, store));
+    case '/api/auth/passkey/login/verify':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handlePasskeyLoginVerify(request, store));
+    case '/api/auth/passkey/delete':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handlePasskeyDelete(request, store));
+    case '/api/auth/passkey/list':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handlePasskeyList(request, store));
     case '/api/auth/note':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleNote(request, store));
     case '/api/auth/salt':

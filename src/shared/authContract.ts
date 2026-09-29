@@ -59,6 +59,21 @@ export interface LoginResponse {
   vault: { version: number; ciphertext: string };
 }
 
+/** Challenge for a WebAuthn ceremony; allowCredentials narrows the chooser
+ *  when the account is known, and is empty for a discoverable-credential flow. */
+export interface PasskeyOptionsResponse {
+  challenge: string;
+  allowCredentials: string[];
+}
+
+/** A passkey signs the session in; wrappedDek is null when the authenticator
+ *  cannot derive the vault key (the password unlocks in that case). */
+export interface PasskeyLoginResponse {
+  user: PublicUser;
+  vault: { version: number; ciphertext: string };
+  wrappedDek: string | null;
+}
+
 export interface SessionResponse {
   user: PublicUser | null;
 }

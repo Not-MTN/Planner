@@ -64,8 +64,8 @@ export async function bootAccount(): Promise<AccountBoot> {
   if (!vault) return { status: 'locked', user };
 
   try {
-    const state = await decryptState(vault.ciphertext, cached);
-    adoptSession(user, cached, { version: vault.version, ciphertext: vault.ciphertext });
+    const state = await decryptState(vault.ciphertext, cached.dek);
+    adoptSession(user, cached.dek, { version: vault.version, ciphertext: vault.ciphertext }, cached.raw);
     return { status: 'ready', user, state, version: vault.version };
   } catch {
     // The cached key no longer opens the vault (password changed elsewhere).
@@ -97,12 +97,14 @@ export async function unlockWithPassword(password: string, remember: boolean): P
   }
 
   if (remember) await rememberOnDevice(session.id, raw);
+  // importDek clears its copy; keep one for passkey enrolment on this page.
+  const dekRaw = new Uint8Array(raw);
   const dek = await importDek(raw, false);
   const state = await decryptState(result.vault.ciphertext, dek).catch(() => {
     throw new VaultError('That vault could not be opened.');
   });
 
-  adoptSession(session, dek, { version: result.vault.version, ciphertext: result.vault.ciphertext });
+  adoptSession(session, dek, { version: result.vault.version, ciphertext: result.vault.ciphertext }, dekRaw);
   return { status: 'ready', user: session, state, version: result.vault.version };
 }
 

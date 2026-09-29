@@ -37,6 +37,12 @@ export interface ActiveSession {
   user: PublicUser;
   /** Non-extractable AES-GCM key for the vault. Memory only. */
   dek: CryptoKey;
+  /**
+   * The same key's bytes, kept only in this page's memory so a passkey can be
+   * enrolled later (the DEK itself is non-extractable and cannot be wrapped).
+   * Never written to storage; cleared on sign-out.
+   */
+  dekRaw: Uint8Array | null;
   vault: { version: number; ciphertext: string };
 }
 
@@ -46,13 +52,25 @@ export function getActiveSession(): ActiveSession | null {
   return active;
 }
 
+function forget(active: ActiveSession | null): void {
+  active?.dekRaw?.fill(0);
+  // The reference is about to die anyway; this just shortens the window.
+  if (active) active.dekRaw = null;
+}
+
 export function endSession(): void {
+  forget(active);
   active = null;
 }
 
 /** Adopts a session that was unlocked outside of signIn (device cache, unlock screen). */
-export function adoptSession(user: PublicUser, dek: CryptoKey, vault: { version: number; ciphertext: string }): void {
-  active = { user, dek, vault };
+export function adoptSession(
+  user: PublicUser,
+  dek: CryptoKey,
+  vault: { version: number; ciphertext: string },
+  dekRaw: Uint8Array | null = null,
+): void {
+  active = { user, dek, dekRaw, vault };
 }
 
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -120,10 +138,9 @@ export async function signUp(input: SignUpInput): Promise<{ recoveryKey: string;
     }),
   });
 
-  active = { user: result.user, dek, vault: { version: 1, ciphertext } };
+  active = { user: result.user, dek, dekRaw, vault: { version: 1, ciphertext } };
   // This is the device they signed up on, so open straight into the planner.
   if (input.remember !== false) await rememberOnDevice(result.user.id, dekRaw);
-  dekRaw.fill(0);
   return { recoveryKey, session: active };
 }
 
@@ -143,9 +160,10 @@ export async function signIn(identifier: string, password: string, remember = tr
 
   const raw = await unwrapKeyRaw(result.wrappedDek, kek);
   if (remember) await rememberOnDevice(result.user.id, raw);
+  // importDek clears its copy; keep one for passkey enrolment on this page.
+  const dekRaw = new Uint8Array(raw);
   const dek = await importDek(raw, false);
-  raw.fill(0);
-  active = { user: result.user, dek, vault: result.vault };
+  active = { user: result.user, dek, dekRaw, vault: result.vault };
   return active;
 }
 
@@ -167,6 +185,7 @@ export async function fetchSession(): Promise<PublicUser | null> {
 }
 
 export async function signOut(): Promise<void> {
+  forget(active);
   active = null;
   try {
     await request<{ ok: true }>('/api/auth/logout', { method: 'POST' });
