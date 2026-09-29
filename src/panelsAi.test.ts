@@ -227,6 +227,17 @@ describeFailures('when the AI is unhappy', () => {
     await expectFailure(generateStudentAdvice({ state: createEmptyState() })).rejects.toThrow(/Your key was rotated/);
   });
 
+  itFailure('points at billing, not the key, when the team is out of credits', async () => {
+    const noCredits =
+      'Your xAI key is working — the team it belongs to just has no credits or license seats. Open https://console.x.ai/team/73b299bc and add credits.';
+    vi.stubGlobal('fetch', vi.fn(async () => reply({ error: { message: noCredits, code: 'no_credits' } }, 403)));
+    await expectFailure(generateStudentAdvice({ state: createEmptyState() })).rejects.toThrow(/console\.x\.ai\/team\/73b299bc/);
+
+    // Without a message the client still has its own words for it.
+    vi.stubGlobal('fetch', vi.fn(async () => reply({ error: { code: 'no_credits' } }, 403)));
+    await expectFailure(generateStudentAdvice({ state: createEmptyState() })).rejects.toThrow(/no credits/i);
+  });
+
   itFailure('survives an answer that is not JSON at all', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => reply('<html>A proxy answer</html>', 200, 'text/html')));
     await expectFailure(generateStudentAdvice({ state: createEmptyState() })).rejects.toThrow();

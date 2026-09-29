@@ -194,6 +194,32 @@ If it still fails with the key message:
 3. If the error is *"The server returned an unexpected response (401) instead of JSON"*, something in front of the app answered — usually Vercel Authentication or deployment password protection. Turn it off, or exclude `/api/*` from it.
 4. Environment variable changes only apply to **new** deployments, so redeploy after editing.
 
+### If the AI says your team has no credits or licenses
+
+```
+Your newly created team doesn't have any credits or licenses yet.
+You can purchase those on https://console.x.ai/team/<your-team-id>
+```
+
+**This is not a configuration problem, and nothing needs redeploying.** Seeing xAI's own
+wording proves the whole path works: the `/api/xai/*` function is deployed, `XAI_API_KEY` is
+set, and the key was clean enough that xAI authenticated it and looked up the team behind it.
+That team simply has no credit balance or license seats, so xAI refuses to run any model for it.
+
+To fix it:
+
+1. Open the `console.x.ai/team/…` link from the error and add credits — or claim the free
+   credits the console offers your team, if it shows any. The app works again immediately; no
+   redeploy is needed.
+2. If you have more than one xAI team, check which one holds the credits: a key belongs to the
+   team it was created in, so a key from an empty team stays empty. Create the key from the team
+   that has credits and put that key in `XAI_API_KEY` (then redeploy, since it *is* a new value).
+3. Confirm the plumbing with `https://<your-app>/api/xai/status` — `{"configured":true}` means the
+   key is present on the server; it deliberately says nothing about the balance.
+
+The proxy maps this to a distinct `no_credits` error code and keeps the console link xAI sent, so
+the app explains the billing problem instead of telling you to re-paste a key that is fine.
+
 Old links keep working: `#/daily/…`, `#/weekly/…`, `#/month/…`, `#/future`, and `#/progress` all map to their new homes.
 
 ## Notes

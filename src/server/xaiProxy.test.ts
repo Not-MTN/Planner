@@ -290,3 +290,59 @@ describe('upstream error reporting', () => {
     expect(parsed.error.message).toBe('bad key');
   });
 });
+
+describe('credit and license errors', () => {
+  // Verbatim shape xAI returns for a key on a team with no balance: a top-level
+  // `error` string plus a `code` that says "permission denied".
+  const NO_CREDITS_BODY = JSON.stringify({
+    code: 'The caller does not have permission to execute the specified operation',
+    error:
+      "Your newly created team doesn't have any credits or licenses yet. You can purchase those on https://console.x.ai/team/73b299bc-1441-46bb-961d-94500b552967",
+  });
+
+  it('reports an out-of-credit team as billing, not a bad key', async () => {
+    for (const status of [401, 403, 429]) {
+      const response = upstreamErrorResponse(status, NO_CREDITS_BODY);
+      expect(response.status).toBe(status);
+      const parsed = (await response.json()) as { error: { code: string; message: string; upstream: number } };
+      expect(parsed.error.code).toBe('no_credits');
+      expect(parsed.error.upstream).toBe(status);
+      // The fix is in the xAI console, so the team link xAI gave us is kept.
+      expect(parsed.error.message).toContain('https://console.x.ai/team/73b299bc-1441-46bb-961d-94500b552967');
+      expect(parsed.error.message).toContain('no credits');
+      expect(parsed.error.message.toLowerCase()).not.toContain('re-copy it from console.x.ai');
+    }
+  });
+
+  it('recognises the other ways xAI phrases an empty balance', () => {
+    for (const message of [
+      'Your credit balance is too low to use this model.',
+      'You exceeded your current credits, please check your plan.',
+      'insufficient_quota: there are no credits left',
+    ]) {
+      expect(upstreamErrorResponse(429, JSON.stringify({ error: { message } })).headers).toBeDefined();
+    }
+  });
+
+  it('still calls a genuinely wrong key an auth problem', async () => {
+    const response = upstreamErrorResponse(401, JSON.stringify({ error: { message: 'Incorrect API key provided' } }));
+    const parsed = (await response.json()) as { error: { code: string; message: string } };
+    expect(parsed.error.code).toBe('upstream_auth');
+    expect(parsed.error.message).toContain('Incorrect API key provided');
+  });
+
+  it('reaches the browser through the chat endpoint with the team link intact', async () => {
+    resetRateLimits();
+    const fetchMock = vi.fn(async () => new Response(NO_CREDITS_BODY, { status: 403 }));
+    const response = await handleXAIChatCompletions(
+      request('/api/xai/chat/completions', { method: 'POST', body: chatBody() }),
+      FAKE_KEY,
+      { fetchImpl: fetchMock as unknown as typeof fetch },
+    );
+    expect(response.status).toBe(403);
+    const parsed = (await response.json()) as { error: { code: string; message: string } };
+    expect(parsed.error.code).toBe('no_credits');
+    expect(parsed.error.message).toContain('console.x.ai/team/');
+    expect(parsed.error.message).toContain('no redeploy');
+  });
+});

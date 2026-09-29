@@ -1077,6 +1077,7 @@ export const fa: Record<string, string> = {
   "Your prompt, saved AI memory, and relevant schedule/check-in details go to xAI through the server proxy. The API key stays on the server, planner notes are not included, and you can forget memory at any time. AI suggestions never change your planner until you review and add them.": "درخواست شما، حافظهٔ ذخیره‌شدهٔ هوش مصنوعی و جزئیات مرتبط برنامه و ثبت‌ها از طریق پراکسی سرور به xAI می‌روند. کلید API روی سرور می‌ماند، یادداشت‌های برنامه‌ریز ارسال نمی‌شوند و هر زمان بخواهید می‌توانید حافظه را فراموش کنید. پیشنهادهای هوش مصنوعی تا بررسی و افزودن شما چیزی را تغییر نمی‌دهند.",
   "Your reflection": "مرور شما",
   "Your rhythm": "ریتم شما",
+  "Your xAI key is working — the team it belongs to just has no credits or license seats. Add credits at https://console.x.ai/billing (or use a key from a team that already has them), then try again. No redeploy needed.": "کلید xAI شما کار می‌کند — فقط تیمی که کلید به آن تعلق دارد اعتبار یا لایسنس ندارد. در https://console.x.ai/billing اعتبار اضافه کنید (یا کلیدی از تیمی که اعتبار دارد بسازید) و دوباره امتحان کنید. نیازی به انتشار دوباره نیست.",
   "a two-minute note about energy and mood can help future plans get more realistic.": "یک یادداشت دو دقیقه‌ای دربارهٔ انرژی و حال‌وهوا به واقع‌بینانه‌تر شدن برنامه‌های آینده کمک می‌کند.",
   "add classes, shifts, appointments, or family time once; AI will reserve those slots.": "کلاس‌ها، شیفت‌ها، قرارها یا وقت خانواده را یک بار اضافه کنید؛ هوش مصنوعی آن بازه‌ها را رزرو می‌کند.",
   "all time": "همهٔ زمان‌ها",

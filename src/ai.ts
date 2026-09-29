@@ -25,6 +25,13 @@ export const XAI_VISION_MODEL = 'grok-4.7';
  */
 export const MAX_PLAN_IMAGE_BYTES = 3 * 1024 * 1024;
 export const XAI_KEY_MISSING_MESSAGE = 'XAI_API_KEY is not configured on the server. On Vercel, add it under Project Settings → Environment Variables and redeploy. Locally, add it to .env.local and restart the dev server.';
+/**
+ * Used only when the proxy flagged `no_credits` without a message. The wording
+ * mirrors `creditErrorMessage` in the server proxy; it is repeated here because
+ * the browser must never import the server-only proxy module.
+ */
+export const XAI_NO_CREDITS_MESSAGE =
+  'Your xAI key is working — the team it belongs to just has no credits or license seats. Add credits at https://console.x.ai/billing (or use a key from a team that already has them), then try again. No redeploy needed.';
 
 export interface PlanRange {
   startDate: string;
@@ -362,6 +369,11 @@ async function xaiJsonInternal(system: string, user: string, imageDataUrl?: stri
 
     // A JSON error body means the proxy reached xAI and is telling us why.
     if (payload) {
+      // Checked first: an out-of-credit team is billed a 401/403/429 upstream,
+      // and re-pasting a valid key would not fix it.
+      if (code === 'no_credits') {
+        throw new Error(message || t(XAI_NO_CREDITS_MESSAGE));
+      }
       if (code === 'upstream_auth' || response.status === 401) {
         throw new Error(message || t("xAI rejected XAI_API_KEY. Check the server environment variable."));
       }

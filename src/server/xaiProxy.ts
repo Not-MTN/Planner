@@ -28,6 +28,8 @@ export const UPSTREAM_TIMEOUT_MS = 180_000;
 export const MISSING_KEY_MESSAGE =
   'XAI_API_KEY is not configured on the server. On Vercel, add it under Project Settings → Environment Variables and redeploy. Locally, add it to .env.local and restart the dev server.';
 
+export const NO_CREDITS_CODE = 'no_credits';
+
 export interface ChatProxyOptions {
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
@@ -65,12 +67,56 @@ function defaultUpstreamMessage(code: string): string {
   if (code === 'rate_limited') {
     return 'xAI is rate-limiting this key right now. Wait a moment and try again.';
   }
+  if (code === NO_CREDITS_CODE) {
+    return creditErrorMessage('');
+  }
   return 'xAI returned an error for this request.';
+}
+
+/**
+ * xAI answers a *valid* key with a permission error when the team behind that
+ * key has no credit balance and no license seats — typically a freshly created
+ * team. Nothing is misconfigured: the key authenticated, xAI looked up its
+ * team, and refused to run a model for it. Reporting that as "check your key"
+ * sends people editing a perfectly good secret, so match the billing wording
+ * and say what actually has to change.
+ */
+const CREDIT_ERROR_PATTERNS: RegExp[] = [
+  /doesn'?t have any credits or licenses/i,
+  /credit balance is too low/i,
+  /insufficient[ _]?(?:credits?|quota|balance)/i,
+  /exceeded your current credits/i,
+  /no credits? (?:remaining|available|left)/i,
+  /out of credits/i,
+  /add credits to (?:your|the) (?:team|account)/i,
+];
+
+export function isCreditError(message: string): boolean {
+  return CREDIT_ERROR_PATTERNS.some((pattern) => pattern.test(message));
+}
+
+/** xAI embeds the exact billing page for the team in its message; keep that link. */
+export function creditConsoleUrl(message: string): string {
+  const match = message.match(/https:\/\/console\.x\.ai\/team\/[0-9a-fA-F-]{8,}/);
+  return match ? match[0] : 'https://console.x.ai/billing';
+}
+
+export function creditErrorMessage(message: string): string {
+  const detail = message.trim() ? ` xAI said: “${message.trim()}”` : '';
+  return (
+    `Your xAI key is working — the team it belongs to just has no credits or license seats, so xAI will not run any model for it. ` +
+    `Open ${creditConsoleUrl(message)} and add credits (or claim the free credits offered there), then try again: no redeploy is needed. ` +
+    `If one of your other xAI teams already has credits, create the API key from that team and put it in XAI_API_KEY instead.${detail}`
+  );
 }
 
 /**
  * Upstream failures keep their status code but gain a stable code and xAI's own
  * message, so the app can explain what actually happened instead of guessing.
+ *
+ * Credit exhaustion is detected before the status mapping: xAI reports it as a
+ * permission error (403) or an auth-style error (401), and an exhausted balance
+ * can also arrive as a 429 — none of which describe the real problem.
  */
 export function upstreamErrorResponse(status: number, body: string): Response {
   let message = '';
@@ -81,6 +127,11 @@ export function upstreamErrorResponse(status: number, body: string): Response {
     else if (error && typeof error === 'object') message = String((error as { message?: unknown }).message ?? '');
   } catch {
     /* not JSON; fall back to the generic message */
+  }
+  if (isCreditError(message)) {
+    return json(status, {
+      error: { message: creditErrorMessage(message), code: NO_CREDITS_CODE, upstream: status },
+    });
   }
   const code =
     status === 401
