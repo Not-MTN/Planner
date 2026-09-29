@@ -13,6 +13,8 @@
  * one file per route.
  */
 
+import { Buffer } from 'node:buffer';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { API_SECURITY_HEADERS } from './security.js';
 import { redactDatabaseError } from './authStore.js';
 import {
@@ -121,9 +123,33 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
   }
 }
 
+/**
+ * Normalize a request URL into a canonical `/api/...` pathname.
+ *
+ * Handles both direct `/api/<route>` URLs and Vercel catch-all rewritten URLs
+ * such as `/api/[...path]?...path=auth/signup` or `/api/[...path]?path=auth&path=signup`.
+ */
+export function resolveApiPathname(url: URL): string {
+  const trimmed = url.pathname.replace(/\/+$/, '') || '/';
+  if (trimmed === '/api/[...path]' || trimmed === '/api') {
+    const rawParts = [
+      ...url.searchParams.getAll('...path'),
+      ...url.searchParams.getAll('path'),
+    ];
+    const joined = rawParts
+      .flatMap((part) => part.split('/'))
+      .map((segment) => segment.trim())
+      .filter(Boolean)
+      .join('/');
+    return joined ? `/api/${joined}` : '/api';
+  }
+  return trimmed;
+}
+
 /** Route one request to its handler. This is the whole server-side surface. */
 export async function handleApiRequest(request: Request, env: ApiEnv): Promise<Response> {
-  const { pathname } = new URL(request.url, 'https://planner.invalid');
+  const url = new URL(request.url, 'https://planner.invalid');
+  const pathname = resolveApiPathname(url);
   const handler = apiRoute(pathname, env);
   if (!handler) return notFoundResponse();
   try {
@@ -145,5 +171,189 @@ export async function handleApiRequest(request: Request, env: ApiEnv): Promise<R
         },
       },
     );
+  }
+}
+
+/** Check whether the runtime passed a standard Web Fetch `Request` vs Node's `IncomingMessage`. */
+export function isWebRequest(input: unknown): input is Request {
+  return Boolean(
+    input &&
+      typeof input === 'object' &&
+      typeof (input as Request).headers?.get === 'function' &&
+      typeof (input as Request).text === 'function',
+  );
+}
+
+function firstHeaderValue(value: string | string[] | undefined): string | undefined {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (!raw) return undefined;
+  const first = raw.split(',')[0]?.trim();
+  return first || undefined;
+}
+
+/**
+ * Stream a Node `IncomingMessage` body into a Web `ReadableStream`.
+ *
+ * Uses `req.on('data')` / `req.on('end')` rather than `Readable.toWeb(req)`
+ * because `@vercel/node`'s `addHelpers` pre-reads `req` and monkey-patches
+ * `req.on` via `restoreBody(req, buf)`, whereas `Readable.toWeb(req)` reads the
+ * already-drained underlying `IncomingMessage` stream and produces 0 bytes.
+ */
+function bodyStreamFromNodeRequest(req: IncomingMessage): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      let received = false;
+      let finished = false;
+      const closeNormally = () => {
+        if (finished) return;
+        finished = true;
+        controller.close();
+      };
+      const finishFromPreDrainedBody = () => {
+        if (finished) return;
+        finished = true;
+        if (!received) {
+          try {
+            const parsed = (req as IncomingMessage & { body?: unknown }).body;
+            if (parsed !== undefined && parsed !== null) {
+              const raw = Buffer.isBuffer(parsed)
+                ? parsed
+                : parsed instanceof Uint8Array
+                  ? Buffer.from(parsed.buffer, parsed.byteOffset, parsed.byteLength)
+                  : typeof parsed === 'string'
+                    ? Buffer.from(parsed, 'utf8')
+                    : Buffer.from(JSON.stringify(parsed), 'utf8');
+              if (raw.byteLength > 0) {
+                controller.enqueue(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength));
+              }
+            }
+          } catch {
+            // Ignore getter errors when `@vercel/node` defines a throwing JSON getter on empty bodies.
+          }
+        }
+        controller.close();
+      };
+      req.on('data', (chunk: Buffer | string) => {
+        if (finished) return;
+        received = true;
+        const buf = typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : Buffer.from(chunk);
+        controller.enqueue(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength));
+      });
+      req.on('end', closeNormally);
+      req.on('error', (err) => {
+        if (finished) return;
+        finished = true;
+        controller.error(err);
+      });
+      if (req.readableEnded || req.complete) {
+        setImmediate(() => {
+          if (!received && !finished) finishFromPreDrainedBody();
+        });
+      }
+    },
+  });
+}
+
+/** Convert a Node `IncomingMessage` into a Web `Request` preserving origin, protocol, and body. */
+export function nodeRequestToWebRequest(req: IncomingMessage): Request {
+  const headers = new Headers();
+  for (const [name, value] of Object.entries(req.headers ?? {})) {
+    if (Array.isArray(value)) {
+      for (const item of value) headers.append(name, item);
+    } else if (typeof value === 'string') {
+      headers.set(name, value);
+    }
+  }
+
+  const forwardedProto = firstHeaderValue(req.headers?.['x-forwarded-proto'])?.toLowerCase();
+  const encryptedSocket = Boolean((req.socket as { encrypted?: boolean } | undefined)?.encrypted);
+  const originHeader = firstHeaderValue(req.headers?.origin)?.toLowerCase();
+  const proto =
+    forwardedProto === 'https' || forwardedProto === 'http'
+      ? forwardedProto
+      : encryptedSocket
+        ? 'https'
+        : originHeader?.startsWith('http://')
+          ? 'http'
+          : 'https';
+
+  const rawHost = firstHeaderValue(req.headers?.host);
+  const forwardedHost = firstHeaderValue(req.headers?.['x-forwarded-host']);
+  const isLoopbackHost = Boolean(rawHost && /^(127\.0\.0\.1|localhost)(:\d+)?$/i.test(rawHost));
+  const host = (!rawHost || isLoopbackHost) && forwardedHost ? forwardedHost : rawHost || forwardedHost || 'localhost';
+  if (!headers.has('host')) headers.set('host', host);
+
+  const method = (req.method || 'GET').toUpperCase();
+  const hasBody = method !== 'GET' && method !== 'HEAD';
+  const url = new URL(req.url || '/', `${proto}://${host}`).toString();
+
+  return new Request(url, {
+    method,
+    headers,
+    body: hasBody ? bodyStreamFromNodeRequest(req) : undefined,
+    ...(hasBody ? { duplex: 'half' } : {}),
+  } as RequestInit);
+}
+
+/** Write a Web `Response` back to a Node `ServerResponse` and end the stream. */
+export async function writeWebResponseToNode(
+  webResponse: Response,
+  res: ServerResponse,
+  method?: string,
+): Promise<void> {
+  res.statusCode = webResponse.status;
+  const getSetCookie = (webResponse.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie;
+  const setCookies = typeof getSetCookie === 'function' ? getSetCookie.call(webResponse.headers) : [];
+  if (setCookies.length > 0) {
+    res.setHeader('set-cookie', setCookies);
+  }
+  webResponse.headers.forEach((value, name) => {
+    if (name.toLowerCase() === 'set-cookie' && setCookies.length > 0) return;
+    res.setHeader(name, value);
+  });
+  if ((method || 'GET').toUpperCase() === 'HEAD' || !webResponse.body) {
+    res.end();
+    return;
+  }
+  const bytes = Buffer.from(await webResponse.arrayBuffer());
+  res.end(bytes);
+}
+
+/** Serve one Node `(req, res)` invocation end-to-end — always writes to, and ends, `res`. */
+export async function handleNodeApiRequest(
+  request: Request | IncomingMessage,
+  res: ServerResponse,
+  env: ApiEnv,
+): Promise<void> {
+  try {
+    const webRequest = isWebRequest(request) ? request : nodeRequestToWebRequest(request);
+    const webResponse = await handleApiRequest(webRequest, env);
+    await writeWebResponseToNode(webResponse, res, webRequest.method);
+  } catch (caught) {
+    const method = isWebRequest(request) ? request.method : (request.method ?? 'UNKNOWN');
+    const url = request.url ?? '/api';
+    console.error(`[planner] ${method} ${url} failed: ${redactDatabaseError(caught)}`);
+    if (!res.headersSent) {
+      res.statusCode = 500;
+      for (const [name, value] of Object.entries(API_SECURITY_HEADERS)) {
+        res.setHeader(name, value);
+      }
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store');
+    }
+    if (!res.writableEnded) {
+      try {
+        res.end(
+          JSON.stringify({
+            error: {
+              message: 'Something went wrong on the server. The error has been logged — please try again.',
+              code: 'internal_error',
+            },
+          }),
+        );
+      } catch {
+        /* the socket is already gone; nothing left to end */
+      }
+    }
   }
 }

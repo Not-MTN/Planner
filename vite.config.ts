@@ -206,12 +206,14 @@ function authHandler(databaseUrl: string | undefined): NextHandleFunction {
                         ? (webRequest) => authStore(databaseUrl).then((store) => handleLinkAccept(webRequest, store))
                         : pathname === '/share'
                           ? (webRequest) => authStore(databaseUrl).then((store) => handleShare(webRequest, store))
-                          : null;
+                          : pathname === '/note'
+                            ? (webRequest) => authStore(databaseUrl).then((store) => handleNote(webRequest, store))
+                            : null;
     if (!run) {
       next();
       return;
     }
-    void run(toWebRequest(request, `/api/auth${pathname}`))
+    void run(toWebRequest(request, `/api/auth${request.url ?? pathname}`))
       .then((webResponse) => sendWebResponse(webResponse, response))
       .catch(() => {
         if (response.headersSent) return;

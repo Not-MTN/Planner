@@ -4,16 +4,52 @@
 // platform 404 before this handler runs.
 //
 // Vercel's Hobby plan caps a Deployment at 12 Serverless Functions, and the
-// API has 16 routes, so instead of one file per route the whole surface is
+// API has 18 routes, so instead of one file per route the whole surface is
 // routed by `src/server/apiRouter.ts`. The public route URLs are unchanged.
+//
+// `@vercel/node` invokes default-export functions with Node's
+// `(req: IncomingMessage, res: ServerResponse)` signature unless Web handler
+// exports are active, while unit tests invoke `handler(new Request(...))`
+// directly. Supporting both signatures ensures the function never leaves
+// `ServerResponse` un-ended in production.
+//
 // The `.js` extension is required: Vercel compiles each TypeScript file to
 // native ESM ("type": "module"), and Node ESM does not resolve extensionless imports.
-import { handleApiRequest } from '../src/server/apiRouter.js';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import {
+  handleApiRequest,
+  handleNodeApiRequest,
+  isWebRequest,
+  type ApiEnv,
+} from '../src/server/apiRouter.js';
 
-export default async function handler(request: Request): Promise<Response> {
-  return handleApiRequest(request, {
-    DATABASE_URL: process.env.DATABASE_URL,
+function currentEnv(): ApiEnv {
+  return {
+    DATABASE_URL:
+      process.env.DATABASE_URL ||
+      process.env.POSTGRES_URL ||
+      process.env.NEON_DATABASE_URL,
     XAI_API_KEY: process.env.XAI_API_KEY,
     XAI_MODEL: process.env.XAI_MODEL,
-  });
+  };
+}
+
+export default async function handler(request: Request): Promise<Response>;
+export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void>;
+export default async function handler(
+  reqOrRequest: Request | IncomingMessage,
+  res?: ServerResponse,
+): Promise<Response | void> {
+  const env = currentEnv();
+  // Whenever the runtime gave us a ServerResponse, the only way out is to
+  // write to it and end it — a returned Response is ignored on that path, and
+  // an un-ended socket is exactly the "stuck with no error" bug.
+  if (res) {
+    await handleNodeApiRequest(reqOrRequest, res, env);
+    return;
+  }
+  if (isWebRequest(reqOrRequest)) {
+    return handleApiRequest(reqOrRequest, env);
+  }
+  throw new TypeError('Unsupported request object passed to API handler.');
 }
