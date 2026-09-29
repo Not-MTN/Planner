@@ -343,6 +343,9 @@ export class DatabaseConfigError extends Error {
  */
 export function cleanDatabaseUrl(raw: string): string {
   let url = raw.trim();
+  url = url.replace(/^["'`<]+/, '').replace(/["'`>]+$/, '').trim();
+  url = url.replace(/^psql\s+/i, '').trim();
+  url = url.replace(/^(?:DATABASE_URL|POSTGRES_URL|NEON_DATABASE_URL)\s*=\s*/i, '').trim();
   url = url.replace(/^["'`<]+/, '').replace(/["'`>]+$/, '');
   return url.trim();
 }
@@ -686,76 +689,78 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
           `DATABASE_URL is not a valid database connection string. Check the value in Vercel → Settings → Environment Variables (no quotes or extra text). (${redactDatabaseError(error)})`,
         );
       }
-      await sql`CREATE TABLE IF NOT EXISTS planner_users (
-        id             text PRIMARY KEY CHECK (id ~ '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'),
-        username       text NOT NULL,
-        username_lower text NOT NULL UNIQUE,
-        email_lower    text UNIQUE,
-        display_name   text NOT NULL,
-        role           text NOT NULL CHECK (role IN ('personal','student','guardian')),
-        created_at     timestamptz NOT NULL DEFAULT now()
-      )`;
-      await sql`CREATE TABLE IF NOT EXISTS planner_credentials (
-        user_id     text PRIMARY KEY REFERENCES planner_users(id) ON DELETE CASCADE,
-        kdf_salt    text NOT NULL,
-        auth_hash   text NOT NULL,
-        hash_salt   text NOT NULL,
-        recovery_hash      text,
-        recovery_hash_salt text,
-        updated_at         timestamptz NOT NULL DEFAULT now()
-      )`;
-      await sql`ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS recovery_hash text`;
-      await sql`ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS recovery_hash_salt text`;
-      await sql`CREATE TABLE IF NOT EXISTS planner_vaults (
-        user_id          text PRIMARY KEY REFERENCES planner_users(id) ON DELETE CASCADE,
-        version          integer NOT NULL CHECK (version > 0),
-        ciphertext       text NOT NULL,
-        wrapped_dek      text NOT NULL,
-        wrapped_recovery text NOT NULL,
-        updated_at       timestamptz NOT NULL DEFAULT now()
-      )`;
-      await sql`CREATE TABLE IF NOT EXISTS planner_sessions (
-        id           text PRIMARY KEY,
-        user_id      text NOT NULL REFERENCES planner_users(id) ON DELETE CASCADE,
-        token_hash   text NOT NULL UNIQUE,
-        label        text NOT NULL DEFAULT '',
-        created_at   timestamptz NOT NULL DEFAULT now(),
-        last_seen_at timestamptz NOT NULL DEFAULT now(),
-        expires_at   timestamptz NOT NULL
-      )`;
-      await sql`CREATE INDEX IF NOT EXISTS planner_sessions_user_idx ON planner_sessions (user_id)`;
-      await sql`CREATE TABLE IF NOT EXISTS planner_links (
-        id                     text PRIMARY KEY,
-        guardian_id            text NOT NULL REFERENCES planner_users(id) ON DELETE CASCADE,
-        student_id             text REFERENCES planner_users(id) ON DELETE CASCADE,
-        student_username_lower text NOT NULL,
-        code_hash              text NOT NULL,
-        wrapped_share          text NOT NULL,
-        share_ciphertext       text,
-        share_week             text,
-        share_updated_at       timestamptz,
-        status                 text NOT NULL CHECK (status IN ('pending','linked','revoked')),
-        note_to_student        text,
-        note_to_guardian       text,
-        note_week              text,
-        created_at             timestamptz NOT NULL DEFAULT now(),
-        updated_at             timestamptz NOT NULL DEFAULT now(),
-        UNIQUE (guardian_id, student_username_lower)
-      )`;
-      await sql`CREATE INDEX IF NOT EXISTS planner_links_student_idx ON planner_links (student_username_lower)`;
-      await sql`CREATE INDEX IF NOT EXISTS planner_links_student_id_idx ON planner_links (student_id)`;
-      await sql`CREATE TABLE IF NOT EXISTS planner_passkeys (
-        credential_id   text PRIMARY KEY,
-        user_id         text NOT NULL REFERENCES planner_users(id) ON DELETE CASCADE,
-        public_key      text NOT NULL,
-        label           text NOT NULL DEFAULT '',
-        sign_count      integer NOT NULL DEFAULT 0,
-        prf_wrapped_dek text,
-        transports      text NOT NULL DEFAULT '',
-        created_at      timestamptz NOT NULL DEFAULT now(),
-        last_used_at    timestamptz
-      )`;
-      await sql`CREATE INDEX IF NOT EXISTS planner_passkeys_user_idx ON planner_passkeys (user_id)`;
+      await sql.transaction([
+        sql`CREATE TABLE IF NOT EXISTS planner_users (
+          id             text PRIMARY KEY CHECK (id ~ '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'),
+          username       text NOT NULL,
+          username_lower text NOT NULL UNIQUE,
+          email_lower    text UNIQUE,
+          display_name   text NOT NULL,
+          role           text NOT NULL CHECK (role IN ('personal','student','guardian')),
+          created_at     timestamptz NOT NULL DEFAULT now()
+        )`,
+        sql`CREATE TABLE IF NOT EXISTS planner_credentials (
+          user_id     text PRIMARY KEY REFERENCES planner_users(id) ON DELETE CASCADE,
+          kdf_salt    text NOT NULL,
+          auth_hash   text NOT NULL,
+          hash_salt   text NOT NULL,
+          recovery_hash      text,
+          recovery_hash_salt text,
+          updated_at         timestamptz NOT NULL DEFAULT now()
+        )`,
+        sql`ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS recovery_hash text`,
+        sql`ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS recovery_hash_salt text`,
+        sql`CREATE TABLE IF NOT EXISTS planner_vaults (
+          user_id          text PRIMARY KEY REFERENCES planner_users(id) ON DELETE CASCADE,
+          version          integer NOT NULL CHECK (version > 0),
+          ciphertext       text NOT NULL,
+          wrapped_dek      text NOT NULL,
+          wrapped_recovery text NOT NULL,
+          updated_at       timestamptz NOT NULL DEFAULT now()
+        )`,
+        sql`CREATE TABLE IF NOT EXISTS planner_sessions (
+          id           text PRIMARY KEY,
+          user_id      text NOT NULL REFERENCES planner_users(id) ON DELETE CASCADE,
+          token_hash   text NOT NULL UNIQUE,
+          label        text NOT NULL DEFAULT '',
+          created_at   timestamptz NOT NULL DEFAULT now(),
+          last_seen_at timestamptz NOT NULL DEFAULT now(),
+          expires_at   timestamptz NOT NULL
+        )`,
+        sql`CREATE INDEX IF NOT EXISTS planner_sessions_user_idx ON planner_sessions (user_id)`,
+        sql`CREATE TABLE IF NOT EXISTS planner_links (
+          id                     text PRIMARY KEY,
+          guardian_id            text NOT NULL REFERENCES planner_users(id) ON DELETE CASCADE,
+          student_id             text REFERENCES planner_users(id) ON DELETE CASCADE,
+          student_username_lower text NOT NULL,
+          code_hash              text NOT NULL,
+          wrapped_share          text NOT NULL,
+          share_ciphertext       text,
+          share_week             text,
+          share_updated_at       timestamptz,
+          status                 text NOT NULL CHECK (status IN ('pending','linked','revoked')),
+          note_to_student        text,
+          note_to_guardian       text,
+          note_week              text,
+          created_at             timestamptz NOT NULL DEFAULT now(),
+          updated_at             timestamptz NOT NULL DEFAULT now(),
+          UNIQUE (guardian_id, student_username_lower)
+        )`,
+        sql`CREATE INDEX IF NOT EXISTS planner_links_student_idx ON planner_links (student_username_lower)`,
+        sql`CREATE INDEX IF NOT EXISTS planner_links_student_id_idx ON planner_links (student_id)`,
+        sql`CREATE TABLE IF NOT EXISTS planner_passkeys (
+          credential_id   text PRIMARY KEY,
+          user_id         text NOT NULL REFERENCES planner_users(id) ON DELETE CASCADE,
+          public_key      text NOT NULL,
+          label           text NOT NULL DEFAULT '',
+          sign_count      integer NOT NULL DEFAULT 0,
+          prf_wrapped_dek text,
+          transports      text NOT NULL DEFAULT '',
+          created_at      timestamptz NOT NULL DEFAULT now(),
+          last_used_at    timestamptz
+        )`,
+        sql`CREATE INDEX IF NOT EXISTS planner_passkeys_user_idx ON planner_passkeys (user_id)`,
+      ]);
     })().catch((error: unknown) => {
       ready = null;
       throw error;
@@ -785,8 +790,10 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
         return { ok: false, reason: 'email_taken' };
       }
 
-      const credential = await hashCredential(input.authToken);
-      const recoveryVerifier = await hashRecoveryVerifier(input.recoveryHash);
+      const [credential, recoveryVerifier] = await Promise.all([
+        hashCredential(input.authToken),
+        hashRecoveryVerifier(input.recoveryHash),
+      ]);
       try {
         // Credentials and vault land together: an account with one but not the
         // other could never sign in, and the name would be gone for good.

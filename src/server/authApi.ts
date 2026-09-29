@@ -86,6 +86,12 @@ function toPublicUser(row: UserRow): PublicUser {
 }
 
 function isHttps(request: Request): boolean {
+  const forwarded = request.headers
+    .get('x-forwarded-proto')
+    ?.split(',')[0]
+    ?.trim()
+    .toLowerCase();
+  if (forwarded === 'https' || forwarded === 'http') return forwarded === 'https';
   try {
     return new URL(request.url).protocol === 'https:';
   } catch {

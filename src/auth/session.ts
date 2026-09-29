@@ -141,8 +141,18 @@ export function adoptSession(
   active = { user, dek, dekRaw, vault };
 }
 
+const REQUEST_TIMEOUT_MS = 25_000;
+
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const method = (init.method ?? 'GET').toUpperCase();
+  const controller = !init.signal && typeof AbortController !== 'undefined' ? new AbortController() : null;
+  let timedOut = false;
+  const timer = controller
+    ? setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, REQUEST_TIMEOUT_MS)
+    : null;
   let response: Response;
   try {
     response = await fetch(path, {
@@ -152,10 +162,20 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
       // failure that looks exactly like a dead connection.
       redirect: 'manual',
       headers: { 'Content-Type': 'application/json' },
+      ...(controller ? { signal: controller.signal } : {}),
       ...init,
     });
   } catch {
+    if (timedOut) {
+      throw new AuthError(
+        'network',
+        'The server took too long to respond. Please try again.',
+        `${method} ${path} timed out.`,
+      );
+    }
     throw new AuthError('network', 'Could not reach the server. Check your connection and try again.');
+  } finally {
+    if (timer !== null) clearTimeout(timer);
   }
 
   // `opaqueredirect` / status 0: something in front of the app redirected this

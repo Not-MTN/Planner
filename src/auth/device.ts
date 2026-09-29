@@ -32,12 +32,39 @@ export function deviceCacheSupported(): boolean {
   return typeof indexedDB !== 'undefined' && typeof crypto !== 'undefined' && Boolean(crypto.subtle);
 }
 
+const IDB_TIMEOUT_MS = 3_000;
+
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error('IndexedDB open timed out'));
+    }, IDB_TIMEOUT_MS);
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn();
+    };
     const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore(STORE);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error('IndexedDB open failed'));
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(STORE)) {
+        request.result.createObjectStore(STORE);
+      }
+    };
+    request.onsuccess = () => {
+      const db = request.result;
+      db.onversionchange = () => db.close();
+      if (settled) {
+        db.close();
+        return;
+      }
+      finish(() => resolve(db));
+    };
+    request.onerror = () => finish(() => reject(request.error ?? new Error('IndexedDB open failed')));
+    request.onblocked = () => finish(() => reject(new Error('IndexedDB open blocked')));
   });
 }
 
