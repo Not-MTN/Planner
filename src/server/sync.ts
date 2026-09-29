@@ -8,6 +8,7 @@
 
 import { isSameOriginRequest } from './xaiProxy.js';
 import { API_SECURITY_HEADERS, BodyTooLargeError, rateLimitResponse, readLimitedBody } from './security.js';
+import { DatabaseConfigError, cleanDatabaseUrl, redactDatabaseError } from './authStore.js';
 
 export const MAX_SYNC_BYTES = 3_000_000;
 const ID_PATTERN = /^[a-f0-9]{64}$/;
@@ -96,28 +97,41 @@ export async function handleSync(request: Request, store: SyncStore | null): Pro
     }
 
     return json(405, { error: { message: 'Method not allowed.' } });
-  } catch {
+  } catch (error) {
+    console.error(`[planner] sync database error: ${redactDatabaseError(error)}`);
     return json(502, { error: { message: 'The sync database could not be reached. Try again shortly.' } });
   }
 }
 
 /** Neon-backed store. Imported lazily so the dependency only loads on the server. */
 export async function createNeonStore(databaseUrl: string | undefined): Promise<SyncStore | null> {
-  databaseUrl = databaseUrl?.trim();
-  if (!databaseUrl) return null;
-  const { neon } = await import('@neondatabase/serverless');
-  const sql = neon(databaseUrl);
+  const url = cleanDatabaseUrl(databaseUrl ?? '');
+  if (!url) return null;
+  // Assigned by ensure() before any method body runs its first query; creating
+  // the driver lazily keeps an unparseable DATABASE_URL from crashing the
+  // function at import time (the platform would report a bare HTML 500).
+  let sql!: Awaited<ReturnType<(typeof import('@neondatabase/serverless'))['neon']>>;
   let ready: Promise<unknown> | null = null;
   const ensure = () => {
-    ready ??= sql`CREATE TABLE IF NOT EXISTS planner_sync (
-      id text PRIMARY KEY CHECK (id ~ '^[a-f0-9]{64}$'),
-      version integer NOT NULL CHECK (version > 0),
-      ciphertext text NOT NULL,
-      updated_at timestamptz NOT NULL DEFAULT now()
-    )`.catch((error: unknown) => {
-      ready = null;
-      throw error;
-    });
+    ready ??= (async () => {
+      const { neon } = await import('@neondatabase/serverless');
+      try {
+        sql = neon(url);
+      } catch (error) {
+        throw new DatabaseConfigError(
+          `DATABASE_URL is not a valid database connection string. Check the value in Vercel → Settings → Environment Variables (no quotes or extra text). (${redactDatabaseError(error)})`,
+        );
+      }
+      return sql`CREATE TABLE IF NOT EXISTS planner_sync (
+        id text PRIMARY KEY CHECK (id ~ '^[a-f0-9]{64}$'),
+        version integer NOT NULL CHECK (version > 0),
+        ciphertext text NOT NULL,
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )`.catch((error: unknown) => {
+        ready = null;
+        throw error;
+      });
+    })();
     return ready;
   };
   return {
@@ -146,8 +160,8 @@ let cached: { url: string; store: Promise<SyncStore | null> } | null = null;
 
 /** Reuses one store per warm function instance. */
 export function neonStore(databaseUrl: string | undefined): Promise<SyncStore | null> {
-  databaseUrl = databaseUrl?.trim();
-  if (!databaseUrl) return Promise.resolve(null);
-  if (!cached || cached.url !== databaseUrl) cached = { url: databaseUrl, store: createNeonStore(databaseUrl) };
+  const url = cleanDatabaseUrl(databaseUrl ?? '');
+  if (!url) return Promise.resolve(null);
+  if (!cached || cached.url !== url) cached = { url, store: createNeonStore(url) };
   return cached.store;
 }

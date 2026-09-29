@@ -14,6 +14,7 @@
  */
 
 import { API_SECURITY_HEADERS } from './security.js';
+import { redactDatabaseError } from './authStore.js';
 import {
   handleAccountVault,
   handleAuthStatus,
@@ -125,5 +126,24 @@ export async function handleApiRequest(request: Request, env: ApiEnv): Promise<R
   const { pathname } = new URL(request.url, 'https://planner.invalid');
   const handler = apiRoute(pathname, env);
   if (!handler) return notFoundResponse();
-  return handler(request);
+  try {
+    return await handler(request);
+  } catch (caught) {
+    // Last resort: a crashed handler must never reach the client as the
+    // platform's non-JSON 500 — the app can only classify JSON errors, so it
+    // would show an opaque "unexpected response". Log the real cause for the
+    // Vercel function logs (secrets redacted) and answer in our own envelope.
+    console.error(`[planner] ${request.method} ${pathname} failed: ${redactDatabaseError(caught)}`);
+    return new Response(
+      JSON.stringify({ error: { message: 'Something went wrong on the server. The error has been logged — please try again.', code: 'internal_error' } }),
+      {
+        status: 500,
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Cache-Control': 'no-store',
+          ...API_SECURITY_HEADERS,
+        },
+      },
+    );
+  }
 }

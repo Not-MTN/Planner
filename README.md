@@ -36,7 +36,7 @@ Sign-in (and guardian linking later) needs the **same `DATABASE_URL`** — there
 
 Visit `https://<your-app>/api/auth/status` — it returns `{"configured": true, "storage": "database"}` when the server can see `DATABASE_URL`. Without one, development and preview answer `{"configured": false, "storage": "temporary"}`: accounts work in memory but a restart forgets them (production has no fallback — it reports `"none"` and every account endpoint answers 503).
 
-**The database itself is never pushed to GitHub.** Only schema files (`db/*.sql`) live in the repository. Neon holds the data, and the connection string travels to Vercel as an environment variable: Vercel → Project → Settings → Environment Variables → `DATABASE_URL`, then redeploy. If you used Vercel's Neon integration, it added that variable for you. Locally it goes in `.env.local`, which is git-ignored.
+**The database itself is never pushed to GitHub.** Only schema files (`db/*.sql`) live in the repository. Neon holds the data, and the connection string travels to Vercel as an environment variable: Vercel → Project → Settings → Environment Variables → `DATABASE_URL`, then redeploy. If you used Vercel's Neon integration, it added that variable for you. Locally it goes in `.env.local`, which is git-ignored. Paste the connection string plain — surrounding quotes, angle brackets and stray whitespace are cleaned up automatically, but anything else glued onto it breaks the parse.
 
 ### Sign-in fails: what the app now tells you
 
@@ -48,6 +48,7 @@ The sign-in screen checks `/api/auth/status` **before you type** and names the c
 | “The accounts API did not answer at this address…” | A 404, an empty body, or the app's own HTML shell where JSON was expected | The deployment has no `api/` functions, or the domain/alias points at a deleted or older deployment. Redeploy, then re-point the domain (Vercel → Project → Domains). A `404 DEPLOYMENT_NOT_FOUND` page means the alias is dead. |
 | “Accounts are not set up on this server yet.” | `{"configured":false, "storage":"none"}` from `/api/auth/status` | `DATABASE_URL` is missing for that production environment: add it and redeploy (environment variables apply only to new deployments). |
 | “Accounts on this server are kept in memory only…” | `{"configured":false, "storage":"temporary"}` — development or preview with no database | Not a bug: sign-up works, but restarting the dev server signs everyone out. Set `DATABASE_URL` (locally in `.env.local`) to keep accounts. |
+| “The accounts database could not be reached. Try again shortly.” (or `internal_error` after a 500) | The API answered JSON, but the database call failed — check the Vercel function logs for a `[planner] …` line naming the cause | Vercel → Project → **Logs**, filter the failed invocation. A `DATABASE_URL is not a valid database connection string` line means the variable's value has stray quotes or extra text around the connection string — re-paste it plain and redeploy. |
 
 The last line under any error is the technical detail — for example `POST /api/auth/salt → 401 text/html — “Log in to Vercel”` — and is meant to be pasted into a bug report.
 
