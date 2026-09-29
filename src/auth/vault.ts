@@ -91,6 +91,11 @@ export async function bootAccount(): Promise<AccountBoot> {
     // Network failure: keep using local copy (offline). If we have a trusted device,
     // we can still try to open with cached key later, but for now treat as offline.
     if (err instanceof AuthError && err.code === 'network') throw err;
+    // Deployment gate, missing API, not configured — these are blocking errors that
+    // must be shown to the user, not swallowed as signed-out.
+    if (err instanceof AuthError && (err.code === 'deployment_gate' || err.code === 'api_missing' || err.code === 'not_configured')) {
+      throw err;
+    }
     // Other errors: fall through to trusted-device check
     user = null;
   }
