@@ -462,17 +462,17 @@ export function SettingsSheet() {
       </section>
 
       <section className="set-section">
-        <h3 className="kicker">{t("AI coach · xAI")}</h3>
-        <p className="set-hint">{t("The planner uses a server-side proxy for xAI (Grok). Your API key stays out of the browser and planner backups.")}</p>
-        <pre className="env-code"><code>{t("XAI_API_KEY=your_xai_api_key")}</code></pre>
-        <p className="set-hint"><strong>{t("On Vercel:")}</strong> {t("Project Settings → Environment Variables → add")} <code>{t("XAI_API_KEY")}</code> {t("with your key as the value, then redeploy. Vercel Functions in")} <code>{t("api/xai")}</code> {t("handle the requests.")}</p>
+        <h3 className="kicker">{t("AI coach · Groq")}</h3>
+        <p className="set-hint">{t("The planner uses a server-side proxy for Groq. Your API key stays out of the browser and planner backups.")}</p>
+        <pre className="env-code"><code>{t("GROQ_API_KEY=your_groq_api_key")}</code></pre>
+        <p className="set-hint"><strong>{t("On Vercel:")}</strong> {t("Project Settings → Environment Variables → add")} <code>{t("GROQ_API_KEY")}</code> {t("with your key as the value, then redeploy. Vercel Functions in")} <code>{t("api/groq")}</code> {t("handle the requests.")}</p>
         <p className="set-hint"><strong>{t("Locally:")}</strong> {t("put that line in")} <code>{t(".env.local")}</code> {t("at the project root, then restart the dev server.")}</p>
-        <p className="ai-privacy-note">{t("Never use a")} <code>{t("VITE_")}</code> {t("prefix for the key. The AI sends your prompt, saved AI memory, and relevant schedule/check-in details to xAI; planner notes are not included. Forget memory from the AI coach at any time.")}</p>
+        <p className="ai-privacy-note">{t("Never use a")} <code>{t("VITE_")}</code> {t("prefix for the key. The AI sends your prompt, saved AI memory, and relevant schedule/check-in details to Groq; planner notes are not included. Forget memory from the AI coach at any time.")}</p>
       </section>
 
       <section className="set-section">
         <h3 className="kicker">{t("Your data")}</h3>
-        <p className="set-hint">{t("Planner data is saved in this browser. With sync on, an encrypted copy is kept in your database; AI requests pass through the server-side xAI proxy.")}</p>
+        <p className="set-hint">{t("Planner data is saved in this browser. With sync on, an encrypted copy is kept in your database; AI requests pass through the server-side Groq proxy.")}</p>
         <div className="set-actions">
           <button type="button" className="btn btn-soft" onClick={exportData}>
             <DownloadIcon size={16} /> {t("Export backup")}

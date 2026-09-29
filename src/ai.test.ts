@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildAIPlannerContext, generateAIPlan, generateAIReview, XAI_CHAT_URL, XAI_TEXT_MODEL, XAI_VISION_MODEL } from './ai';
+import { buildAIPlannerContext, generateAIPlan, generateAIReview, GROQ_CHAT_URL, GROQ_TEXT_MODEL, GROQ_VISION_MODEL } from './ai';
 import { addAIMemory, addEvent, addFixedCommitment, addTask, logFocus, toggleTask } from './mutate';
 import { createEmptyState } from './types';
 
-function mockXAI(content: unknown) {
+function mockGroq(content: unknown) {
   const payload = { choices: [{ message: { content: JSON.stringify(content) } }] };
   const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({
     ok: true,
@@ -18,7 +18,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('xAI planning assistant', () => {
+describe('Groq planning assistant', () => {
   it('sends explicit memory and soft planner patterns as context without sending notes', async () => {
     let state = addAIMemory(createEmptyState(), { text: 'I need a quiet hour after lunch.', category: 'boundary' }, 'memory-1', '2026-09-27T08:00:00.000Z');
     state = addTask(state, {
@@ -31,7 +31,7 @@ describe('xAI planning assistant', () => {
       memory: [{ category: 'boundary', text: 'I need a quiet hour after lunch.' }],
       patterns: { focusHours: ['09:00'], completedTaskCategories: [{ category: 'work', count: 1 }] },
     });
-    const fetchMock = mockXAI({ summary: 'A calm plan.', tasks: [], events: [], habits: [], wellbeing: [] });
+    const fetchMock = mockGroq({ summary: 'A calm plan.', tasks: [], events: [], habits: [], wellbeing: [] });
     await generateAIPlan({ prompt: 'Plan a calm day.', range: { startDate: '2026-09-27', days: 1 }, state });
     const request = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as { messages: Array<{ role: string; content: string }> };
     const userMessage = request.messages.find((message) => message.role === 'user')?.content ?? '';
@@ -53,7 +53,7 @@ describe('xAI planning assistant', () => {
       title: 'Appointment', date: '2026-09-29', startTime: '10:00', endTime: '11:00',
       category: 'personal', note: '', important: false,
     }, 'appointment', now);
-    const fetchMock = mockXAI({
+    const fetchMock = mockGroq({
       summary: 'A balanced two-day plan.',
       tasks: [
         { title: 'Already planned', date: '2026-09-30', priority: 'medium', category: 'personal' },
@@ -75,10 +75,10 @@ describe('xAI planning assistant', () => {
       state,
     });
 
-    expect(fetchMock).toHaveBeenCalledWith(XAI_CHAT_URL, expect.objectContaining({ method: 'POST' }));
+    expect(fetchMock).toHaveBeenCalledWith(GROQ_CHAT_URL, expect.objectContaining({ method: 'POST' }));
     expect(fetchMock.mock.calls[0][1]?.headers).not.toHaveProperty('Authorization');
     const request = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as { model: string };
-    expect(request.model).toBe(XAI_TEXT_MODEL);
+    expect(request.model).toBe(GROQ_TEXT_MODEL);
     expect(result.tasks.map((task) => task.title)).toEqual(['Pack lunch']);
     expect(result.events.map((event) => event.title)).toEqual(['Walk after class']);
     expect(result.skippedEvents).toHaveLength(2);
@@ -88,8 +88,8 @@ describe('xAI planning assistant', () => {
     expect(result.suggestions).toEqual(['Keep one short break between study sessions.']);
   });
 
-  it('uses xAI Grok image understanding for an attached plan image', async () => {
-    const fetchMock = mockXAI({ summary: 'Read from the picture.', tasks: [], events: [], habits: [], wellbeing: [] });
+  it('uses the Groq vision model for an attached plan image for an attached plan image', async () => {
+    const fetchMock = mockGroq({ summary: 'Read from the picture.', tasks: [], events: [], habits: [], wellbeing: [] });
     await generateAIPlan({
       prompt: '',
       range: { startDate: '2026-09-27', days: 1 },
@@ -100,7 +100,7 @@ describe('xAI planning assistant', () => {
       model: string;
       messages: Array<{ role: string; content: unknown }>;
     };
-    expect(request.model).toBe(XAI_VISION_MODEL);
+    expect(request.model).toBe(GROQ_VISION_MODEL);
     expect(request.messages[1].content).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'image_url' }),
     ]));
@@ -117,7 +117,7 @@ describe('xAI planning assistant', () => {
       category: 'personal', note: '', goalId: null,
     }, 'task-done', now);
     state = toggleTask(state, 'task-done', now);
-    mockXAI({
+    mockGroq({
       summary: 'You made steady progress.',
       wins: ['You completed the task you planned.'],
       improvements: ['Leave a buffer for reading.'],

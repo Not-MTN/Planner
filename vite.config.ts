@@ -6,7 +6,7 @@ import { Readable } from 'node:stream';
 import { cwd, env } from 'node:process';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { NextHandleFunction } from 'connect';
-import { handleXAIChatCompletions, handleXAIStatus } from './src/server/xaiProxy';
+import { handleGroqChatCompletions, handleGroqStatus } from './src/server/groqProxy';
 import { API_SECURITY_HEADERS } from './src/server/security';
 import { handleSync, handleSyncStatus, neonStore } from './src/server/sync';
 import {
@@ -64,39 +64,39 @@ async function sendWebResponse(webResponse: Response, response: ServerResponse):
   response.end(Buffer.from(await webResponse.arrayBuffer()));
 }
 
-function xaiProxyHandler(apiKey: string | undefined, model: string | undefined): NextHandleFunction {
+function groqProxyHandler(apiKey: string | undefined, model: string | undefined, visionModel: string | undefined): NextHandleFunction {
   return (request, response, next) => {
-    // Mounted at /api/xai, so request.url is relative to that prefix.
+    // Mounted at /api/groq, so request.url is relative to that prefix.
     const pathname = (request.url ?? '').split('?')[0];
     let handler: ((webRequest: Request) => Response | Promise<Response>) | null = null;
-    if (pathname === '/status') handler = (webRequest) => handleXAIStatus(webRequest, apiKey);
+    if (pathname === '/status') handler = (webRequest) => handleGroqStatus(webRequest, apiKey);
     else if (pathname === '/chat/completions') {
-      handler = (webRequest) => handleXAIChatCompletions(webRequest, apiKey, { model });
+      handler = (webRequest) => handleGroqChatCompletions(webRequest, apiKey, { model, visionModel });
     }
     if (!handler) {
       next();
       return;
     }
-    void Promise.resolve(handler(toWebRequest(request, `/api/xai${pathname}`)))
+    void Promise.resolve(handler(toWebRequest(request, `/api/groq${pathname}`)))
       .then((webResponse) => sendWebResponse(webResponse, response))
       .catch(() => {
         if (response.headersSent) return;
         response.statusCode = 500;
         response.setHeader('Content-Type', 'application/json');
-        response.end(JSON.stringify({ error: { message: 'The local xAI proxy failed. Please try again.' } }));
+        response.end(JSON.stringify({ error: { message: 'The local Groq proxy failed. Please try again.' } }));
       });
   };
 }
 
-function xaiProxy(apiKey: string | undefined, model: string | undefined): Plugin {
-  const middleware = xaiProxyHandler(apiKey, model);
+function groqProxyPlugin(apiKey: string | undefined, model: string | undefined, visionModel: string | undefined): Plugin {
+  const middleware = groqProxyHandler(apiKey, model, visionModel);
   return {
-    name: 'planner-xai-proxy',
+    name: 'planner-groq-proxy',
     configureServer(server) {
-      server.middlewares.use('/api/xai', middleware);
+      server.middlewares.use('/api/groq', middleware);
     },
     configurePreviewServer(server) {
-      server.middlewares.use('/api/xai', middleware);
+      server.middlewares.use('/api/groq', middleware);
     },
   };
 }
@@ -262,11 +262,12 @@ function authApi(databaseUrl: string | undefined): Plugin {
 export default defineConfig(({ mode }) => {
   // Read the secret only inside the Vite/Node process. It is never defined into the browser bundle.
   const fileEnv = loadEnv(mode, cwd(), '');
-  const apiKey = env.XAI_API_KEY || fileEnv.XAI_API_KEY;
-  const model = env.XAI_MODEL || fileEnv.XAI_MODEL;
+  const apiKey = env.GROQ_API_KEY || fileEnv.GROQ_API_KEY;
+  const model = env.GROQ_MODEL || fileEnv.GROQ_MODEL;
+  const visionModel = env.GROQ_VISION_MODEL ?? fileEnv.GROQ_VISION_MODEL;
   const databaseUrl = env.DATABASE_URL || fileEnv.DATABASE_URL;
   return {
-    plugins: [react(), xaiProxy(apiKey, model), syncApi(databaseUrl), authApi(databaseUrl), icsApi(), apiFallback()],
+    plugins: [react(), groqProxyPlugin(apiKey, model, visionModel), syncApi(databaseUrl), authApi(databaseUrl), icsApi(), apiFallback()],
     build: {
       rollupOptions: {
         output: {

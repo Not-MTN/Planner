@@ -2,7 +2,7 @@
 
 A calm, local-first planner for your day, your week, and the days ahead — tasks, habits, goals, and notes in one beautiful place.
 
-Planner data is saved in this browser (`localStorage`, mirrored to IndexedDB). Optional **end-to-end encrypted sync** keeps devices in step through your own Neon database — there are no accounts, and the server only stores ciphertext. If you choose to use AI, the current prompt, any AI memory you explicitly saved, and the minimum schedule/check-in details needed for that request pass through the server-side proxy to xAI. Planner notes are not sent. Use **Settings → Export** for a backup file, and **Settings → Import** to bring one back.
+Planner data is saved in this browser (`localStorage`, mirrored to IndexedDB). Optional **end-to-end encrypted sync** keeps devices in step through your own Neon database — there are no accounts, and the server only stores ciphertext. If you choose to use AI, the current prompt, any AI memory you explicitly saved, and the minimum schedule/check-in details needed for that request pass through the server-side proxy to Groq. Planner notes are not sent. Use **Settings → Export** for a backup file, and **Settings → Import** to bring one back.
 
 ```bash
 npm install
@@ -97,7 +97,7 @@ Settings → **Language** switches the whole interface to Persian with a right-t
 - **Habits** — streaks (current & best), a week strip, and a 12-week heatmap you can tap to fill in any day.
 - **Calendar** — drag events between days in Week view, see the month at a glance, and scroll the days ahead in Upcoming (7 / 14 / 30 / 90 days). A load strip shows quiet vs full days; undated tasks sit in **Someday** and can park on the quietest day.
 - **Insights** — day streak, weekly bars, a 7/30/90-day completion trend, a task/event/habit completion donut, habit consistency, and goal progress.
-- **AI Coach (xAI / Grok)** — describe a day, week, month (30 days), or any custom range up to 90 days (say it in the request — “plan the next 10 days” — and it offers to match the range); get draft tasks, timed events, habits, and gentle wellbeing ideas spread across the whole stretch. Upload a PNG/JPG (up to 3 MB) of a written plan for image reading. Review the draft before adding it; one undo reverses the whole batch, and the draft stays on the **Plans** page either way. **AI memory** lets you save the life context you choose — preferences, people, routines, boundaries, and other helpful facts — so future plans and reviews can fit you better. Memory is local-first, included in encrypted sync/backups, editable and forgettable at any time; it is sent to xAI only when you ask the coach to plan or review.
+- **AI Coach (Groq Cloud)** — describe a day, week, month (30 days), or any custom range up to 90 days (say it in the request — “plan the next 10 days” — and it offers to match the range); get draft tasks, timed events, habits, and gentle wellbeing ideas spread across the whole stretch. Upload a PNG/JPG (up to 3 MB) of a written plan for image reading. Review the draft before adding it; one undo reverses the whole batch, and the draft stays on the **Plans** page either way. **AI memory** lets you save the life context you choose — preferences, people, routines, boundaries, and other helpful facts — so future plans and reviews can fit you better. Memory is local-first, included in encrypted sync/backups, editable and forgettable at any time; it is sent to Groq only when you ask the coach to plan or review.
 - **Protected weekly times** — add a repeating class, shift, or appointment (for example Tuesday 08:00–09:00). It appears on the calendar and the AI rejects overlapping events.
 - **AI review** — ask for a daily, weekly, monthly, or custom reflection on completed tasks, events, and habit check-ins. Select unfinished tasks and dates to carry them forward; nothing is rescheduled without your action.
 - **Themes** — light, dark, or follow your system, plus five accent colours. All in Settings.
@@ -142,35 +142,35 @@ Settings → **Language** switches the whole interface to Persian with a right-t
 - **Daily mood check-in** — five big, warm faces on Today (drained → glowing). One tap, no judgment; the card glows to invite you each evening, and logging a glowing day fires the confetti. Tapping a finished task also drops a small rotating "well done" toast — the reward is the point. Insights shows your last 7 days of feelings with a running average.
 - **Jalali dates** — optionally shows the Persian (Jalali) date alongside Gregorian dates (Settings → Calendar, dates & time).
 
-## xAI (Grok) setup
+## Groq setup
 
-The browser never talks to xAI directly. It calls two same-origin endpoints, and a server-side proxy adds the API key:
+The browser never talks to Groq directly. It calls two same-origin endpoints, and a server-side proxy adds the API key:
 
 | Endpoint | Method | Purpose |
 | --- | --- | --- |
-| `/api/xai/status` | GET | Returns `{"configured": true}` or `{"configured": false}` — never the key |
-| `/api/xai/chat/completions` | POST | Forwards the request to xAI's chat-completions API |
+| `/api/groq/status` | GET | Returns `{"configured": true}` or `{"configured": false}` — never the key |
+| `/api/groq/chat/completions` | POST | Forwards the request to Groq's chat-completions API |
 
-The same handler code (`src/server/xaiProxy.ts`) serves both environments:
+The same handler code (`src/server/groqProxy.ts`) serves both environments:
 
 - **Vercel** — `api/[...path].ts` is a single catch-all Vercel Function that routes every `/api/*` request (`src/server/apiRouter.ts` is the route table). One function instead of eighteen keeps the Deployment inside Vercel's Hobby-plan limit of 12 Serverless Functions; the route URLs are unchanged.
 - **Local** — `vite.config.ts` mounts the same router as middleware for `npm run dev` and `npm run preview`.
 
 ### Deploy on Vercel
 
-1. Create an API key in the xAI Console.
+1. Create an account at [console.groq.com](https://console.groq.com) (email or Google/GitHub — **no credit card needed**) and create a key under **API Keys**.
 2. In Vercel open **Project → Settings → Environment Variables** and add:
-   - **Key:** `XAI_API_KEY`
-   - **Value:** your xAI API key
+   - **Key:** `GROQ_API_KEY`
+   - **Value:** your Groq API key
    - **Environments:** Production (and Preview if you want AI on preview deployments)
 3. Redeploy. Environment variable changes only apply to new deployments.
-4. Visit `https://<your-app>/api/xai/status` — it should return `{"configured":true}`.
+4. Visit `https://<your-app>/api/groq/status` — it should return `{"configured":true}`.
 
-Never name the variable `VITE_XAI_API_KEY` (or anything starting with `VITE_`): Vite would bake it into the public JavaScript bundle. `vercel.json` enables Fluid compute so long AI requests get the 300-second function duration.
+Never name the variable `VITE_GROQ_API_KEY` (or anything starting with `VITE_`): Vite would bake it into the public JavaScript bundle. `vercel.json` enables Fluid compute so long AI requests get the 300-second function duration.
 
 ### Run locally
 
-1. Copy `.env.example` to `.env.local` and set `XAI_API_KEY=your_xai_api_key`. `.env.local` is git-ignored.
+1. Copy `.env.example` to `.env.local` and set `GROQ_API_KEY=your_groq_api_key`. `.env.local` is git-ignored.
 2. Restart `npm run dev`; the AI page reports whether the key is configured, and **AI Coach → AI settings** repeats these instructions.
 
 ### Using the AI coach
@@ -181,18 +181,85 @@ Never name the variable `VITE_XAI_API_KEY` (or anything starting with `VITE_`): 
 4. Add your repeating class/work times under **Weekly fixed times**. The planner displays those as protected calendar blocks and the AI will not schedule overlapping events.
 5. Talk instead of typing on the AI Coach screen. If the recognizer keeps mishearing you, set your accent under **Settings → Voice → Listening accent**.
 
-The key is read only on the server from `XAI_API_KEY`; it is never put in the browser bundle, session storage, or planner export, and the status endpoint reports only a boolean. AI requests use xAI's OpenAI-compatible chat-completions endpoint with Grok 4.7 for text and image understanding. If you host the static build somewhere other than Vercel, provide equivalent server-side `/api/xai/*` endpoints (you can reuse `src/server/xaiProxy.ts`).
+The key is read only on the server from `GROQ_API_KEY`; it is never put in the browser bundle, session storage, or planner export, and the status endpoint reports only a boolean. AI requests use Groq's OpenAI-compatible endpoint (`https://api.groq.com/openai/v1/chat/completions`). Two models are configured, because Groq's text models reject image input outright:
+
+| Use | Default model | Override |
+| --- | --- | --- |
+| Planning, reviews, voice, refine | `openai/gpt-oss-120b` | `GROQ_MODEL` |
+| Reading a photo of a written plan | `qwen/qwen3.8-27b` | `GROQ_VISION_MODEL` |
+
+Both must be listed in the current [model catalogue](https://console.groq.com/docs/models) — Groq retires models regularly, and a retired id comes back as a 404 the proxy reports as *"Groq does not recognise that model name"*. If you host the static build somewhere other than Vercel, provide equivalent server-side `/api/groq/*` endpoints (you can reuse `src/server/groqProxy.ts`).
+
+**Changing a model needs no client change.** The browser always names the role it needs — the
+text id or the vision id above — and the proxy resolves that onto whatever `GROQ_MODEL` /
+`GROQ_VISION_MODEL` this deployment picked. Setting `GROQ_MODEL=openai/gpt-oss-20b` and redeploying
+is enough; the bundle does not have to be rebuilt to match. Set `GROQ_VISION_MODEL` to an empty
+string to turn image input off, and image requests are then refused with that stated plainly
+rather than failing inside Groq.
+
+Two more things the proxy settles on the way out, both because Groq's reasoning models behave
+differently from a plain chat model:
+
+- **Reasoning effort is pinned per model** (`low` for GPT-OSS, `none` for Qwen, so it reads a photo
+  in instruct mode). Reasoning tokens come out of `max_completion_tokens` too, so leaving the
+  effort at the model's default lets the thinking quietly eat the budget meant for the answer and
+  the reply arrives as truncated JSON. Models that do not take the knob get no invented parameter.
+- **The OpenAI-only `detail` hint is stripped from image parts.** Groq does not document it and
+  charges a flat 2048 input tokens per image regardless, so forwarding it would buy nothing and
+  risk a 400 from a provider that validates strictly.
 
 ### If the AI says the key was rejected
 
-That message used to appear for every 401, including ones that had nothing to do with the key. The app now shows xAI's own error, and the proxy cleans up the three paste mistakes that cause a real 401: surrounding quotes, a `Bearer ` prefix, and invisible characters copied from a document.
+That message used to appear for every 401, including ones that had nothing to do with the key. The app now shows Groq's own error, and the proxy cleans up the three paste mistakes that cause a real 401: surrounding quotes, a `Bearer ` prefix, and invisible characters copied from a document.
 
 If it still fails with the key message:
 
-1. Re-copy the key from [console.x.ai](https://console.x.ai) and paste it into `XAI_API_KEY` — do not include quotes or `Bearer `.
-2. Check the model: set `XAI_MODEL` to a model your key can use (the default is `grok-4.7`).
+1. Re-copy the key from [console.groq.com](https://console.groq.com) and paste it into `GROQ_API_KEY` — do not include quotes or `Bearer `.
+2. Check the model: set `GROQ_MODEL` (and `GROQ_VISION_MODEL` for image requests) to a model listed in your console (the defaults are `openai/gpt-oss-120b` and `qwen/qwen3.8-27b`).
 3. If the error is *"The server returned an unexpected response (401) instead of JSON"*, something in front of the app answered — usually Vercel Authentication or deployment password protection. Turn it off, or exclude `/api/*` from it.
 4. Environment variable changes only apply to **new** deployments, so redeploy after editing.
+
+### If the AI says you are out of free allowance
+
+```
+Please add a payment method to continue using the API.
+```
+
+Groq returns this as a **429**, which reads like "slow down and retry" — but waiting will not
+help, and neither will re-pasting a key that is fine. Groq's free tier is genuinely free and
+needs no card, so this only appears once you have used up the per-day allowance on the model.
+
+To fix it, do one of:
+
+1. **Wait for the daily reset.** The free allowance refills every day; nothing to change.
+2. **Add a payment method** at [console.groq.com/settings/billing](https://console.groq.com/settings/billing).
+   Pay-as-you-go then applies, and GPT-OSS 120B costs $0.15 per million input tokens and $0.60
+   per million output tokens.
+3. **Switch model.** Set `GROQ_MODEL` to a model with a higher or separate limit — the caps are
+   per model, not per account.
+
+The proxy maps this to a distinct `billing` error code so the app explains the allowance instead
+of telling you to re-paste a valid key or wait for a rate limit that is not the problem.
+
+### If the AI is rate-limited
+
+```
+Rate limit reached for model openai/gpt-oss-120b. Limit 30, Used 30. Try again in 1s.
+```
+
+Groq caps requests **per minute and per day, per model** — the free tier is roughly 30 RPM with a
+daily cap that varies by model. A 30-day plan draft is one request, so normal use stays well
+inside it; the proxy also throttles to 20 requests a minute per visitor before your key is used
+at all. If you hit it, wait a few seconds, or point `GROQ_MODEL` at a less contended model. Check
+your exact caps under **Console → Limits**.
+
+### If image reading fails but text works
+
+Text and image requests go to **different models** on Groq. `openai/gpt-oss-120b` is text-only and
+answers an image request with `messages[1].content must be a string`, so image requests are routed
+to `qwen/qwen3.8-27b`, which is currently Groq's only multimodal chat model. If Groq retires or
+renames it, set `GROQ_VISION_MODEL` to whatever the [vision guide](https://console.groq.com/docs/vision)
+lists, or set it to an empty string to turn image input off.
 
 Old links keep working: `#/daily/…`, `#/weekly/…`, `#/month/…`, `#/future`, and `#/progress` all map to their new homes.
 

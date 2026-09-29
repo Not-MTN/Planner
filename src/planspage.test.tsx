@@ -143,10 +143,10 @@ describe('Plans page', () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes('/api/xai/status')) {
+      if (url.includes('/api/groq/status')) {
         return new Response(JSON.stringify({ configured: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
-      if (url.includes('/api/xai/chat/completions')) {
+      if (url.includes('/api/groq/chat/completions')) {
         return new Response(JSON.stringify({
           choices: [{ message: { content: JSON.stringify({
             summary: 'Two light days.',

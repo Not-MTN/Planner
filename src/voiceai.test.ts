@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { compressHistory, normalizeVoiceReply, pickVoice, replyLang, speakText, stopSpeaking, voiceRange, voiceSystemPrompt, voiceTurn, VOICE_HISTORY_LIMIT, type VoiceCurrentDraft } from './voiceai';
+import { DEFAULT_MAX_TOKENS, LONG_RANGE_MAX_TOKENS, GROQ_TEXT_MODEL, GROQ_VISION_MODEL } from './ai';
 import { createEmptyState } from './types';
 
 const today = new Date().toISOString().slice(0, 10);
@@ -94,7 +95,7 @@ describe('voice ai', () => {
     expect(replyLang('باشه، deep work رو می‌ذارم عصر.')).toBe('fa');
   });
 
-  it('sends the utterance, bounded history and schedule context to the xAI proxy', async () => {
+  it('sends the utterance, bounded history and schedule context to the Groq proxy', async () => {
     const calls: Array<{ url: string; body: string }> = [];
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -125,7 +126,7 @@ describe('voice ai', () => {
       const state = createEmptyState();
       const result = await voiceTurn({ utterance: "I'm wiped. Make tomorrow soft?", history: [{ role: 'user', text: 'hi' }], state });
       expect(calls).toHaveLength(1);
-      expect(calls[0].url).toContain('/api/xai/chat/completions');
+      expect(calls[0].url).toContain('/api/groq/chat/completions');
       const body = JSON.parse(calls[0].body) as { messages: Array<{ role: string; content: string }>; response_format?: { type: string } };
       expect(body.response_format?.type).toBe('json_object');
       const userMessage = JSON.parse(body.messages[1].content) as {
@@ -146,6 +147,35 @@ describe('voice ai', () => {
       globalThis.fetch = originalFetch;
     }
   });
+  it('asks for more room when the spoken request covers a long stretch', async () => {
+    // A spoken "plan my next two months" carries a whole draft inside the reply
+    // JSON, so a week-sized budget would truncate it mid-plan.
+    const bodies: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(String(init?.body));
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: JSON.stringify({ reply: 'on it', followUp: null, draft: null }) } }],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }) as typeof fetch;
+    try {
+      const budget = (index: number) => (JSON.parse(bodies[index]) as { max_completion_tokens: number }).max_completion_tokens;
+      await voiceTurn({ utterance: 'plan my evening', history: [], state: createEmptyState() });
+      await voiceTurn({ utterance: 'plan my next two months', history: [], state: createEmptyState() });
+      expect(budget(0)).toBe(DEFAULT_MAX_TOKENS);
+      expect(budget(1)).toBe(LONG_RANGE_MAX_TOKENS);
+      expect(LONG_RANGE_MAX_TOKENS).toBeGreaterThan(DEFAULT_MAX_TOKENS);
+      // Voice never sends an image, so it must stay on the text model.
+      expect((JSON.parse(bodies[0]) as { model: string }).model).toBe(GROQ_TEXT_MODEL);
+      expect(GROQ_VISION_MODEL).not.toBe(GROQ_TEXT_MODEL);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('keeps the horizon from earlier in the conversation when answering a follow-up', async () => {
     const calls: string[] = [];
     const originalFetch = globalThis.fetch;

@@ -41,13 +41,14 @@ import {
 import { authStore } from './authStore.js';
 import { handleICS } from './icsProxy.js';
 import { handleSync, handleSyncStatus, neonStore } from './sync.js';
-import { handleXAIChatCompletions, handleXAIStatus } from './xaiProxy.js';
+import { handleGroqChatCompletions, handleGroqStatus } from './groqProxy.js';
 
 /** The server-side environment the API reads; never exposed to the browser. */
 export interface ApiEnv {
   DATABASE_URL?: string;
-  XAI_API_KEY?: string;
-  XAI_MODEL?: string;
+  GROQ_API_KEY?: string;
+  GROQ_MODEL?: string;
+  GROQ_VISION_MODEL?: string;
 }
 
 type Handler = (request: Request) => Response | Promise<Response>;
@@ -114,10 +115,10 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
       return (request) => neonStore(env.DATABASE_URL).then((store) => handleSync(request, store));
     case '/api/sync/status':
       return (request) => handleSyncStatus(request, env.DATABASE_URL);
-    case '/api/xai/chat/completions':
-      return (request) => handleXAIChatCompletions(request, env.XAI_API_KEY, { model: env.XAI_MODEL });
-    case '/api/xai/status':
-      return (request) => handleXAIStatus(request, env.XAI_API_KEY);
+    case '/api/groq/chat/completions':
+      return (request) => handleGroqChatCompletions(request, env.GROQ_API_KEY, { model: env.GROQ_MODEL, visionModel: env.GROQ_VISION_MODEL });
+    case '/api/groq/status':
+      return (request) => handleGroqStatus(request, env.GROQ_API_KEY);
     default:
       return null;
   }

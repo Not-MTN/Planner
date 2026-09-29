@@ -9,7 +9,7 @@ import { useEffect, useState } from 'react';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { HeartIcon, PlusIcon, SparkIcon, TrashIcon } from '../icons';
-import { friendlyXAIError, generateGuardianGuidance, type GuardianGuidance } from '../ai';
+import { friendlyGroqError, generateGuardianGuidance, type GuardianGuidance } from '../ai';
 import { t } from '../i18n';
 import { Field, Empty } from '../components/ui';
 import { CompletionRing, FocusTrend, SubjectSplit, WeekBars, minutesLabel } from '../components/charts';
@@ -89,7 +89,7 @@ export function GuardianPanelView() {
       const result = await generateGuardianGuidance({ results: link.results, history: link.history });
       setGuidance((current) => ({ ...current, [link.id]: result }));
     } catch (error) {
-      flash(friendlyXAIError(error));
+      flash(friendlyGroqError(error));
     } finally {
       setGuiding(null);
     }

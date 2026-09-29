@@ -231,14 +231,14 @@ describe('app smoke', () => {
         utterance.onend?.();
       },
     };
-    // Stub the xAI proxy: chat completions answers with a spoken reply + a draft.
+    // Stub the Groq proxy: chat completions answers with a spoken reply + a draft.
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes('/api/xai/status')) {
+      if (url.includes('/api/groq/status')) {
         return new Response(JSON.stringify({ configured: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
-      if (url.includes('/api/xai/chat/completions')) {
+      if (url.includes('/api/groq/chat/completions')) {
         return new Response(JSON.stringify({
           choices: [{ message: { content: JSON.stringify({
             reply: 'Got you — a gentle Tuesday, with one hour to breathe before the gym.',
@@ -303,7 +303,7 @@ describe('app smoke', () => {
     (window as unknown as { SpeechRecognition: unknown }).SpeechRecognition = DenyingRecognition;
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (input: RequestInfo | URL) => {
-      if (String(input).includes('/api/xai/status')) {
+      if (String(input).includes('/api/groq/status')) {
         return new Response(JSON.stringify({ configured: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
       throw new Error('should never reach the AI');
@@ -343,10 +343,10 @@ describe('app smoke', () => {
     let attempts = 0;
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes('/api/xai/status')) {
+      if (url.includes('/api/groq/status')) {
         return new Response(JSON.stringify({ configured: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
-      if (url.includes('/api/xai/chat/completions')) {
+      if (url.includes('/api/groq/chat/completions')) {
         attempts += 1;
         if (attempts === 1) return new Response('boom', { status: 500 });
         return new Response(JSON.stringify({
@@ -477,7 +477,7 @@ describe('app smoke', () => {
     expect(text()).toContain('I keep Sunday evenings for family.');
   });
 
-  it('explains how to configure the server-side xAI key', async () => {
+  it('explains how to configure the server-side Groq key', async () => {
     mountApp();
     const aiNav = [...document.querySelectorAll<HTMLButtonElement>('.nav-link')].find((button) => button.textContent?.includes('AI coach'));
     await act(async () => {
@@ -486,8 +486,8 @@ describe('app smoke', () => {
     await waitForText('Make a plan that fits.');
     const settings = [...document.querySelectorAll<HTMLButtonElement>('.ai-head-actions button')].find((button) => button.textContent?.includes('AI settings'));
     act(() => settings?.click());
-    expect(text()).toContain('AI coach · xAI');
-    expect(text()).toContain('XAI_API_KEY=your_xai_api_key');
+    expect(text()).toContain('AI coach · Groq');
+    expect(text()).toContain('GROQ_API_KEY=your_groq_api_key');
     expect(text()).toContain('.env.local');
     expect(document.querySelector('.ai-key-field input')).toBeFalsy();
   });

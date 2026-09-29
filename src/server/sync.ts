@@ -6,7 +6,7 @@
  * SHA-256 id derived from the code and an AES-GCM ciphertext.
  */
 
-import { isSameOriginRequest } from './xaiProxy.js';
+import { isSameOriginRequest } from './groqProxy.js';
 import { API_SECURITY_HEADERS, BodyTooLargeError, rateLimitResponse, readLimitedBody } from './security.js';
 import { DatabaseConfigError, cleanDatabaseUrl, redactDatabaseError } from './authStore.js';
 

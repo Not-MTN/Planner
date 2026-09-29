@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type Re
 import { CATEGORIES, categoryById } from '../constants';
 import { usePlanner } from '../context';
 import { addDays, addMinutes, formatFullDate, timeToMinutes, todayISO, weekdayIndex, displayTime } from '../dates';
-import { analyzeDraft, filterDraftAgainstState, habitFrequencyLabel, MAX_PLAN_IMAGE_BYTES, XAI_KEY_MISSING_MESSAGE, checkXAIConfiguration, friendlyXAIError, generateAIPlan, generateAIReview, hasReviewActivity, refineAIPlan } from '../ai';
+import { analyzeDraft, filterDraftAgainstState, habitFrequencyLabel, MAX_PLAN_IMAGE_BYTES, GROQ_KEY_MISSING_MESSAGE, checkGroqConfiguration, friendlyGroqError, generateAIPlan, generateAIReview, hasReviewActivity, refineAIPlan } from '../ai';
 import type { AIReview, AIDraft, DraftWarning, PlanRange } from '../ai';
 import { MAX_PLAN_DAYS, parsePlanDuration } from '../duration';
 import { cx } from '../cx';
@@ -95,7 +95,7 @@ export function AIView() {
   } = planner;
   const today = todayISO();
   const currentTab: AISection = route.name === 'ai' ? route.tab ?? 'plan' : 'plan';
-  const [xaiConfigured, setXaiConfigured] = useState<boolean | null>(null);
+  const [groqConfigured, setGroqConfigured] = useState<boolean | null>(null);
   const [period, setPeriod] = useState<PlanningPeriod>('day');
   const [customDays, setCustomDays] = useState('14');
   const [planStart, setPlanStart] = useState(today);
@@ -147,8 +147,8 @@ export function AIView() {
 
   useEffect(() => {
     let active = true;
-    void checkXAIConfiguration().then((configured) => {
-      if (active) setXaiConfigured(configured);
+    void checkGroqConfiguration().then((configured) => {
+      if (active) setGroqConfigured(configured);
     });
     return () => { active = false; };
   }, []);
@@ -164,10 +164,10 @@ export function AIView() {
     setError('');
     setDraft(null);
     setDraftPlanId(null);
-    const configured = await checkXAIConfiguration();
-    setXaiConfigured(configured);
+    const configured = await checkGroqConfiguration();
+    setGroqConfigured(configured);
     if (!configured) {
-      setError(XAI_KEY_MISSING_MESSAGE);
+      setError(GROQ_KEY_MISSING_MESSAGE);
       openSettings();
       return;
     }
@@ -196,7 +196,7 @@ export function AIView() {
       setDraftRange(planRange);
       setDraftPlanId(planId);
     } catch (reason) {
-      setError(friendlyXAIError(reason));
+      setError(friendlyGroqError(reason));
     } finally {
       setWorking(false);
     }
@@ -210,10 +210,10 @@ export function AIView() {
   const refineDraft = async (request: string) => {
     if (!draft) return;
     setError('');
-    const configured = await checkXAIConfiguration();
-    setXaiConfigured(configured);
+    const configured = await checkGroqConfiguration();
+    setGroqConfigured(configured);
     if (!configured) {
-      setError(XAI_KEY_MISSING_MESSAGE);
+      setError(GROQ_KEY_MISSING_MESSAGE);
       openSettings();
       return;
     }
@@ -232,7 +232,7 @@ export function AIView() {
       }
       flash(t("Draft updated — review the changes before adding."));
     } catch (reason) {
-      setError(friendlyXAIError(reason));
+      setError(friendlyGroqError(reason));
     } finally {
       setWorking(false);
     }
@@ -274,10 +274,10 @@ export function AIView() {
   const generateReview = async () => {
     setError('');
     setReview(null);
-    const configured = await checkXAIConfiguration();
-    setXaiConfigured(configured);
+    const configured = await checkGroqConfiguration();
+    setGroqConfigured(configured);
     if (!configured) {
-      setError(XAI_KEY_MISSING_MESSAGE);
+      setError(GROQ_KEY_MISSING_MESSAGE);
       openSettings();
       return;
     }
@@ -292,7 +292,7 @@ export function AIView() {
       setCarrySelection(Object.fromEntries(result.carryForward.map((item) => [item.taskId, true])));
       setCarryDates(Object.fromEntries(result.carryForward.map((item) => [item.taskId, item.date])));
     } catch (reason) {
-      setError(friendlyXAIError(reason));
+      setError(friendlyGroqError(reason));
     } finally {
       setWorking(false);
     }
@@ -315,7 +315,7 @@ export function AIView() {
       const dataUrl = await readFile(file);
       setImage({ name: file.name, dataUrl });
     } catch (reason) {
-      setError(friendlyXAIError(reason));
+      setError(friendlyGroqError(reason));
     }
   };
 
@@ -400,13 +400,13 @@ export function AIView() {
     <div className="view ai-view">
       <header className="page-head ai-page-head">
         <div>
-          <p className="kicker">{t("AI coach · powered by xAI Grok")}</p>
+          <p className="kicker">{t("AI coach · powered by Groq")}</p>
           <h1>{t("Make a plan that fits.")}</h1>
           <p className="lede">{t("Turn a brain dump or a picture into a kind, realistic schedule — then reflect on what worked.")}</p>
         </div>
         <div className="ai-head-actions">
-          <span className={cx('chip', xaiConfigured ? 'ai-connected' : 'ai-disconnected')}>
-            <span className="status-dot" />{xaiConfigured === null ? t("Checking xAI key…") : xaiConfigured ? t("xAI connected") : 'XAI_API_KEY needed'}
+          <span className={cx('chip', groqConfigured ? 'ai-connected' : 'ai-disconnected')}>
+            <span className="status-dot" />{groqConfigured === null ? t("Checking Groq key…") : groqConfigured ? t("Groq connected") : 'GROQ_API_KEY needed'}
           </span>
           <button type="button" className="btn btn-soft btn-small" onClick={openSettings}>{t("AI settings")}</button>
         </div>
@@ -423,7 +423,7 @@ export function AIView() {
 
       <section className="ai-privacy card">
         <span className="ai-privacy-icon"><LeafIcon size={18} /></span>
-        <p><strong>{t("Your data, your choice.")}</strong> {t("Your prompt, saved AI memory, and relevant schedule/check-in details go to xAI through the server proxy. The API key stays on the server, planner notes are not included, and you can forget memory at any time. AI suggestions never change your planner until you review and add them.")}</p>
+        <p><strong>{t("Your data, your choice.")}</strong> {t("Your prompt, saved AI memory, and relevant schedule/check-in details go to Groq through the server proxy. The API key stays on the server, planner notes are not included, and you can forget memory at any time. AI suggestions never change your planner until you review and add them.")}</p>
       </section>
 
       <MemoryCard
@@ -523,7 +523,7 @@ export function AIView() {
                 <UploadIcon size={15} /> {t("Add a plan picture")}
                 <input type="file" accept="image/png,image/jpeg" onChange={onImage} />
               </label>
-              <span className="hint">{t("PNG or JPG · up to 3 MB. Images are sent to xAI for reading and are not saved in your planner.")}</span>
+              <span className="hint">{t("PNG or JPG · up to 3 MB. Images are sent to Groq for reading and are not saved in your planner.")}</span>
             </div>
             {image ? (
               <div className="ai-image-preview">
@@ -742,7 +742,7 @@ function MemoryCard({
           <p className="kicker">{t("Teach it what matters")}</p>
           <h2 className="card-title">{t("AI memory")}</h2>
           <p className="meta">{t("Save the parts of your life you want future plans to understand. Write them in your own words; you stay in control.")}</p>
-          <p className="ai-memory-safety">{t("Only save details you are comfortable sending to xAI when you ask for help.")}</p>
+          <p className="ai-memory-safety">{t("Only save details you are comfortable sending to Groq when you ask for help.")}</p>
         </div>
         <span className="ai-memory-count">{memories.length} {t("remembered")}</span>
       </header>

@@ -217,14 +217,26 @@ describeFailures('when the AI is unhappy', () => {
   itFailure('explains a missing key instead of failing silently', async () => {
     // A 503 with no detail of its own is the signature of an unset key.
     vi.stubGlobal('fetch', vi.fn(async () => reply({ error: { code: 'upstream_auth' } }, 503)));
-    await expectFailure(generateStudentAdvice({ state: createEmptyState() })).rejects.toThrow(/XAI_API_KEY/);
+    await expectFailure(generateStudentAdvice({ state: createEmptyState() })).rejects.toThrow(/GROQ_API_KEY/);
     vi.stubGlobal('fetch', vi.fn(async () => reply({ error: { code: 'upstream_auth' } }, 503)));
-    await expectFailure(generateGuardianGuidance({ results })).rejects.toThrow(/XAI_API_KEY/);
+    await expectFailure(generateGuardianGuidance({ results })).rejects.toThrow(/GROQ_API_KEY/);
   });
 
   itFailure('passes on whatever the proxy actually said, when it said something', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => reply({ error: { message: 'Your key was rotated.', code: 'upstream_auth' } }, 401)));
     await expectFailure(generateStudentAdvice({ state: createEmptyState() })).rejects.toThrow(/Your key was rotated/);
+  });
+
+  itFailure('points at billing, not the key, when the free allowance runs out', async () => {
+    const exhausted =
+      'Your Groq key is working — the account has just run out of free allowance. Add a payment method at https://console.groq.com/settings/billing.';
+    // Groq reports this as a 429, which otherwise reads as "just retry later".
+    vi.stubGlobal('fetch', vi.fn(async () => reply({ error: { message: exhausted, code: 'billing' } }, 429)));
+    await expectFailure(generateStudentAdvice({ state: createEmptyState() })).rejects.toThrow(/console\.groq\.com\/settings\/billing/);
+
+    // Without a message the client still has its own words for it.
+    vi.stubGlobal('fetch', vi.fn(async () => reply({ error: { code: 'billing' } }, 429)));
+    await expectFailure(generateStudentAdvice({ state: createEmptyState() })).rejects.toThrow(/free allowance/i);
   });
 
   itFailure('survives an answer that is not JSON at all', async () => {

@@ -4,10 +4,18 @@
  * it stays testable without the speech UI.
  *
  * - STT: the browser's Web Speech service (see speech.ts), nothing recorded here.
- * - Brains: the existing xAI proxy (same as the typed plan builder).
+ * - Brains: the existing Groq proxy (same as the typed plan builder).
  * - TTS: the browser's speech synthesizer; no audio ever leaves the device.
  */
-import { xaiChatJson, normalizeDraftPlan, draftForModel, type AIDraft, type PlanRange } from './ai';
+import {
+  DEFAULT_MAX_TOKENS,
+  LONG_RANGE_MAX_TOKENS,
+  draftForModel,
+  groqChatJson,
+  normalizeDraftPlan,
+  type AIDraft,
+  type PlanRange,
+} from './ai';
 import { addDays, todayISO } from './dates';
 import { parsePlanDuration } from './duration';
 import { getLang, t } from './i18n';
@@ -162,7 +170,15 @@ export async function voiceTurn(options: { utterance: string; history: VoiceTurn
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const timer = setTimeout(() => controller?.abort(), VOICE_TURN_TIMEOUT_MS);
   try {
-    const raw = await xaiChatJson(systemForRange(range), JSON.stringify(payload), controller?.signal);
+    // A spoken "plan my next month" carries a whole draft inside the reply, so
+    // the budget has to follow the horizon exactly as the typed builder's does —
+    // otherwise the JSON is cut off mid-plan and the turn reads as a failure.
+    const raw = await groqChatJson(
+      systemForRange(range),
+      JSON.stringify(payload),
+      controller?.signal,
+      range.days > 30 ? LONG_RANGE_MAX_TOKENS : DEFAULT_MAX_TOKENS,
+    );
     return normalizeVoiceReply(raw, options.state, range);
   } catch (cause) {
     if (cause instanceof Error && cause.name === 'AbortError') {

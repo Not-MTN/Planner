@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { usePlanner } from '../context';
 import { addDays, formatFullDate, displayTime } from '../dates';
-import { analyzeDraft, checkXAIConfiguration, filterDraftAgainstState, friendlyXAIError, habitFrequencyLabel, refineAIPlan, XAI_KEY_MISSING_MESSAGE, type AIDraft, type DraftWarning } from '../ai';
+import { analyzeDraft, checkGroqConfiguration, filterDraftAgainstState, friendlyGroqError, habitFrequencyLabel, refineAIPlan, GROQ_KEY_MISSING_MESSAGE, type AIDraft, type DraftWarning } from '../ai';
 import { cx } from '../cx';
 import { DraftRefine } from '../components/DraftRefine';
 import { CalendarIcon, CheckIcon, CloseIcon, LeafIcon, MicIcon, SparklesIcon } from '../icons';
@@ -63,9 +63,9 @@ export function PlansView() {
 
   /** Ask the AI to change a saved draft, keeping its range intact. */
   const refinePlan = async (plan: SavedAIPlan, request: string) => {
-    const configured = await checkXAIConfiguration();
+    const configured = await checkGroqConfiguration();
     if (!configured) {
-      flash(XAI_KEY_MISSING_MESSAGE);
+      flash(GROQ_KEY_MISSING_MESSAGE);
       openSettings();
       return;
     }
@@ -86,7 +86,7 @@ export function PlansView() {
       });
       flash(t("Draft updated — review the changes before adding."));
     } catch (reason) {
-      flash(friendlyXAIError(reason));
+      flash(friendlyGroqError(reason));
     } finally {
       setRefiningId(null);
     }
