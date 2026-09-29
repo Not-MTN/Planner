@@ -295,6 +295,10 @@ export const en = {
   errEmailTaken: 'That email is already registered.',
   errNotConfigured: 'Accounts are not set up on this server yet.',
   errNetwork: 'Could not reach the server. Check your connection.',
+  errDeploymentGate:
+    'This deployment is behind a hosting sign-in page, so the app cannot reach its own API. Turn off Vercel Authentication (Project Settings → Deployment Protection), or open the production domain, then try again.',
+  errApiMissing:
+    'The accounts API did not answer at this address. Redeploy the app with its api/ functions, or check the domain you are using, then try again.',
   errPasskeyCancelled: 'Passkey sign-in was cancelled.',
   errPasskeyUnsupported: 'Passkeys need a modern browser on a secure connection.',
   errPasskeyNoPrf: "This browser's passkeys cannot open your planner — your password will.",
@@ -692,6 +696,10 @@ export const fa: Record<keyof typeof en, string> = {
   errEmailTaken: 'این ایمیل قبلاً ثبت شده.',
   errNotConfigured: 'حساب‌ها روی این سرور هنوز راه‌اندازی نشده‌اند.',
   errNetwork: 'به سرور دسترسی نیست. اتصال‌تان را بررسی کنید.',
+  errDeploymentGate:
+    'این استقرار پشت صفحهٔ ورودِ سرویس میزبانی است و برنامه به API خودش دسترسی ندارد. Vercel Authentication را خاموش کنید (Project Settings ← Deployment Protection) یا دامنهٔ اصلی را باز کنید و دوباره تلاش کنید.',
+  errApiMissing:
+    'API حساب‌ها در این نشانی پاسخ نمی‌دهد. برنامه را همراه توابع api/ دوباره منتشر کنید یا دامنه‌ای که استفاده می‌کنید را بررسی کنید.',
   errPasskeyCancelled: 'ورود با کلید عبور لغو شد.',
   errPasskeyUnsupported: 'کلید عبور به مرورگر به‌روز و اتصال امن نیاز دارد.',
   errPasskeyNoPrf: 'این مرورگر نمی‌تواند با کلید عبور قفل برنامه را باز کند؛ رمز عبور را وارد کنید.',

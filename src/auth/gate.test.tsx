@@ -80,6 +80,25 @@ describe('account gate', () => {
     expect(text()).not.toContain('Unlock your planner');
   });
 
+  it('names a protected deployment instead of bouncing to a sign-in form', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response('<html><head><title>Protected Deployment – Vercel</title></head><body>Log in to Vercel</body></html>', {
+          status: 401,
+          headers: { 'Content-Type': 'text/html' },
+        }),
+      ),
+    );
+    await mount();
+    expect(text()).toContain("Can't open your planner");
+    expect(text()).toContain('Vercel Authentication');
+    expect(text()).toContain('Retry');
+    // Never the old silent redirect to a form that cannot work.
+    expect(text()).not.toContain('Unlock your planner');
+    expect(text()).not.toContain('Personal Planner');
+  });
+
   it('asks for the password when the session is known but the key is not', async () => {
     vi.stubGlobal(
       'fetch',

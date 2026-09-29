@@ -240,6 +240,34 @@ describe('sign-up journey', () => {
     expect(requests).toContain('POST /api/auth/recovery/complete');
   }, 60_000);
 
+  it('names a protected deployment instead of retrying a hopeless sign-in', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response('<html><head><title>Protected Deployment – Vercel</title></head><body>Log in to Vercel</body></html>', {
+          status: 401,
+          headers: { 'Content-Type': 'text/html' },
+        }),
+      ),
+    );
+    await renderAt('/login');
+
+    // The check runs before anyone types, so the cause is visible up front.
+    await waitFor(() => Boolean(container.querySelector('.auth-notice')));
+    expect(container.querySelector('.auth-notice')?.textContent).toContain('Vercel Authentication');
+    expect(container.querySelector('.auth-notice code')?.textContent).toContain('401 text/html');
+
+    const inputs = [...container.querySelectorAll('input')] as HTMLInputElement[];
+    setValue(inputs[0]!, 'sara');
+    setValue(inputs[1]!, 'a-long-enough-password');
+    await click(container.querySelector('form.auth-fields button[type="submit"]'));
+
+    await waitFor(() => Boolean(container.querySelector('.auth-error')));
+    expect(container.querySelector('.auth-error')?.textContent).toContain('Vercel Authentication');
+    expect(container.textContent).not.toContain('unexpected response');
+    expect(assign).not.toHaveBeenCalled();
+  }, 60_000);
+
   it('opens the planner the same way after signing in', async () => {
     // An existing account, created straight through the client.
     const { signUp } = await import('../auth/session');

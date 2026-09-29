@@ -49,7 +49,8 @@ export interface ApiEnv {
 
 type Handler = (request: Request) => Response | Promise<Response>;
 
-function unknownRoute(): Response {
+/** The one 404 every unrouted /api path gets, in dev and in production alike. */
+export function notFoundResponse(): Response {
   return new Response(JSON.stringify({ error: { message: 'Not found.' } }), {
     status: 404,
     headers: {
@@ -123,6 +124,6 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
 export async function handleApiRequest(request: Request, env: ApiEnv): Promise<Response> {
   const { pathname } = new URL(request.url, 'https://planner.invalid');
   const handler = apiRoute(pathname, env);
-  if (!handler) return unknownRoute();
+  if (!handler) return notFoundResponse();
   return handler(request);
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { COPY, type Lang } from './copy';
-import { AuthError, resetPasswordWithRecovery, signIn, signUp, type AuthErrorCode } from '../auth/session';
+import { AuthError, fetchApiStatus, resetPasswordWithRecovery, signIn, signUp, type AuthErrorCode } from '../auth/session';
 import { PasskeyError, passkeySignIn, passkeysSupported, registerPasskey } from '../auth/passkey';
 import { EMAIL_PATTERN, USERNAME_PATTERN } from '../shared/authContract';
 import { loadFrom } from '../storage';
@@ -26,10 +26,72 @@ function errorText(code: AuthErrorCode | null, detail: string | null, c: Record<
   if (code === 'taken') return c.errTaken;
   if (code === 'not_configured') return c.errNotConfigured;
   if (code === 'network') return c.errNetwork;
+  // These two are named precisely, because retrying them never helps: something
+  // in front of the app, or a missing deployment, answered instead of the API.
+  if (code === 'deployment_gate') return c.errDeploymentGate;
+  if (code === 'api_missing') return c.errApiMissing;
   if (detail?.toLowerCase().includes('too many requests')) return c.errRateLimited;
-  if (detail?.toLowerCase().includes('unexpected response') || detail === 'Not found.') return c.errUnexpectedResponse;
   if (lang === 'fa') return c.errUnknown;
   return detail ?? c.errUnknown;
+}
+
+/**
+ * The one-line technical detail ("POST /api/auth/salt → 401 text/html — …"),
+ * shown under the friendly sentence so a broken deployment can be diagnosed
+ * without opening dev tools.
+ */
+function errorDetailText(caught: unknown): string | null {
+  if (!(caught instanceof AuthError)) return null;
+  if (caught.code !== 'deployment_gate' && caught.code !== 'api_missing' && caught.code !== 'unknown') return null;
+  // Never echo a credential-shaped server message back into the panel.
+  return caught.detail && caught.detail.length <= 200 ? caught.detail : null;
+}
+
+/**
+ * Every auth screen asks once, before anyone types, whether the accounts API is
+ * reachable and configured. A protected domain or a deployment without
+ * `DATABASE_URL` is then explained up front instead of as a failed sign-in.
+ */
+function useServerNotice(c: Record<string, string>, lang: Lang): { notice: string | null; detail: string | null } {
+  const [state, setState] = useState<{ notice: string | null; detail: string | null }>({ notice: null, detail: null });
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchApiStatus().then(
+      (status) => {
+        if (cancelled) return;
+        setState(status.configured ? { notice: null, detail: null } : { notice: c.errNotConfigured, detail: null });
+      },
+      (caught: unknown) => {
+        if (cancelled) return;
+        setState({
+          notice: errorText(
+            caught instanceof AuthError ? caught.code : null,
+            caught instanceof AuthError ? caught.detail : null,
+            c,
+            lang,
+          ),
+          detail: errorDetailText(caught),
+        });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [c, lang]);
+
+  return state;
+}
+
+/** The notice above the form: what is wrong with the server, and how to read it. */
+function ServerNotice({ notice, detail }: { notice: string | null; detail: string | null }) {
+  if (!notice) return null;
+  return (
+    <div className="auth-notice reveal-in" role="status">
+      <p>{notice}</p>
+      {detail ? <code dir="ltr">{detail}</code> : null}
+    </div>
+  );
 }
 
 /** Maps a passkey failure onto translated copy. */
@@ -128,17 +190,21 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
   const [remember, setRemember] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  const server = useServerNotice(c, lang);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (busy) return;
     setBusy(true);
     setError(null);
+    setErrorDetail(null);
     try {
       await signIn(identifier, password, remember);
       navigate('/app');
     } catch (caught) {
       setError(errorText(caught instanceof AuthError ? caught.code : null, caught instanceof AuthError ? caught.detail : null, c, lang));
+      setErrorDetail(errorDetailText(caught));
       setBusy(false);
     }
   };
@@ -149,11 +215,13 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
     if (busy) return;
     setBusy(true);
     setError(null);
+    setErrorDetail(null);
     try {
       await passkeySignIn(identifier);
       navigate('/app');
     } catch (caught) {
       setError(passkeyErrorText(caught, c, lang));
+      setErrorDetail(errorDetailText(caught));
       setBusy(false);
     }
   };
@@ -175,6 +243,8 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
             aria-busy={busy}
             aria-describedby={error ? 'signin-error' : undefined}
           >
+            <ServerNotice notice={server.notice} detail={server.detail} />
+
             <label className="field">
               <span>{c.authUsername}</span>
               <input
@@ -229,9 +299,12 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
             </label>
 
             {error ? (
-              <p id="signin-error" className="auth-error" role="alert">
-                {error}
-              </p>
+              <>
+                <p id="signin-error" className="auth-error" role="alert">
+                  {error}
+                </p>
+                {errorDetail ? <code className="auth-error-detail" dir="ltr">{errorDetail}</code> : null}
+              </>
             ) : null}
             <button type="submit" className="btn btn-primary btn-block" disabled={busy} aria-busy={busy}>
               {busy ? <span className="spinner" aria-hidden="true" /> : null}
@@ -305,7 +378,9 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
   const [recoveryKey, setRecoveryKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [passkeyAdded, setPasskeyAdded] = useState(false);
+  const server = useServerNotice(c, lang);
 
   /**
    * SPEC ladder, first rung after "trusted device": enrol a passkey right
@@ -382,6 +457,7 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
       setStep('recovery');
     } catch (caught) {
       setError(errorText(caught instanceof AuthError ? caught.code : null, caught instanceof AuthError ? caught.detail : null, c, lang));
+      setErrorDetail(errorDetailText(caught));
       setBusy(false);
     }
   };
@@ -446,9 +522,12 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
                     return;
                   }
                   setError(null);
+                  setErrorDetail(null);
                   setStep('role');
                 }}
               >
+                <ServerNotice notice={server.notice} detail={server.detail} />
+
                 <label className="field">
                   <span>{c.authName}</span>
                   <input
@@ -534,9 +613,12 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
                   <span>{c.authTerms}</span>
                 </label>
                 {error ? (
-                  <p className="auth-error" role="alert">
-                    {error}
-                  </p>
+                  <>
+                    <p className="auth-error" role="alert">
+                      {error}
+                    </p>
+                    {errorDetail ? <code className="auth-error-detail" dir="ltr">{errorDetail}</code> : null}
+                  </>
                 ) : null}
                 <button type="submit" className="btn btn-primary btn-block" disabled={!agreed || password.length < 10}>
                   {c.authContinue}
@@ -650,9 +732,12 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
                   {c.authRoleSkip}
                 </button>
                 {error ? (
-                  <p className="auth-error" role="alert">
-                    {error}
-                  </p>
+                  <>
+                    <p className="auth-error" role="alert">
+                      {error}
+                    </p>
+                    {errorDetail ? <code className="auth-error-detail" dir="ltr">{errorDetail}</code> : null}
+                  </>
                 ) : null}
                 <button type="button" className="btn btn-primary btn-block" disabled={busy} onClick={() => void createAccount()}>
                   {busy ? <span className="spinner" aria-hidden="true" /> : null}
@@ -705,7 +790,12 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
                   <p className="auth-hint reveal-in" style={{ animationDelay: '170ms' }}>
                     {c.authPasskeyAddHint}
                   </p>
-                  {error ? <p className="auth-error reveal-in">{error}</p> : null}
+                  {error ? (
+                    <>
+                      <p className="auth-error reveal-in">{error}</p>
+                      {errorDetail ? <code className="auth-error-detail" dir="ltr">{errorDetail}</code> : null}
+                    </>
+                  ) : null}
                 </>
               ) : null}
 
@@ -743,10 +833,12 @@ function Recover({ lang, navigate }: { lang: Lang; navigate: Nav }) {
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [nextRecoveryKey, setNextRecoveryKey] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState(false);
   const meter = strength(password, lang);
+  const server = useServerNotice(c, lang);
 
   const recoverWithPasskey = async () => {
     if (busy) return;
@@ -791,6 +883,7 @@ function Recover({ lang, navigate }: { lang: Lang; navigate: Nav }) {
         setError(c.authRecoveryInvalid);
       } else {
         setError(errorText(caught instanceof AuthError ? caught.code : null, caught instanceof AuthError ? caught.detail : null, c, lang));
+        setErrorDetail(errorDetailText(caught));
       }
     } finally {
       setBusy(false);
@@ -861,6 +954,8 @@ function Recover({ lang, navigate }: { lang: Lang; navigate: Nav }) {
               </header>
 
               <form className="auth-fields reveal-in" style={{ animationDelay: '60ms' }} onSubmit={submit} aria-busy={busy}>
+                <ServerNotice notice={server.notice} detail={server.detail} />
+
                 <label className="field">
                   <span>{c.authRecoverIdentifier}</span>
                   <input
@@ -951,7 +1046,12 @@ function Recover({ lang, navigate }: { lang: Lang; navigate: Nav }) {
                     </button>
                   </span>
                 </label>
-                {error ? <p className="auth-error" role="alert">{error}</p> : null}
+                {error ? (
+                  <>
+                    <p className="auth-error" role="alert">{error}</p>
+                    {errorDetail ? <code className="auth-error-detail" dir="ltr">{errorDetail}</code> : null}
+                  </>
+                ) : null}
                 <button type="submit" className="btn btn-primary btn-block" disabled={busy} aria-busy={busy}>
                   {busy ? <span className="spinner" aria-hidden="true" /> : null}
                   {busy ? c.authRecoverResetting : c.authRecoverReset}
