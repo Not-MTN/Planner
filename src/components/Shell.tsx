@@ -8,6 +8,7 @@ import {
   CheckIcon,
   DotsIcon,
   DownloadIcon,
+  ExitIcon,
   FlagIcon,
   LeafIcon,
   MoonIcon,
@@ -57,7 +58,15 @@ import { isAIVisited, onTourRequest, requestTour, TOUR_STOPS, tourRouteFor, tour
 import { onAboutRequest, requestAbout } from '../about';
 import { TourSheet } from './TourSheet';
 import { AboutSheet } from './AboutSheet';
+import { useSignOut } from './useSignOut';
+import { accountUser } from '../auth/vault';
 import { t } from '../i18n';
+
+/** The signed-in account in one glance — name initial for the avatar. */
+function accountInitial(name: string): string {
+  const first = name.trim().charAt(0);
+  return first ? first.toUpperCase() : '·';
+}
 
 const NAV = [
   { name: 'today', label: t("Today"), icon: SunIcon },
@@ -107,6 +116,12 @@ export function Shell() {
   const [moreOpen, setMoreOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  // Sign-out only appears for an account this device knows: the live vault
+  // session, or the last signed-in user when the vault opened from the
+  // trusted-device cache (offline boots). A local-only planner has nobody to
+  // sign out, so the button would be a dead end.
+  const account = accountUser();
+  const requestSignOut = useSignOut();
   // Panels only show up once they are added — they are extras, never a mode.
   const panelNav = [
     ...(planner.panels.student.enabled ? [{ name: 'student' as const, label: t("Student"), icon: StudyIcon }] : []),
@@ -310,6 +325,25 @@ export function Shell() {
               </>
             )}
           </p>
+          {account ? (
+            <div className="side-account">
+              <div className="side-account-id">
+                <span className="account-avatar" aria-hidden="true">
+                  {accountInitial(account.displayName || account.username)}
+                </span>
+                <span className="account-meta">
+                  <span className="account-name">{account.displayName || account.username}</span>
+                  <span className="account-sub" dir="ltr">
+                    {account.email ?? `@${account.username}`}
+                  </span>
+                </span>
+              </div>
+              <button type="button" className="side-signout" onClick={requestSignOut} title={t("Sign out")}>
+                <ExitIcon size={15} />
+                <span>{t("Sign out")}</span>
+              </button>
+            </div>
+          ) : null}
         </div>
       </aside>
 
@@ -330,7 +364,7 @@ export function Shell() {
               <SparklesIcon size={18} />
               {!aiSeen ? <i className="nav-attention" aria-hidden="true" /> : null}
             </button>
-            <button type="button" className="icon-btn round" aria-label={t("Search")} onClick={openPalette}>
+            <button type="button" className="icon-btn round" aria-label={t("Search")} data-tour="search" onClick={openPalette}>
               <SearchIcon size={18} />
             </button>
             <button
@@ -402,24 +436,35 @@ export function Shell() {
       <nav className="tabbar" aria-label={t("Primary")}>
         <Tab icon={SunIcon} name="today" label={t("Today")} active={route.name === 'today'} onClick={() => go('today')} />
         <Tab icon={CalendarIcon} name="calendar" label={t("Calendar")} active={route.name === 'calendar'} onClick={() => go('calendar')} />
+        {/* The add action lives in the bar itself, centred for the thumb,
+            instead of a floating button that lands on top of the content. */}
+        <button type="button" className="tab tab-add" aria-label={t("Quick add")} onClick={openPalette}>
+          <span className="tab-add-puck"><PlusIcon size={20} /></span>
+        </button>
         <Tab icon={CheckIcon} name="tasks" label={t("Tasks")} active={route.name === 'tasks'} onClick={() => go('tasks')} />
         <Tab icon={DotsIcon} name="habits" label={t("Habits")} active={route.name === 'habits'} onClick={() => go('habits')} />
         <Tab icon={SlidersIcon} label={t("More")} active={moreActive || moreOpen} onClick={() => setMoreOpen(true)} />
       </nav>
 
-      <button
-        type="button"
-        className="fab"
-        data-tour="search"
-        aria-label={t("Quick add")}
-        onClick={openPalette}
-      >
-        <PlusIcon />
-      </button>
-
       {moreOpen ? (
         <Modal title={t("More")} onClose={() => setMoreOpen(false)}>
           <div className="more-list">
+            {account ? (
+              <>
+                <div className="more-account">
+                  <span className="account-avatar" aria-hidden="true">
+                    {accountInitial(account.displayName || account.username)}
+                  </span>
+                  <span className="account-meta">
+                    <span className="account-name">{account.displayName || account.username}</span>
+                    <span className="account-sub" dir="ltr">
+                      {account.email ?? `@${account.username}`}
+                    </span>
+                  </span>
+                </div>
+                <div className="more-divider" role="separator" />
+              </>
+            ) : null}
             <button type="button" className={cx(route.name === 'goals' && 'on')} onClick={() => go('goals')}>
               <FlagIcon size={18} /> {t("Goals")}
             </button>
@@ -456,6 +501,11 @@ export function Shell() {
             <button type="button" onClick={() => { setMoreOpen(false); window.setTimeout(requestAbout, 60); }}><HeartIcon size={18} /> {t("Why Planner?")}</button>
             <button type="button" onClick={exportData}><DownloadIcon size={18} /> {t("Export backup")}</button>
             <button type="button" onClick={importFile.open}><UploadIcon size={18} /> {t("Import backup")}</button>
+            {account ? (
+              <button type="button" className="more-signout" onClick={() => { setMoreOpen(false); requestSignOut(); }}>
+                <ExitIcon size={18} /> {t("Sign out")}
+              </button>
+            ) : null}
           </div>
         </Modal>
       ) : null}

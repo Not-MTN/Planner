@@ -54,6 +54,16 @@ export function unlockedUser(): PublicUser | null {
   return getActiveSession()?.user ?? null;
 }
 
+/**
+ * Who this device belongs to, even when the vault key is not in memory right
+ * now (offline boot, trusted-device boot): the live session first, then the
+ * user info stored on the last sign-in. The shell uses it for the account chip
+ * and to decide whether "Log out" is worth showing.
+ */
+export function accountUser(): PublicUser | null {
+  return getActiveSession()?.user ?? loadLastUserInfo();
+}
+
 export function isUnlocked(): boolean {
   return getActiveSession() !== null;
 }

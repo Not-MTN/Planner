@@ -2,7 +2,7 @@
   "name": "Planner — calm daily planning",
   "short_name": "Planner",
   "description": "A calm, local-first planner for your day, habits, and goals.",
-  "start_url": "/#/today",
+  "start_url": "/app#/today",
   "display": "standalone",
   "background_color": "#f5f0e7",
   "theme_color": "#f5f0e7",
@@ -23,19 +23,19 @@
   "shortcuts": [
     {
       "name": "Today",
-      "url": "/#/today"
+      "url": "/app#/today"
     },
     {
       "name": "Quick add",
-      "url": "/#/today?qa=1"
+      "url": "/app#/today?qa=1"
     },
     {
       "name": "Calendar",
-      "url": "/#/calendar"
+      "url": "/app#/calendar"
     },
     {
       "name": "Tasks",
-      "url": "/#/tasks"
+      "url": "/app#/tasks"
     }
   ]
 }

@@ -42,7 +42,7 @@ export function StatsWidget({ state }: { state: PlannerState }) {
       {stats.streakSum > 0 && (
         <div className="stats-streak">
           <span className="streak-icon">🔥</span>
-          <span>{t('{{n}} day streak across all habits', { n: String(stats.streakSum) })}</span>
+          <span>{t('{0} day streak across all habits', { 0: stats.streakSum })}</span>
         </div>
       )}
     </div>

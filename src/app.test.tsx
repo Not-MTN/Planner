@@ -199,6 +199,46 @@ describe('app smoke', () => {
     expect(window.localStorage.getItem('planner-theme')).toBe('dark');
   });
 
+  it('shows the signed-in account in the sidebar with a sign-out that asks first', () => {
+    window.localStorage.setItem(
+      'planner-last-user-info',
+      JSON.stringify({
+        id: 'user-1',
+        username: 'demo',
+        email: 'demo@planner.app',
+        displayName: 'Demo User',
+        role: 'personal',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    );
+    mountApp();
+    const card = document.querySelector('.side-account');
+    expect(card).toBeTruthy();
+    expect(card?.textContent).toContain('Demo User');
+    expect(card?.textContent).toContain('demo@planner.app');
+    const signOutButton = card?.querySelector<HTMLButtonElement>('.side-signout');
+    expect(signOutButton?.textContent).toContain('Sign out');
+    act(() => {
+      signOutButton?.click();
+    });
+    // Signing out is destructive-adjacent, so it always asks first.
+    expect(text()).toContain('Sign out of Planner?');
+    const cancel = [...document.querySelectorAll<HTMLButtonElement>('.sheet-confirm button')].find((button) =>
+      button.textContent?.includes('Cancel'),
+    );
+    act(() => {
+      cancel?.click();
+    });
+    expect(document.querySelector('.side-account')).toBeTruthy();
+  });
+
+  it('hides the account card and sign-out when the device has no account', () => {
+    mountApp();
+    expect(document.querySelector('.side-account')).toBeNull();
+    expect(document.querySelector('.side-signout')).toBeNull();
+    expect(text()).toContain('Dark mode');
+  });
+
   function setTextareaValue(area: HTMLTextAreaElement, value: string): void {
     const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
     setter?.call(area, value);

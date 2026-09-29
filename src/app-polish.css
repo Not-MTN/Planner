@@ -1,0 +1,249 @@
+/* ============================================================
+   APP POLISH — final experience layer for /app
+   Loaded AFTER styles.css (and the old styles-polish.css) so it
+   has the last word on every rule it touches. It builds on the
+   placement & device pass at the end of styles.css — what lives
+   here is what that pass does not already cover:
+
+   1. Form structure: the wrapper wraps, the input is the box
+      (an older pass left every form field box-in-a-box).
+   2. The account block: identity card in the side panel, header
+      in the mobile More sheet.
+   3. Accessibility & resilience: keyboard focus rings, forced
+      colors, stronger-contrast tokens, reduced motion, dvh
+      fallbacks for iOS 15.
+   4. Last-mile chrome: tablet-width tab dock, date chip that
+      tracks the mobile bar's real height, sheet safe areas.
+   ============================================================ */
+
+/* ---------- 1. Interaction hardening the base does not cover ---------- */
+
+/* No 300 ms tap delay and no accidental double-tap zoom on controls. */
+:where(button, a, [role="button"], .seg, .tab, .nav-link, .filter, .chip) {
+  touch-action: manipulation;
+}
+
+/* iOS 15 and older have no dynamic viewport units; give them real fallbacks. */
+@supports not (height: 100dvh) {
+  .app-shell { min-height: 100vh; }
+  @media (min-width: 1024px) {
+    .sidebar { height: 100vh; max-height: 100vh; }
+  }
+  .sheet { max-height: min(86vh, 780px); }
+  .modal-overlay { min-height: 100vh; }
+}
+
+/* Every interactive element deserves a visible keyboard focus ring. This is
+   the one thing mouse users never see and keyboard users always need. The
+   outline follows each control's own shape, so no border-radius here. */
+:where(button, [href], summary, [tabindex]:not([tabindex="-1"]), .nav-link, .tab):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+:where(.seg, .filter, .chip, .icon-choice):focus-visible { outline-offset: 1px; }
+
+/* Windows High-Contrast / forced-colors: system colours keep meaning. */
+@media (forced-colors: active) {
+  .card, .sheet, .tabbar, .side-account { border-color: CanvasText; }
+  /* Accent tints and gradients are stripped here; give identity a real edge. */
+  .account-avatar, .account-mark { border: 1px solid CanvasText; background: Canvas; color: CanvasText; box-shadow: none; }
+  .nav-link.active, .tab.active, .seg.on, .filter.on {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  :where(button, [href], input, select, textarea):focus-visible { outline-color: Highlight; }
+}
+
+/* Stronger borders when the user asks the OS for more contrast. */
+@media (prefers-contrast: more) {
+  :root { --line: rgba(35, 32, 27, 0.2); --line-strong: rgba(35, 32, 27, 0.38); }
+  [data-theme="dark"] { --line: rgba(236, 229, 214, 0.24); --line-strong: rgba(236, 229, 214, 0.44); }
+}
+
+/* Motion-sensitive users: keep the app, drop the choreography. */
+@media (prefers-reduced-motion: reduce) {
+  .view-enter, .sheet, .modal-overlay, .toast { animation: none; }
+  .card, .btn, .nav-link, .tab, .tabbar, .icon-btn, .side-signout, .filter { transition-duration: 0.01ms; }
+}
+
+/* ---------- 2. Fields: one box, exactly one ---------- */
+/* An earlier pass styled .field itself like an input, leaving every labelled
+   control box-in-a-box. The wrapper wraps; the input is the box. */
+.field {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  font-size: inherit;
+  gap: 6px;
+}
+.field input, .field select, .field textarea,
+.journal-entry {
+  min-height: 46px;
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  font-size: 14.5px;
+  transition: border-color 0.16s, box-shadow 0.16s, background 0.16s;
+}
+.field textarea { min-height: 74px; }
+.field input:focus, .field select:focus, .field textarea:focus,
+.journal-entry:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--surface);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+/* ---------- 3. Sidebar: small refinements ---------- */
+@media (min-width: 1024px) {
+  .sidebar { padding: 18px 14px 14px; }
+  .sidebar .brand { padding: 6px 10px 14px; }
+  .nav-link { min-height: 42px; border-radius: 13px; }
+  .nav-link.active { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent); }
+  .side-tool { min-height: 40px; }
+}
+
+/* Hover states are a pointer luxury — gate them so they never stick on touch. */
+@media (hover: hover) {
+  .nav-link:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); color: var(--ink); transform: none; }
+  .card:hover { transform: translateY(-2px); box-shadow: var(--shadow); border-color: color-mix(in srgb, var(--accent) 24%, var(--line)); }
+  .icon-btn:hover { transform: translateY(-1px); }
+  .btn:hover { transform: translateY(-1px); }
+  .btn:active { transform: translateY(0) scale(0.97); }
+  .hub-tile:hover { transform: translateY(-2px); }
+}
+
+/* ---------- 4. Account: the shared identity pieces ---------- */
+/* Used by the side-panel card and the mobile More sheet header. Settings has
+   its own .account-row family in styles.css. */
+.account-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--accent-contrast);
+  background: linear-gradient(145deg, var(--accent), var(--accent-deep));
+  box-shadow: 0 6px 14px color-mix(in srgb, var(--accent) 34%, transparent);
+}
+.account-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+.account-name {
+  font-size: 13.5px;
+  font-weight: 680;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account-sub {
+  font-size: 11.5px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: ltr;
+  text-align: start;
+}
+
+/* Side panel card: who you are, then the way out. */
+.side-account {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 2px 0;
+  padding: 9px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.side-account-id { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.side-account-id .account-meta { flex: 1; }
+/* Inside the card the sign-out becomes a real button; its colour still comes
+   from the shared .side-signout rule in styles.css. */
+.side-account .side-signout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  width: 100%;
+  border-radius: 11px;
+  border: 1px solid color-mix(in srgb, var(--danger) 26%, var(--line));
+  background: var(--surface);
+  font-size: 13px;
+  font-weight: 640;
+  transition: background 0.16s, border-color 0.16s, transform 0.16s;
+}
+.side-account .side-signout:active { transform: scale(0.97); }
+@media (pointer: coarse) {
+  .side-account .side-signout { min-height: 44px; }
+}
+
+/* Mobile "More" sheet header: the same identity, above the list. */
+.more-account {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 12px 10px;
+}
+.more-divider { height: 1px; background: var(--line); margin: 6px 4px; }
+
+/* ---------- 5. Mobile chrome: what the placement pass leaves open ---------- */
+@media (max-width: 1023px) {
+  /* Pin the bar to a deterministic height so the sticky date chip can sit
+     exactly beneath it on every device family (icons are 36–44px tall
+     depending on the pointer). box-sizing is border-box everywhere. */
+  .mobile-bar {
+    min-height: calc(60px + env(safe-area-inset-top, 0px));
+    background: color-mix(in srgb, var(--bg) 78%, transparent);
+    backdrop-filter: blur(18px) saturate(1.15);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.06);
+  }
+  [data-theme="dark"] .mobile-bar { box-shadow: 0 12px 30px rgba(0, 0, 0, 0.34); }
+  .mobile-date { top: calc(60px + env(safe-area-inset-top, 0px)); }
+
+  /* Room below for the floating dock (plus the puck raised out of it) and
+     the home indicator, so the last card is never pinned under chrome. */
+  .content { padding-bottom: calc(126px + env(safe-area-inset-bottom, 0px)); }
+}
+
+/* Tablets: a dock the width of a thumb, not the width of a desk. */
+@media (min-width: 601px) and (max-width: 1023px) {
+  .tabbar {
+    inset-inline-start: max(48px, calc((100% - 600px) / 2));
+    inset-inline-end: max(48px, calc((100% - 600px) / 2));
+  }
+}
+
+/* Desktop: phone chrome stays off, no matter which layer loaded before. */
+@media (min-width: 1024px) {
+  .tabbar, .mobile-bar, .fab, .mobile-date { display: none; }
+}
+
+/* ---------- 6. Sheets: bottom-anchored, home-indicator safe ---------- */
+@media (max-width: 699px) {
+  .modal-overlay { padding: 0; }
+  .sheet {
+    max-width: 100%;
+    border-inline: 0;
+    border-bottom: 0;
+    border-radius: 24px 24px 0 0;
+    padding: 10px 20px calc(28px + env(safe-area-inset-bottom, 0px));
+    max-height: min(92dvh, 780px);
+  }
+}
+@media (min-width: 700px) {
+  .sheet { padding: 14px 26px 26px; }
+}

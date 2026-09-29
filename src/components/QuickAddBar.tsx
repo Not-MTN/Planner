@@ -12,6 +12,17 @@ export function QuickAddBar({ defaultDate, placeholder }: { defaultDate?: string
   const [text, setText] = useState('');
   const speech = useSpeechInput();
   const inputRef = useRef<HTMLInputElement>(null);
+  // The example placeholder is a lesson on wide screens and a wall of
+  // truncated text on a phone, so small screens get the short version.
+  const [narrow, setNarrow] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(max-width: 480px)').matches,
+  );
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 480px)');
+    const onChange = () => setNarrow(query.matches);
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
 
   useEffect(() => {
     // PWA shortcut / deep link (#/today?qa=1) lands here: put the caret in the box.
@@ -69,7 +80,7 @@ export function QuickAddBar({ defaultDate, placeholder }: { defaultDate?: string
           autoCorrect="on"
           spellCheck
           onChange={(event) => setText(event.target.value)}
-          placeholder={placeholder ?? t("Add anything — try “Call mom tomorrow 5pm #work !high”")}
+          placeholder={placeholder ?? (narrow ? t("Add anything…") : t("Add anything — try “Call mom tomorrow 5pm #work !high”"))}
           aria-label={t("Quick add")}
           maxLength={200}
         />
