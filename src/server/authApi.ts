@@ -677,6 +677,32 @@ export async function handlePasskeyList(request: Request, store: AuthStore | nul
   }
 }
 
+/** Permanently delete the signed-in account after password re-verification. */
+export async function handleAccountDelete(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'auth-account-delete', 5) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'DELETE') return error(405, 'Method not allowed.', undefined);
+  if (!store?.deleteAccount) return error(503, 'Account deletion is not available on this server.', 'not_configured');
+
+  const session = await linkUser(request, store);
+  if (!session) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+  const body = await readJsonBody(request);
+  const authToken = isBase64(body?.authToken, 32, 64) ? body.authToken : null;
+  if (!authToken) return error(400, 'Confirm your password to delete this account.');
+
+  try {
+    const account = await store.findAccount(session.user.username_lower);
+    if (!account) return error(401, 'The account could not be verified.', 'bad_credentials');
+    const candidate = await hashAuthToken(authToken, account.hashSalt);
+    if (!safeEqual(candidate, account.authHash)) return error(401, 'That password did not match.', 'bad_credentials');
+    const removed = await store.deleteAccount(session.user.id);
+    if (!removed) return error(404, 'This account is already gone.', 'not_found');
+    return json(200, { ok: true }, { 'Set-Cookie': clearedCookie(isHttps(request)) });
+  } catch {
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
+}
+
 /** Remove one of your own passkeys. */
 export async function handlePasskeyDelete(request: Request, store: AuthStore | null): Promise<Response> {
   const blocked = guard(request, 'auth-passkey-delete', 15) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));

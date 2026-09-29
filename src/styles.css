@@ -2109,6 +2109,12 @@ h1, .page-head h1 {
 .ai-privacy { display: grid; grid-template-columns: 38px minmax(0, 1fr); align-items: center; gap: 12px; padding: 14px 18px; background: var(--ai-grad); }
 .ai-privacy p { color: var(--ink-soft); font-size: 13px; }
 .ai-privacy strong { color: var(--ink); }
+.ai-apply-note { margin: 0 0 12px; padding: 10px 13px; border-inline-start: 3px solid var(--accent); border-radius: 0 10px 10px 0; background: var(--accent-soft); color: var(--ink-soft); font-size: 12.5px; line-height: 1.55; }
+.ai-schedule-conflict, .voice-schedule-conflict { margin: 12px 0; padding: 14px; border: 1px solid color-mix(in srgb, var(--cat-peach) 48%, var(--line)); border-radius: 14px; background: color-mix(in srgb, var(--cat-peach) 9%, var(--surface)); }
+.ai-schedule-conflict strong { font-size: 13px; color: var(--cat-peach-text); }
+.ai-schedule-conflict p { margin: 5px 0 10px; color: var(--ink-soft); font-size: 13px; line-height: 1.55; }
+.ai-schedule-conflict .form-actions { margin-top: 8px; }
+.voice-schedule-conflict { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; margin-top: 0; }
 .ai-privacy-icon, .ai-ideas-mark { width: 36px; height: 36px; border-radius: 13px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-deep); }
 .ai-error { border-color: color-mix(in srgb, var(--danger) 25%, transparent); background: var(--danger-soft); color: var(--danger); }
 .ai-range-controls { display: grid; grid-template-columns: repeat(2, minmax(180px, 1fr)) minmax(150px, .7fr); gap: 12px; align-items: end; }
@@ -3444,6 +3450,7 @@ html, body { overflow-x: clip; }
 }
 
 /* ---------- Panel details ---------- */
+.panel-head-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
 .panel-identity { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; margin: 0; }
 .panel-identity strong { font-size: 15px; font-weight: 640; color: var(--ink); }
 .panel-identity span { font-size: 13px; color: var(--muted); }
@@ -4118,6 +4125,19 @@ body {
 .account-signout:hover {
   background: var(--danger-soft);
   color: var(--danger);
+}
+.account-delete-actions {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.account-delete-form {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--line));
+  border-radius: 12px;
+  background: var(--danger-soft);
 }
 
 /* ---------- Phones held sideways: less chrome, more page ---------- */

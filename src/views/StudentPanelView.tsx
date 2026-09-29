@@ -28,6 +28,7 @@ export function StudentPanelView() {
   const [busy, setBusy] = useState(false);
   const [advice, setAdvice] = useState<StudentAdvice | null>(null);
   const [asking, setAsking] = useState(false);
+  const [sharing, setSharing] = useState(false);
 
   // Keep in step with the server: a guardian may have ended the link.
   useEffect(() => {
@@ -75,6 +76,20 @@ export function StudentPanelView() {
       flash(error instanceof AuthError || error instanceof Error ? error.message : t("That code could not be used."));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const shareNow = async () => {
+    if (sharing || panels.student.guardians.length === 0) return;
+    setSharing(true);
+    try {
+      const shared = await shareWeeklyResults(state, panels, true);
+      updatePanels(shared.panels);
+      flash(shared.sent > 0 ? t("This week’s results were shared with your guardians.") : t("No linked guardians were available to receive the results."));
+    } catch (error) {
+      flash(error instanceof Error ? error.message : t("This week’s results could not be shared."));
+    } finally {
+      setSharing(false);
     }
   };
 
@@ -350,6 +365,12 @@ export function StudentPanelView() {
             <p className="kicker">{t("Guardians")}</p>
             <h2 className="card-title">{t("Who sees your week")}</h2>
           </div>
+          {panels.student.guardians.length > 0 ? (
+            <button type="button" className="btn btn-ghost btn-tiny" disabled={sharing} onClick={() => void shareNow()}>
+              {sharing ? <span className="spinner" aria-hidden="true" /> : null}
+              {sharing ? t("Sharing…") : t("Share this week now")}
+            </button>
+          ) : null}
         </header>
         <p className="view-sub">
           {t("They receive your weekly results — how much was planned, how much got done, how long you focused, and the headline you write. Nothing else leaves this planner.")}

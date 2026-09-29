@@ -3,6 +3,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { StrictMode, act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { App } from './App';
+import { addEvent } from './mutate';
+import { addDays, todayISO } from './dates';
+import { createEmptyState } from './types';
+import { serialize, STORAGE_KEY } from './storage';
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
@@ -99,6 +103,15 @@ describe('app smoke', () => {
     expect(document.querySelector('.hero-panel')).toBeTruthy();
   });
 
+  it('opens the notification center from the top-bar bell', () => {
+    mountApp();
+    const bell = document.querySelector<HTMLButtonElement>('.mobile-bar-actions .notification-trigger');
+    expect(bell).toBeTruthy();
+    act(() => bell?.click());
+    expect(text()).toContain('No notifications yet');
+    expect(document.querySelector('[role="dialog"]')).toBeTruthy();
+  });
+
   it('adds a task through smart quick add and undoes it', () => {
     mountApp();
     const input = document.querySelector<HTMLInputElement>('.quick-add input');
@@ -127,7 +140,7 @@ describe('app smoke', () => {
     await act(async () => {
       input?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
     });
-    await settle();
+    await waitForText('How your days are taking shape');
     expect(text()).toContain('How your days are taking shape');
     expect(document.querySelectorAll('[aria-label="Progress charts"] .chart-card')).toHaveLength(2);
     expect(document.querySelectorAll('[aria-label="Focus and rhythm"] .chart-card')).toHaveLength(2);
@@ -271,14 +284,22 @@ describe('app smoke', () => {
         utterance.onend?.();
       },
     };
+    // An existing class occupies the time the next request will ask for.
+    const tomorrow = addDays(todayISO(), 1);
+    const existingState = addEvent(createEmptyState(), {
+      title: 'Class', date: tomorrow, startTime: '17:00', endTime: '18:00', category: 'learning', note: '', important: false,
+    }, 'class-at-five', new Date().toISOString());
+    localStorage.setItem(STORAGE_KEY, serialize(existingState));
     // Stub the Groq proxy: chat completions answers with a spoken reply + a draft.
     const originalFetch = globalThis.fetch;
+    let completionCalls = 0;
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes('/api/groq/status')) {
         return new Response(JSON.stringify({ configured: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
       if (url.includes('/api/groq/chat/completions')) {
+        completionCalls += 1;
         return new Response(JSON.stringify({
           choices: [{ message: { content: JSON.stringify({
             reply: 'Got you — a gentle Tuesday, with one hour to breathe before the gym.',
@@ -321,7 +342,28 @@ describe('app smoke', () => {
       expect(text()).toContain('make tomorrow gentle, gym late afternoon');
       expect(text()).toContain('a gentle Tuesday');
       expect(text()).toContain('Gentle Tuesday'); // the draft landed in the review card
+      expect(text()).toContain('Typed and spoken requests create a reviewable draft.');
       expect(spoken.join(' ')).toContain('gentle Tuesday'); // and it was spoken aloud
+      // Applying is a separate, explicit action; it mutates planner state and reports the result.
+      const addPlan = [...document.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Add this plan'));
+      expect(addPlan).toBeTruthy();
+      await act(async () => {
+        addPlan?.click();
+      });
+      expect(text()).toContain('Added 1 task, 0 events and 0 habits. Undo is available.');
+
+      // The next spoken request collides with the saved class, so Planner should ask before another AI call.
+      const nextOrb = document.querySelector<HTMLButtonElement>('.voice-orb');
+      act(() => nextOrb?.click());
+      await act(async () => {
+        (recognition as unknown as { onresult: ((e: unknown) => void) | null })?.onresult?.({
+          resultIndex: 0,
+          results: [{ isFinal: true, 0: { transcript: 'schedule gym at 5 pm tomorrow' } }],
+        });
+      });
+      await waitForText('There’s a conflict: Class');
+      expect(text()).toContain('Keep Class and find another time');
+      expect(completionCalls).toBe(1);
     } finally {
       globalThis.fetch = originalFetch;
       delete (window as unknown as { SpeechRecognition?: unknown }).SpeechRecognition;
@@ -668,13 +710,6 @@ describe('app smoke', () => {
     expect(document.querySelector('.month-grid')).toBeTruthy();
   });
 });
-
-/** Await the lazy route chunks (Calendar / Insights / AI). */
-async function settle(): Promise<void> {
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 120));
-  });
-}
 
 function click(element: Element | null | undefined): void {
   if (!element) throw new Error('element missing');

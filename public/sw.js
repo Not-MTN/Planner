@@ -60,12 +60,30 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try { payload = event.data ? event.data.json() : {}; } catch { payload = {}; }
+  const title = typeof payload.title === 'string' ? payload.title : 'Planner reminder';
+  const options = {
+    body: typeof payload.body === 'string' ? payload.body : 'A reminder is due. Open Planner to see your schedule.',
+    icon: '/favicon.svg',
+    tag: typeof payload.tag === 'string' ? payload.tag : 'planner-reminder',
+    data: { url: typeof payload.url === 'string' ? payload.url : '/#/today' },
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
+  const target = event.notification.data && typeof event.notification.data.url === 'string' ? event.notification.data.url : '/#/today';
   event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (clients) => {
       const open = clients.find((client) => 'focus' in client);
-      return open ? open.focus() : self.clients.openWindow('/#/today');
+      if (open) {
+        if ('navigate' in open) await open.navigate(target);
+        return open.focus();
+      }
+      return self.clients.openWindow(target);
     }),
   );
 });

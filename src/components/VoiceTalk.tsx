@@ -3,9 +3,10 @@ import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { MicIcon, CloseIcon, VolumeIcon, SparklesIcon } from '../icons';
 import { t, getLang } from '../i18n';
-import { replyLang, speakText, stopSpeaking, voiceTurn, type VoiceCurrentDraft, type VoiceTurn } from '../voiceai';
+import { replyLang, speakText, stopSpeaking, voiceRange, voiceTurn, type VoiceCurrentDraft, type VoiceTurn } from '../voiceai';
 import { useSpeechInput, type SpeechError } from '../speech';
-import type { AIDraft, PlanRange } from '../ai';
+import { findPromptScheduleConflicts, type AIDraft, type PlanRange, type PromptScheduleConflict } from '../ai';
+import { displayTime, formatFullDate, todayISO } from '../dates';
 
 /**
  * Voice AI: tap the orb, talk like a tired human, and the AI answers back —
@@ -42,6 +43,7 @@ export function VoiceTalk({ onDraft, currentDraft = null }: {
   const [interim, setInterim] = useState('');
   const [muted, setMuted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingConflict, setPendingConflict] = useState<{ utterance: string; conflict: PromptScheduleConflict } | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const mountedRef = useRef(true);
   const busyRef = useRef(false);
@@ -77,18 +79,41 @@ export function VoiceTalk({ onDraft, currentDraft = null }: {
     }, 40);
   };
 
-  const answer = async (utterance: string, echo = true) => {
+  const answer = async (utterance: string, echo = true, approvedConflict?: PromptScheduleConflict) => {
     if (busyRef.current) return;
-    busyRef.current = true;
+    lastUtteranceRef.current = utterance;
     setError(null);
     setInterim('');
-    lastUtteranceRef.current = utterance;
+    if (!approvedConflict) {
+      const range = currentDraft?.range ?? voiceRange(todayISO(), utterance);
+      const conflict = findPromptScheduleConflicts(utterance, state, range)[0];
+      if (conflict) {
+        setPendingConflict({ utterance, conflict });
+        const reply = t("There’s a conflict: {0} is already scheduled on {1} from {2} to {3}, so {4} is not free. Should I keep it and find another time?", {
+          0: conflict.title,
+          1: formatFullDate(conflict.date),
+          2: displayTime(conflict.startTime),
+          3: displayTime(conflict.endTime),
+          4: displayTime(conflict.requestedTime),
+        });
+        setBubbles((current) => [...current, ...(echo ? [{ role: 'user' as const, text: utterance }] : []), { role: 'assistant', text: reply }]);
+        scrollLog();
+        const spoken = !mutedRef.current && speakText(reply, { lang: replyLang(reply), onend: () => settle('idle') });
+        setPhase(spoken ? 'speaking' : 'idle');
+        return;
+      }
+    }
+    busyRef.current = true;
+    setPendingConflict(null);
     setPhase('thinking');
     if (echo) setBubbles((current) => [...current, { role: 'user', text: utterance }]);
     scrollLog();
     try {
       const history: VoiceTurn[] = bubbles.slice(-10).map((bubble) => ({ role: bubble.role, text: bubble.text }));
-      const result = await voiceTurn({ utterance, history, state, currentDraft });
+      const requestText = approvedConflict
+        ? `${utterance}\n\nScheduling decision: Keep the existing ${approvedConflict.title} on ${approvedConflict.date} from ${approvedConflict.startTime} to ${approvedConflict.endTime} protected. Do not move or overlap it; find another genuinely free time for my requested activity and tell me you worked around this conflict.`
+        : utterance;
+      const result = await voiceTurn({ utterance: requestText, history, state, currentDraft });
       if (!mountedRef.current) return;
       const replyText = result.followUp ? `${result.reply} ${result.followUp}` : result.reply;
       setBubbles((current) => [...current, { role: 'assistant', text: replyText }]);
@@ -221,6 +246,20 @@ export function VoiceTalk({ onDraft, currentDraft = null }: {
           </p>
         ) : null}
       </div>
+      {pendingConflict ? (
+        <div className="voice-schedule-conflict" role="alert">
+          <button
+            type="button"
+            className="btn btn-primary btn-small"
+            onClick={() => void answer(pendingConflict.utterance, false, pendingConflict.conflict)}
+          >
+            {t("Keep {0} and find another time", { 0: pendingConflict.conflict.title })}
+          </button>
+          <button type="button" className="btn btn-ghost btn-small" onClick={() => setPendingConflict(null)}>
+            {t("I’ll change my request")}
+          </button>
+        </div>
+      ) : null}
 
       <div className="voice-controls">
         <button

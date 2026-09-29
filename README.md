@@ -100,7 +100,7 @@ Settings → **Language** switches the whole interface to Persian with a right-t
 - **AI Coach (Groq Cloud)** — describe a day, week, month (30 days), or any custom range up to 90 days (say it in the request — “plan the next 10 days” — and it offers to match the range); get draft tasks, timed events, habits, and gentle wellbeing ideas spread across the whole stretch. Upload a PNG/JPG (up to 3 MB) of a written plan for image reading. Review the draft before adding it; one undo reverses the whole batch, and the draft stays on the **Plans** page either way. **AI memory** lets you save the life context you choose — preferences, people, routines, boundaries, and other helpful facts — so future plans and reviews can fit you better. Memory is local-first, included in encrypted sync/backups, editable and forgettable at any time; it is sent to Groq only when you ask the coach to plan or review.
 - **Protected weekly times** — add a repeating class, shift, or appointment (for example Tuesday 08:00–09:00). It appears on the calendar and the AI rejects overlapping events.
 - **AI review** — ask for a daily, weekly, monthly, or custom reflection on completed tasks, events, and habit check-ins. Select unfinished tasks and dates to carry them forward; nothing is rescheduled without your action.
-- **Themes** — light, dark, or follow your system, plus five accent colours. All in Settings.
+- **Themes & navigation** — light, dark, or follow your system, plus five accent colours. Settings → Navigation lets you hide sections from the desktop sidebar without removing them from search or the mobile More menu.
 - **Repeating tasks** — daily, weekdays, weekly, monthly, or yearly. Finishing one schedules the next copy (overdue ones skip ahead to the next future date). Quick add understands `every day`, `weekdays`, `every monday`, `monthly`…
 - **Repeating events** — birthdays, classes, and weekly meetings expand onto matching days (and export with an RRULE).
 - **Waiting** — mark a task as waiting on a person or reply; it stays off Overdue until you clear it.
@@ -108,10 +108,10 @@ Settings → **Language** switches the whole interface to Persian with a right-t
 - **Milestone dates** — goal steps can have a date and show up on Upcoming.
 - **Busy calendar** — Settings can export an .ics of busy times only (titles stripped).
 - **Checklists** — break a task into steps; the row shows a progress bar and you can tick steps inline.
-- **Reminders** — optional notifications before events and timed tasks, plus a morning summary. Falls back to in-app toasts if notifications are blocked. (Settings → Reminders; works while Planner is open or installed.)
+- **Reminders & notification center** — optional notifications before events and timed tasks, plus a morning summary. Use the bell in the desktop sidebar or mobile top bar to reopen up to 50 recent reminders, mark them read, or clear them. Falls back to in-app toasts if notifications are blocked. (Settings → Reminders; scheduled checks run while Planner is open.)
 - **Installable & offline** — a service worker caches the app shell, so Planner opens without a connection. Install it from Settings → App or your browser menu.
 - **Calendar files (.ics)** — export events, protected weekly times (as repeating events), and dated tasks; import from Google, Outlook, or Apple Calendar. All-day events arrive as dated tasks. **Export busy times** shares only Busy blocks.
-- **Task board** — switch Tasks between List and a Kanban Board grouped by When, Priority, or Category. Drag cards between columns to reschedule, re-prioritise, or complete.
+- **Task board** — switch Tasks between List and a Kanban Board grouped by When, Priority, or Category. Drag cards between columns to reschedule, re-prioritise, or complete. The list also has a dedicated **Inbox** for undated tasks and locally saved filter/search views.
 - **Calendar editing** — in Week view, drag an event's bottom edge (or focus it and use ↑/↓) to change its length in 15-minute steps; drag tasks to other days too.
 - **Plan my day** — one tap fits today's untimed, overdue, and urgent tasks into your free time around events and protected hours. One undo reverses it.
 - **Pomodoro focus** — short and long breaks between rounds; every focused minute (even when you end early) is logged.
@@ -141,6 +141,18 @@ Settings → **Language** switches the whole interface to Persian with a right-t
 - **Faster first paint** — Calendar, Insights, and the AI coach load their code on first visit instead of in the main bundle.
 - **Daily mood check-in** — five big, warm faces on Today (drained → glowing). One tap, no judgment; the card glows to invite you each evening, and logging a glowing day fires the confetti. Tapping a finished task also drops a small rotating "well done" toast — the reward is the point. Insights shows your last 7 days of feelings with a running average.
 - **Jalali dates** — optionally shows the Persian (Jalali) date alongside Gregorian dates (Settings → Calendar, dates & time).
+
+## Background push reminders
+
+Push delivery can work while Planner is closed, but it needs server configuration; the ordinary in-app reminder bell continues to work without it.
+
+1. Generate a VAPID pair with `npx web-push generate-vapid-keys`.
+2. Set `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` (for example `mailto:admin@example.com`), and a long random `CRON_SECRET` in `.env.local` and your deployment environment. Never expose the private key or cron secret in a `VITE_` variable.
+3. The same `DATABASE_URL` stores browser push subscriptions and reminder times. Planner only uploads scheduled times and opaque reminder IDs; notification text is generic and task/event titles stay on the device.
+4. Configure a trusted scheduler to call `GET https://<your-app>/api/push/dispatch` once per minute with `Authorization: Bearer <CRON_SECRET>`. Do not publish that secret in a URL. The endpoint rejects calls without it.
+5. In Planner, enable **Settings → Background notifications**. Browser permission and an installed/registered service worker are required. Turning it off removes the server subscription and queued reminders.
+
+Push uses the standard Web Push protocol. Some hosting plans do not permit minute-level scheduled functions, so use an external scheduler if needed; without scheduled calls the browser cannot be woken at reminder time.
 
 ## Groq setup
 

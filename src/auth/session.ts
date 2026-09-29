@@ -472,6 +472,31 @@ export async function fetchApiStatus(): Promise<ApiStatus> {
   return request<ApiStatus>('/api/auth/status', { method: 'GET' });
 }
 
+export async function deleteAccount(password: string): Promise<void> {
+  const current = active;
+  if (!current) throw new AuthError('unauthenticated', 'Unlock your account before deleting it.');
+  if (!password) throw new AuthError('bad_credentials', 'Enter your password to continue.');
+  const { kdfSalt } = await request<{ kdfSalt: string }>('/api/auth/salt', {
+    method: 'POST',
+    body: JSON.stringify({ username: current.user.username }),
+  });
+  const { authToken } = await deriveFromPassword(password, kdfSalt);
+  await request<{ ok: true }>('/api/auth/account', {
+    method: 'DELETE',
+    body: JSON.stringify({ authToken }),
+  });
+
+  const userId = current.user.id;
+  forget(current);
+  active = null;
+  clearPersistedAuth();
+  try {
+    await forgetDevice(userId);
+  } catch {
+    /* the account and server session are already gone */
+  }
+}
+
 export async function signOut(): Promise<void> {
   const userId = active?.user.id ?? getLastUserId() ?? undefined;
   forget(active);

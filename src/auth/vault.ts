@@ -64,6 +64,12 @@ export function accountUser(): PublicUser | null {
   return getActiveSession()?.user ?? loadLastUserInfo();
 }
 
+export function forgetAccountUser(): void {
+  try {
+    localStorage.removeItem(LAST_USER_INFO_KEY);
+  } catch {}
+}
+
 export function isUnlocked(): boolean {
   return getActiveSession() !== null;
 }

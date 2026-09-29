@@ -18,6 +18,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { API_SECURITY_HEADERS } from './security.js';
 import { redactDatabaseError } from './authStore.js';
 import {
+  handleAccountDelete,
   handleAccountVault,
   handleAuthStatus,
   handleLinkAccept,
@@ -42,6 +43,7 @@ import { authStore } from './authStore.js';
 import { handleICS } from './icsProxy.js';
 import { handleSync, handleSyncStatus, neonStore } from './sync.js';
 import { handleGroqChatCompletions, handleGroqStatus } from './groqProxy.js';
+import { handlePushConfig, handlePushDispatch, handlePushSubscription } from './pushApi.js';
 
 /** The server-side environment the API reads; never exposed to the browser. */
 export interface ApiEnv {
@@ -49,6 +51,10 @@ export interface ApiEnv {
   GROQ_API_KEY?: string;
   GROQ_MODEL?: string;
   GROQ_VISION_MODEL?: string;
+  VAPID_PUBLIC_KEY?: string;
+  VAPID_PRIVATE_KEY?: string;
+  VAPID_SUBJECT?: string;
+  CRON_SECRET?: string;
 }
 
 type Handler = (request: Request) => Response | Promise<Response>;
@@ -71,6 +77,8 @@ export function notFoundResponse(): Response {
  */
 export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
   switch (pathname) {
+    case '/api/auth/account':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleAccountDelete(request, store));
     case '/api/auth/link-accept':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleLinkAccept(request, store));
     case '/api/auth/links':
@@ -119,6 +127,12 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
       return (request) => handleGroqChatCompletions(request, env.GROQ_API_KEY, { model: env.GROQ_MODEL, visionModel: env.GROQ_VISION_MODEL });
     case '/api/groq/status':
       return (request) => handleGroqStatus(request, env.GROQ_API_KEY);
+    case '/api/push/config':
+      return (request) => handlePushConfig(request, env.VAPID_PUBLIC_KEY, env.VAPID_PRIVATE_KEY, env.DATABASE_URL, env.CRON_SECRET);
+    case '/api/push/subscription':
+      return (request) => handlePushSubscription(request, env);
+    case '/api/push/dispatch':
+      return (request) => handlePushDispatch(request, env);
     default:
       return null;
   }
