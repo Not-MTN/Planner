@@ -2,10 +2,12 @@ import { ACCENT_CHOICES, type Accent } from '../constants';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { useImportFile } from '../hooks';
-import { DownloadIcon, SparklesIcon, UploadIcon } from '../icons';
+import { DownloadIcon, ExitIcon, SparklesIcon, UploadIcon, UserIcon } from '../icons';
 import { Modal } from './ui';
 import { useEffect, useState } from 'react';
 import { FeedsSection, SecuritySection, SharedSpaceSection, TaskImportSection, TemplatesSection, WeatherSection } from './SettingsExtras';
+import { useSignOut } from './useSignOut';
+import { unlockedUser } from '../auth/vault';
 import { DATE_LANGUAGES, todayISO, type DateLanguage } from '../dates';
 import { downloadBusyICS, downloadICS, parseICS } from '../ics';
 import { canInstall, isInstalled, onInstallChange, promptInstall } from '../pwa';
@@ -369,6 +371,39 @@ function InstallSection() {
   );
 }
 
+/**
+ * Who is signed in on this device, and the way out. People look for sign-out
+ * in Settings first, so it lives here as well as in the side and More panels.
+ */
+function AccountSection() {
+  const user = unlockedUser();
+  const requestSignOut = useSignOut();
+
+  return (
+    <section className="set-section">
+      <h3 className="kicker">{t("Account")}</h3>
+      {user ? (
+        <div className="set-row account-row">
+          <span className="account-mark" aria-hidden="true">
+            <UserIcon size={17} />
+          </span>
+          <div>
+            <p className="set-label">{user.displayName || user.username}</p>
+            <p className="set-hint">{t("Signed in · your planner syncs through its encrypted vault")}</p>
+          </div>
+          <button type="button" className="btn btn-ghost account-signout" onClick={requestSignOut}>
+            <ExitIcon size={15} /> {t("Sign out")}
+          </button>
+        </div>
+      ) : (
+        <p className="set-hint">
+          {t("No account on this device. Your planner is saved in this browser only; an account keeps it in an encrypted vault you can open anywhere.")}
+        </p>
+      )}
+    </section>
+  );
+}
+
 export function SettingsSheet() {
   const planner = usePlanner();
   const {
@@ -389,6 +424,7 @@ export function SettingsSheet() {
 
   return (
     <Modal title={t("Settings")} onClose={closeSettings} className="sheet-settings">
+      <AccountSection />
       <section className="set-section">
         <h3 className="kicker">{t("Appearance")}</h3>
         <div className="set-row">

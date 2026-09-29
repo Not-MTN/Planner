@@ -50,11 +50,13 @@ export function BookIcon(props: IconProps) {
 }
 
 export function WeekIcon(props: IconProps) {
+  // Filled bars, not outlined ones: at 16–18px three hollow rectangles read
+  // as missing-glyph boxes, which is exactly what this icon must never look like.
   return (
     <Svg {...props}>
-      <rect x="3.5" y="4.5" width="4" height="15" rx="1.2" />
-      <rect x="10" y="4.5" width="4" height="15" rx="1.2" />
-      <rect x="16.5" y="4.5" width="4" height="15" rx="1.2" />
+      <rect x="4" y="5" width="4.2" height="14" rx="1.6" fill="currentColor" stroke="none" opacity="0.9" />
+      <rect x="9.9" y="9" width="4.2" height="10" rx="1.6" fill="currentColor" stroke="none" opacity="0.55" />
+      <rect x="15.8" y="6.5" width="4.2" height="12.5" rx="1.6" fill="currentColor" stroke="none" opacity="0.72" />
     </Svg>
   );
 }
@@ -395,6 +397,25 @@ export function RedoIcon(props: IconProps) {
     <Svg {...props}>
       <path d="M16.5 4.5 20 8l-3.5 3.5" />
       <path d="M20 8H9.5a5 5 0 0 0 0 10H13" />
+    </Svg>
+  );
+}
+
+export function ExitIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4" />
+      <path d="M10 8l-4 4 4 4" />
+      <path d="M6 12h10" />
+    </Svg>
+  );
+}
+
+export function UserIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="8" r="3.6" />
+      <path d="M5 20c.8-3.6 3.6-5.4 7-5.4s6.2 1.8 7 5.4" />
     </Svg>
   );
 }

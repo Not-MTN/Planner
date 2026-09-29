@@ -133,7 +133,11 @@ export function DayView({ date }: { date: string }) {
                 {dayRelation(addDays(today, 1), today)} {t("and beyond")}
               </button>
             </div>
-          ) : (
+          ) : null}
+          {/* The glance strip fills the headline column beside the progress
+              card, so the numbers are above the fold instead of six cards down. */}
+          {isToday ? <StatsWidget state={state} /> : null}
+          {!isToday ? (
             <div className="pager hero-pager">
               <button type="button" className="icon-btn round" aria-label={t("Previous day")} onClick={() => navigate({ name: 'day', date: addDays(date, -1) })}>
                 <ChevronLeftIcon />
@@ -145,7 +149,7 @@ export function DayView({ date }: { date: string }) {
                 <ChevronRightIcon />
               </button>
             </div>
-          )}
+          ) : null}
         </div>
 
         <aside className="card hero-panel">
@@ -199,17 +203,9 @@ export function DayView({ date }: { date: string }) {
         </aside>
       </header>
 
-      {isToday ? <AICoachCard onOpen={() => navigate({ name: 'ai', tab: 'plan' })} /> : null}
-      {fresh && isToday ? <WelcomeCard /> : null}
-      {isToday ? <StatsWidget state={state} /> : null}
-      {isToday ? <BackupReminder onExport={planner.exportData} /> : null}
-      {isToday ? <PanelHub /> : null}
-      {isToday ? <PanelInvite /> : null}
-      {isToday ? <WeatherCard /> : null}
-      {isToday ? <MoodCard date={today} /> : null}
-      {essentials.length > 0 ? <EssentialsCard date={date} habits={essentials} /> : null}
-
-      <IntentionField key={date} date={date} />
+      {/* The day's working area comes first: intention, then the schedule and
+          its checklists. Promos and check-ins follow, never ahead of the plan. */}
+      {isToday ? <IntentionField key={date} date={date} /> : null}
 
       <div className="today-grid">
         <section className="card timeline-card">
@@ -356,6 +352,15 @@ export function DayView({ date }: { date: string }) {
           <DayNotes date={date} />
         </div>
       </div>
+
+      {isToday ? <AICoachCard onOpen={() => navigate({ name: 'ai', tab: 'plan' })} /> : null}
+      {fresh && isToday ? <WelcomeCard /> : null}
+      {isToday ? <BackupReminder onExport={planner.exportData} /> : null}
+      {isToday ? <PanelHub /> : null}
+      {isToday ? <PanelInvite /> : null}
+      {isToday ? <WeatherCard /> : null}
+      {isToday ? <MoodCard date={today} /> : null}
+      {essentials.length > 0 ? <EssentialsCard date={date} habits={essentials} /> : null}
     </div>
   );
 }

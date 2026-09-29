@@ -3886,3 +3886,294 @@ html, body { overflow-x: clip; }
   .ai-draft-actions { flex-wrap: wrap; }
   .ai-upload-row { flex-direction: column; align-items: stretch; }
 }
+
+/* ============================================================
+   Placement & device pass — appended last on purpose.
+   styles.css loads after styles-polish.css, so the rules below
+   are the final word where the two files disagree (the mobile
+   tab bar, the FAB, the mobile bar). Everything here exists to
+   keep one promise: nothing overlaps, nothing spills sideways,
+   and every control is reachable from a thumb or a keyboard on
+   any screen from 320px phones to ultrawide desktops.
+   ============================================================ */
+
+/* ---------- Touch & text hygiene ---------- */
+body {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+/* iOS Safari zooms the page when a focused field is under 16px. */
+@media (pointer: coarse) {
+  .input,
+  input,
+  select,
+  textarea,
+  .quick-add input,
+  .step-form input,
+  .intention input {
+    font-size: 16px;
+  }
+}
+
+/* ---------- Mobile chrome: one floating bar, clear of the notch ---------- */
+@media (max-width: 1023px) {
+  .mobile-bar {
+    padding-top: calc(10px + env(safe-area-inset-top));
+    padding-bottom: 10px;
+  }
+  .tabbar {
+    inset-inline: 10px;
+    bottom: calc(10px + env(safe-area-inset-bottom));
+    border: 1px solid var(--line);
+    border-radius: 22px;
+    padding: 5px;
+    box-shadow: var(--shadow-lift);
+  }
+  .tab {
+    min-height: 46px;
+    border-radius: 16px;
+  }
+  /* The centred add puck rises out of the bar; nothing floats over content. */
+  .tab-add {
+    flex: 0 0 auto;
+    width: 56px;
+    padding: 0;
+    justify-content: flex-end;
+  }
+  .tab-add-puck {
+    display: grid;
+    place-items: center;
+    width: 46px;
+    height: 46px;
+    margin-top: -22px;
+    border-radius: 17px;
+    color: var(--accent-contrast);
+    background: linear-gradient(150deg, var(--accent), var(--accent-deep));
+    box-shadow: 0 10px 24px color-mix(in srgb, var(--accent) 45%, transparent);
+    transition: transform 0.18s var(--ease);
+  }
+  .tab-add:active .tab-add-puck {
+    transform: scale(0.92);
+  }
+  .content {
+    padding-bottom: 132px;
+  }
+  /* The sticky date chip gets a fade so lines scroll out from under it. */
+  .mobile-date {
+    padding: 6px 18px 2px;
+    background: linear-gradient(var(--bg) 62%, color-mix(in srgb, var(--bg) 0%, transparent));
+  }
+}
+
+/* A sheet or the palette owns the screen: park the tab bar under it. */
+@media (max-width: 1023px) {
+  .app-shell:has(.modal-overlay) .tabbar {
+    transform: translateY(calc(100% + 20px));
+    transition: transform 0.25s var(--ease);
+  }
+}
+
+/* ---------- Page heads stack on phones instead of colliding ---------- */
+@media (max-width: 620px) {
+  .page-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .page-head > .btn,
+  .page-head-actions {
+    align-self: flex-start;
+  }
+  .page-head-actions .btn {
+    flex: 0 0 auto;
+  }
+}
+
+/* ---------- Goal cards: let the step form wrap ---------- */
+/* The label wrappers are flex items; without min-width:0 their inputs'
+   intrinsic width (especially the date field) sets a 560px floor and the
+   whole column spills off a phone screen. */
+.step-form {
+  flex-wrap: wrap;
+}
+.step-form label {
+  display: block;
+  min-width: 0;
+}
+.step-form label:first-of-type {
+  flex: 1 1 150px;
+}
+.step-form label:first-of-type input {
+  width: 100%;
+}
+.step-form label:last-of-type {
+  flex: 0 1 148px;
+}
+.step-form label:last-of-type input {
+  width: 100%;
+}
+.step-form .btn {
+  flex: none;
+  align-self: center;
+}
+.goal-card .row-actions {
+  gap: 8px;
+}
+
+/* ---------- Horizontal strips read as carousels, not broken layout ---------- */
+/* The week and the year-in-pixels are intentionally wider than a phone;
+   snap points plus an edge fade say "swipe me" without a word. */
+@media (max-width: 1023px) {
+  .week-scroller,
+  .year-scroll {
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    mask-image: linear-gradient(to right, transparent 0, #000 14px, #000 calc(100% - 26px), transparent 100%);
+  }
+  .week-scroller::-webkit-scrollbar,
+  .year-scroll::-webkit-scrollbar {
+    display: none;
+  }
+  .week-scroller > * {
+    scroll-snap-align: start;
+  }
+}
+@media (max-width: 640px) {
+  .week-scroller {
+    grid-template-columns: repeat(7, minmax(128px, 1fr));
+    gap: 8px;
+  }
+  .day-col {
+    padding: 10px;
+  }
+}
+
+/* ---------- The glance strip lives in the headline column ---------- */
+.hero-copy .stats-widget {
+  margin-top: 20px;
+}
+.hero-copy .stats-widget-head {
+  margin-bottom: 12px;
+}
+@media (max-width: 600px) {
+  .hero-copy .stats-widget {
+    margin-top: 16px;
+  }
+}
+
+/* ---------- Sidebar foot: tools, then the way out ---------- */
+.side-history {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.side-signout {
+  color: var(--danger);
+}
+.side-signout:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+/* ---------- More panel: sign-out sits apart, in the danger colour ---------- */
+.more-signout {
+  margin-top: 8px;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 12px 12px;
+  color: var(--danger);
+  font-weight: 600;
+}
+.more-signout:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+/* ---------- Settings account row ---------- */
+.account-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.account-mark {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  flex: none;
+}
+.account-row > div {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.account-signout {
+  margin-inline-start: auto;
+  color: var(--danger);
+}
+.account-signout:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+/* ---------- Phones held sideways: less chrome, more page ---------- */
+@media (max-height: 480px) and (orientation: landscape) {
+  .mobile-date {
+    display: none;
+  }
+  .content {
+    padding-top: 10px;
+  }
+}
+
+/* ---------- Ultrawide: the reading column stays calm ---------- */
+@media (min-width: 1800px) {
+  :root {
+    --sidebar: 272px;
+  }
+}
+
+/* ---------- Checkbox & row tools on the smallest phones ---------- */
+/* A 22px box is a fine visual but a poor target: grow the hit area on
+   touch devices without changing the drawn size. */
+@media (pointer: coarse) {
+  .check {
+    position: relative;
+  }
+  .check::after {
+    content: "";
+    position: absolute;
+    inset: -11px;
+  }
+}
+/* At 320–380px the row's fixed tools (time, grip, edit, remove) would
+   squeeze the title to a sliver. The grip is drag-only (useless without
+   a mouse), so it steps out first; then the row may wrap. */
+@media (max-width: 380px) {
+  .grip {
+    display: none;
+  }
+  .task,
+  .event,
+  .habit-row {
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 11px 2px;
+  }
+  .item-body {
+    flex: 1 1 140px;
+  }
+  .time-field input {
+    width: 56px;
+  }
+  .task .icon-btn,
+  .event .icon-btn,
+  .habit-row .icon-btn {
+    width: 30px;
+    height: 30px;
+  }
+}
