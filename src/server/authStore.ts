@@ -226,6 +226,8 @@ export interface AuthStore {
   createSession(userId: string, tokenHash: string, label: string, expiresAt: Date): Promise<void>;
   findSession(tokenHash: string): Promise<{ session: SessionRow; user: UserRow } | null>;
   deleteSession(id: string): Promise<void>;
+  /** Permanently remove an account and all account-owned data. */
+  deleteAccount?(userId: string): Promise<boolean>;
   /** Guardian: ask a student to be followed. Returns null when already asked. */
   createLink(input: NewLink): Promise<LinkRow | null>;
   /** Guardian's own requests. */
@@ -527,6 +529,22 @@ export function createMemoryAuthStore(): AuthStore {
       for (const [hash, session] of sessions) {
         if (session.id === id) sessions.delete(hash);
       }
+    },
+    async deleteAccount(userId) {
+      if (!users.has(userId)) return false;
+      users.delete(userId);
+      credentials.delete(userId);
+      vaults.delete(userId);
+      for (const [hash, session] of sessions) {
+        if (session.user_id === userId) sessions.delete(hash);
+      }
+      for (let index = links.length - 1; index >= 0; index -= 1) {
+        if (links[index]?.guardian_id === userId || links[index]?.student_id === userId) links.splice(index, 1);
+      }
+      for (let index = passkeys.length - 1; index >= 0; index -= 1) {
+        if (passkeys[index]?.user_id === userId) passkeys.splice(index, 1);
+      }
+      return true;
     },
     async createLink(input) {
       const clash = links.some(
@@ -955,6 +973,12 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
     async deleteSession(id) {
       await ensure();
       await sql`DELETE FROM planner_sessions WHERE id = ${id}`;
+    },
+
+    async deleteAccount(userId) {
+      await ensure();
+      const rows = (await sql`DELETE FROM planner_users WHERE id = ${userId} RETURNING id`) as Array<{ id: string }>;
+      return rows.length > 0;
     },
 
     async createLink(input) {

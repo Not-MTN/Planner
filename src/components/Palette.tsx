@@ -149,6 +149,8 @@ function PaletteInner() {
       { id: 'go-goals', icon: FlagIcon, label: t("Go to Goals"), run: close(() => navigate({ name: 'goals' })) },
       { id: 'go-notes', icon: NoteIcon, label: t("Go to Notes"), run: close(() => navigate({ name: 'notes' })) },
       { id: 'go-insights', icon: ArcIcon, label: t("Go to Insights"), sub: 'Your week at a glance', run: close(() => navigate({ name: 'insights' })) },
+      { id: 'go-matrix', icon: FlagIcon, label: t("Go to Matrix"), sub: 'Prioritize by urgency and importance', run: close(() => navigate({ name: 'matrix' })) },
+      { id: 'go-review', icon: WeekIcon, label: t("Go to Weekly Review"), sub: 'Reflect and plan next week', run: close(() => navigate({ name: 'review' })) },
       { id: 'focus', icon: StopwatchIcon, label: t("Start a focus session"), sub: 'A quiet timer for one thing', run: close(() => startFocus({ taskId: null, title: t("Focus session"), minutes: 25 })) },
       {
         id: 'theme',

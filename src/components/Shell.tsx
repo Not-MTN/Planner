@@ -4,6 +4,7 @@ import { cx } from '../cx';
 import { formatWeekdayShort, todayISO } from '../dates';
 import {
   ArcIcon,
+  BellIcon,
   CalendarIcon,
   CheckIcon,
   DotsIcon,
@@ -44,6 +45,9 @@ import { TasksView } from '../views/TasksView';
 import { MatrixView } from '../views/MatrixView';
 import { ShortcutsSheet } from './ShortcutsSheet';
 import { WeeklyReview } from './WeeklyReview';
+import { NotificationsSheet } from './NotificationsSheet';
+import { clearNotifications, loadNotifications, markNotificationsRead, subscribeNotifications } from '../notificationCenter';
+import { loadNavigationPages, subscribeNavigationPages } from '../navigationPrefs';
 
 const CalendarView = lazy(() => import('../views/CalendarView').then((m) => ({ default: m.CalendarView })));
 const InsightsView = lazy(() => import('../views/InsightsView').then((m) => ({ default: m.InsightsView })));
@@ -114,6 +118,12 @@ export function Shell() {
     confettiSeed,
   } = planner;
   const [moreOpen, setMoreOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notificationItems, setNotificationItems] = useState(loadNotifications);
+  const [visiblePages, setVisiblePages] = useState(loadNavigationPages);
+  const unreadNotifications = notificationItems.filter((item) => !item.read).length;
+  useEffect(() => subscribeNotifications(() => setNotificationItems(loadNotifications())), []);
+  useEffect(() => subscribeNavigationPages(() => setVisiblePages(loadNavigationPages())), []);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   // Sign-out only appears for an account this device knows: the live vault
@@ -127,6 +137,9 @@ export function Shell() {
     ...(planner.panels.student.enabled ? [{ name: 'student' as const, label: t("Student"), icon: StudyIcon }] : []),
     ...(planner.panels.guardian.enabled ? [{ name: 'guardian' as const, label: t("Guardian"), icon: HeartIcon }] : []),
   ];
+  const planNav = NAV.slice(0, 4).filter((item) => visiblePages.includes(item.name));
+  const focusNav = NAV.slice(4, 6).filter((item) => visiblePages.includes(item.name));
+  const trackNav = NAV.slice(6).filter((item) => visiblePages.includes(item.name));
   const importFile = useImportFile(importText);
   const key = routeKey(route);
   const today = todayISO();
@@ -251,18 +264,12 @@ export function Shell() {
           <kbd className="kbd">{t("⌘K")}</kbd>
         </button>
         <nav className="side-nav" aria-label={t("Planner")}>
-          <p className="nav-label">{t("Plan")}</p>
-          {NAV.slice(0, 4).map((item) => (
-            <NavButton key={item.name} item={item} active={route.name === item.name || (item.name === 'calendar' && route.name === 'calendar')} attention={item.name === 'ai' && !aiSeen} onClick={() => go(item.name)} />
-          ))}
-          <p className="nav-label">{t("Focus")}</p>
-          {NAV.slice(4, 6).map((item) => (
-            <NavButton key={item.name} item={item} active={route.name === item.name} onClick={() => go(item.name)} />
-          ))}
-          <p className="nav-label">{t("Track")}</p>
-          {NAV.slice(6).map((item) => (
-            <NavButton key={item.name} item={item} active={route.name === item.name} attention={item.name === 'ai' && !aiSeen} onClick={() => go(item.name)} />
-          ))}
+          {planNav.length > 0 ? <><p className="nav-label">{t("Plan")}</p>
+            {planNav.map((item) => <NavButton key={item.name} item={item} active={route.name === item.name || (item.name === 'calendar' && route.name === 'calendar')} attention={item.name === 'ai' && !aiSeen} onClick={() => go(item.name)} />)}</> : null}
+          {focusNav.length > 0 ? <><p className="nav-label">{t("Focus")}</p>
+            {focusNav.map((item) => <NavButton key={item.name} item={item} active={route.name === item.name} onClick={() => go(item.name)} />)}</> : null}
+          {trackNav.length > 0 ? <><p className="nav-label">{t("Track")}</p>
+            {trackNav.map((item) => <NavButton key={item.name} item={item} active={route.name === item.name} attention={item.name === 'ai' && !aiSeen} onClick={() => go(item.name)} />)}</> : null}
           {panelNav.length > 0 ? (
             <>
               <p className="nav-label">{t("Panels")}</p>
@@ -300,6 +307,11 @@ export function Shell() {
               <RedoIcon size={16} />
             </button>
           </div>
+          <button type="button" className="side-tool notification-trigger" onClick={() => setNotificationsOpen(true)}>
+            <BellIcon size={16} />
+            <span>{t("Notifications")}</span>
+            {unreadNotifications > 0 ? <span className="notification-badge">{unreadNotifications > 9 ? '9+' : unreadNotifications}</span> : null}
+          </button>
           <button
             type="button"
             className="side-tool"
@@ -363,6 +375,10 @@ export function Shell() {
             >
               <SparklesIcon size={18} />
               {!aiSeen ? <i className="nav-attention" aria-hidden="true" /> : null}
+            </button>
+            <button type="button" className="icon-btn round notification-trigger" aria-label={unreadNotifications ? t("Notifications · {0} unread", { 0: unreadNotifications }) : t("Notifications")} title={t("Notifications")} onClick={() => setNotificationsOpen(true)}>
+              <BellIcon size={18} />
+              {unreadNotifications > 0 ? <i className="notification-dot" aria-hidden="true" /> : null}
             </button>
             <button type="button" className="icon-btn round" aria-label={t("Search")} data-tour="search" onClick={openPalette}>
               <SearchIcon size={18} />
@@ -477,6 +493,10 @@ export function Shell() {
             <button type="button" className={cx(route.name === 'matrix' && 'on')} onClick={() => go('matrix')}>
               <FlagIcon size={18} /> {t("Matrix")}
             </button>
+            <button type="button" onClick={() => { setMoreOpen(false); setNotificationsOpen(true); }}>
+              <BellIcon size={18} /> {t("Notifications")}
+              {unreadNotifications > 0 ? <span className="notification-badge">{unreadNotifications}</span> : null}
+            </button>
             <button type="button" className={cx(route.name === 'review' && 'on')} onClick={() => go('review')}>
               <WeekIcon size={18} /> {t("Weekly Review")}
             </button>
@@ -510,6 +530,16 @@ export function Shell() {
         </Modal>
       ) : null}
 
+      {notificationsOpen ? (
+        <NotificationsSheet
+          items={notificationItems}
+          onClose={() => setNotificationsOpen(false)}
+          onOpenToday={() => { setNotificationsOpen(false); navigate({ name: 'today' }); }}
+          onMarkAllRead={() => markNotificationsRead()}
+          onClear={() => clearNotifications()}
+          onRead={(key) => markNotificationsRead([key])}
+        />
+      ) : null}
       {composer ? <Composer /> : null}
       {settingsOpen ? <SettingsSheet /> : null}
       {paletteOpen ? <Palette /> : null}

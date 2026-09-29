@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  handleAccountDelete,
   handleAccountVault,
   handleLogin,
   handleLogout,
@@ -27,6 +28,14 @@ function post(path: string, body: unknown, cookie?: string): Request {
 function put(path: string, body: unknown, cookie?: string): Request {
   return new Request(`https://planner.test${path}`, {
     method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
+    body: JSON.stringify(body),
+  });
+}
+
+function del(path: string, body: unknown, cookie?: string): Request {
+  return new Request(`https://planner.test${path}`, {
+    method: 'DELETE',
     headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
     body: JSON.stringify(body),
   });
@@ -68,6 +77,24 @@ describe('account API', () => {
     expect(cookieFrom(response)).toContain('planner_session=');
     expect(response.headers.get('set-cookie')).toContain('HttpOnly');
     expect(response.headers.get('set-cookie')).toContain('Secure');
+  });
+
+  it('deletes an account only after password re-verification and clears its session', async () => {
+    resetRateLimits();
+    const store = STORE();
+    const signup = await handleSignup(post('/api/auth/signup', ACCOUNT), store);
+    const cookie = cookieFrom(signup);
+
+    const rejected = await handleAccountDelete(del('/api/auth/account', { authToken: 'YmFkYXV0aHRva2VuMTIzNDU2Nzg5MA==' }, cookie), store);
+    expect(rejected.status).toBe(401);
+    expect(await store.findAccount('sara')).not.toBeNull();
+
+    resetRateLimits();
+    const removed = await handleAccountDelete(del('/api/auth/account', { authToken: ACCOUNT.authToken }, cookie), store);
+    expect(removed.status).toBe(200);
+    expect(removed.headers.get('set-cookie')).toContain('Max-Age=0');
+    expect(await store.findAccount('sara')).toBeNull();
+    expect((await handleSession(get('/api/auth/session', cookie), store)).status).toBe(401);
   });
 
   it('rejects a duplicate username and a duplicate email', async () => {

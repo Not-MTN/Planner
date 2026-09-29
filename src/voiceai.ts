@@ -63,7 +63,10 @@ export function compressHistory(turns: VoiceTurn[]): VoiceTurn[] {
 /** Compact, honest context the voice AI needs to plan around. */
 export function buildVoiceContext(state: PlannerState, today: string, range: PlanRange = { startDate: today, days: 7 }): unknown {
   const lastDate = addDays(range.startDate, Math.max(1, range.days) - 1);
-  const pending = state.tasks.filter((task) => !task.completed).slice(0, 15);
+  const pending = state.tasks
+    .filter((task) => !task.completed && (task.dueDate === null || (task.dueDate >= range.startDate && task.dueDate <= lastDate)))
+    .sort((a, b) => (a.dueDate ?? '9999-99-99').localeCompare(b.dueDate ?? '9999-99-99') || (a.dueTime ?? '99:99').localeCompare(b.dueTime ?? '99:99'))
+    .slice(0, 30);
   const moods = state.moods.slice(-3);
   return {
     today,
@@ -71,9 +74,20 @@ export function buildVoiceContext(state: PlannerState, today: string, range: Pla
     pendingTaskTitles: pending.map((task) => ({ title: task.title, date: task.dueDate, time: task.dueTime })),
     existingEvents: state.events
       .filter((event) => event.date >= range.startDate && event.date <= lastDate)
-      .slice(0, 20)
+      .sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime))
+      .slice(0, 50)
       .map((event) => ({ title: event.title, date: event.date, startTime: event.startTime, endTime: event.endTime })),
     fixedWeeklyTimes: state.fixedCommitments.map((item) => ({ weekday: item.weekday, title: item.title, startTime: item.startTime, endTime: item.endTime })),
+    savedPlans: (state.aiPlans ?? [])
+      .filter((plan) => plan.startDate <= lastDate && addDays(plan.startDate, plan.days - 1) >= range.startDate)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, 8)
+      .map((plan) => ({
+        title: plan.title,
+        status: plan.status,
+        events: plan.events.slice(0, 10).map(({ title, date, startTime, endTime }) => ({ title, date, startTime, endTime })),
+        tasks: plan.tasks.slice(0, 10).map(({ title, dueDate, dueTime }) => ({ title, date: dueDate, time: dueTime })),
+      })),
     habits: state.habits.filter((habit) => !habit.archived).map((habit) => habit.name),
     recentMoods: moods.map((mood) => ({ date: mood.date, value: mood.value })),
   };
@@ -92,7 +106,7 @@ Persian must be understood perfectly, however casually it is spoken. Expect fast
 
 Rules:
 1. "reply": plain words meant to be heard out loud, IN THE USER'S LANGUAGE — if they speak Persian or Finglish, answer in warm, natural, conversational Persian (like a caring friend, not a textbook and not formal news-speak); if English, answer in English; if mixed, follow whichever dominates — no markdown, no bullet lists, no emojis, at most 60 words. Warm, human, direct. Never say "As requested". Dates and times inside the reply stay as plain digits.
-2. When the user wants anything planned, arranged, moved, or cleared — INCLUDING vague tired asks like "fix tomorrow for me" — include a "draft" built from their context: a realistic, honest plan, never packed, respecting fixed weekly times and existing events. Tasks must have a date inside ${'${range}'}. Use events only when a time is useful. Do not duplicate anything already listed in the context. Honor the LENGTH the user asked for: spread the plan across that whole span, and keep longer spans lighter per day.
+2. When the user wants anything planned, arranged, moved, or cleared — INCLUDING vague tired asks like "fix tomorrow for me" — include a "draft" built from their context: a realistic, honest plan, never packed, respecting fixed weekly times and existing events. Tasks must have a date inside ${'${range}'}. Use events only when a time is useful. Do not duplicate anything already listed in the context. Honor the LENGTH the user asked for: spread the plan across that whole span, and keep longer spans lighter per day. The context includes live schedule items and saved plans. Treat draft-status saved plans as proposals, not confirmed calendar events. If the requested activity/time conflicts with a named event, class, fixed time, or timed task, tell the user exactly what is already scheduled and ask what to protect or move; leave "draft" null until they answer. Never silently skip the request, overwrite an existing item, or move the existing commitment without explicit permission.
 3. If one crucial thing is missing (for example they asked to plan "this week" but the draft would depend on a specific day), ask ONE short spoken question in "reply", set "followUp" to the same question, and leave "draft" null.
 4. Keep health ideas gentle and optional; never medical advice. If they sound low, answer kindly first, plan lightly second.
 5. "followUp": null or one short question that would genuinely change the plan. "draft": null or a JSON plan object.

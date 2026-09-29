@@ -12,6 +12,20 @@ import { TaskBoard, type BoardGroup } from './TaskBoard';
 import { t } from '../i18n';
 
 const LAYOUT_KEY = 'planner-task-layout';
+const SAVED_VIEWS_KEY = 'planner-task-saved-views';
+
+interface SavedTaskView { id: string; label: string; filter: FilterId; query: string }
+
+function loadSavedViews(): SavedTaskView[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SAVED_VIEWS_KEY) ?? '[]') as unknown;
+    return Array.isArray(raw) ? raw.filter((item): item is SavedTaskView => Boolean(item && typeof item.id === 'string' && typeof item.label === 'string' && typeof item.filter === 'string' && FILTERS.some((filter) => filter.id === item.filter) && typeof item.query === 'string')) : [];
+  } catch { return []; }
+}
+
+function persistSavedViews(views: SavedTaskView[]): void {
+  try { localStorage.setItem(SAVED_VIEWS_KEY, JSON.stringify(views)); } catch { /* optional preference */ }
+}
 
 function loadLayout(): { layout: 'list' | 'board'; group: BoardGroup } {
   try {
@@ -29,6 +43,7 @@ const FILTERS = [
   { id: 'open', label: t("Open") },
   { id: 'overdue', label: t("Overdue") },
   { id: 'waiting', label: t("Waiting") },
+  { id: 'inbox', label: t("Inbox") },
   { id: 'today', label: t("Today") },
   { id: 'upcoming', label: t("Upcoming") },
   { id: 'done', label: t("Done") },
@@ -41,6 +56,8 @@ export function TasksView() {
   const bulk = useBulkActions();
   const [filter, setFilter] = useState<FilterId>('open');
   const [query, setQuery] = useState('');
+  const [savedViews, setSavedViews] = useState(loadSavedViews);
+  const [activeSavedView, setActiveSavedView] = useState('');
   const [view, setView] = useState(loadLayout);
   const [selecting, setSelecting] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, number>>({});
@@ -67,6 +84,7 @@ export function TasksView() {
       open: state.tasks.filter((task) => !task.completed).length,
       overdue: state.tasks.filter((task) => !task.completed && !task.waiting && task.dueDate !== null && task.dueDate < today).length,
       waiting: state.tasks.filter((task) => !task.completed && Boolean(task.waiting)).length,
+      inbox: state.tasks.filter((task) => !task.completed && !task.dueDate).length,
       today: state.tasks.filter((task) => task.dueDate === today).length,
       upcoming: state.tasks.filter((task) => !task.completed && task.dueDate !== null && task.dueDate > today).length,
       done: state.tasks.filter((task) => task.completed).length,
@@ -74,18 +92,33 @@ export function TasksView() {
     [state.tasks, today],
   );
 
+  const saveCurrentView = () => {
+    const viewLabel = `${FILTERS.find((item) => item.id === filter)?.label ?? t('Open')}${query.trim() ? ` · ${query.trim()}` : ''}`;
+    const existing = savedViews.find((item) => item.filter === filter && item.query === query.trim());
+    if (existing) {
+      setActiveSavedView(existing.id);
+      return;
+    }
+    const id = `view-${Date.now().toString(36)}`;
+    const next = [...savedViews, { id, label: viewLabel, filter, query: query.trim() }].slice(-12);
+    setSavedViews(next);
+    persistSavedViews(next);
+    setActiveSavedView(id);
+  };
   const groups = useMemo(() => {
     const matched = searched;
     const visible = matched.filter((task) => {
       if (filter === 'done') return task.completed;
       if (filter === 'overdue') return !task.completed && !task.waiting && task.dueDate !== null && task.dueDate < today;
       if (filter === 'waiting') return !task.completed && Boolean(task.waiting);
+      if (filter === 'inbox') return !task.completed && task.dueDate === null;
       if (filter === 'today') return task.dueDate === today;
       if (filter === 'upcoming') return !task.completed && task.dueDate !== null && task.dueDate > today;
       return !task.completed;
     });
     if (filter === 'overdue') return [{ id: 'carried', label: t("Overdue"), tasks: sortTasks(visible) }];
     if (filter === 'waiting') return [{ id: 'waiting', label: t("Waiting"), tasks: sortTasks(visible) }];
+    if (filter === 'inbox') return [{ id: 'inbox', label: t("Inbox"), tasks: sortTasks(visible) }];
     if (filter === 'done') return [{ id: 'done', label: t("Completed"), tasks: sortTasks(visible) }];
     if (filter === 'upcoming') {
       const byDate = new Map<string, Task[]>();
@@ -147,7 +180,7 @@ export function TasksView() {
               role="tab"
               aria-selected={filter === item.id}
               className={cx('filter', filter === item.id && 'on')}
-              onClick={() => setFilter(item.id)}
+              onClick={() => { setFilter(item.id); setActiveSavedView(''); }}
             >
               {item.label}
               <span className="filter-count">{counts[item.id]}</span>
@@ -157,8 +190,25 @@ export function TasksView() {
         )}
         <label className="search">
           <span className="visually-hidden">{t("Search tasks")}</span>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("Search tasks")} />
+          <input value={query} onChange={(event) => { setQuery(event.target.value); setActiveSavedView(''); }} placeholder={t("Search tasks")} />
         </label>
+        <div className="saved-task-views">
+          {savedViews.length > 0 ? (
+            <select aria-label={t("Saved task views")} value={activeSavedView} onChange={(event) => {
+              const selectedView = savedViews.find((item) => item.id === event.target.value);
+              setActiveSavedView(event.target.value);
+              if (selectedView) { setFilter(selectedView.filter); setQuery(selectedView.query); }
+            }}>
+              <option value="">{t("Saved views")}</option>
+              {savedViews.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+            </select>
+          ) : null}
+          <button type="button" className="btn btn-tiny" onClick={saveCurrentView}>{t("Save view")}</button>
+          {activeSavedView ? <button type="button" className="btn btn-tiny btn-ghost" aria-label={t("Delete saved view")} onClick={() => {
+            const next = savedViews.filter((item) => item.id !== activeSavedView);
+            setSavedViews(next); persistSavedViews(next); setActiveSavedView('');
+          }}>{t("Remove")}</button> : null}
+        </div>
         {view.layout === 'list' && state.tasks.length > 0 ? (
           <button
             type="button"

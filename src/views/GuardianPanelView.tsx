@@ -21,6 +21,7 @@ export function GuardianPanelView() {
   const { panels, updatePanels, flash, navigate, requestConfirm } = usePlanner();
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [invitation, setInvitation] = useState<Invitation | null>(null);
   const [copied, setCopied] = useState(false);
   const [draft, setDraft] = useState({ username: '', displayName: '' });
@@ -79,6 +80,22 @@ export function GuardianPanelView() {
       window.setTimeout(() => setCopied(false), 2200);
     } catch {
       setCopied(false);
+    }
+  };
+
+  const refreshPanel = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      const synced = await syncLinks(panels);
+      const results = await refreshResults(synced.panels);
+      const incoming = await readNotices(results.panels);
+      updatePanels(incoming.panels);
+      flash(t("Student results refreshed."));
+    } catch (error) {
+      flash(error instanceof Error ? error.message : t("Could not refresh student results."));
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -169,9 +186,15 @@ export function GuardianPanelView() {
             <p className="kicker">{t("Students")}</p>
             <h2 className="card-title">{t("Who you follow")}</h2>
           </div>
-          <button type="button" className="btn btn-tiny" onClick={() => setAdding((value) => !value)}>
-            <PlusIcon size={14} /> {t("Student")}
-          </button>
+          <span className="panel-head-actions">
+            <button type="button" className="btn btn-ghost btn-tiny" disabled={refreshing} onClick={() => void refreshPanel()}>
+              {refreshing ? <span className="spinner" aria-hidden="true" /> : null}
+              {refreshing ? t("Refreshing…") : t("Refresh results")}
+            </button>
+            <button type="button" className="btn btn-tiny" onClick={() => setAdding((value) => !value)}>
+              <PlusIcon size={14} /> {t("Student")}
+            </button>
+          </span>
         </header>
 
         {adding ? (

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildAIPlannerContext, generateAIPlan, generateAIReview, GROQ_CHAT_URL, GROQ_TEXT_MODEL, GROQ_VISION_MODEL } from './ai';
-import { addAIMemory, addEvent, addFixedCommitment, addTask, logFocus, toggleTask } from './mutate';
+import { buildAIPlannerContext, findPromptScheduleConflicts, generateAIPlan, generateAIReview, GROQ_CHAT_URL, GROQ_TEXT_MODEL, GROQ_VISION_MODEL } from './ai';
+import { addAIMemory, addEvent, addFixedCommitment, addTask, logFocus, saveAIPlan, toggleTask } from './mutate';
 import { createEmptyState } from './types';
 
 function mockGroq(content: unknown) {
@@ -38,6 +38,39 @@ describe('Groq planning assistant', () => {
     expect(userMessage).toContain('I need a quiet hour after lunch.');
     expect(userMessage).toContain('focusHours');
     expect(userMessage).not.toContain('private note should stay local');
+  });
+
+  it('spots typed and Persian time collisions against the live calendar before planning', () => {
+    const state = addEvent(createEmptyState(), {
+      title: 'Class', date: '2026-09-28', startTime: '17:00', endTime: '18:00',
+      category: 'learning', note: '', important: false,
+    }, 'class-at-five', '2026-09-27T12:00:00.000Z');
+    const range = { startDate: '2026-09-28', days: 1 };
+    expect(findPromptScheduleConflicts('Add gym at 5 p.m. tomorrow', state, range)).toMatchObject([
+      { title: 'Class', date: '2026-09-28', requestedTime: '17:00', startTime: '17:00', endTime: '18:00', source: 'event' },
+    ]);
+    expect(findPromptScheduleConflicts('فردا ساعت ۵ عصر باشگاه', state, range)[0]?.title).toBe('Class');
+  });
+
+  it('includes saved AI plans as clearly labeled context without treating drafts as live items', async () => {
+    const added = addEvent(createEmptyState(), {
+      title: 'Class', date: '2026-09-28', startTime: '17:00', endTime: '18:00',
+      category: 'learning', note: '', important: false,
+    }, 'class-at-five', '2026-09-27T12:00:00.000Z');
+    const saved = saveAIPlan(added, {
+      title: 'Exam week', prompt: 'Keep mornings calm', summary: 'A draft for exam week',
+      startDate: '2026-09-28', days: 3, source: 'typed',
+      tasks: [], events: [{ title: 'Gym', date: '2026-09-28', startTime: '17:00', endTime: '18:00', category: 'health', note: '', important: false }],
+      habits: [], suggestions: [],
+    }, 'plan-exam-week', '2026-09-27T13:00:00.000Z').state;
+    const fetchMock = mockGroq({ summary: 'An adjusted draft.', tasks: [], events: [], habits: [], wellbeing: [] });
+    await generateAIPlan({ prompt: 'What is going on with my plans?', range: { startDate: '2026-09-28', days: 1 }, state: saved });
+    const request = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as { messages: Array<{ role: string; content: string }> };
+    const system = request.messages.find((message) => message.role === 'system')?.content ?? '';
+    const user = request.messages.find((message) => message.role === 'user')?.content ?? '';
+    expect(system).toContain('Saved plans marked draft are proposals, not calendar commitments');
+    expect(user).toContain('Exam week');
+    expect(user).toContain('Class');
   });
 
   it('keeps protected weekly times and existing events clear when normalizing an AI plan', async () => {

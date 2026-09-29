@@ -971,3 +971,59 @@
 .card, .matrix-card, .stat-card, .task-row, .btn, .field {
   box-sizing: border-box;
 }
+
+/* ---------- Notification center ---------- */
+.notification-trigger { position: relative; }
+.notification-badge {
+  display: inline-flex;
+  min-width: 19px;
+  height: 19px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 0 5px;
+  color: #fff;
+  background: var(--danger, #c44848);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  margin-inline-start: auto;
+}
+.mobile-bar-actions .notification-trigger { overflow: visible; }
+.mobile-bar-actions .notification-trigger .notification-dot {
+  position: absolute;
+  inset-block-start: 3px;
+  inset-inline-end: 3px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--bg);
+}
+.notifications-sheet { width: min(560px, 100%); }
+.notification-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0 12px; }
+.notification-toolbar .set-actions { margin: 0; }
+.notification-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; max-height: min(60vh, 520px); overflow: auto; }
+.notification-list li { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.notification-list li.is-unread { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); background: color-mix(in srgb, var(--accent-soft) 45%, var(--surface)); }
+.notification-item { display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 14px; color: inherit; text-align: start; border: 0; background: transparent; cursor: pointer; }
+.notification-item:hover { background: color-mix(in srgb, var(--accent-soft) 50%, transparent); }
+.notification-icon, .notification-empty-icon { display: grid; place-items: center; width: 34px; height: 34px; flex: none; border-radius: 50%; color: var(--accent-ink, var(--accent)); background: var(--accent-soft); }
+.notification-copy { display: grid; gap: 3px; flex: 1; min-width: 0; }
+.notification-copy strong { font-size: 14px; }
+.notification-copy > span { color: var(--ink-soft); font-size: 13px; }
+.notification-copy time { color: var(--muted); font-size: 11px; margin-top: 3px; }
+.notification-dot { width: 8px; height: 8px; flex: none; margin: 5px 2px; border-radius: 50%; background: var(--accent); }
+.notification-empty { display: grid; justify-items: center; text-align: center; padding: 34px 18px 40px; }
+.notification-empty-icon { width: 48px; height: 48px; margin-bottom: 12px; }
+.notification-empty h3 { margin: 0 0 6px; font-size: 16px; }
+.notification-empty p { max-width: 300px; margin: 0; color: var(--muted); font-size: 13px; }
+.saved-task-views { display: flex; align-items: center; gap: 6px; }
+.saved-task-views select { min-height: 36px; max-width: 190px; border: 1px solid var(--line); border-radius: 10px; padding: 0 9px; color: var(--ink); background: var(--surface); }
+@media (max-width: 700px) {
+  .saved-task-views { width: 100%; }
+  .saved-task-views select { flex: 1; max-width: none; }
+}
+.navigation-preferences { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.navigation-preference { display: flex; align-items: center; gap: 9px; min-height: 40px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 13px; }
+.navigation-preference input { accent-color: var(--accent); }
+.navigation-preference small { margin-inline-start: auto; color: var(--muted); font-size: 10px; }
+@media (max-width: 420px) { .navigation-preferences { grid-template-columns: 1fr; } }

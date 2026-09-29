@@ -33,6 +33,7 @@ import {
 import { authStore } from './src/server/authStore';
 import { handleICS } from './src/server/icsProxy';
 import { notFoundResponse } from './src/server/apiRouter';
+import { handlePushConfig, handlePushDispatch, handlePushSubscription } from './src/server/pushApi';
 
 // API responses can use a deny-all CSP; the HTML document needs its own app CSP,
 // which is configured in vercel.json. Do not put the API CSP on Vite's HTML page.
@@ -259,6 +260,21 @@ function authApi(databaseUrl: string | undefined): Plugin {
   };
 }
 
+function pushApi(pushEnv: { DATABASE_URL?: string; VAPID_PUBLIC_KEY?: string; VAPID_PRIVATE_KEY?: string; VAPID_SUBJECT?: string; CRON_SECRET?: string }): Plugin {
+  const middleware: NextHandleFunction = (request, response, next) => {
+    if (!request.url?.startsWith('/push/')) { next(); return; }
+    const pathname = `/api${request.url}`;
+    void import('./src/server/pushVite').then(({ handleLocalPush }) => handleLocalPush(toWebRequest(request, pathname), pushEnv))
+      .then((result) => sendWebResponse(result, response))
+      .catch(() => { if (!response.headersSent) { response.statusCode = 500; response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ error: { message: 'The local push API failed.' } })); } });
+  };
+  return {
+    name: 'planner-push-api',
+    configureServer(server) { server.middlewares.use('/api', middleware); },
+    configurePreviewServer(server) { server.middlewares.use('/api', middleware); },
+  };
+}
+
 export default defineConfig(({ mode }) => {
   // Read the secret only inside the Vite/Node process. It is never defined into the browser bundle.
   const fileEnv = loadEnv(mode, cwd(), '');
@@ -266,8 +282,15 @@ export default defineConfig(({ mode }) => {
   const model = env.GROQ_MODEL || fileEnv.GROQ_MODEL;
   const visionModel = env.GROQ_VISION_MODEL ?? fileEnv.GROQ_VISION_MODEL;
   const databaseUrl = env.DATABASE_URL || fileEnv.DATABASE_URL;
+  const pushEnv = {
+    DATABASE_URL: databaseUrl,
+    VAPID_PUBLIC_KEY: env.VAPID_PUBLIC_KEY || fileEnv.VAPID_PUBLIC_KEY,
+    VAPID_PRIVATE_KEY: env.VAPID_PRIVATE_KEY || fileEnv.VAPID_PRIVATE_KEY,
+    VAPID_SUBJECT: env.VAPID_SUBJECT || fileEnv.VAPID_SUBJECT,
+    CRON_SECRET: env.CRON_SECRET || fileEnv.CRON_SECRET,
+  };
   return {
-    plugins: [react(), groqProxyPlugin(apiKey, model, visionModel), syncApi(databaseUrl), authApi(databaseUrl), icsApi(), apiFallback()],
+    plugins: [react(), groqProxyPlugin(apiKey, model, visionModel), syncApi(databaseUrl), authApi(databaseUrl), icsApi(), pushApi(pushEnv), apiFallback()],
     build: {
       rollupOptions: {
         output: {

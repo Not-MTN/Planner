@@ -7,7 +7,8 @@ import { Modal } from './ui';
 import { useEffect, useState } from 'react';
 import { FeedsSection, SecuritySection, SharedSpaceSection, TaskImportSection, TemplatesSection, WeatherSection } from './SettingsExtras';
 import { useSignOut } from './useSignOut';
-import { accountUser } from '../auth/vault';
+import { accountUser, forgetAccountUser } from '../auth/vault';
+import { deleteAccount, getActiveSession } from '../auth/session';
 import { DATE_LANGUAGES, todayISO, type DateLanguage } from '../dates';
 import { downloadBusyICS, downloadICS, parseICS } from '../ics';
 import { canInstall, isInstalled, onInstallChange, promptInstall } from '../pwa';
@@ -16,6 +17,37 @@ import { requestAbout } from '../about';
 import { LEAD_CHOICES } from '../reminders';
 import { loadSpeechLocaleId, saveSpeechLocaleId, speechAvailable, SPEECH_LOCALES } from '../speech';
 import { t, getLang, setLang, LANGUAGES, type Lang } from '../i18n';
+import { loadNavigationPages, NAVIGATION_PAGES, saveNavigationPages, type NavigationPage } from '../navigationPrefs';
+import { backgroundPushEnabled, configureBackgroundPush, refreshBackgroundPushSchedule } from '../push';
+
+const NAV_LABELS: Record<NavigationPage, string> = {
+  today: t("Today"), calendar: t("Calendar"), tasks: t("Tasks"), matrix: t("Matrix"), habits: t("Habits"),
+  goals: t("Goals"), notes: t("Notes"), plans: t("Plans"), insights: t("Insights"), ai: t("AI coach"),
+};
+
+function NavigationSection() {
+  const [pages, setPages] = useState(loadNavigationPages);
+  const toggle = (page: NavigationPage, enabled: boolean) => {
+    const next = enabled ? [...pages, page] : pages.filter((item) => item !== page);
+    setPages(next);
+    saveNavigationPages(next);
+  };
+  return (
+    <section className="set-section">
+      <h3 className="kicker">{t("Navigation")}</h3>
+      <p className="set-hint">{t("Choose which sections stay in your desktop sidebar. Hidden sections remain available from search and the mobile More menu.")}</p>
+      <div className="navigation-preferences">
+        {NAVIGATION_PAGES.map((page) => (
+          <label key={page} className="navigation-preference">
+            <input type="checkbox" checked={pages.includes(page)} disabled={page === 'today'} onChange={(event) => toggle(page, event.target.checked)} />
+            <span>{NAV_LABELS[page]}</span>
+            {page === 'today' ? <small>{t("Always shown")}</small> : null}
+          </label>
+        ))}
+      </div>
+    </section>
+  );
+}
 
 function SyncSection() {
   const { sync, syncStatus, syncMessage, syncAvailable, startSync, stopSync, syncNow, deleteCloudCopy, requestConfirm, flash } = usePlanner();
@@ -207,6 +239,48 @@ function RemindersSection() {
   );
 }
 
+function BackgroundPushSection() {
+  const { state, reminders, flash } = usePlanner();
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  const [enabled, setEnabled] = useState(backgroundPushEnabled);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const supported = typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  useEffect(() => {
+    let live = true;
+    void fetch('/api/push/config', { cache: 'no-store' }).then((response) => response.json()).then((body: { configured?: boolean }) => { if (live) setConfigured(body.configured === true); }).catch(() => { if (live) setConfigured(false); });
+    return () => { live = false; };
+  }, []);
+  const toggle = async () => {
+    setBusy(true); setMessage(null);
+    try {
+      await configureBackgroundPush(!enabled);
+      if (!enabled) await refreshBackgroundPushSchedule(state, reminders);
+      setEnabled(!enabled);
+      if (enabled) flash(t("Background reminders turned off."));
+      else flash(t("Background reminders enabled."));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : t("Could not configure background reminders."));
+    } finally { setBusy(false); }
+  };
+  return (
+    <section className="set-section">
+      <h3 className="kicker">{t("Background notifications")}</h3>
+      <div className="set-row">
+        <div>
+          <p className="set-label">{enabled ? t("Background reminders are on") : t("Remind me while Planner is closed")}</p>
+          <p className="set-hint">{!supported ? t("This browser does not support push notifications.") : configured === false ? t("This server needs push keys, a database, and a scheduled delivery job before background reminders can be enabled.") : t("Sends a generic alert at scheduled times. Reminder times are uploaded; task and event titles stay on this device.")}</p>
+        </div>
+        <button type="button" className={cx('btn', enabled ? 'btn-soft' : 'btn-primary')} disabled={!supported || configured !== true || busy} onClick={() => void toggle()}>
+          {busy ? t("Working…") : enabled ? t("Turn off") : t("Enable")}
+        </button>
+      </div>
+      {message ? <p className="set-hint is-error" role="alert">{message}</p> : null}
+      {enabled && reminders.enabled ? <p className="set-hint">{t("Your upcoming reminders are refreshed when your planner changes.")}</p> : null}
+    </section>
+  );
+}
+
 function VoiceSection() {
   const { flash } = usePlanner();
   const [localeId, setLocaleId] = useState(() => loadSpeechLocaleId());
@@ -380,23 +454,86 @@ function InstallSection() {
 function AccountSection() {
   const user = accountUser();
   const requestSignOut = useSignOut();
+  const { requestConfirm, flash } = usePlanner();
+  const [deleting, setDeleting] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [password, setPassword] = useState('');
+  const [confirmation, setConfirmation] = useState('');
+  const [deleteError, setDeleteError] = useState('');
+  const [deleted, setDeleted] = useState(false);
+
+  const requestDelete = () => {
+    if (busy || confirmation.trim().toUpperCase() !== 'DELETE' || !password) return;
+    requestConfirm({
+      title: t("Permanently delete your account?"),
+      body: t("This permanently deletes your Planner account, encrypted vault, passkeys, sessions, and guardian links. The planner currently on this device and separate sync-code copies are not deleted. This cannot be undone."),
+      confirmLabel: t("Delete account permanently"),
+      onConfirm: () => {
+        setBusy(true);
+        setDeleteError('');
+        void deleteAccount(password)
+          .then(() => {
+            forgetAccountUser();
+            setDeleted(true);
+            setDeleting(false);
+            setPassword('');
+            setConfirmation('');
+            flash(t("Account deleted. The planner on this device was kept as a local copy."));
+          })
+          .catch((error: unknown) => setDeleteError(error instanceof Error ? error.message : t("The account could not be deleted.")))
+          .finally(() => setBusy(false));
+      },
+    });
+  };
 
   return (
     <section className="set-section">
       <h3 className="kicker">{t("Account")}</h3>
-      {user ? (
-        <div className="set-row account-row">
-          <span className="account-mark" aria-hidden="true">
-            <UserIcon size={17} />
-          </span>
-          <div>
-            <p className="set-label">{user.displayName || user.username}</p>
-            <p className="set-hint">{t("Signed in · your planner syncs through its encrypted vault")}</p>
+      {user && !deleted ? (
+        <>
+          <div className="set-row account-row">
+            <span className="account-mark" aria-hidden="true">
+              <UserIcon size={17} />
+            </span>
+            <div>
+              <p className="set-label">{user.displayName || user.username}</p>
+              <p className="set-hint">{t("Signed in · your planner syncs through its encrypted vault")}</p>
+            </div>
+            <button type="button" className="btn btn-ghost account-signout" onClick={requestSignOut}>
+              <ExitIcon size={15} /> {t("Sign out")}
+            </button>
           </div>
-          <button type="button" className="btn btn-ghost account-signout" onClick={requestSignOut}>
-            <ExitIcon size={15} /> {t("Sign out")}
-          </button>
-        </div>
+          {getActiveSession() ? (
+            <div className="set-actions account-delete-actions">
+              {!deleting ? (
+                <button type="button" className="btn btn-danger" onClick={() => { setDeleting(true); setDeleteError(''); }}>
+                  {t("Delete account")}
+                </button>
+              ) : (
+                <div className="account-delete-form">
+                  <p className="set-hint">{t("Account deletion is permanent. Your device’s planner stays here as a local copy; export it first if you need a backup.")}</p>
+                  <label className="field">
+                    <span>{t("Current password")}</span>
+                    <input className="input" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />
+                  </label>
+                  <label className="field">
+                    <span>{t("Type DELETE to continue")}</span>
+                    <input className="input" autoComplete="off" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} />
+                  </label>
+                  {deleteError ? <p className="set-hint is-error" role="alert">{deleteError}</p> : null}
+                  <div className="set-actions">
+                    <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => { setDeleting(false); setPassword(''); setConfirmation(''); }}>{t("Cancel")}</button>
+                    <button type="button" className="btn btn-danger" disabled={busy || !password || confirmation.trim().toUpperCase() !== 'DELETE'} onClick={requestDelete}>
+                      {busy ? t("Deleting…") : t("Delete account permanently")}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
+        </>
+      ) : user ? (
+        <p className="set-hint">{t("Your account has been deleted. The planner on this device remains available as a local copy.")}</p>
       ) : (
         <p className="set-hint">
           {t("No account on this device. Your planner is saved in this browser only; an account keeps it in an encrypted vault you can open anywhere.")}
@@ -470,9 +607,11 @@ export function SettingsSheet() {
         </div>
       </section>
 
+      <NavigationSection />
       <SyncSection />
       <SharedSpaceSection />
       <RemindersSection />
+      <BackgroundPushSection />
       <VoiceSection />
       <CalendarSection />
       <FeedsSection />

@@ -63,6 +63,8 @@ import {
 } from './mutate';
 import { loadDisplayPrefs, loadWeekStart, setDisplayPrefs as storeDisplayPrefs, setWeekStart as storeWeekStart, todayISO, type DisplayPrefs, type WeekStart } from './dates';
 import { dueReminders, loadFired, loadReminderSettings, saveFired, saveReminderSettings, showNotification, type ReminderSettings } from './reminders';
+import { appendNotifications } from './notificationCenter';
+import { backgroundPushEnabled, refreshBackgroundPushSchedule } from './push';
 import { buildSampleState } from './sample';
 import { deleteRemote, EMPTY_SYNC, generateCode, loadSyncSettings, mergeStates, normalizeCode, saveSyncSettings, SyncError, syncConfigured, syncOnce, type SyncSettings } from './sync';
 import {
@@ -953,6 +955,7 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
       const fired = loadFired(todayISO(now));
       const due = dueReminders(stateRef.current, now, reminders, fired);
       if (due.length === 0) return;
+      appendNotifications(due, now);
       for (const reminder of due) {
         fired.add(reminder.key);
         void showNotification(reminder).then((shown) => {
@@ -965,6 +968,18 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     const id = window.setInterval(check, 20000);
     return () => window.clearInterval(id);
   }, [reminders, flash]);
+
+  const pushScheduleTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (isTestEnv() || !backgroundPushEnabled()) return;
+    if (pushScheduleTimer.current !== null) window.clearTimeout(pushScheduleTimer.current);
+    pushScheduleTimer.current = window.setTimeout(() => {
+      void refreshBackgroundPushSchedule(state, reminders).catch(() => { /* keep local reminders working if push is temporarily unavailable */ });
+    }, 1200);
+    return () => {
+      if (pushScheduleTimer.current !== null) window.clearTimeout(pushScheduleTimer.current);
+    };
+  }, [state, reminders]);
 
   const startFresh = useCallback(() => {
     const empty = createEmptyState();
@@ -1127,8 +1142,22 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     logFocus: (entry) => commit((current) => logFocusIn(current, entry)),
     importCalendar: (data) => commit((current) => {
       let next = current;
-      for (const input of data.events) next = addEventTo(next, input);
-      for (const input of data.tasks) next = addTaskTo(next, input);
+      const eventKey = (item: { title: string; date: string; startTime: string; endTime: string | null }) => `${item.title.trim().toLocaleLowerCase()}|${item.date}|${item.startTime}|${item.endTime ?? ''}`;
+      const taskKey = (item: { title: string; dueDate: string | null; dueTime?: string | null }) => `${item.title.trim().toLocaleLowerCase()}|${item.dueDate ?? ''}|${item.dueTime ?? ''}`;
+      const knownEvents = new Set(current.events.map(eventKey));
+      for (const input of data.events) {
+        const key = eventKey(input);
+        if (knownEvents.has(key)) continue;
+        knownEvents.add(key);
+        next = addEventTo(next, input);
+      }
+      const knownTasks = new Set(current.tasks.map(taskKey));
+      for (const input of data.tasks) {
+        const key = taskKey(input);
+        if (knownTasks.has(key)) continue;
+        knownTasks.add(key);
+        next = addTaskTo(next, input);
+      }
       return next;
     }),
     swapTasks: (aId, bId) => commit((current) => swapTasksIn(current, aId, bId)),

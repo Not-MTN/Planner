@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type Re
 import { CATEGORIES, categoryById } from '../constants';
 import { usePlanner } from '../context';
 import { addDays, addMinutes, formatFullDate, timeToMinutes, todayISO, weekdayIndex, displayTime } from '../dates';
-import { analyzeDraft, filterDraftAgainstState, habitFrequencyLabel, MAX_PLAN_IMAGE_BYTES, GROQ_KEY_MISSING_MESSAGE, checkGroqConfiguration, friendlyGroqError, generateAIPlan, generateAIReview, hasReviewActivity, refineAIPlan } from '../ai';
-import type { AIReview, AIDraft, DraftWarning, PlanRange } from '../ai';
+import { analyzeDraft, filterDraftAgainstState, findPromptScheduleConflicts, habitFrequencyLabel, MAX_PLAN_IMAGE_BYTES, GROQ_KEY_MISSING_MESSAGE, checkGroqConfiguration, friendlyGroqError, generateAIPlan, generateAIReview, hasReviewActivity, refineAIPlan } from '../ai';
+import type { AIReview, AIDraft, DraftWarning, PlanRange, PromptScheduleConflict } from '../ai';
 import { MAX_PLAN_DAYS, parsePlanDuration } from '../duration';
 import { cx } from '../cx';
 import { useSpeechInput } from '../speech';
@@ -101,6 +101,7 @@ export function AIView() {
   const [planStart, setPlanStart] = useState(today);
   const [reviewThrough, setReviewThrough] = useState(today);
   const [prompt, setPrompt] = useState('');
+  const [pendingScheduleConflict, setPendingScheduleConflict] = useState<PromptScheduleConflict | null>(null);
   const speech = useSpeechInput();
   const dictate = () => {
     if (speech.listening) {
@@ -108,6 +109,7 @@ export function AIView() {
       return;
     }
     speech.start((spoken) => {
+      setPendingScheduleConflict(null);
       setPrompt((current) => (current.trim() ? `${current.replace(/\s+$/, '')} ${spoken}` : spoken));
     });
   };
@@ -160,7 +162,19 @@ export function AIView() {
 
   const goToTab = (tab: AISection) => navigate({ name: 'ai', tab });
 
-  const generatePlan = async () => {
+  const generatePlan = async (approvedConflict?: PromptScheduleConflict) => {
+    const requestText = prompt.trim();
+    const promptRange = heard && heardDiffers ? { startDate: heard.startDate, days: heard.days } : planRange;
+    const generationRange = approvedConflict && heard && heardDiffers ? promptRange : planRange;
+    if (!approvedConflict && requestText) {
+      const conflicts = findPromptScheduleConflicts(requestText, state, promptRange);
+      if (conflicts.length > 0) {
+        setPendingScheduleConflict(conflicts[0]!);
+        setError('');
+        return;
+      }
+    }
+    setPendingScheduleConflict(null);
     setError('');
     setDraft(null);
     setDraftPlanId(null);
@@ -173,19 +187,22 @@ export function AIView() {
     }
     setWorking(true);
     try {
+      const schedulingDecision = approvedConflict
+        ? `\n\nScheduling decision: Keep the existing ${approvedConflict.title} on ${approvedConflict.date} from ${approvedConflict.startTime} to ${approvedConflict.endTime} protected. The user asked for a new activity at ${approvedConflict.requestedTime}; do not move or overlap the existing item. Find a genuinely free alternative time for the requested activity and mention that you worked around the conflict.`
+        : '';
       const result = await generateAIPlan({
-        prompt,
-        range: planRange,
+        prompt: `${requestText}${schedulingDecision}`,
+        range: generationRange,
         state,
         imageDataUrl: image?.dataUrl,
       });
       // Every draft also lands on the Plans page, so it can be revisited later.
       const planId = saveAIPlan({
-        title: planTitleFor(prompt, Boolean(image?.dataUrl)),
-        prompt: prompt.trim(),
+        title: planTitleFor(requestText, Boolean(image?.dataUrl)),
+        prompt: requestText,
         summary: result.summary,
-        startDate: planRange.startDate,
-        days: planRange.days,
+        startDate: generationRange.startDate,
+        days: generationRange.days,
         source: 'typed',
         tasks: result.tasks,
         events: result.events,
@@ -193,7 +210,7 @@ export function AIView() {
         suggestions: result.suggestions,
       });
       setDraft(result);
-      setDraftRange(planRange);
+      setDraftRange(generationRange);
       setDraftPlanId(planId);
     } catch (reason) {
       setError(friendlyGroqError(reason));
@@ -440,6 +457,9 @@ export function AIView() {
 
       {currentTab === 'plan' ? (
         <>
+          <p className="ai-apply-note" role="note">
+            {t("Typed and spoken requests create a reviewable draft. Voice can revise the draft on screen, but it does not directly change existing tasks or events. Review the draft and choose Add this plan to add its tasks, events and habits to your planner.")}
+          </p>
           <VoiceTalk onDraft={onVoiceDraft} currentDraft={draft ? { draft, range: draftRange } : null} />
           <section className="card ai-builder">
             <header className="card-head">
@@ -471,6 +491,24 @@ export function AIView() {
               ) : null}
             </div>
             <p className="ai-range-note">{formatFullDate(planRange.startDate)} — {formatFullDate(planEnd)}{t(". Fixed weekly times and existing events are treated as busy, protected slots.")}</p>
+            {pendingScheduleConflict ? (
+              <div className="ai-schedule-conflict" role="alert">
+                <strong>{t("I spotted a schedule conflict")}</strong>
+                <p>{t("You mentioned {0}; {1} is already scheduled on {2} from {3} to {4}. Should I keep that commitment and find another time for your request?", {
+                  0: displayTime(pendingScheduleConflict.requestedTime),
+                  1: pendingScheduleConflict.title,
+                  2: formatFullDate(pendingScheduleConflict.date),
+                  3: displayTime(pendingScheduleConflict.startTime),
+                  4: displayTime(pendingScheduleConflict.endTime),
+                })}</p>
+                <div className="form-actions">
+                  <button type="button" className="btn btn-primary btn-small" onClick={() => void generatePlan(pendingScheduleConflict)}>
+                    {t("Keep {0} and find another time", { 0: pendingScheduleConflict.title })}
+                  </button>
+                  <button type="button" className="btn btn-ghost btn-small" onClick={() => setPendingScheduleConflict(null)}>{t("I’ll change my request")}</button>
+                </div>
+              </div>
+            ) : null}
             {heard && heardDiffers ? (
               <div className="ai-heard-range" role="status">
                 <span><CalendarIcon size={14} /> {heard.clamped
@@ -488,7 +526,7 @@ export function AIView() {
             ) : null}
             <div className="chip-row ai-chips" role="group" aria-label={t("Start from a suggestion")}>
               {PLAN_CHIPS.map((chip) => (
-                <button key={chip} type="button" className="chip" onClick={() => setPrompt(chip)}>
+                <button key={chip} type="button" className="chip" onClick={() => { setPendingScheduleConflict(null); setPrompt(chip); }}>
                   {chip}
                 </button>
               ))}
@@ -515,7 +553,7 @@ export function AIView() {
                 maxLength={2400}
                 value={prompt}
                 placeholder={speech.available ? t("Type or dictate — tap the mic and just say your day. Example: “Class Tuesday 8am, gym after, help me fit it all in.”") : t("Example: I have class Tuesday morning. Help me fit in studying, a short workout, meals, and time to unwind. Keep each day manageable.")}
-                onChange={(event) => setPrompt(event.target.value)}
+                onChange={(event) => { setPendingScheduleConflict(null); setPrompt(event.target.value); }}
               />
             </label>
             <div className="ai-upload-row">
@@ -534,7 +572,7 @@ export function AIView() {
             ) : null}
             <div className="ai-builder-actions">
               <p className="meta">{t("Health ideas stay gentle and optional. The AI is not a medical professional.")}</p>
-              <button type="button" className="btn btn-primary" disabled={working || (!prompt.trim() && !image)} onClick={generatePlan}>
+              <button type="button" className="btn btn-primary" disabled={working || (!prompt.trim() && !image)} onClick={() => void generatePlan()}>
                 <SparklesIcon size={16} />{working ? t("Building your plan…") : t("Build a draft")}
               </button>
             </div>
