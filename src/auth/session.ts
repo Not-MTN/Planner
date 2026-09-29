@@ -18,8 +18,64 @@ import {
   unwrapKeyRaw,
   wrapRawKey,
 } from './crypto';
-import { rememberOnDevice } from './device';
+import { forgetDevice, rememberOnDevice } from './device';
 import type { PlannerState } from '../types';
+
+const LAST_USER_KEY = 'planner-last-user-id';
+const AUTH_FLAG_KEY = 'planner-auth-flag';
+const REDIRECT_KEY = 'planner-should-redirect';
+
+function persistAuth(userId: string): void {
+  try {
+    localStorage.setItem(LAST_USER_KEY, userId);
+    localStorage.setItem(AUTH_FLAG_KEY, '1');
+    localStorage.setItem(REDIRECT_KEY, '1');
+  } catch {
+    /* storage blocked */
+  }
+}
+
+function clearPersistedAuth(): void {
+  try {
+    localStorage.removeItem(LAST_USER_KEY);
+    localStorage.removeItem(AUTH_FLAG_KEY);
+    localStorage.removeItem(REDIRECT_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getLastUserId(): string | null {
+  try {
+    return localStorage.getItem(LAST_USER_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function isAuthFlagSet(): boolean {
+  try {
+    return localStorage.getItem(AUTH_FLAG_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function shouldAutoRedirect(): boolean {
+  try {
+    return localStorage.getItem(REDIRECT_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function markRedirectDone(): void {
+  try {
+    localStorage.removeItem(REDIRECT_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 
 export type AuthErrorCode =
   | 'bad_credentials'
@@ -274,6 +330,7 @@ export async function signUp(input: SignUpInput): Promise<{ recoveryKey: string;
   active = { user: result.user, dek, dekRaw, vault: { version: 1, ciphertext } };
   // This is the device they signed up on, so open straight into the planner.
   if (input.remember !== false) await rememberOnDevice(result.user.id, dekRaw);
+  persistAuth(result.user.id);
   return { recoveryKey, session: active };
 }
 
@@ -293,10 +350,19 @@ export async function signIn(identifier: string, password: string, remember = tr
 
   const raw = await unwrapKeyRaw(result.wrappedDek, kek);
   if (remember) await rememberOnDevice(result.user.id, raw);
+  else {
+    // Even if not remembering the vault key, we still want to clear any old device cache for other accounts
+    // but keep this session persisted via cookie
+    try {
+      const last = getLastUserId();
+      if (last && last !== result.user.id) await forgetDevice(last);
+    } catch {}
+  }
   // importDek clears its copy; keep one for passkey enrolment on this page.
   const dekRaw = new Uint8Array(raw);
   const dek = await importDek(raw, false);
   active = { user: result.user, dek, dekRaw, vault: result.vault };
+  persistAuth(result.user.id);
   return active;
 }
 
@@ -370,9 +436,21 @@ export async function resetPasswordWithRecovery(
 export async function fetchSession(): Promise<PublicUser | null> {
   try {
     const result = await request<SessionResponse>('/api/auth/session');
+    if (result.user) {
+      try {
+        persistAuth(result.user.id);
+      } catch {}
+    }
     return result.user;
   } catch (error) {
-    if (error instanceof AuthError && error.code === 'unauthenticated') return null;
+    if (error instanceof AuthError && error.code === 'unauthenticated') {
+      // Do not clear persisted flag here immediately — the device cache might still allow offline unlock.
+      // Only clear redirect flag so we don't loop.
+      try {
+        localStorage.removeItem(REDIRECT_KEY);
+      } catch {}
+      return null;
+    }
     throw error;
   }
 }
@@ -395,8 +473,13 @@ export async function fetchApiStatus(): Promise<ApiStatus> {
 }
 
 export async function signOut(): Promise<void> {
+  const userId = active?.user.id ?? getLastUserId() ?? undefined;
   forget(active);
   active = null;
+  clearPersistedAuth();
+  try {
+    await forgetDevice(userId);
+  } catch {}
   try {
     await request<{ ok: true }>('/api/auth/logout', { method: 'POST' });
   } catch {

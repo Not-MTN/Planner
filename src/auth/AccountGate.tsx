@@ -74,14 +74,14 @@ export function AccountGate() {
 
   // Back online after an offline boot? Reload so the vault can take over.
   useEffect(() => {
-    if (boot?.status !== 'offline') return;
+    if (boot?.status !== 'offline' && boot?.status !== 'offline-trusted') return;
     const retry = () => window.location.reload();
     window.addEventListener('online', retry);
     return () => window.removeEventListener('online', retry);
   }, [boot]);
 
   if (boot?.status === 'ready') return <App initialState={boot.state} />;
-  if (boot?.status === 'offline') return <App />;
+  if (boot?.status === 'offline' || boot?.status === 'offline-trusted') return <App />;
 
   if (boot?.status === 'blocked') {
     const { error } = boot;

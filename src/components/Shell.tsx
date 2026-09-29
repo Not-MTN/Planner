@@ -40,6 +40,9 @@ import { GoalsView } from '../views/GoalsView';
 import { HabitsView } from '../views/HabitsView';
 import { NotesView } from '../views/NotesView';
 import { TasksView } from '../views/TasksView';
+import { MatrixView } from '../views/MatrixView';
+import { ShortcutsSheet } from './ShortcutsSheet';
+import { WeeklyReview } from './WeeklyReview';
 
 const CalendarView = lazy(() => import('../views/CalendarView').then((m) => ({ default: m.CalendarView })));
 const InsightsView = lazy(() => import('../views/InsightsView').then((m) => ({ default: m.InsightsView })));
@@ -59,13 +62,14 @@ import { t } from '../i18n';
 const NAV = [
   { name: 'today', label: t("Today"), icon: SunIcon },
   { name: 'calendar', label: t("Calendar"), icon: CalendarIcon },
-  { name: 'ai', label: t("AI coach"), icon: SparklesIcon },
-  { name: 'plans', label: t("Plans"), icon: WeekIcon },
   { name: 'tasks', label: t("Tasks"), icon: CheckIcon },
+  { name: 'matrix', label: t("Matrix"), icon: FlagIcon },
   { name: 'habits', label: t("Habits"), icon: DotsIcon },
-  { name: 'goals', label: t("Goals"), icon: FlagIcon },
+  { name: 'goals', label: t("Goals"), icon: HorizonIcon },
   { name: 'notes', label: t("Notes"), icon: NoteIcon },
+  { name: 'plans', label: t("Plans"), icon: WeekIcon },
   { name: 'insights', label: t("Insights"), icon: ArcIcon },
+  { name: 'ai', label: t("AI coach"), icon: SparklesIcon },
 ] as const;
 
 export function Shell() {
@@ -101,6 +105,8 @@ export function Shell() {
     confettiSeed,
   } = planner;
   const [moreOpen, setMoreOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
   // Panels only show up once they are added — they are extras, never a mode.
   const panelNav = [
     ...(planner.panels.student.enabled ? [{ name: 'student' as const, label: t("Student"), icon: StudyIcon }] : []),
@@ -181,7 +187,7 @@ export function Shell() {
         else undo();
         return;
       }
-      if (typing || composer || confirm || settingsOpen || moreOpen || tourStep !== null || aboutOpen) return;
+      if (typing || composer || confirm || settingsOpen || moreOpen || tourStep !== null || aboutOpen || shortcutsOpen || reviewOpen) return;
       if (event.key === '/') {
         event.preventDefault();
         openPalette();
@@ -190,14 +196,20 @@ export function Shell() {
         openComposer({ mode: 'create', type: 'task', date: today });
       } else if (event.key.toLowerCase() === 't') {
         navigate({ name: 'today' });
+      } else if (event.key.toLowerCase() === 'm') {
+        event.preventDefault();
+        navigate({ name: 'matrix' } as Route);
+      } else if (event.key.toLowerCase() === 'r') {
+        event.preventDefault();
+        setReviewOpen(true);
       } else if (event.key === '?' || (event.shiftKey && event.key === '/')) {
         event.preventDefault();
-        openSettings();
+        setShortcutsOpen(true);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [paletteOpen, composer, confirm, settingsOpen, moreOpen, tourStep, aboutOpen, openPalette, closePalette, openComposer, openSettings, navigate, undo, redo, today]);
+  }, [paletteOpen, composer, confirm, settingsOpen, moreOpen, tourStep, aboutOpen, shortcutsOpen, reviewOpen, openPalette, closePalette, openComposer, openSettings, navigate, undo, redo, today]);
 
   const go = (name: string) => {
     if (name === 'calendar') navigate({ name: 'calendar', tab: 'week', date: today });
@@ -205,7 +217,7 @@ export function Shell() {
     setMoreOpen(false);
   };
 
-  const moreActive = ['goals', 'notes', 'insights', 'ai', 'plans'].includes(route.name);
+  const moreActive = ['goals', 'notes', 'insights', 'ai', 'plans', 'matrix', 'review'].includes(route.name);
 
   return (
     <div className="app-shell">
@@ -228,9 +240,13 @@ export function Shell() {
           {NAV.slice(0, 4).map((item) => (
             <NavButton key={item.name} item={item} active={route.name === item.name || (item.name === 'calendar' && route.name === 'calendar')} attention={item.name === 'ai' && !aiSeen} onClick={() => go(item.name)} />
           ))}
-          <p className="nav-label">{t("Track")}</p>
-          {NAV.slice(4).map((item) => (
+          <p className="nav-label">{t("Focus")}</p>
+          {NAV.slice(4, 6).map((item) => (
             <NavButton key={item.name} item={item} active={route.name === item.name} onClick={() => go(item.name)} />
+          ))}
+          <p className="nav-label">{t("Track")}</p>
+          {NAV.slice(6).map((item) => (
+            <NavButton key={item.name} item={item} active={route.name === item.name} attention={item.name === 'ai' && !aiSeen} onClick={() => go(item.name)} />
           ))}
           {panelNav.length > 0 ? (
             <>
@@ -365,6 +381,8 @@ export function Shell() {
                   {route.name === 'day' ? <DayView date={route.date} /> : null}
                   {route.name === 'calendar' ? <CalendarView /> : null}
                   {route.name === 'tasks' ? <TasksView /> : null}
+                  {route.name === 'matrix' ? <MatrixView tasks={planner.state.tasks} /> : null}
+                  {route.name === 'review' ? <div className="view"><WeeklyReview state={planner.state} onClose={() => go('today')} /></div> : null}
                   {route.name === 'habits' ? <HabitsView /> : null}
                   {route.name === 'goals' ? <GoalsView /> : null}
                   {route.name === 'notes' ? <NotesView /> : null}
@@ -411,6 +429,12 @@ export function Shell() {
             <button type="button" className={cx(route.name === 'insights' && 'on')} onClick={() => go('insights')}>
               <ArcIcon size={18} /> {t("Insights")}
             </button>
+            <button type="button" className={cx(route.name === 'matrix' && 'on')} onClick={() => go('matrix')}>
+              <FlagIcon size={18} /> {t("Matrix")}
+            </button>
+            <button type="button" className={cx(route.name === 'review' && 'on')} onClick={() => go('review')}>
+              <WeekIcon size={18} /> {t("Weekly Review")}
+            </button>
             <button type="button" className={cx(route.name === 'ai' && 'on')} onClick={() => go('ai')}>
               <SparklesIcon size={18} /> {t("AI coach")}
               {!aiSeen ? <i className="nav-attention more-attention" aria-hidden="true" /> : null}
@@ -426,6 +450,7 @@ export function Shell() {
             <button type="button" className={cx(route.name === 'panels' && 'on')} onClick={() => go('panels')}>
               <HorizonIcon size={18} /> {t("Panels")}
             </button>
+            <button type="button" onClick={() => { setMoreOpen(false); setShortcutsOpen(true); }}><HelpIcon size={18} /> {t("Keyboard shortcuts")}</button>
             <button type="button" onClick={openSettings}><SlidersIcon size={18} /> {t("Settings")}</button>
             <button type="button" onClick={requestTour}><HelpIcon size={18} /> {t("How Planner works")}</button>
             <button type="button" onClick={() => { setMoreOpen(false); window.setTimeout(requestAbout, 60); }}><HeartIcon size={18} /> {t("Why Planner?")}</button>
@@ -492,6 +517,12 @@ export function Shell() {
         <TourSheet step={tourStep} onStep={setTourStep} onClose={closeTour} />
       ) : null}
       {aboutOpen ? <AboutSheet onClose={() => setAboutOpen(false)} /> : null}
+      {shortcutsOpen ? <ShortcutsSheet onClose={() => setShortcutsOpen(false)} /> : null}
+      {reviewOpen ? (
+        <Modal title={t("Weekly Review")} onClose={() => setReviewOpen(false)}>
+          <WeeklyReview state={planner.state} onClose={() => setReviewOpen(false)} />
+        </Modal>
+      ) : null}
       <input ref={importFile.ref} className="visually-hidden" tabIndex={-1} aria-hidden="true" type="file" accept="application/json,.json" onChange={importFile.onChange} />
     </div>
   );

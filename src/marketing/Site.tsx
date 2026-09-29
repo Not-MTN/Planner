@@ -5,8 +5,11 @@ import { Auth } from './Auth';
 import { applyTheme, loadThemeMode, type ThemeMode } from '../theme';
 import type { Accent } from '../constants';
 import { useScrollProgress, useScrolled } from './effects';
+import { fetchSession, isAuthFlagSet, shouldAutoRedirect, markRedirectDone } from '../auth/session';
+import { getLastTrustedUserId } from '../auth/device';
 import './marketing.css';
 import './showcase.css';
+import './marketing-polish.css';
 
 const LANG_KEY = 'planner-site-lang';
 const ACCENT: Accent = 'sage';
@@ -31,9 +34,58 @@ export function Site() {
   const [lang, setLang] = useState<Lang>(readLang);
   const [theme, setTheme] = useState<ThemeMode>(loadThemeMode);
   const [menu, setMenu] = useState(false);
+  const [authed, setAuthed] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
   const scrolled = useScrolled(10);
   const progress = useScrollProgress();
   const c = COPY[lang];
+
+  // Check if user is already authenticated — if so, landing should show "Open Planner"
+  // and /login should redirect to /app. Also auto-redirect from "/" if they previously
+  // chose to be remembered (REDIRECT flag).
+  useEffect(() => {
+    let cancelled = false;
+    const checkAuth = async () => {
+      // Fast path: localStorage flag
+      const hasFlag = isAuthFlagSet();
+      const trusted = await getLastTrustedUserId().catch(() => null);
+      const likelyAuthed = hasFlag || Boolean(trusted);
+      // If not likely, we still try fetchSession quickly
+      try {
+        const user = await fetchSession();
+        if (cancelled) return;
+        if (user) {
+          setAuthed(true);
+          // If we're on "/" and the user should be auto-redirected (just signed in before),
+          // take them straight to the app — this is the "stay logged in" fix.
+          if (readPath() === '/' && shouldAutoRedirect()) {
+            markRedirectDone();
+            window.location.assign('/app');
+            return;
+          }
+          // If we're on /login or /signup while already signed in, go to app
+          const current = readPath();
+          if (current === '/login' || current === '/signup') {
+            window.location.assign('/app');
+            return;
+          }
+        } else {
+          // No session, but trusted device exists — still treat as authed for UI purposes
+          // so landing shows "Open Planner" which will boot via device cache
+          if (trusted) setAuthed(true);
+        }
+      } catch {
+        // Network error: if we have trusted device, still show as authed
+        if (likelyAuthed) setAuthed(true);
+      } finally {
+        if (!cancelled) setAuthChecked(true);
+      }
+    };
+    void checkAuth();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     applyTheme(theme, ACCENT);
@@ -163,12 +215,25 @@ export function Site() {
               </button>
             ) : (
               <>
-                <button type="button" className="btn btn-quiet" onClick={() => navigate('/login')}>
-                  {c.navSignIn}
-                </button>
-                <button type="button" className="btn btn-primary btn-sm" onClick={() => navigate('/signup')}>
-                  {c.navStart}
-                </button>
+                {authChecked && authed ? (
+                  <>
+                    <button type="button" className="btn btn-quiet" onClick={() => navigate('/app')}>
+                      {lang === 'fa' ? 'باز کردن برنامه' : 'Open Planner'}
+                    </button>
+                    <button type="button" className="btn btn-primary btn-sm" onClick={() => navigate('/app')}>
+                      {lang === 'fa' ? 'رفتن به برنامه' : 'Go to app'}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button type="button" className="btn btn-quiet" onClick={() => navigate('/login')}>
+                      {c.navSignIn}
+                    </button>
+                    <button type="button" className="btn btn-primary btn-sm" onClick={() => navigate('/signup')}>
+                      {c.navStart}
+                    </button>
+                  </>
+                )}
                 <button type="button" className="nav-burger" aria-label={c.navMenu} aria-expanded={menu} onClick={() => setMenu(!menu)}>
                   <span />
                   <span />
@@ -182,7 +247,7 @@ export function Site() {
       {isAuth ? (
         <Auth lang={lang} mode={path === '/login' ? 'signin' : path === '/recover' ? 'recover' : 'signup'} navigate={navigate} />
       ) : (
-        <Landing lang={lang} navigate={navigate} />
+        <Landing lang={lang} navigate={navigate} authed={authed} />
       )}
 
       {!isAuth ? (

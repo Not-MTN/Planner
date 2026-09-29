@@ -104,7 +104,7 @@ function TinyChart({ kind }: { kind: string }) {
   );
 }
 
-export function Landing({ lang, navigate }: { lang: Lang; navigate: Nav }) {
+export function Landing({ lang, navigate, authed }: { lang: Lang; navigate: Nav; authed?: boolean }) {
   const c = COPY[lang];
   const [open, setOpen] = useState<number | null>(0);
   const faqs = [
@@ -134,12 +134,25 @@ export function Landing({ lang, navigate }: { lang: Lang; navigate: Nav }) {
             {c.heroSub}
           </p>
           <div className="hero-actions reveal" data-reveal style={{ transitionDelay: '210ms' }}>
-            <button type="button" className="btn btn-primary btn-lg" onClick={() => navigate('/signup')}>
-              {c.heroCta}
-            </button>
-            <a className="btn btn-ghost btn-lg" href="#how">
-              {c.heroCta2}
-            </a>
+            {authed ? (
+              <>
+                <button type="button" className="btn btn-primary btn-lg" onClick={() => navigate('/app')}>
+                  {lang === 'fa' ? 'باز کردن برنامه' : 'Open your planner'}
+                </button>
+                <a className="btn btn-ghost btn-lg" href="#how">
+                  {c.heroCta2}
+                </a>
+              </>
+            ) : (
+              <>
+                <button type="button" className="btn btn-primary btn-lg" onClick={() => navigate('/signup')}>
+                  {c.heroCta}
+                </button>
+                <a className="btn btn-ghost btn-lg" href="#how">
+                  {c.heroCta2}
+                </a>
+              </>
+            )}
           </div>
           <ul className="hero-trust reveal" data-reveal style={{ transitionDelay: '280ms' }}>
             {[c.trustEncrypted, c.trustOffline, c.trustAds].map((item) => (
@@ -509,12 +522,18 @@ export function Landing({ lang, navigate }: { lang: Lang; navigate: Nav }) {
         <div className="cta-glow" aria-hidden="true" />
         <div className="wrap wrap-narrow cta-inner reveal" data-reveal>
           <p className="pill">{c.ctaBadge}</p>
-          <h2>{c.ctaTitle}</h2>
-          <p>{c.ctaSub}</p>
+          <h2>{authed ? (lang === 'fa' ? 'برگردید به برنامه' : 'Welcome back') : c.ctaTitle}</h2>
+          <p>{authed ? (lang === 'fa' ? 'برنامه‌تان منتظر شماست — آفلاین هم کار می‌کند.' : 'Your planner is waiting — it even works offline.') : c.ctaSub}</p>
           <div className="hero-actions">
-            <button type="button" className="btn btn-primary btn-lg" onClick={() => navigate('/signup')}>
-              {c.ctaButton}
-            </button>
+            {authed ? (
+              <button type="button" className="btn btn-primary btn-lg" onClick={() => navigate('/app')}>
+                {lang === 'fa' ? 'باز کردن برنامه' : 'Open your planner'}
+              </button>
+            ) : (
+              <button type="button" className="btn btn-primary btn-lg" onClick={() => navigate('/signup')}>
+                {c.ctaButton}
+              </button>
+            )}
             <a className="btn btn-ghost btn-lg" href="mailto:hello@example.com">
               {c.ctaSecondary}
             </a>

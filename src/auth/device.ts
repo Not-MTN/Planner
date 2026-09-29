@@ -20,6 +20,7 @@ const DB_NAME = 'planner-auth';
 const STORE = 'device';
 const KEY_HANDLE = 'device-key';
 const WRAP_PREFIX = 'wrapped:';
+const LAST_USER_HANDLE = 'last-user-id';
 
 /** Copies bytes into a plain ArrayBuffer, which the WebCrypto types require. */
 function toBuffer(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
@@ -110,10 +111,60 @@ export async function rememberOnDevice(userId: string, rawKey: Uint8Array<ArrayB
     const out = new Uint8Array(iv.length + cipher.length);
     out.set(iv);
     out.set(cipher, iv.length);
-    await run('readwrite', (store) => store.put(out, WRAP_PREFIX + userId) as unknown as IDBRequest<unknown>);
+    await run('readwrite', (store) => {
+      store.put(out, WRAP_PREFIX + userId);
+      // Also store last user id in the same DB so offline boot can find it without localStorage
+      store.put(userId, LAST_USER_HANDLE);
+      return store.get(KEY_HANDLE) as unknown as IDBRequest<unknown>;
+    }).catch(async () => {
+      // Fallback if transaction with multiple puts fails: try individually
+      await run('readwrite', (s) => s.put(out, WRAP_PREFIX + userId) as unknown as IDBRequest<unknown>);
+      await run('readwrite', (s) => s.put(userId, LAST_USER_HANDLE) as unknown as IDBRequest<unknown>);
+    });
+    // Ensure last user id also in localStorage for fast path
+    try {
+      localStorage.setItem('planner-last-user-id', userId);
+    } catch {}
     return true;
   } catch {
     return false;
+  }
+}
+
+export async function listTrustedUserIds(): Promise<string[]> {
+  if (!deviceCacheSupported()) return [];
+  try {
+    const db = await open();
+    return await new Promise<string[]>((resolve) => {
+      const tx = db.transaction(STORE, 'readonly');
+      const store = tx.objectStore(STORE);
+      const req = store.getAllKeys() as IDBRequest<IDBValidKey[]>;
+      req.onsuccess = () => {
+        const keys = (req.result as string[]).filter((k) => typeof k === 'string' && k.startsWith(WRAP_PREFIX)).map((k) => k.slice(WRAP_PREFIX.length));
+        resolve(keys);
+      };
+      req.onerror = () => resolve([]);
+      tx.oncomplete = () => db.close();
+      tx.onerror = () => {
+        db.close();
+        resolve([]);
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
+export async function getLastTrustedUserId(): Promise<string | null> {
+  if (!deviceCacheSupported()) return null;
+  try {
+    const stored = await run('readonly', (store) => store.get(LAST_USER_HANDLE) as IDBRequest<unknown>);
+    if (typeof stored === 'string' && stored.length > 0) return stored;
+  } catch {}
+  try {
+    return localStorage.getItem('planner-last-user-id');
+  } catch {
+    return null;
   }
 }
 
@@ -137,10 +188,26 @@ export async function forgetDevice(userId?: string): Promise<void> {
   if (!deviceCacheSupported()) return;
   try {
     if (userId) {
-      await run('readwrite', (store) => store.delete(WRAP_PREFIX + userId) as unknown as IDBRequest<unknown>);
+      await run('readwrite', (store) => {
+        store.delete(WRAP_PREFIX + userId);
+        // If this was the last user, clear that pointer too
+        const lastReq = store.get(LAST_USER_HANDLE) as IDBRequest<unknown>;
+        lastReq.onsuccess = () => {
+          if (lastReq.result === userId) store.delete(LAST_USER_HANDLE);
+        };
+        return lastReq as unknown as IDBRequest<unknown>;
+      }).catch(async () => {
+        await run('readwrite', (s) => s.delete(WRAP_PREFIX + userId) as unknown as IDBRequest<unknown>);
+      });
+      try {
+        if (localStorage.getItem('planner-last-user-id') === userId) localStorage.removeItem('planner-last-user-id');
+      } catch {}
       return;
     }
     await run('readwrite', (store) => store.clear() as unknown as IDBRequest<unknown>);
+    try {
+      localStorage.removeItem('planner-last-user-id');
+    } catch {}
   } catch {
     /* nothing cached, or storage unavailable */
   }

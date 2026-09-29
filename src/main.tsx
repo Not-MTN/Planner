@@ -6,6 +6,7 @@ import '@fontsource-variable/estedad';
 // is imported by the gate, so the public site never inherits them (and the two
 // bundles cannot re-style each other's .check, .hero, .field, .btn, ...).
 import './tokens.css';
+import './styles-polish.css';
 
 // The marketing site and the planner are two separate bundles: opening the app
 // never downloads the landing page, and vice versa.
@@ -24,6 +25,20 @@ function bootTarget(): 'app' | 'site' {
   if (path === '/' && /^#\/(today|calendar|tasks|habits|goals|notes|insights|plans|ai|day|quickadd)/.test(window.location.hash)) {
     window.history.replaceState({}, '', `/app${window.location.hash}`);
     return 'app';
+  }
+  try {
+    const url = new URL(window.location.href);
+    if (path === '/' && !url.searchParams.has('stay')) {
+      const shouldRedirect = localStorage.getItem('planner-should-redirect') === '1';
+      const hasAuthFlag = localStorage.getItem('planner-auth-flag') === '1';
+      const hasLastUser = Boolean(localStorage.getItem('planner-last-user-id'));
+      if (shouldRedirect && (hasAuthFlag || hasLastUser)) {
+        window.history.replaceState({}, '', '/app');
+        return 'app';
+      }
+    }
+  } catch {
+    /* storage blocked */
   }
   return 'site';
 }

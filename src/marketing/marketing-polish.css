@@ -1,0 +1,467 @@
+/* ============================================================
+   MARKETING POLISH — box sizes, margins, spacing, modern feel
+   ============================================================ */
+
+.mkt {
+  --mkt-max: 1180px;
+  --mkt-gap: 28px;
+  --mkt-card-pad: 28px;
+  --mkt-radius: 22px;
+  --mkt-radius-sm: 14px;
+}
+
+/* Progress bar */
+.mkt .progress {
+  height: 2px;
+  background: var(--accent);
+  transform-origin: left;
+  transform: scaleX(var(--p, 0));
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+}
+
+/* Nav */
+.mkt .nav {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(18px) saturate(1.2);
+  border-bottom: 1px solid transparent;
+  transition: all 0.25s var(--ease);
+}
+.mkt .nav.is-scrolled {
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  border-bottom-color: var(--line);
+  box-shadow: 0 1px 0 var(--line), 0 8px 24px rgba(0,0,0,0.04);
+}
+.mkt .nav-inner {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.mkt .brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: -0.02em;
+  height: auto;
+  margin: 0;
+  padding: 6px 10px 6px 6px;
+  border-radius: 12px;
+}
+.mkt .brand-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: var(--ink);
+  display: grid;
+  place-items: center;
+}
+.mkt .brand-name {
+  font-family: var(--serif);
+  font-weight: 800;
+}
+.mkt .nav-links {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.mkt .nav-links button {
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink-soft);
+  transition: all 0.18s var(--ease);
+}
+.mkt .nav-links button:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+.mkt .nav-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mkt .icon-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  transition: all 0.18s var(--ease);
+}
+.mkt .icon-btn:hover {
+  background: var(--surface-3);
+  transform: translateY(-1px);
+}
+
+/* Buttons */
+.mkt .btn {
+  min-height: 40px;
+  padding: 0 18px;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s var(--ease);
+  border: 1px solid transparent;
+  line-height: 1;
+}
+.mkt .btn:hover {
+  transform: translateY(-1px);
+}
+.mkt .btn:active {
+  transform: translateY(0);
+}
+.mkt .btn-primary {
+  background: var(--ink);
+  color: var(--bg);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+}
+.mkt .btn-primary:hover {
+  background: color-mix(in srgb, var(--ink) 88%, black);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+}
+.mkt .btn-ghost {
+  background: var(--surface-2);
+  border-color: var(--line);
+  color: var(--ink);
+}
+.mkt .btn-ghost:hover {
+  background: var(--surface-3);
+  border-color: var(--line-strong);
+}
+.mkt .btn-quiet {
+  background: transparent;
+  color: var(--ink-soft);
+  min-height: 36px;
+  padding: 0 12px;
+}
+.mkt .btn-quiet:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+.mkt .btn-sm {
+  min-height: 36px;
+  padding: 0 14px;
+  font-size: 13.5px;
+  border-radius: 10px;
+}
+.mkt .btn-lg {
+  min-height: 48px;
+  padding: 0 24px;
+  font-size: 15px;
+  border-radius: 14px;
+}
+
+/* Hero */
+.mkt .hero {
+  padding: 72px 0 48px;
+  position: relative;
+  overflow: hidden;
+}
+.mkt .hero-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 18px;
+  max-width: 720px;
+  position: relative;
+  z-index: 1;
+}
+.mkt .hero-title {
+  font-size: clamp(36px, 5.5vw, 64px);
+  font-weight: 850;
+  line-height: 0.92;
+  letter-spacing: -0.04em;
+  margin: 0;
+}
+.mkt .hero-sub {
+  font-size: clamp(16px, 1.8vw, 19px);
+  line-height: 1.6;
+  color: var(--ink-soft);
+  max-width: 56ch;
+  margin: 6px 0 8px;
+}
+.mkt .hero-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.mkt .hero-trust {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.mkt .hero-trust li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.mkt .pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 6px 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  box-shadow: var(--shadow-soft);
+}
+.mkt .pill-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #22c55e 20%, transparent);
+}
+
+/* Sections */
+.mkt .section {
+  padding: 80px 0;
+}
+@media (max-width: 768px) {
+  .mkt .section {
+    padding: 56px 0;
+  }
+}
+.mkt .section-head {
+  max-width: 640px;
+  margin-bottom: 40px;
+}
+.mkt .section-head.center {
+  text-align: center;
+  margin-inline: auto;
+}
+.mkt .section-head h2 {
+  font-size: clamp(28px, 3.5vw, 42px);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  margin: 0 0 12px;
+}
+.mkt .section-head .lede,
+.mkt .section-head p {
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
+/* Cards and features */
+.mkt .feature, .mkt .card, .mkt .shot, .mkt .step {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--mkt-radius);
+  padding: var(--mkt-card-pad);
+  box-shadow: var(--shadow-soft);
+  transition: all 0.25s var(--ease);
+}
+.mkt .feature:hover, .mkt .card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
+  border-color: var(--line-strong);
+}
+
+/* Split layout */
+.mkt .split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 48px;
+  align-items: center;
+}
+@media (max-width: 900px) {
+  .mkt .split {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+}
+
+/* Auth screens */
+.mkt .auth {
+  min-height: 80vh;
+  display: grid;
+  place-items: center;
+  padding: 40px 20px;
+}
+.mkt .auth-card {
+  width: 100%;
+  max-width: 440px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  padding: 32px;
+  box-shadow: var(--shadow);
+}
+.mkt .auth-title {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  margin-bottom: 8px;
+}
+.mkt .auth-sub {
+  font-size: 14px;
+  color: var(--ink-soft);
+  line-height: 1.5;
+  margin-bottom: 24px;
+}
+.mkt .auth-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.mkt .field {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 15px;
+  transition: all 0.18s var(--ease);
+}
+.mkt .field:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.mkt .auth-foot {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Footer */
+.mkt .foot {
+  background: var(--surface-2);
+  border-top: 1px solid var(--line);
+  padding: 56px 0 32px;
+  margin-top: 40px;
+}
+.mkt .foot-grid {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1fr 1fr;
+  gap: 32px;
+}
+@media (max-width: 800px) {
+  .mkt .foot-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+}
+@media (max-width: 480px) {
+  .mkt .foot-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.mkt .foot-col h4 {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 14px;
+  color: var(--ink);
+}
+.mkt .foot-col button, .mkt .foot-col a {
+  display: block;
+  padding: 6px 0;
+  font-size: 14px;
+  color: var(--ink-soft);
+  transition: color 0.15s;
+  text-align: start;
+}
+.mkt .foot-col button:hover, .mkt .foot-col a:hover {
+  color: var(--ink);
+}
+.mkt .foot-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+.mkt .foot-note {
+  font-size: 13px;
+  color: var(--ink-soft);
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+.mkt .foot-fine {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* Reveal animation */
+.mkt .reveal {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.6s var(--ease), transform 0.6s var(--ease);
+}
+.mkt .reveal.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* CTA */
+.mkt .cta {
+  background: var(--ink);
+  color: var(--bg);
+  border-radius: 0;
+  position: relative;
+  overflow: hidden;
+  text-align: center;
+}
+.mkt .cta-inner {
+  padding: 80px 0;
+  position: relative;
+  z-index: 1;
+}
+.mkt .cta h2 {
+  font-size: clamp(28px, 4vw, 44px);
+  font-weight: 850;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  margin-bottom: 16px;
+  color: var(--bg);
+}
+.mkt .cta p {
+  font-size: 16px;
+  line-height: 1.6;
+  color: color-mix(in srgb, var(--bg) 70%, transparent);
+  max-width: 48ch;
+  margin: 0 auto 24px;
+}
+.mkt .cta .btn-primary {
+  background: var(--bg);
+  color: var(--ink);
+}
+.mkt .cta .btn-ghost {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--bg) 20%, transparent);
+  color: var(--bg);
+}

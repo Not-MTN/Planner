@@ -13,12 +13,13 @@ import {
   endSession,
   fetchSession,
   getActiveSession,
+  getLastUserId,
   pullVault,
   pushVault,
   request,
   signOut as apiSignOut,
 } from './session';
-import { forgetDevice, recallFromDevice, rememberOnDevice } from './device';
+import { forgetDevice, getLastTrustedUserId, recallFromDevice, rememberOnDevice } from './device';
 import { mergeStates } from '../sync';
 import type { PlannerState } from '../types';
 import type { PublicUser } from '../shared/authContract';
@@ -26,7 +27,28 @@ import type { PublicUser } from '../shared/authContract';
 export type AccountBoot =
   | { status: 'signed-out' }
   | { status: 'locked'; user: PublicUser }
-  | { status: 'ready'; user: PublicUser; state: PlannerState; version: number };
+  | { status: 'ready'; user: PublicUser; state: PlannerState; version: number }
+  | { status: 'offline-trusted'; userId: string };
+
+const LAST_USER_INFO_KEY = 'planner-last-user-info';
+
+function storeLastUserInfo(user: PublicUser): void {
+  try {
+    localStorage.setItem(LAST_USER_INFO_KEY, JSON.stringify(user));
+  } catch {}
+}
+
+function loadLastUserInfo(): PublicUser | null {
+  try {
+    const raw = localStorage.getItem(LAST_USER_INFO_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PublicUser;
+    if (parsed && typeof parsed.id === 'string') return parsed;
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 export function unlockedUser(): PublicUser | null {
   return getActiveSession()?.user ?? null;
@@ -42,9 +64,12 @@ export function lock(): void {
 
 /** Signs out: ends the server session, drops the key, clears the device cache. */
 export async function signOut(): Promise<void> {
-  const userId = getActiveSession()?.user.id;
+  const userId = getActiveSession()?.user.id ?? getLastUserId() ?? undefined;
   endSession();
   await forgetDevice(userId);
+  try {
+    localStorage.removeItem(LAST_USER_INFO_KEY);
+  } catch {}
   await apiSignOut();
 }
 
@@ -52,10 +77,76 @@ export async function signOut(): Promise<void> {
  * Decides what to show on boot: straight into the planner if this device was
  * trusted, the unlock screen if we know who they are but not their key, or the
  * sign-in page.
+ *
+ * New behavior: if the server session is gone but this device was trusted before,
+ * we still open the planner with the local copy (offline-trusted) instead of forcing
+ * a full sign-in. The user keeps working; sync will resume once they re-authenticate.
  */
 export async function bootAccount(): Promise<AccountBoot> {
-  const user = await fetchSession();
-  if (!user) return { status: 'signed-out' };
+  let user: PublicUser | null = null;
+  try {
+    user = await fetchSession();
+    if (user) storeLastUserInfo(user);
+  } catch (err) {
+    // Network failure: keep using local copy (offline). If we have a trusted device,
+    // we can still try to open with cached key later, but for now treat as offline.
+    if (err instanceof AuthError && err.code === 'network') throw err;
+    // Other errors: fall through to trusted-device check
+    user = null;
+  }
+
+  if (!user) {
+    // No active session cookie. Check if this device was trusted before.
+    const lastId = (await getLastTrustedUserId()) ?? getLastUserId();
+    if (lastId) {
+      const cached = await recallFromDevice(lastId);
+      if (cached) {
+        // Try to pull vault — if it works, we have a fresh session via cookie somehow restored
+        try {
+          const vault = await pullVault();
+          if (vault) {
+            const storedUser = loadLastUserInfo();
+            // If we have stored user info, use it; otherwise create a minimal user shell
+            const effectiveUser: PublicUser = storedUser ?? {
+              id: lastId,
+              username: 'user',
+              email: null,
+              displayName: 'Planner',
+              role: 'personal',
+              createdAt: new Date().toISOString(),
+            };
+            try {
+              const state = await decryptState(vault.ciphertext, cached.dek);
+              adoptSession(effectiveUser, cached.dek, { version: vault.version, ciphertext: vault.ciphertext }, cached.raw);
+              return { status: 'ready', user: effectiveUser, state, version: vault.version };
+            } catch {
+              // Cached key invalid, fall through to locked if we have user info
+              if (storedUser) return { status: 'locked', user: storedUser };
+            }
+          }
+        } catch {
+          // pullVault failed (likely unauthenticated). If we have cached key, allow offline-trusted
+          const storedUser = loadLastUserInfo();
+          if (storedUser) {
+            // We have user info and cached key, but no session — allow offline with local data
+            // The AccountGate will treat this as offline and show the app with local copy
+            // But we can attempt to adopt session with cached dek and a placeholder vault version 0
+            // so future pushes will trigger re-auth
+            try {
+              // We don't have vault ciphertext offline, so just return offline-trusted
+              return { status: 'offline-trusted', userId: lastId };
+            } catch {}
+          }
+          // Even without stored user info, if we have a trusted device, don't force sign-in
+          return { status: 'offline-trusted', userId: lastId };
+        }
+        // If we got here, cached exists but vault pull didn't work and we have no stored user info
+        const storedUser = loadLastUserInfo();
+        if (storedUser) return { status: 'locked', user: storedUser };
+      }
+    }
+    return { status: 'signed-out' };
+  }
 
   const cached = await recallFromDevice(user.id);
   if (!cached) return { status: 'locked', user };
