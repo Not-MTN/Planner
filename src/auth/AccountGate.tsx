@@ -12,7 +12,10 @@ import { App } from '../App';
 import { bootAccount, signOut, unlockWithPassword, type AccountBoot } from './vault';
 import { AuthError } from './session';
 // The planner's component styles, for the unlock screen and the app behind it.
+// app-polish.css is the final layer: it ships in the same chunk and must load
+// after styles.css so its rules carry the day on every device class.
 import '../styles.css';
+import '../app-polish.css';
 import './gate.css';
 
 type Boot = AccountBoot | { status: 'offline' } | { status: 'blocked'; error: AuthError } | null;

@@ -59,8 +59,14 @@ import { onAboutRequest, requestAbout } from '../about';
 import { TourSheet } from './TourSheet';
 import { AboutSheet } from './AboutSheet';
 import { useSignOut } from './useSignOut';
-import { unlockedUser } from '../auth/vault';
+import { accountUser } from '../auth/vault';
 import { t } from '../i18n';
+
+/** The signed-in account in one glance — name initial for the avatar. */
+function accountInitial(name: string): string {
+  const first = name.trim().charAt(0);
+  return first ? first.toUpperCase() : '·';
+}
 
 const NAV = [
   { name: 'today', label: t("Today"), icon: SunIcon },
@@ -110,9 +116,11 @@ export function Shell() {
   const [moreOpen, setMoreOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
-  // Sign-out only appears for a signed-in vault; a local-only planner has
-  // nothing to sign out of, so the button would be a dead end.
-  const account = unlockedUser();
+  // Sign-out only appears for an account this device knows: the live vault
+  // session, or the last signed-in user when the vault opened from the
+  // trusted-device cache (offline boots). A local-only planner has nobody to
+  // sign out, so the button would be a dead end.
+  const account = accountUser();
   const requestSignOut = useSignOut();
   // Panels only show up once they are added — they are extras, never a mode.
   const panelNav = [
@@ -309,12 +317,6 @@ export function Shell() {
             <SlidersIcon size={16} />
             <span>{t("Settings")}</span>
           </button>
-          {account ? (
-            <button type="button" className="side-tool side-signout" onClick={requestSignOut} title={t("Sign out")}>
-              <ExitIcon size={16} />
-              <span>{t("Sign out")}</span>
-            </button>
-          ) : null}
           <p className="side-note">
             {syncStatus === 'off' ? t("Saved on this device") : (
               <>
@@ -323,6 +325,25 @@ export function Shell() {
               </>
             )}
           </p>
+          {account ? (
+            <div className="side-account">
+              <div className="side-account-id">
+                <span className="account-avatar" aria-hidden="true">
+                  {accountInitial(account.displayName || account.username)}
+                </span>
+                <span className="account-meta">
+                  <span className="account-name">{account.displayName || account.username}</span>
+                  <span className="account-sub" dir="ltr">
+                    {account.email ?? `@${account.username}`}
+                  </span>
+                </span>
+              </div>
+              <button type="button" className="side-signout" onClick={requestSignOut} title={t("Sign out")}>
+                <ExitIcon size={15} />
+                <span>{t("Sign out")}</span>
+              </button>
+            </div>
+          ) : null}
         </div>
       </aside>
 
@@ -428,6 +449,22 @@ export function Shell() {
       {moreOpen ? (
         <Modal title={t("More")} onClose={() => setMoreOpen(false)}>
           <div className="more-list">
+            {account ? (
+              <>
+                <div className="more-account">
+                  <span className="account-avatar" aria-hidden="true">
+                    {accountInitial(account.displayName || account.username)}
+                  </span>
+                  <span className="account-meta">
+                    <span className="account-name">{account.displayName || account.username}</span>
+                    <span className="account-sub" dir="ltr">
+                      {account.email ?? `@${account.username}`}
+                    </span>
+                  </span>
+                </div>
+                <div className="more-divider" role="separator" />
+              </>
+            ) : null}
             <button type="button" className={cx(route.name === 'goals' && 'on')} onClick={() => go('goals')}>
               <FlagIcon size={18} /> {t("Goals")}
             </button>

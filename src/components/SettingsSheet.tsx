@@ -7,7 +7,7 @@ import { Modal } from './ui';
 import { useEffect, useState } from 'react';
 import { FeedsSection, SecuritySection, SharedSpaceSection, TaskImportSection, TemplatesSection, WeatherSection } from './SettingsExtras';
 import { useSignOut } from './useSignOut';
-import { unlockedUser } from '../auth/vault';
+import { accountUser } from '../auth/vault';
 import { DATE_LANGUAGES, todayISO, type DateLanguage } from '../dates';
 import { downloadBusyICS, downloadICS, parseICS } from '../ics';
 import { canInstall, isInstalled, onInstallChange, promptInstall } from '../pwa';
@@ -374,9 +374,11 @@ function InstallSection() {
 /**
  * Who is signed in on this device, and the way out. People look for sign-out
  * in Settings first, so it lives here as well as in the side and More panels.
+ * Falls back to the last signed-in user when the vault came from the trusted
+ * device cache (offline boots), so the way out never vanishes.
  */
 function AccountSection() {
-  const user = unlockedUser();
+  const user = accountUser();
   const requestSignOut = useSignOut();
 
   return (

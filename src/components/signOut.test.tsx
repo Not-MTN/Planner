@@ -4,9 +4,8 @@
  * More panel and Settings all offer a way out, and pressing it asks first.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { StrictMode, act, type Root } from 'react';
-import { createRoot } from 'react-dom/client';
-import { webcrypto } from 'node:crypto';
+import { StrictMode, act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import { App } from '../App';
 import { adoptSession, endSession } from '../auth/session';
 import type { PublicUser } from '../shared/authContract';
@@ -61,7 +60,7 @@ beforeEach(async () => {
   Element.prototype.scrollIntoView = () => undefined;
   window.scrollTo = () => undefined;
   (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
-  const dek = await webcrypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  const dek = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
   adoptSession(user, dek, { version: 1, ciphertext: '' });
   container = document.createElement('div');
   document.body.appendChild(container);
