@@ -32,6 +32,7 @@ import {
 } from './src/server/authApi';
 import { authStore } from './src/server/authStore';
 import { handleICS } from './src/server/icsProxy';
+import { notFoundResponse } from './src/server/apiRouter';
 
 // API responses can use a deny-all CSP; the HTML document needs its own app CSP,
 // which is configured in vercel.json. Do not put the API CSP on Vite's HTML page.
@@ -221,6 +222,28 @@ function authHandler(databaseUrl: string | undefined): NextHandleFunction {
   };
 }
 
+/**
+ * Dev/preview parity with the deployed catch-all function: an unknown /api path
+ * answers the same JSON 404 instead of Vite's empty 404 (POST) or the HTML shell
+ * (GET). A misrouted or missing API then reads the same wherever it happens.
+ *
+ * Registered last, so it only sees paths no earlier /api middleware claimed.
+ */
+function apiFallback(): Plugin {
+  const middleware: NextHandleFunction = (_request, response) => {
+    void sendWebResponse(notFoundResponse(), response);
+  };
+  return {
+    name: 'planner-api-fallback',
+    configureServer(server) {
+      server.middlewares.use('/api', middleware);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use('/api', middleware);
+    },
+  };
+}
+
 function authApi(databaseUrl: string | undefined): Plugin {
   const middleware = authHandler(databaseUrl);
   return {
@@ -241,7 +264,7 @@ export default defineConfig(({ mode }) => {
   const model = env.XAI_MODEL || fileEnv.XAI_MODEL;
   const databaseUrl = env.DATABASE_URL || fileEnv.DATABASE_URL;
   return {
-    plugins: [react(), xaiProxy(apiKey, model), syncApi(databaseUrl), authApi(databaseUrl), icsApi()],
+    plugins: [react(), xaiProxy(apiKey, model), syncApi(databaseUrl), authApi(databaseUrl), icsApi(), apiFallback()],
     build: {
       rollupOptions: {
         output: {

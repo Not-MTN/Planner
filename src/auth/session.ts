@@ -29,7 +29,62 @@ export type AuthErrorCode =
   | 'unauthenticated'
   | 'conflict'
   | 'network'
+  /**
+   * A hosting sign-in page (Vercel Authentication, password protection, a
+   * Cloudflare interstitial) answered instead of the API. Signing in cannot
+   * work until that gate is turned off, so the user must be told exactly that.
+   */
+  | 'deployment_gate'
+  /** Nothing serves the accounts API at this address: the route or function is missing. */
+  | 'api_missing'
   | 'unknown';
+
+/**
+ * Shown when the deployment sits behind a hosting gate. Retrying is pointless,
+ * so the copy names the cause and the setting that fixes it.
+ */
+export const DEPLOYMENT_GATE_MESSAGE =
+  'This deployment is behind a hosting sign-in page, so the app cannot reach its own API. Turn off Vercel Authentication (Project Settings → Deployment Protection), or open the production domain, then try again.';
+
+/** Shown when the API route itself is missing (functions not deployed, alias pointing nowhere). */
+export const API_MISSING_MESSAGE =
+  'The accounts API did not answer at this address, so signing in cannot work. Redeploy the app so its api/ functions are included, then try again.';
+
+/** Text a hosting gate leaves in the body, so a plain "not JSON" can be named. */
+const GATE_MARKERS =
+  /vercel authentication|deployment protection|protected deployment|log in to vercel|sso-api|cloudflare|just a moment|checking your browser|attention required|enable javascript and cookies/i;
+
+function looksLikeGate(raw: string): boolean {
+  return GATE_MARKERS.test(raw);
+}
+
+/** One line describing what actually came back, for the UI's technical detail. */
+function describeResponse(response: Response, raw: string): string {
+  const type = (response.headers.get('content-type') ?? '').split(';')[0].trim() || 'no content-type';
+  const snippet = raw
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120);
+  return `${response.status} ${type}${snippet ? ` — “${snippet}”` : ''}`;
+}
+
+/** Classifies a response that carried no JSON error of ours. */
+function unexpectedBody(response: Response, raw: string): AuthErrorCode {
+  if (looksLikeGate(raw)) return 'deployment_gate';
+  const type = (response.headers.get('content-type') ?? '').toLowerCase();
+  // A 404 with nothing in it, or the app's own HTML shell, means the route is
+  // not served here — a platform answer, not one of our handlers.
+  if (response.status === 404 || type.includes('text/html')) return 'api_missing';
+  return 'unknown';
+}
+
+function unexpectedMessage(code: AuthErrorCode, response: Response): string {
+  if (code === 'deployment_gate') return DEPLOYMENT_GATE_MESSAGE;
+  if (code === 'api_missing') return API_MISSING_MESSAGE;
+  return `The server answered with ${response.status} instead of JSON.`;
+}
 
 export class AuthError extends Error {
   readonly code: AuthErrorCode;
@@ -87,10 +142,15 @@ export function adoptSession(
 }
 
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const method = (init.method ?? 'GET').toUpperCase();
   let response: Response;
   try {
     response = await fetch(path, {
       credentials: 'same-origin',
+      // A hosting sign-in page answers with a redirect. Keeping it manual means
+      // the browser hands us an opaque redirect we can name, instead of a CORS
+      // failure that looks exactly like a dead connection.
+      redirect: 'manual',
       headers: { 'Content-Type': 'application/json' },
       ...init,
     });
@@ -98,25 +158,61 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
     throw new AuthError('network', 'Could not reach the server. Check your connection and try again.');
   }
 
-  let body: unknown = null;
+  // `opaqueredirect` / status 0: something in front of the app redirected this
+  // request away before the API ever saw it. Nothing in this API redirects.
+  if (response.type === 'opaqueredirect' || response.status === 0) {
+    throw new AuthError(
+      'deployment_gate',
+      DEPLOYMENT_GATE_MESSAGE,
+      `${method} ${path} was redirected to a sign-in page before it reached the API.`,
+    );
+  }
+
+  let raw = '';
   try {
-    body = await response.json();
+    raw = await response.text();
   } catch {
-    /* fall through to the status check */
+    raw = '';
+  }
+  let body: unknown = null;
+  if (raw.trim()) {
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      body = null;
+    }
   }
 
   if (!response.ok) {
     const error = (body as { error?: { message?: string; code?: string } } | null)?.error;
-    const code = (error?.code ?? 'unknown') as AuthErrorCode;
+    const detail = `${method} ${path} → ${describeResponse(response, raw)}`;
+
+    if (!error) {
+      // Nothing of ours answered. Say what did: a hosting gate, a missing
+      // route, or some other non-JSON page — never a vague "unexpected".
+      const code = unexpectedBody(response, raw);
+      throw new AuthError(code, unexpectedMessage(code, response), detail);
+    }
+
+    // Our router answers an unrouted path with a bare "Not found." and no code;
+    // that is a deployment gap, not something the user can retry away.
+    if (response.status === 404 && !error.code) {
+      throw new AuthError('api_missing', API_MISSING_MESSAGE, detail);
+    }
+
+    const code = (error.code ?? 'unknown') as AuthErrorCode;
     const mapped: AuthErrorCode =
-      code === 'taken' ? (error?.message?.toLowerCase().includes('email') ? 'email_taken' : 'taken') : code;
-    const serverMessage = typeof error?.message === 'string' && error.message.trim() ? error.message : null;
-    // A missing route should not collapse to a generic platform "Not found";
-    // preserve the status so the auth UI can explain the failure in either language.
-    const detail = response.status === 404
-      ? `The server returned an unexpected response (${response.status}).`
-      : serverMessage ?? `The server returned an unexpected response (${response.status}).`;
-    throw new AuthError(mapped, detail, detail);
+      code === 'taken' ? (error.message?.toLowerCase().includes('email') ? 'email_taken' : 'taken') : code;
+    const serverMessage = typeof error.message === 'string' && error.message.trim() ? error.message : null;
+    const message = serverMessage ?? `The server answered with ${response.status}.`;
+    throw new AuthError(mapped, message, serverMessage ?? detail);
+  }
+
+  // A 2xx that is not JSON means the route served something else entirely
+  // (typically the app shell). Callers must not receive a null body.
+  if (raw.trim() && body === null) {
+    const code = unexpectedBody(response, raw);
+    throw new AuthError(code, unexpectedMessage(code, response), `${method} ${path} → ${describeResponse(response, raw)}`);
   }
   return body as T;
 }
@@ -259,6 +355,23 @@ export async function fetchSession(): Promise<PublicUser | null> {
     if (error instanceof AuthError && error.code === 'unauthenticated') return null;
     throw error;
   }
+}
+
+export interface ApiStatus {
+  /** The server can see a database. */
+  configured: boolean;
+  /** `temporary` is the development/preview memory fallback: accounts work, but a restart forgets them. */
+  storage?: 'database' | 'temporary' | 'none';
+}
+
+/**
+ * Pre-flight check for the sign-in screens: is the accounts API reachable, and
+ * does this server have a database? It throws the same classified AuthError as
+ * every other call, so a hosting gate or a missing route can be named before
+ * anyone types a password into a form that cannot possibly work.
+ */
+export async function fetchApiStatus(): Promise<ApiStatus> {
+  return request<ApiStatus>('/api/auth/status', { method: 'GET' });
 }
 
 export async function signOut(): Promise<void> {

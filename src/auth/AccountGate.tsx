@@ -15,7 +15,25 @@ import { AuthError } from './session';
 import '../styles.css';
 import './gate.css';
 
-type Boot = AccountBoot | { status: 'offline' } | null;
+type Boot = AccountBoot | { status: 'offline' } | { status: 'blocked'; error: AuthError } | null;
+
+/**
+ * One sentence per cause, in the reader's language. "Signed out" is wrong for
+ * all of these: no password could get past a gate or a missing API, and saying
+ * so is the difference between a fixable report and a loop.
+ */
+function blockedReason(error: AuthError): string {
+  if (error.code === 'deployment_gate') {
+    return t('This deployment is behind a hosting sign-in page. Turn off Vercel Authentication or password protection, then reload.');
+  }
+  if (error.code === 'api_missing') {
+    return t('The accounts API is not answering at this address. Redeploy the app with its api/ functions, then reload.');
+  }
+  if (error.code === 'not_configured') {
+    return t('Accounts are not set up on this server yet. Add DATABASE_URL to the deployment, then reload.');
+  }
+  return t('Something went wrong while opening your planner.');
+}
 
 export function AccountGate() {
   const [boot, setBoot] = useState<Boot>(null);
@@ -31,7 +49,17 @@ export function AccountGate() {
       (err: unknown) => {
         if (cancelled) return;
         // Without a network we cannot read the vault, so keep working locally.
-        setBoot(err instanceof AuthError && err.code === 'network' ? { status: 'offline' } : { status: 'signed-out' });
+        if (err instanceof AuthError && err.code === 'network') {
+          setBoot({ status: 'offline' });
+          return;
+        }
+        // Everything else used to be treated as "signed out", which sent people
+        // to a sign-in form that could not possibly work. Name the real cause.
+        if (err instanceof AuthError) {
+          setBoot({ status: 'blocked', error: err });
+          return;
+        }
+        setBoot({ status: 'signed-out' });
       },
     );
     return () => {
@@ -54,6 +82,36 @@ export function AccountGate() {
 
   if (boot?.status === 'ready') return <App initialState={boot.state} />;
   if (boot?.status === 'offline') return <App />;
+
+  if (boot?.status === 'blocked') {
+    const { error } = boot;
+    return (
+      <div className="gate">
+        <div className="gate-card">
+          <div className="gate-mark" aria-hidden="true">
+            ⚠️
+          </div>
+          <h1 className="gate-title">{t("Can't open your planner")}</h1>
+          <p className="gate-sub">{blockedReason(error)}</p>
+          {error.detail ? (
+            <code className="gate-detail" dir="ltr">
+              {error.detail}
+            </code>
+          ) : null}
+          <div className="gate-actions">
+            <button className="btn btn-primary" type="button" onClick={() => window.location.reload()}>
+              {t('Retry')}
+            </button>
+          </div>
+          <div className="gate-links">
+            <button type="button" onClick={() => window.location.assign('/')}>
+              {t('Back to the website')}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const locked = boot?.status === 'locked' ? boot.user : null;
 

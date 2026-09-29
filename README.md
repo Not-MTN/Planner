@@ -34,9 +34,33 @@ How it works: the sync code never leaves your devices. The browser derives an AE
 
 Sign-in (and guardian linking later) needs the **same `DATABASE_URL`** — there is nothing else to provision, because the API creates its tables on first use just like `planner_sync`. The schema is in `db/auth.sql` if you prefer to run it yourself.
 
-Visit `https://<your-app>/api/auth/status` — it returns `{"configured": true}` when the server can see `DATABASE_URL`.
+Visit `https://<your-app>/api/auth/status` — it returns `{"configured": true, "storage": "database"}` when the server can see `DATABASE_URL`. Without one, development and preview answer `{"configured": false, "storage": "temporary"}`: accounts work in memory but a restart forgets them (production has no fallback — it reports `"none"` and every account endpoint answers 503).
 
 **The database itself is never pushed to GitHub.** Only schema files (`db/*.sql`) live in the repository. Neon holds the data, and the connection string travels to Vercel as an environment variable: Vercel → Project → Settings → Environment Variables → `DATABASE_URL`, then redeploy. If you used Vercel's Neon integration, it added that variable for you. Locally it goes in `.env.local`, which is git-ignored.
+
+### Sign-in fails: what the app now tells you
+
+The sign-in screen checks `/api/auth/status` **before you type** and names the cause instead of retrying a form that cannot work. Three answers are possible, each with a fix on the hosting side:
+
+| What you see | What answered | Fix |
+| --- | --- | --- |
+| “This deployment is behind a hosting sign-in page…” | Vercel Authentication / password protection (the request was redirected, or an HTML login page came back) | Vercel → Project → **Settings → Deployment Protection** → turn **Vercel Authentication** off (or set it to *Standard Protection* and use the production domain). `/api/*` must never be protected: the app cannot sign in to the hosting provider on the user's behalf. |
+| “The accounts API did not answer at this address…” | A 404, an empty body, or the app's own HTML shell where JSON was expected | The deployment has no `api/` functions, or the domain/alias points at a deleted or older deployment. Redeploy, then re-point the domain (Vercel → Project → Domains). A `404 DEPLOYMENT_NOT_FOUND` page means the alias is dead. |
+| “Accounts are not set up on this server yet.” | `{"configured":false, "storage":"none"}` from `/api/auth/status` | `DATABASE_URL` is missing for that production environment: add it and redeploy (environment variables apply only to new deployments). |
+| “Accounts on this server are kept in memory only…” | `{"configured":false, "storage":"temporary"}` — development or preview with no database | Not a bug: sign-up works, but restarting the dev server signs everyone out. Set `DATABASE_URL` (locally in `.env.local`) to keep accounts. |
+
+The last line under any error is the technical detail — for example `POST /api/auth/salt → 401 text/html — “Log in to Vercel”` — and is meant to be pasted into a bug report.
+
+Two checks from a terminal settle it in seconds:
+
+```bash
+curl -s -o /dev/null -w '%{http_code} %{content_type}\n' https://<your-app>/api/auth/status
+curl -s https://<your-app>/api/auth/status          # expect {"configured":true}
+```
+
+If the first line says `text/html`, protection is on; if the second prints a 404 page, the domain is not pointing at a live deployment. `/login` and `/signup` are static pages, so they can look healthy while every API call is being intercepted — that is exactly the case these messages exist for.
+
+**Installed as an app?** The service worker keeps the shell offline, so a stale install can open the login page from cache and fail every API call with the same symptom. Uninstalling the PWA (or “Update” in Settings, or clearing site data) clears the cached shell.
 
 
 ## Languages (English / فارسی)

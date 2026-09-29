@@ -81,7 +81,8 @@ describe('handleApiRequest', () => {
   it('serves /api/auth/status without a database', async () => {
     const response = await handleApiRequest(request('/api/auth/status'), NO_ENV);
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ configured: false });
+    // No database, and not production: the in-memory fallback is in use.
+    await expect(response.json()).resolves.toEqual({ configured: false, storage: 'temporary' });
   });
 
   it('serves /api/xai/status with and without a key', async () => {
