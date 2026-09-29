@@ -54,7 +54,7 @@ export function createFakeNeon(): FakeDb {
   function run(text: string, values: unknown[]): Row[] {
     const q = normalise(text);
 
-    if (/^CREATE /i.test(q)) return [];
+    if (/^(CREATE|ALTER) /i.test(q)) return [];
 
     if (/^INSERT INTO planner_users /i.test(q)) {
       const [id, username, username_lower, email_lower, display_name, role] = values;
@@ -72,8 +72,8 @@ export function createFakeNeon(): FakeDb {
     }
 
     if (/^INSERT INTO planner_credentials /i.test(q)) {
-      const [user_id, kdf_salt, auth_hash, hash_salt] = values;
-      tables.planner_credentials.push({ user_id, kdf_salt, auth_hash, hash_salt, updated_at: now() });
+      const [user_id, kdf_salt, auth_hash, hash_salt, recovery_hash, recovery_hash_salt] = values;
+      tables.planner_credentials.push({ user_id, kdf_salt, auth_hash, hash_salt, recovery_hash, recovery_hash_salt, updated_at: now() });
       return [];
     }
 
@@ -82,6 +82,16 @@ export function createFakeNeon(): FakeDb {
       const [user_id, ciphertext, wrapped_dek, wrapped_recovery] = values;
       tables.planner_vaults.push({ user_id, version: 1, ciphertext, wrapped_dek, wrapped_recovery, updated_at: now() });
       return [];
+    }
+
+    if (/^SELECT u\.id, c\.recovery_hash/i.test(q)) {
+      const needle = values[0];
+      const user = tables.planner_users.find((row) => row.username_lower === needle || row.email_lower === needle);
+      if (!user || !tables.planner_vaults.some((row) => row.user_id === user.id)) return [];
+      const credential = tables.planner_credentials.find((row) => row.user_id === user.id);
+      return credential
+        ? [{ id: user.id, recovery_hash: credential.recovery_hash ?? null, recovery_hash_salt: credential.recovery_hash_salt ?? null }]
+        : [];
     }
 
     if (/^SELECT u\.id/i.test(q)) {
@@ -93,6 +103,25 @@ export function createFakeNeon(): FakeDb {
       const credential = tables.planner_credentials.find((row) => row.user_id === user.id);
       if (!credential) return [];
       return [{ ...user, ...credential }];
+    }
+
+    if (/^WITH credential_update AS /i.test(q)) {
+      const [kdf_salt, auth_hash, hash_salt, recovery_hash, recovery_hash_salt, user_id, proof, proof_salt, wrapped_dek, wrapped_recovery] = values;
+      const credential = tables.planner_credentials.find((row) => row.user_id === user_id);
+      if (!credential || credential.recovery_hash !== proof || credential.recovery_hash_salt !== proof_salt) return [];
+      const vault = tables.planner_vaults.find((row) => row.user_id === user_id);
+      if (!vault) return [];
+      credential.kdf_salt = kdf_salt;
+      credential.auth_hash = auth_hash;
+      credential.hash_salt = hash_salt;
+      credential.recovery_hash = recovery_hash;
+      credential.recovery_hash_salt = recovery_hash_salt;
+      credential.updated_at = now();
+      vault.wrapped_dek = wrapped_dek;
+      vault.wrapped_recovery = wrapped_recovery;
+      vault.updated_at = now();
+      tables.planner_sessions = tables.planner_sessions.filter((row) => row.user_id !== user_id);
+      return [{ user_id }];
     }
 
     if (/^UPDATE planner_credentials SET /i.test(q)) {

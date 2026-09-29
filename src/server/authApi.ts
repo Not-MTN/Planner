@@ -2,11 +2,13 @@
  * Account API shared by the Vercel Functions in `api/auth/*` and the Vite
  * dev/preview middleware.
  *
- * The server stores only what it must: an identifier, a verifier for the
- * client-stretched auth token, session records, and an opaque encrypted vault.
- * Passwords, planner content and vault keys never reach it.
+ * The server stores only what it must: an identifier, one-way verifiers for
+ * the client-stretched auth token and high-entropy recovery key, session
+ * records, and an opaque encrypted vault. Passwords, the recovery key itself,
+ * planner content and vault keys never reach it.
  */
 import { createHash } from 'node:crypto';
+import { Buffer } from 'node:buffer';
 import { isSameOriginRequest } from './xaiProxy';
 import { WebAuthnError, fromBase64Url, verifyAssertion, verifyRegistration } from './webauthn';
 import { API_SECURITY_HEADERS, BodyTooLargeError, rateLimitResponse, readLimitedBody } from './security';
@@ -157,6 +159,7 @@ export async function handleSignup(request: Request, store: AuthStore | null): P
   const email = cleanEmail(body.email);
   const kdfSalt = body.kdfSalt;
   const authToken = body.authToken;
+  const recoveryHash = body.recoveryHash;
   const wrappedDek = body.wrappedDek;
   const wrappedRecovery = body.wrappedRecovery;
   const ciphertext = body.ciphertext;
@@ -167,6 +170,7 @@ export async function handleSignup(request: Request, store: AuthStore | null): P
   if (email === undefined) return error(400, 'That email address does not look right.');
   if (!isBase64(kdfSalt, 16, 64)) return error(400, 'Missing or invalid KDF salt.');
   if (!isBase64(authToken, 32, 64)) return error(400, 'Missing or invalid auth token.');
+  if (!isBase64(recoveryHash, 43, 44)) return error(400, 'Missing or invalid recovery verifier.');
   if (!isBase64(wrappedDek, 32, 256)) return error(400, 'Missing or invalid wrapped key.');
   if (!isBase64(wrappedRecovery, 32, 256)) return error(400, 'Missing or invalid recovery key.');
   if (typeof ciphertext !== 'string' || !ciphertext || ciphertext.length > MAX_VAULT_BYTES * 2) {
@@ -181,6 +185,7 @@ export async function handleSignup(request: Request, store: AuthStore | null): P
       role,
       kdfSalt,
       authToken,
+      recoveryHash: recoveryHash as string,
       wrappedDek,
       wrappedRecovery,
       ciphertext,
@@ -230,6 +235,74 @@ export async function handleSalt(request: Request, store: AuthStore | null): Pro
   try {
     const account = await store!.findAccount(login);
     return json(200, { kdfSalt: account?.kdfSalt ?? decoySalt(login) });
+  } catch {
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
+}
+
+/** A stable encrypted-looking decoy keeps recovery lookup from confirming accounts. */
+function decoyRecoveryWrap(login: string): string {
+  const normalized = login.trim().toLowerCase();
+  const head = createHash('sha256').update(`planner-recovery-decoy:${normalized}`).digest();
+  const tail = createHash('sha256').update(`planner-recovery-decoy-tail:${normalized}`).digest();
+  return Buffer.concat([head, tail.subarray(0, 28)]).toString('base64');
+}
+
+/** Returns only the salt and opaque wrapped key; unknown accounts get a decoy of the same shape. */
+export async function handleRecoveryStart(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'auth-recovery-start', 30) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'POST') return error(405, 'Method not allowed.', undefined);
+
+  const body = await readJsonBody(request);
+  const login = typeof body?.username === 'string' ? body.username.trim() : '';
+  if (!login || login.length > 200) return error(400, 'Enter your username or email.');
+
+  try {
+    const account = await store!.findAccount(login);
+    const vault = account ? await store!.getVault(account.user.id) : null;
+    return json(200, {
+      kdfSalt: account?.kdfSalt ?? decoySalt(login),
+      wrappedRecovery: vault?.wrappedRecovery ?? decoyRecoveryWrap(login),
+    });
+  } catch {
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
+}
+
+/** Replaces the password and both wrapped DEKs only after the verifier matches. */
+export async function handleRecoveryComplete(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'auth-recovery-complete', 8) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'POST') return error(405, 'Method not allowed.', undefined);
+
+  const body = await readJsonBody(request);
+  const login = typeof body?.username === 'string' ? body.username.trim() : '';
+  const recoveryHash = body?.recoveryHash;
+  const newRecoveryHash = body?.newRecoveryHash;
+  const kdfSalt = body?.kdfSalt;
+  const authToken = body?.authToken;
+  const wrappedDek = body?.wrappedDek;
+  const wrappedRecovery = body?.wrappedRecovery;
+  if (
+    !login || login.length > 200 ||
+    !isBase64(recoveryHash, 43, 44) || !isBase64(newRecoveryHash, 43, 44) ||
+    !isBase64(kdfSalt, 16, 64) || !isBase64(authToken, 32, 64) ||
+    !isBase64(wrappedDek, 32, 256) || !isBase64(wrappedRecovery, 32, 256)
+  ) {
+    return error(400, 'Missing or invalid recovery details.');
+  }
+
+  try {
+    const updated = await store!.recoverAccount(login, recoveryHash, {
+      newRecoveryHash,
+      kdfSalt,
+      authToken,
+      wrappedDek,
+      wrappedRecovery,
+    });
+    if (!updated) return error(401, 'Wrong username or recovery key.', 'bad_credentials');
+    return json(200, { ok: true });
   } catch {
     return error(502, 'The accounts database could not be reached. Try again shortly.');
   }

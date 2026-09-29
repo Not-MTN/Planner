@@ -25,6 +25,10 @@ function route(path: string, method: string, body?: string): Promise<Response> {
       return import('../server/authApi').then((m) => m.handleSignup(request, store));
     case 'POST /api/auth/salt':
       return import('../server/authApi').then((m) => m.handleSalt(request, store));
+    case 'POST /api/auth/recovery/start':
+      return import('../server/authApi').then((m) => m.handleRecoveryStart(request, store));
+    case 'POST /api/auth/recovery/complete':
+      return import('../server/authApi').then((m) => m.handleRecoveryComplete(request, store));
     case 'POST /api/auth/login':
       return import('../server/authApi').then((m) => m.handleLogin(request, store));
     case 'GET /api/auth/session':
@@ -131,6 +135,27 @@ describe('accounts end to end', () => {
     // The panel choices made at sign-up travelled inside the encrypted vault.
     expect(reopened?.panels.student.field).toBe('Mathematics');
     expect(reopened?.panels.student.grade).toBe('school-11');
+  }, 60_000);
+
+  it('resets a forgotten password with the real recovery key and keeps the vault readable', async () => {
+    const { signUp, signIn, endSession, decryptVault, resetPasswordWithRecovery, AuthError } = await import('./session');
+    const original = sampleState();
+    const recoveryUser = { ...USER, username: 'recover1', email: 'recover1@example.com' };
+    const { recoveryKey } = await signUp({ ...recoveryUser, role: 'student', password: PASSWORD, initialState: original, remember: false });
+    endSession();
+
+    await expect(
+      resetPasswordWithRecovery(recoveryUser.username, 'plnr-AAAA-AAAA-AAAA-AAAA-AAAA', 'another-long-password'),
+    ).rejects.toBeInstanceOf(AuthError);
+
+    const replacementPassword = 'a-different-long-password';
+    const replacementRecoveryKey = await resetPasswordWithRecovery(recoveryUser.username, recoveryKey, replacementPassword);
+    expect(replacementRecoveryKey).toMatch(/^plnr(-[A-Z2-9]{4}){5}$/);
+
+    await expect(signIn(recoveryUser.username, PASSWORD, false)).rejects.toBeInstanceOf(AuthError);
+    const session = await signIn(recoveryUser.username, replacementPassword, false);
+    expect(session.user.username).toBe(recoveryUser.username);
+    expect((await decryptVault())?.tasks[0]?.title).toBe('Finish the maths homework');
   }, 60_000);
 
   it('signs in with the email address instead of the username', async () => {

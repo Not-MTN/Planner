@@ -1,4 +1,7 @@
 // Vercel Function: api/[...path].ts — the single serverless function behind every /api/* route.
+// The explicit /api/(.*) rewrite in vercel.json is important: Vercel's inferred
+// catch-all routing can miss nested paths such as /api/auth/salt and return a
+// platform 404 before this handler runs.
 //
 // Vercel's Hobby plan caps a Deployment at 12 Serverless Functions, and the
 // API has 16 routes, so instead of one file per route the whole surface is

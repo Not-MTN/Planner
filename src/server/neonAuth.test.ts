@@ -17,7 +17,15 @@ vi.mock('@neondatabase/serverless', () => ({
 }));
 
 const { createNeonAuthStore, hashCredential, hashAuthToken } = await import('./authStore');
-const { handleAccountVault, handleLogin, handleLogout, handleSession, handleSignup } = await import('./authApi');
+const {
+  handleAccountVault,
+  handleLogin,
+  handleLogout,
+  handleRecoveryComplete,
+  handleRecoveryStart,
+  handleSession,
+  handleSignup,
+} = await import('./authApi');
 const { resetRateLimits } = await import('./security');
 interface LoginResponse {
   user: { username: string };
@@ -37,6 +45,7 @@ const ACCOUNT = {
   role: 'student' as const,
   kdfSalt: 'c2FsdHNhbHRzYWx0c2E=',
   authToken: 'YXV0aFRva2VuYXV0aFRva2VuYXV0aFRva2VuMTI=',
+  recoveryHash: HASH,
   wrappedDek: 'd3JhcHBlZERla3dyYXBwZWREZWt3cmFwcGVkRGVrMTI=',
   wrappedRecovery: 'd3JhcHBlZFJlY292ZXJ5d3JhcHBlZFJlY292ZXJ5MTI=',
   ciphertext: 'dmF1bHRjaXBoZXJ0ZXh0',
@@ -79,6 +88,8 @@ describe('accounts on the real database path', () => {
     // One row per table: a missing credential or vault would break sign-in.
     expect(db.tables.planner_users).toHaveLength(1);
     expect(db.tables.planner_credentials).toHaveLength(1);
+    expect(db.tables.planner_credentials[0]?.recovery_hash).not.toBe(ACCOUNT.recoveryHash);
+    expect(db.tables.planner_credentials[0]?.recovery_hash_salt).toBeTruthy();
     expect(db.tables.planner_vaults).toHaveLength(1);
     expect(db.tables.planner_sessions).toHaveLength(1);
   });
@@ -181,6 +192,40 @@ describe('accounts on the real database path', () => {
 
     const stale = await handleLogin(post('/api/auth/login', { username: ACCOUNT.username, authToken: ACCOUNT.authToken }), store);
     expect(stale.status).toBe(401);
+  });
+
+  it('recovers through the database path, rotates wraps, and revokes old sessions', async () => {
+    const store = await createNeonAuthStore(DB_URL);
+    const signup = await handleSignup(post('/api/auth/signup', ACCOUNT), store);
+    const oldCookie = cookieFrom(signup);
+
+    const start = await handleRecoveryStart(post('/api/auth/recovery/start', { username: 'sara' }), store);
+    expect(start.status).toBe(200);
+    await expect(start.json()).resolves.toEqual({ kdfSalt: ACCOUNT.kdfSalt, wrappedRecovery: ACCOUNT.wrappedRecovery });
+
+    const update = {
+      username: 'sara',
+      recoveryHash: HASH,
+      newRecoveryHash: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+      kdfSalt: 'bmV3LXNhbHQtMDEyMzQ1Ng==',
+      authToken: 'bm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm4=',
+      wrappedDek: 'eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4',
+      wrappedRecovery: 'eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5',
+    };
+    const wrong = await handleRecoveryComplete(post('/api/auth/recovery/complete', { ...update, recoveryHash: update.newRecoveryHash }), store);
+    expect(wrong.status).toBe(401);
+
+    const recovered = await handleRecoveryComplete(post('/api/auth/recovery/complete', update), store);
+    expect(recovered.status).toBe(200);
+    expect((await handleSession(get('/api/auth/session', oldCookie), store)).status).toBe(401);
+
+    const newLogin = await handleLogin(post('/api/auth/login', { username: 'sara', authToken: update.authToken }), store);
+    expect(newLogin.status).toBe(200);
+    expect((await handleLogin(post('/api/auth/login', { username: 'sara', authToken: ACCOUNT.authToken }), store)).status).toBe(401);
+    expect(db.tables.planner_vaults[0]?.wrapped_dek).toBe(update.wrappedDek);
+    expect(db.tables.planner_vaults[0]?.wrapped_recovery).toBe(update.wrappedRecovery);
+    expect(db.tables.planner_credentials[0]?.recovery_hash).not.toBe(update.newRecoveryHash);
+    expect(db.tables.planner_credentials[0]?.recovery_hash_salt).toBeTruthy();
   });
 
   it('keeps a link, accepts it by code hash, and moves results without reading them', async () => {

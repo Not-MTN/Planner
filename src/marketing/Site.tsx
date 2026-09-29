@@ -105,30 +105,32 @@ export function Site() {
   return (
     <div className="mkt" dir={lang === 'fa' ? 'rtl' : 'ltr'} data-lang={lang}>
       <span className="progress" aria-hidden="true" style={{ ['--p' as string]: progress }} />
-      <header className={`nav ${scrolled ? 'is-scrolled' : ''}`}>
+      <header className={`nav ${scrolled ? 'is-scrolled' : ''} ${isAuth ? 'nav-auth' : ''}`}>
         <div className="wrap nav-inner">
           <button type="button" className="brand" onClick={() => navigate('/')}>
             <span className="brand-mark" aria-hidden="true" />
             <span className="brand-name">{c.brand}</span>
           </button>
 
-          <nav className={`nav-links ${menu ? 'is-open' : ''}`} aria-label={c.navMenu}>
-            <button type="button" onClick={() => goToSection('how')}>
-              {c.navHow}
-            </button>
-            <button type="button" onClick={() => goToSection('roles')}>
-              {c.navRoles}
-            </button>
-            <button type="button" onClick={() => goToSection('guardians')}>
-              {c.navGuardians}
-            </button>
-            <button type="button" onClick={() => goToSection('ai')}>
-              {c.navAI}
-            </button>
-            <button type="button" onClick={() => goToSection('privacy')}>
-              {c.navPrivacy}
-            </button>
-          </nav>
+          {!isAuth ? (
+            <nav className={`nav-links ${menu ? 'is-open' : ''}`} aria-label={c.navMenu}>
+              <button type="button" onClick={() => goToSection('how')}>
+                {c.navHow}
+              </button>
+              <button type="button" onClick={() => goToSection('roles')}>
+                {c.navRoles}
+              </button>
+              <button type="button" onClick={() => goToSection('guardians')}>
+                {c.navGuardians}
+              </button>
+              <button type="button" onClick={() => goToSection('ai')}>
+                {c.navAI}
+              </button>
+              <button type="button" onClick={() => goToSection('privacy')}>
+                {c.navPrivacy}
+              </button>
+            </nav>
+          ) : null}
 
           <div className="nav-tools">
             <button
@@ -155,16 +157,24 @@ export function Site() {
             >
               {theme === 'dark' ? '☀' : '☾'}
             </button>
-            <button type="button" className="btn btn-quiet" onClick={() => navigate('/login')}>
-              {c.navSignIn}
-            </button>
-            <button type="button" className="btn btn-primary btn-sm" onClick={() => navigate('/signup')}>
-              {c.navStart}
-            </button>
-            <button type="button" className="nav-burger" aria-label={c.navMenu} aria-expanded={menu} onClick={() => setMenu(!menu)}>
-              <span />
-              <span />
-            </button>
+            {isAuth ? (
+              <button type="button" className="btn btn-quiet nav-auth-back" onClick={() => navigate('/')}>
+                {c.navBackHome}
+              </button>
+            ) : (
+              <>
+                <button type="button" className="btn btn-quiet" onClick={() => navigate('/login')}>
+                  {c.navSignIn}
+                </button>
+                <button type="button" className="btn btn-primary btn-sm" onClick={() => navigate('/signup')}>
+                  {c.navStart}
+                </button>
+                <button type="button" className="nav-burger" aria-label={c.navMenu} aria-expanded={menu} onClick={() => setMenu(!menu)}>
+                  <span />
+                  <span />
+                </button>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -175,6 +185,7 @@ export function Site() {
         <Landing lang={lang} navigate={navigate} />
       )}
 
+      {!isAuth ? (
       <footer className="foot">
         <div className="wrap">
           <div className="foot-grid">
@@ -224,6 +235,7 @@ export function Site() {
           </div>
         </div>
       </footer>
+      ) : null}
     </div>
   );
 }

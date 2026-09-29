@@ -98,6 +98,13 @@ export function normalizeRecoveryKey(input: string): string | null {
   return `plnr-${clean.match(/.{4}/g)!.join('-')}`;
 }
 
+/** A one-way verifier for account recovery; the high-entropy key itself stays in the browser. */
+export function hashRecoveryKey(input: string): string {
+  const normalized = normalizeRecoveryKey(input);
+  if (!normalized) throw new VaultError('That recovery key is not valid.');
+  return toBase64(sha256(new TextEncoder().encode(normalized)));
+}
+
 /** Returns the usable (non-extractable) DEK plus its two wrapped copies. */
 export async function createVaultKeys(password: string, recoveryKey: string) {
   const salt = newSalt();

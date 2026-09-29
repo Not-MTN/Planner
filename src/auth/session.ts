@@ -4,7 +4,20 @@
  * trusted-device flow (phase 2) is built.
  */
 import type { LoginResponse, PublicUser, SessionResponse, VaultResponse } from '../shared/authContract';
-import { createVaultKeys, decryptState, deriveFromPassword, encryptState, formatRecoveryKey, importDek, unwrapKeyRaw } from './crypto';
+import {
+  createVaultKeys,
+  decryptState,
+  deriveFromPassword,
+  encryptState,
+  formatRecoveryKey,
+  hashRecoveryKey,
+  importDek,
+  keyFromRecovery,
+  newSalt,
+  normalizeRecoveryKey,
+  unwrapKeyRaw,
+  wrapRawKey,
+} from './crypto';
 import { rememberOnDevice } from './device';
 import type { PlannerState } from '../types';
 
@@ -98,9 +111,11 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
     const mapped: AuthErrorCode =
       code === 'taken' ? (error?.message?.toLowerCase().includes('email') ? 'email_taken' : 'taken') : code;
     const serverMessage = typeof error?.message === 'string' && error.message.trim() ? error.message : null;
-    // No structured message (an error page, a proxy, a bare status): say which
-    // status came back, the same way the AI proxy does — silence helps nobody.
-    const detail = serverMessage ?? `The server returned an unexpected response (${response.status}).`;
+    // A missing route should not collapse to a generic platform "Not found";
+    // preserve the status so the auth UI can explain the failure in either language.
+    const detail = response.status === 404
+      ? `The server returned an unexpected response (${response.status}).`
+      : serverMessage ?? `The server returned an unexpected response (${response.status}).`;
     throw new AuthError(mapped, detail, detail);
   }
   return body as T;
@@ -120,6 +135,7 @@ export interface SignUpInput {
 
 export async function signUp(input: SignUpInput): Promise<{ recoveryKey: string; session: ActiveSession }> {
   const recoveryKey = formatRecoveryKey();
+  const recoveryHash = hashRecoveryKey(recoveryKey);
   const { salt, authToken, dek, dekRaw, wrappedDek, wrappedRecovery } = await createVaultKeys(input.password, recoveryKey);
   const ciphertext = await encryptState(input.initialState, dek);
 
@@ -132,6 +148,7 @@ export async function signUp(input: SignUpInput): Promise<{ recoveryKey: string;
       role: input.role,
       kdfSalt: salt,
       authToken,
+      recoveryHash,
       wrappedDek,
       wrappedRecovery,
       ciphertext,
@@ -165,6 +182,66 @@ export async function signIn(identifier: string, password: string, remember = tr
   const dek = await importDek(raw, false);
   active = { user: result.user, dek, dekRaw, vault: result.vault };
   return active;
+}
+
+/**
+ * Change a forgotten password using the recovery key. The vault key is unwrapped
+ * and re-wrapped in this browser; only its encrypted copies and one-way recovery
+ * verifier are sent to the server.
+ */
+export async function resetPasswordWithRecovery(
+  identifier: string,
+  recoveryKeyInput: string,
+  newPassword: string,
+): Promise<string> {
+  const identifierValue = identifier.trim();
+  const recoveryKey = normalizeRecoveryKey(recoveryKeyInput);
+  if (!identifierValue || !recoveryKey) {
+    throw new AuthError('bad_credentials', 'Wrong username or recovery key.');
+  }
+
+  const { kdfSalt: oldSalt, wrappedRecovery: oldWrappedRecovery } = await request<{ kdfSalt: string; wrappedRecovery: string }>(
+    '/api/auth/recovery/start',
+    { method: 'POST', body: JSON.stringify({ username: identifierValue }) },
+  );
+
+  let raw: Uint8Array<ArrayBuffer> | null = null;
+  try {
+    const oldRecoveryKek = await keyFromRecovery(recoveryKey, oldSalt);
+    try {
+      raw = await unwrapKeyRaw(oldWrappedRecovery, oldRecoveryKek);
+    } catch {
+      // The endpoint deliberately returns a decoy for unknown accounts. Keep
+      // the same message for an unknown identifier and a wrong recovery key.
+      throw new AuthError('bad_credentials', 'Wrong username or recovery key.');
+    }
+
+    const salt = newSalt();
+    const { authToken, kek } = await deriveFromPassword(newPassword, salt);
+    const nextRecoveryKey = formatRecoveryKey();
+    const recoveryHash = hashRecoveryKey(recoveryKey);
+    const nextRecoveryHash = hashRecoveryKey(nextRecoveryKey);
+    const wrappedDek = await wrapRawKey(raw, kek);
+    const nextRecoveryKek = await keyFromRecovery(nextRecoveryKey, salt);
+    const wrappedRecovery = await wrapRawKey(raw, nextRecoveryKek);
+
+    await request<{ ok: true }>('/api/auth/recovery/complete', {
+      method: 'POST',
+      body: JSON.stringify({
+        username: identifierValue,
+        recoveryHash,
+        newRecoveryHash: nextRecoveryHash,
+        kdfSalt: salt,
+        authToken,
+        wrappedDek,
+        wrappedRecovery,
+      }),
+    });
+    endSession();
+    return nextRecoveryKey;
+  } finally {
+    raw?.fill(0);
+  }
 }
 
 /**
