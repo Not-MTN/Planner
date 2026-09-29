@@ -357,14 +357,21 @@ export async function fetchSession(): Promise<PublicUser | null> {
   }
 }
 
+export interface ApiStatus {
+  /** The server can see a database. */
+  configured: boolean;
+  /** `temporary` is the development/preview memory fallback: accounts work, but a restart forgets them. */
+  storage?: 'database' | 'temporary' | 'none';
+}
+
 /**
  * Pre-flight check for the sign-in screens: is the accounts API reachable, and
  * does this server have a database? It throws the same classified AuthError as
  * every other call, so a hosting gate or a missing route can be named before
  * anyone types a password into a form that cannot possibly work.
  */
-export async function fetchApiStatus(): Promise<{ configured: boolean }> {
-  return request<{ configured: boolean }>('/api/auth/status', { method: 'GET' });
+export async function fetchApiStatus(): Promise<ApiStatus> {
+  return request<ApiStatus>('/api/auth/status', { method: 'GET' });
 }
 
 export async function signOut(): Promise<void> {

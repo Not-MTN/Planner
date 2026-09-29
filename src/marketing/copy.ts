@@ -299,6 +299,8 @@ export const en = {
     'This deployment is behind a hosting sign-in page, so the app cannot reach its own API. Turn off Vercel Authentication (Project Settings → Deployment Protection), or open the production domain, then try again.',
   errApiMissing:
     'The accounts API did not answer at this address. Redeploy the app with its api/ functions, or check the domain you are using, then try again.',
+  errTemporaryAccounts:
+    'Accounts on this server are kept in memory only, so restarting it signs everyone out. Add a DATABASE_URL to keep them.',
   errPasskeyCancelled: 'Passkey sign-in was cancelled.',
   errPasskeyUnsupported: 'Passkeys need a modern browser on a secure connection.',
   errPasskeyNoPrf: "This browser's passkeys cannot open your planner — your password will.",
@@ -700,6 +702,8 @@ export const fa: Record<keyof typeof en, string> = {
     'این استقرار پشت صفحهٔ ورودِ سرویس میزبانی است و برنامه به API خودش دسترسی ندارد. Vercel Authentication را خاموش کنید (Project Settings ← Deployment Protection) یا دامنهٔ اصلی را باز کنید و دوباره تلاش کنید.',
   errApiMissing:
     'API حساب‌ها در این نشانی پاسخ نمی‌دهد. برنامه را همراه توابع api/ دوباره منتشر کنید یا دامنه‌ای که استفاده می‌کنید را بررسی کنید.',
+  errTemporaryAccounts:
+    'حساب‌های این سرور فقط در حافظه نگه داشته می‌شوند، پس با هر بار راه‌اندازی دوباره همه از حساب خارج می‌شوند. برای نگه‌داشتن آن‌ها DATABASE_URL را تنظیم کنید.',
   errPasskeyCancelled: 'ورود با کلید عبور لغو شد.',
   errPasskeyUnsupported: 'کلید عبور به مرورگر به‌روز و اتصال امن نیاز دارد.',
   errPasskeyNoPrf: 'این مرورگر نمی‌تواند با کلید عبور قفل برنامه را باز کند؛ رمز عبور را وارد کنید.',

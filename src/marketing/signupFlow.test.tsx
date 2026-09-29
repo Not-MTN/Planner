@@ -240,6 +240,12 @@ describe('sign-up journey', () => {
     expect(requests).toContain('POST /api/auth/recovery/complete');
   }, 60_000);
 
+  it('says when accounts are kept in memory only, not by a database', async () => {
+    await renderAt('/login');
+    await waitFor(() => Boolean(container.querySelector('.auth-notice')));
+    expect(container.querySelector('.auth-notice')?.textContent).toContain('kept in memory only');
+  });
+
   it('names a protected deployment instead of retrying a hopeless sign-in', async () => {
     vi.stubGlobal(
       'fetch',

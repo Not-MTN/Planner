@@ -60,7 +60,11 @@ function useServerNotice(c: Record<string, string>, lang: Lang): { notice: strin
     fetchApiStatus().then(
       (status) => {
         if (cancelled) return;
-        setState(status.configured ? { notice: null, detail: null } : { notice: c.errNotConfigured, detail: null });
+        // A dev/preview server without a database still lets people sign up, but
+        // forgets them on restart — say that instead of "accounts are not set up".
+        const notice =
+          status.storage === 'temporary' ? c.errTemporaryAccounts : status.configured ? null : c.errNotConfigured;
+        setState({ notice, detail: null });
       },
       (caught: unknown) => {
         if (cancelled) return;

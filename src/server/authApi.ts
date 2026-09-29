@@ -208,7 +208,16 @@ export async function handleSignup(request: Request, store: AuthStore | null): P
 export function handleAuthStatus(request: Request, databaseUrl: string | undefined): Response {
   if (!isSameOriginRequest(request)) return error(403, 'Cross-origin requests are not allowed.');
   if (request.method !== 'GET' && request.method !== 'HEAD') return error(405, 'Method not allowed.', undefined);
-  return json(200, { configured: Boolean(databaseUrl?.trim()) });
+  const configured = Boolean(databaseUrl?.trim());
+  // Development and preview fall back to the in-memory store, where accounts
+  // work but do not survive a restart. Saying so is more useful than a bare
+  // "not configured" that contradicts a sign-up which just succeeded.
+  const storage: 'database' | 'temporary' | 'none' = configured
+    ? 'database'
+    : process.env.NODE_ENV === 'production'
+      ? 'none'
+      : 'temporary';
+  return json(200, { configured, storage });
 }
 
 /* -------------------------------------------------------------------- salt */
