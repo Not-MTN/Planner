@@ -9,9 +9,9 @@
  */
 import { createHash } from 'node:crypto';
 import { Buffer } from 'node:buffer';
-import { isSameOriginRequest } from './xaiProxy';
-import { WebAuthnError, fromBase64Url, verifyAssertion, verifyRegistration } from './webauthn';
-import { API_SECURITY_HEADERS, BodyTooLargeError, rateLimitResponse, readLimitedBody } from './security';
+import { isSameOriginRequest } from './xaiProxy.js';
+import { WebAuthnError, fromBase64Url, verifyAssertion, verifyRegistration } from './webauthn.js';
+import { API_SECURITY_HEADERS, BodyTooLargeError, rateLimitResponse, readLimitedBody } from './security.js';
 import {
   cleanCodeHash,
   cleanDisplayName,
@@ -39,7 +39,7 @@ import {
   type SessionResponse,
   type ShareResponse,
   type VaultResponse,
-} from '../shared/authContract';
+} from '../shared/authContract.js';
 import {
   hashAuthToken,
   hashToken,
@@ -49,7 +49,7 @@ import {
   type AuthStore,
   type LinkRow,
   type UserRow,
-} from './authStore';
+} from './authStore.js';
 
 export const MISSING_DB_AUTH_MESSAGE =
   'Accounts need a database. Add your Neon connection string as DATABASE_URL under Vercel → Project Settings → Environment Variables (or in .env.local) and restart.';
