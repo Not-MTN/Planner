@@ -260,7 +260,7 @@ describe('passkey journey', () => {
     document.body.appendChild(container);
     root = createRoot(container);
     await renderAt('/login');
-    await click(buttonStartingWith('Sign in with a passkey'));
+    await click(buttonStartingWith('Continue with a passkey'));
     await waitFor(() => assign.mock.calls.length > 0);
 
     expect(assign).toHaveBeenCalledWith('/app');
@@ -291,7 +291,7 @@ describe('passkey journey', () => {
   it('turns a cancelled sign-in touch into a sentence, not an error flood', async () => {
     createBehaviour = 'cancel';
     await renderAt('/login');
-    await click(buttonStartingWith('Sign in with a passkey'));
+    await click(buttonStartingWith('Continue with a passkey'));
     await waitFor(() => Boolean(container.querySelector('.auth-error')));
     expect(container.querySelector('.auth-error')?.textContent).toBe('Passkey sign-in was cancelled.');
     expect(assign).not.toHaveBeenCalled();

@@ -3,7 +3,7 @@
  *
  * Production serves it through ONE Vercel Function via the catch-all
  * `api/[...path].ts`: Vercel's Hobby plan allows at most 12 Serverless
- * Functions per Deployment, and the API has 16 routes. The Vite dev/preview
+ * Functions per Deployment, and the API has 18 routes. The Vite dev/preview
  * middleware mounts the same `handleApiRequest`, so local development and
  * production share one code path for routing as well.
  *
@@ -28,6 +28,8 @@ import {
   handlePasskeyLoginVerify,
   handlePasskeyRegisterOptions,
   handlePasskeyRegisterVerify,
+  handleRecoveryComplete,
+  handleRecoveryStart,
   handleSalt,
   handleSession,
   handleShare,
@@ -86,6 +88,10 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
       return (request) => authStore(env.DATABASE_URL).then((store) => handlePasskeyList(request, store));
     case '/api/auth/note':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleNote(request, store));
+    case '/api/auth/recovery/start':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleRecoveryStart(request, store));
+    case '/api/auth/recovery/complete':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleRecoveryComplete(request, store));
     case '/api/auth/salt':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleSalt(request, store));
     case '/api/auth/session':

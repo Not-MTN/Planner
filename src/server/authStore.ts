@@ -35,8 +35,13 @@ CREATE TABLE IF NOT EXISTS planner_credentials (
   kdf_salt    text NOT NULL,
   auth_hash   text NOT NULL,
   hash_salt   text NOT NULL,
-  updated_at  timestamptz NOT NULL DEFAULT now()
+  recovery_hash      text,
+  recovery_hash_salt text,
+  updated_at         timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS recovery_hash text;
+ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS recovery_hash_salt text;
 
 CREATE TABLE IF NOT EXISTS planner_vaults (
   user_id          text PRIMARY KEY REFERENCES planner_users(id) ON DELETE CASCADE,
@@ -136,12 +141,21 @@ export interface NewAccount {
   role: AccountRole;
   kdfSalt: string;
   authToken: string;
+  recoveryHash: string;
   wrappedDek: string;
   wrappedRecovery: string;
   ciphertext: string;
 }
 
 export type CreateResult = { ok: true; user: UserRow } | { ok: false; reason: 'username_taken' | 'email_taken' };
+
+export interface RecoveryUpdate {
+  newRecoveryHash: string;
+  kdfSalt: string;
+  authToken: string;
+  wrappedDek: string;
+  wrappedRecovery: string;
+}
 
 export interface SessionRow {
   id: string;
@@ -202,6 +216,8 @@ export interface NewPasskey {
 export interface AuthStore {
   createAccount(input: NewAccount): Promise<CreateResult>;
   findAccount(login: string): Promise<AccountRow | null>;
+  /** Verify a recovery-key verifier, rotate the password wraps, and revoke sessions. */
+  recoverAccount(login: string, recoveryHash: string, update: RecoveryUpdate): Promise<boolean>;
   findUserById(id: string): Promise<UserRow | null>;
   getVault(userId: string): Promise<VaultRow | null>;
   putVault(userId: string, baseVersion: number, ciphertext: string): Promise<VaultRow | null>;
@@ -267,6 +283,15 @@ export async function hashCredential(authToken: string): Promise<StoredCredentia
   return { hashSalt, authHash: await hashAuthToken(authToken, hashSalt) };
 }
 
+/** A separate server-side scrypt verifier prevents a database read from being a usable recovery proof. */
+export async function hashRecoveryVerifier(recoveryHash: string): Promise<{ recoveryHash: string; recoveryHashSalt: string }> {
+  const recoveryHashSalt = newSalt();
+  return {
+    recoveryHash: await hashAuthToken(recoveryHash, recoveryHashSalt),
+    recoveryHashSalt,
+  };
+}
+
 export function newSalt(): string {
   return randomBytes(16).toString('base64');
 }
@@ -290,12 +315,23 @@ export function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(left, right);
 }
 
+async function spendRecoveryFailureWork(recoveryHash: string): Promise<void> {
+  const dummy = await hashAuthToken(recoveryHash, 'planner-recovery-decoy-salt');
+  safeEqual(dummy, dummy);
+}
+
 /* ------------------------------------------------------------- memory store */
 
 /** Used only outside production when no database is configured. */
 export function createMemoryAuthStore(): AuthStore {
   const users = new Map<string, UserRow>();
-  const credentials = new Map<string, { kdfSalt: string; hashSalt: string; authHash: string }>();
+  const credentials = new Map<string, {
+    kdfSalt: string;
+    hashSalt: string;
+    authHash: string;
+    recoveryHash: string | null;
+    recoveryHashSalt: string | null;
+  }>();
   const vaults = new Map<string, VaultRow>();
   const sessions = new Map<string, SessionRow>();
   const links: LinkRow[] = [];
@@ -323,7 +359,8 @@ export function createMemoryAuthStore(): AuthStore {
       };
       users.set(user.id, user);
       const credential = await hashCredential(input.authToken);
-      credentials.set(user.id, { kdfSalt: input.kdfSalt, ...credential });
+      const recoveryVerifier = await hashRecoveryVerifier(input.recoveryHash);
+      credentials.set(user.id, { kdfSalt: input.kdfSalt, ...credential, ...recoveryVerifier });
       vaults.set(user.id, {
         version: 1,
         ciphertext: input.ciphertext,
@@ -344,6 +381,40 @@ export function createMemoryAuthStore(): AuthStore {
       }
       return null;
     },
+    async recoverAccount(login, recoveryHash, update) {
+      const needle = login.trim().toLowerCase();
+      const user = [...users.values()].find((row) => row.username_lower === needle || row.email_lower === needle);
+      if (!user) {
+        await spendRecoveryFailureWork(recoveryHash);
+        return false;
+      }
+      const current = credentials.get(user.id);
+      const vault = vaults.get(user.id);
+      if (!current?.recoveryHash || !current.recoveryHashSalt || !vault) {
+        await spendRecoveryFailureWork(recoveryHash);
+        return false;
+      }
+      const candidate = await hashAuthToken(recoveryHash, current.recoveryHashSalt);
+      if (!safeEqual(current.recoveryHash, candidate)) return false;
+
+      const credential = await hashCredential(update.authToken);
+      const recoveryVerifier = await hashRecoveryVerifier(update.newRecoveryHash);
+      credentials.set(user.id, {
+        kdfSalt: update.kdfSalt,
+        ...credential,
+        ...recoveryVerifier,
+      });
+      vaults.set(user.id, {
+        ...vault,
+        wrappedDek: update.wrappedDek,
+        wrappedRecovery: update.wrappedRecovery,
+        updated_at: new Date().toISOString(),
+      });
+      for (const [tokenHash, session] of sessions) {
+        if (session.user_id === user.id) sessions.delete(tokenHash);
+      }
+      return true;
+    },
     async findUserById(id) {
       return users.get(id) ?? null;
     },
@@ -360,7 +431,13 @@ export function createMemoryAuthStore(): AuthStore {
       return next;
     },
     async updateCredential(userId, kdfSalt, authToken) {
-      credentials.set(userId, { kdfSalt, ...(await hashCredential(authToken)) });
+      const prior = credentials.get(userId);
+      credentials.set(userId, {
+        kdfSalt,
+        recoveryHash: prior?.recoveryHash ?? null,
+        recoveryHashSalt: prior?.recoveryHashSalt ?? null,
+        ...(await hashCredential(authToken)),
+      });
     },
     async createSession(userId, tokenHash, _label, expiresAt) {
       sessions.set(tokenHash, { id: newId(), user_id: userId, expires_at: expiresAt.toISOString() });
@@ -543,8 +620,12 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
         kdf_salt    text NOT NULL,
         auth_hash   text NOT NULL,
         hash_salt   text NOT NULL,
-        updated_at  timestamptz NOT NULL DEFAULT now()
+        recovery_hash      text,
+        recovery_hash_salt text,
+        updated_at         timestamptz NOT NULL DEFAULT now()
       )`;
+      await sql`ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS recovery_hash text`;
+      await sql`ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS recovery_hash_salt text`;
       await sql`CREATE TABLE IF NOT EXISTS planner_vaults (
         user_id          text PRIMARY KEY REFERENCES planner_users(id) ON DELETE CASCADE,
         version          integer NOT NULL CHECK (version > 0),
@@ -625,13 +706,17 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
       }
 
       const credential = await hashCredential(input.authToken);
+      const recoveryVerifier = await hashRecoveryVerifier(input.recoveryHash);
       try {
         // Credentials and vault land together: an account with one but not the
         // other could never sign in, and the name would be gone for good.
         await sql.transaction([
           sql`
-            INSERT INTO planner_credentials (user_id, kdf_salt, auth_hash, hash_salt)
-            VALUES (${id}, ${input.kdfSalt}, ${credential.authHash}, ${credential.hashSalt})
+            INSERT INTO planner_credentials
+              (user_id, kdf_salt, auth_hash, hash_salt, recovery_hash, recovery_hash_salt)
+            VALUES
+              (${id}, ${input.kdfSalt}, ${credential.authHash}, ${credential.hashSalt},
+               ${recoveryVerifier.recoveryHash}, ${recoveryVerifier.recoveryHashSalt})
           `,
           sql`
             INSERT INTO planner_vaults (user_id, version, ciphertext, wrapped_dek, wrapped_recovery)
@@ -660,6 +745,52 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
       const row = rows[0];
       if (!row) return null;
       return { user: row, kdfSalt: row.kdf_salt, hashSalt: row.hash_salt, authHash: row.auth_hash };
+    },
+
+    async recoverAccount(login, recoveryHash, update) {
+      await ensure();
+      const needle = login.trim().toLowerCase();
+      const rows = (await sql`
+        SELECT u.id, c.recovery_hash, c.recovery_hash_salt
+        FROM planner_users u
+        JOIN planner_credentials c ON c.user_id = u.id
+        JOIN planner_vaults v ON v.user_id = u.id
+        WHERE u.username_lower = ${needle} OR u.email_lower = ${needle}
+        LIMIT 1
+      `) as { id: string; recovery_hash: string | null; recovery_hash_salt: string | null }[];
+      const row = rows[0];
+      if (!row?.recovery_hash || !row.recovery_hash_salt) {
+        await spendRecoveryFailureWork(recoveryHash);
+        return false;
+      }
+      const candidate = await hashAuthToken(recoveryHash, row.recovery_hash_salt);
+      if (!safeEqual(row.recovery_hash, candidate)) return false;
+
+      const credential = await hashCredential(update.authToken);
+      const recoveryVerifier = await hashRecoveryVerifier(update.newRecoveryHash);
+      const updated = (await sql`
+        WITH credential_update AS (
+          UPDATE planner_credentials
+          SET kdf_salt = ${update.kdfSalt}, auth_hash = ${credential.authHash},
+              hash_salt = ${credential.hashSalt}, recovery_hash = ${recoveryVerifier.recoveryHash},
+              recovery_hash_salt = ${recoveryVerifier.recoveryHashSalt}, updated_at = now()
+          WHERE user_id = ${row.id} AND recovery_hash = ${row.recovery_hash}
+            AND recovery_hash_salt = ${row.recovery_hash_salt}
+          RETURNING user_id
+        ),
+        vault_update AS (
+          UPDATE planner_vaults
+          SET wrapped_dek = ${update.wrappedDek}, wrapped_recovery = ${update.wrappedRecovery}, updated_at = now()
+          WHERE user_id IN (SELECT user_id FROM credential_update)
+          RETURNING user_id
+        ),
+        sessions_delete AS (
+          DELETE FROM planner_sessions WHERE user_id IN (SELECT user_id FROM credential_update)
+          RETURNING id
+        )
+        SELECT user_id FROM credential_update
+      `) as { user_id: string }[];
+      return updated.length > 0;
     },
 
     async findUserById(id) {

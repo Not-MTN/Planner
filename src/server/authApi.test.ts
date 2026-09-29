@@ -3,6 +3,8 @@ import {
   handleAccountVault,
   handleLogin,
   handleLogout,
+  handleRecoveryComplete,
+  handleRecoveryStart,
   handleSalt,
   handleSession,
   handleSignup,
@@ -43,8 +45,9 @@ const ACCOUNT = {
   role: 'student' as const,
   kdfSalt: 'c2FsdHNhbHRzYWx0c2E=',
   authToken: 'YXV0aFRva2VuYXV0aFRva2VuYXV0aFRva2VuMTI=',
+  recoveryHash: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
   wrappedDek: 'd3JhcHBlZERla3dyYXBwZWREZWt3cmFwcGVkRGVrMTI=',
-  wrappedRecovery: 'd3JhcHBlZFJlY292ZXJ5d3JhcHBlZFJlY292ZXJ5MTI=',
+  wrappedRecovery: 'eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5',
   ciphertext: 'dmF1bHRjaXBoZXJ0ZXh0',
 };
 
@@ -222,6 +225,60 @@ describe('account API', () => {
 
     const after = (await (await handleSession(get('/api/auth/session', cookie), store)).json()) as { user: PublicUser | null };
     expect(after.user).toBeNull();
+  });
+
+  it('does not reveal whether a recovery identifier exists', async () => {
+    resetRateLimits();
+    const store = STORE();
+    await handleSignup(post('/api/auth/signup', ACCOUNT), store);
+
+    const known = await handleRecoveryStart(post('/api/auth/recovery/start', { username: 'sara' }), store);
+    const unknown = await handleRecoveryStart(post('/api/auth/recovery/start', { username: 'nobody' }), store);
+    expect(known.status).toBe(200);
+    expect(unknown.status).toBe(200);
+    const knownBody = (await known.json()) as { kdfSalt: string; wrappedRecovery: string };
+    const unknownBody = (await unknown.json()) as { kdfSalt: string; wrappedRecovery: string };
+    expect(Object.keys(unknownBody).sort()).toEqual(Object.keys(knownBody).sort());
+    expect(knownBody.kdfSalt).toBe(ACCOUNT.kdfSalt);
+    expect(knownBody.wrappedRecovery).toBe(ACCOUNT.wrappedRecovery);
+    expect(unknownBody.kdfSalt).not.toBe(knownBody.kdfSalt);
+    expect(unknownBody.wrappedRecovery).toHaveLength(knownBody.wrappedRecovery.length);
+  });
+
+  it('rotates credentials and wrapped keys only with the recovery verifier, then revokes sessions', async () => {
+    resetRateLimits();
+    const store = STORE();
+    const signup = await handleSignup(post('/api/auth/signup', ACCOUNT), store);
+    const oldCookie = cookieFrom(signup);
+    const newRecoveryHash = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=';
+    const update = {
+      username: 'sara',
+      recoveryHash: ACCOUNT.recoveryHash,
+      newRecoveryHash,
+      kdfSalt: 'bmV3LXNhbHQtMDEyMzQ1Ng==',
+      authToken: 'bm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm4=',
+      wrappedDek: 'eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4',
+      wrappedRecovery: 'eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5',
+    };
+
+    const wrong = await handleRecoveryComplete(post('/api/auth/recovery/complete', { ...update, recoveryHash: newRecoveryHash }), store);
+    expect(wrong.status).toBe(401);
+
+    const completed = await handleRecoveryComplete(post('/api/auth/recovery/complete', update), store);
+    expect(completed.status).toBe(200);
+    expect(await completed.json()).toEqual({ ok: true });
+
+    const staleSession = await handleSession(get('/api/auth/session', oldCookie), store);
+    expect(staleSession.status).toBe(401);
+
+    const newLogin = await handleLogin(post('/api/auth/login', { username: 'sara', authToken: update.authToken }), store);
+    expect(newLogin.status).toBe(200);
+    const body = (await newLogin.json()) as LoginResponse;
+    expect(body.kdfSalt).toBe(update.kdfSalt);
+    expect(body.wrappedDek).toBe(update.wrappedDek);
+
+    const oldLogin = await handleLogin(post('/api/auth/login', { username: 'sara', authToken: ACCOUNT.authToken }), store);
+    expect(oldLogin.status).toBe(401);
   });
 
   it('reports 503 when no database is configured', async () => {

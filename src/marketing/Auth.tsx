@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { COPY, type Lang } from './copy';
-import { AuthError, signIn, signUp, type AuthErrorCode } from '../auth/session';
+import { AuthError, resetPasswordWithRecovery, signIn, signUp, type AuthErrorCode } from '../auth/session';
 import { PasskeyError, passkeySignIn, passkeysSupported, registerPasskey } from '../auth/passkey';
 import { EMAIL_PATTERN, USERNAME_PATTERN } from '../shared/authContract';
 import { loadFrom } from '../storage';
@@ -8,15 +8,6 @@ import { loadFrom } from '../storage';
 type Nav = (to: string) => void;
 type Mode = 'signin' | 'signup' | 'recover';
 type Role = 'personal' | 'student' | 'guardian';
-
-const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-
-function makeRecoveryKey(): string {
-  const bytes = new Uint8Array(20);
-  crypto.getRandomValues(bytes);
-  const chars = Array.from(bytes, (byte) => ALPHABET[byte % ALPHABET.length]).join('');
-  return `plnr-${chars.match(/.{4}/g)!.join('-')}`;
-}
 
 function strength(password: string, lang: Lang): { score: 0 | 1 | 2 | 3; label: string } {
   const c = COPY[lang];
@@ -28,20 +19,21 @@ function strength(password: string, lang: Lang): { score: 0 | 1 | 2 | 3; label: 
   return { score: 1, label: c.authStrengthFair };
 }
 
-/** Maps an API failure onto translated copy; unknown failures say what the server said. */
-function errorText(code: AuthErrorCode | null, detail: string | null, c: Record<string, string>): string {
+/** Maps API failures to the selected language without leaking English server copy into Persian screens. */
+function errorText(code: AuthErrorCode | null, detail: string | null, c: Record<string, string>, lang: Lang): string {
   if (code === 'bad_credentials') return c.errBadCredentials;
   if (code === 'email_taken') return c.errEmailTaken;
   if (code === 'taken') return c.errTaken;
   if (code === 'not_configured') return c.errNotConfigured;
   if (code === 'network') return c.errNetwork;
-  // Validation rejections, rate limits, database outages… the server's own
-  // sentence is the only one that says what to do next.
+  if (detail?.toLowerCase().includes('too many requests')) return c.errRateLimited;
+  if (detail?.toLowerCase().includes('unexpected response') || detail === 'Not found.') return c.errUnexpectedResponse;
+  if (lang === 'fa') return c.errUnknown;
   return detail ?? c.errUnknown;
 }
 
 /** Maps a passkey failure onto translated copy. */
-function passkeyErrorText(caught: unknown, c: Record<string, string>): string {
+function passkeyErrorText(caught: unknown, c: Record<string, string>, lang: Lang): string {
   if (caught instanceof PasskeyError) {
     if (caught.code === 'cancelled') return c.errPasskeyCancelled;
     if (caught.code === 'no_prf') return c.errPasskeyNoPrf;
@@ -53,7 +45,8 @@ function passkeyErrorText(caught: unknown, c: Record<string, string>): string {
     if (caught.code === 'bad_credentials') return c.errPasskeyRejected;
     if (caught.code === 'not_configured') return c.errNotConfigured;
     if (caught.code === 'network') return c.errNetwork;
-    return caught.detail ?? c.errUnknown;
+    if (caught.detail?.toLowerCase().includes('too many requests')) return c.errRateLimited;
+    return lang === 'fa' ? c.errUnknown : caught.detail ?? c.errUnknown;
   }
   return c.errUnknown;
 }
@@ -145,7 +138,7 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
       await signIn(identifier, password, remember);
       navigate('/app');
     } catch (caught) {
-      setError(errorText(caught instanceof AuthError ? caught.code : null, caught instanceof AuthError ? caught.detail : null, c));
+      setError(errorText(caught instanceof AuthError ? caught.code : null, caught instanceof AuthError ? caught.detail : null, c, lang));
       setBusy(false);
     }
   };
@@ -160,7 +153,7 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
       await passkeySignIn(identifier);
       navigate('/app');
     } catch (caught) {
-      setError(passkeyErrorText(caught, c));
+      setError(passkeyErrorText(caught, c, lang));
       setBusy(false);
     }
   };
@@ -179,23 +172,49 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
             className="auth-fields reveal-in"
             style={{ animationDelay: '60ms' }}
             onSubmit={submit}
+            aria-busy={busy}
+            aria-describedby={error ? 'signin-error' : undefined}
           >
             <label className="field">
               <span>{c.authUsername}</span>
-              <input value={identifier} onChange={(event) => setIdentifier(event.target.value)} autoComplete="username" required />
+              <input
+                id="signin-identifier"
+                name="username"
+                type="text"
+                inputMode="email"
+                dir="ltr"
+                value={identifier}
+                onChange={(event) => setIdentifier(event.target.value)}
+                autoComplete="username"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                placeholder={c.authUsernamePlaceholder}
+                required
+              />
             </label>
 
             <label className="field">
               <span>{c.authPassword}</span>
               <span className="field-wrap">
                 <input
+                  id="signin-password"
+                  name="password"
                   type={show ? 'text' : 'password'}
+                  dir="ltr"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                   autoComplete="current-password"
+                  placeholder={c.authPasswordPlaceholder}
                   required
                 />
-                <button type="button" className="field-toggle" onClick={() => setShow(!show)}>
+                <button
+                  type="button"
+                  className="field-toggle"
+                  aria-label={show ? c.authHide : c.authShow}
+                  aria-pressed={show}
+                  onClick={() => setShow(!show)}
+                >
                   {show ? c.authHide : c.authShow}
                 </button>
               </span>
@@ -210,33 +229,37 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
             </label>
 
             {error ? (
-              <p className="auth-error" role="alert">
+              <p id="signin-error" className="auth-error" role="alert">
                 {error}
               </p>
             ) : null}
-            <button type="submit" className="btn btn-primary btn-block" disabled={busy}>
+            <button type="submit" className="btn btn-primary btn-block" disabled={busy} aria-busy={busy}>
               {busy ? <span className="spinner" aria-hidden="true" /> : null}
               {busy ? c.authBusy : c.authSignInAction}
             </button>
           </form>
 
-          <div className="auth-or reveal-in" style={{ animationDelay: '120ms' }}>
-            <span>{c.authOr}</span>
-          </div>
-
-          <button
-            type="button"
-            className="btn btn-outline btn-block reveal-in"
-            style={{ animationDelay: '150ms' }}
-            disabled={busy}
-            onClick={() => void withPasskey()}
-          >
-            <span className="btn-key" aria-hidden="true" />
-            {busy ? c.authPasskeyBusy : c.authPasskey}
-          </button>
-          <p className="auth-hint reveal-in" style={{ animationDelay: '180ms' }}>
-            {c.authPasskeyHint}
-          </p>
+          {passkeysSupported() ? (
+            <>
+              <div className="auth-or reveal-in" style={{ animationDelay: '120ms' }}>
+                <span>{c.authOr}</span>
+              </div>
+              <button
+                type="button"
+                className="btn btn-outline btn-block reveal-in"
+                style={{ animationDelay: '150ms' }}
+                disabled={busy}
+                aria-busy={busy}
+                onClick={() => void withPasskey()}
+              >
+                <span className="btn-key" aria-hidden="true" />
+                {busy ? c.authPasskeyBusy : c.authPasskey}
+              </button>
+              <p className="auth-hint reveal-in" style={{ animationDelay: '180ms' }}>
+                {c.authPasskeyHint}
+              </p>
+            </>
+          ) : null}
 
           <footer className="auth-foot reveal-in" style={{ animationDelay: '220ms' }}>
             <button type="button" className="link" onClick={() => navigate('/recover')}>
@@ -279,6 +302,7 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
   const [agreed, setAgreed] = useState(false);
   const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [recoveryKey, setRecoveryKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [passkeyAdded, setPasskeyAdded] = useState(false);
@@ -296,7 +320,7 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
       await registerPasskey();
       setPasskeyAdded(true);
     } catch (caught) {
-      setError(passkeyErrorText(caught, c));
+      setError(passkeyErrorText(caught, c, lang));
     } finally {
       setBusy(false);
     }
@@ -344,7 +368,7 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
           field: chosen === 'guardian' ? details.field : state.panels.guardian.field,
         },
       };
-      await signUp({
+      const created = await signUp({
         username,
         email,
         displayName: name,
@@ -353,15 +377,16 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
         // Signed up on this device, so trust it by default; Settings can forget it.
         initialState: { ...state, panels },
       });
+      setRecoveryKey(created.recoveryKey);
       setBusy(false);
       setStep('recovery');
     } catch (caught) {
-      setError(errorText(caught instanceof AuthError ? caught.code : null, caught instanceof AuthError ? caught.detail : null, c));
+      setError(errorText(caught instanceof AuthError ? caught.code : null, caught instanceof AuthError ? caught.detail : null, c, lang));
       setBusy(false);
     }
   };
 
-  const key = useMemo(makeRecoveryKey, []);
+  const key = recoveryKey;
   const meter = strength(password, lang);
 
   const download = () => {
@@ -426,30 +451,73 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
               >
                 <label className="field">
                   <span>{c.authName}</span>
-                  <input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" required />
+                  <input
+                    name="name"
+                    type="text"
+                    autoComplete="name"
+                    autoCapitalize="words"
+                    placeholder={c.authNamePlaceholder}
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    maxLength={60}
+                    required
+                  />
                   <em>{c.authNameHint}</em>
                 </label>
                 <label className="field">
                   <span>{c.authUsernameOnly}</span>
-                  <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required />
+                  <input
+                    name="username"
+                    type="text"
+                    dir="ltr"
+                    autoComplete="username"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    placeholder={c.authNewUsernamePlaceholder}
+                    value={username}
+                    onChange={(event) => setUsername(event.target.value)}
+                    minLength={3}
+                    maxLength={24}
+                    required
+                  />
                   <em>{c.authUsernameHint}</em>
                 </label>
                 <label className="field">
                   <span>{c.authEmail}</span>
-                  <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" />
+                  <input
+                    name="email"
+                    type="email"
+                    dir="ltr"
+                    autoComplete="email"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    placeholder={c.authEmailPlaceholder}
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                  />
                   <em>{c.authEmailHint}</em>
                 </label>
                 <label className="field">
                   <span>{c.authPassword}</span>
                   <span className="field-wrap">
                     <input
+                      name="new-password"
                       type={show ? 'text' : 'password'}
+                      dir="ltr"
                       value={password}
                       onChange={(event) => setPassword(event.target.value)}
                       autoComplete="new-password"
+                      placeholder={c.authPasswordPlaceholder}
                       required
                     />
-                    <button type="button" className="field-toggle" onClick={() => setShow(!show)}>
+                    <button
+                      type="button"
+                      className="field-toggle"
+                      aria-label={show ? c.authHide : c.authShow}
+                      aria-pressed={show}
+                      onClick={() => setShow(!show)}
+                    >
                       {show ? c.authHide : c.authShow}
                     </button>
                   </span>
@@ -522,7 +590,7 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
                   <label className="field">
                     <span>{c.authStudentGrade}</span>
                     <select className="input" value={studentGrade} onChange={(event) => setStudentGrade(event.target.value)}>
-                      <option value="">—</option>
+                      <option value="">{c.authChooseGrade}</option>
                       {gradeOptions.map((option) => (
                         <option key={option.id} value={option.id}>
                           {option.label}
@@ -667,22 +735,87 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
 
 function Recover({ lang, navigate }: { lang: Lang; navigate: Nav }) {
   const c = COPY[lang];
+  const [identifier, setIdentifier] = useState('');
   const [key, setKey] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmation, setConfirmation] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmation, setShowConfirmation] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [nextRecoveryKey, setNextRecoveryKey] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const meter = strength(password, lang);
 
-  // The passkey *is* the recovery for the trusted-device → passkey → key
-  // ladder: sign in with the credential on any browser, no identifier needed.
   const recoverWithPasskey = async () => {
     if (busy) return;
     setBusy(true);
     setError(null);
     try {
-      await passkeySignIn();
-      navigate('/app');
+      const result = await passkeySignIn();
+      if (result.unlocked) {
+        navigate('/app');
+        return;
+      }
+      // The session is authenticated, but this credential cannot unwrap the
+      // vault key in this browser. Stay here so the recovery-key reset remains available.
+      setError(c.errPasskeyNoPrf);
     } catch (caught) {
-      setError(passkeyErrorText(caught, c));
+      setError(passkeyErrorText(caught, c, lang));
+    } finally {
       setBusy(false);
+    }
+  };
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (busy) return;
+    setError(null);
+    if (password.length < 10) {
+      setError(c.errShortPassword);
+      return;
+    }
+    if (password !== confirmation) {
+      setError(c.authPasswordMismatch);
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const generated = await resetPasswordWithRecovery(identifier, key, password);
+      setNextRecoveryKey(generated);
+      setSaved(false);
+    } catch (caught) {
+      if (caught instanceof AuthError && caught.code === 'bad_credentials') {
+        setError(c.authRecoveryInvalid);
+      } else {
+        setError(errorText(caught instanceof AuthError ? caught.code : null, caught instanceof AuthError ? caught.detail : null, c, lang));
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const download = () => {
+    if (!nextRecoveryKey) return;
+    const blob = new Blob([`Planner recovery key\n\n${nextRecoveryKey}\n\n${c.authRecoverySub}\n`], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'planner-recovery-key.txt';
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const copy = async () => {
+    if (!nextRecoveryKey) return;
+    try {
+      await navigator.clipboard.writeText(nextRecoveryKey);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2200);
+    } catch {
+      setCopied(false);
     }
   };
 
@@ -691,54 +824,160 @@ function Recover({ lang, navigate }: { lang: Lang; navigate: Nav }) {
       <Aside lang={lang} />
       <section className="auth-panel">
         <div className="auth-form">
-          <header className="auth-head reveal-in">
-            <h1>{c.authRecoverTitle}</h1>
-            <p>{c.authRecoverSub}</p>
-          </header>
+          {nextRecoveryKey ? (
+            <>
+              <header className="auth-head reveal-in">
+                <h1>{c.authRecoveryCompleteTitle}</h1>
+                <p>{c.authRecoveryCompleteSub}</p>
+              </header>
+              <div className="recovery reveal-in" style={{ animationDelay: '60ms' }}>
+                <code dir="ltr">{nextRecoveryKey}</code>
+                <div className="recovery-actions">
+                  <button type="button" className="btn btn-outline" onClick={() => void copy()}>
+                    {copied ? c.authRecoveryCopied : c.authRecoveryCopy}
+                  </button>
+                  <button type="button" className="btn btn-outline" onClick={download}>
+                    {c.authRecoveryDownload}
+                  </button>
+                </div>
+                <p className="recovery-warn">{c.authRecoveryWarn}</p>
+              </div>
+              <label className="check reveal-in" style={{ animationDelay: '100ms' }}>
+                <input type="checkbox" checked={saved} onChange={(event) => setSaved(event.target.checked)} />
+                <span>{c.authRecoverySaved}</span>
+              </label>
+              <footer className="auth-foot reveal-in" style={{ animationDelay: '130ms' }}>
+                <button type="button" className="btn btn-primary btn-block" disabled={!saved} onClick={() => navigate('/login')}>
+                  {c.authRecoveryComplete}
+                </button>
+                <p className="auth-note">{c.authRecoveryView}</p>
+              </footer>
+            </>
+          ) : (
+            <>
+              <header className="auth-head reveal-in">
+                <h1>{c.authRecoverTitle}</h1>
+                <p>{c.authRecoverSub}</p>
+              </header>
 
-          <div className="auth-fields reveal-in" style={{ animationDelay: '60ms' }}>
-            <button type="button" className="recover-option" disabled>
-              <span className="recover-icon" aria-hidden="true">
-                📱
-              </span>
-              <span>
-                <strong>{c.authRecoverDevice}</strong>
-                <em>{c.authRecoverDeviceD}</em>
-              </span>
-            </button>
-            {passkeysSupported() ? (
-              <button
-                type="button"
-                className="recover-option"
-                disabled={busy}
-                onClick={() => void recoverWithPasskey()}
-              >
-                <span className="recover-icon" aria-hidden="true">
-                  🔑
-                </span>
-                <span>
-                  <strong>{c.authRecoverPasskey}</strong>
-                  <em>{c.authRecoverPasskeyD}</em>
-                </span>
-              </button>
-            ) : null}
+              <form className="auth-fields reveal-in" style={{ animationDelay: '60ms' }} onSubmit={submit} aria-busy={busy}>
+                <label className="field">
+                  <span>{c.authRecoverIdentifier}</span>
+                  <input
+                    name="username"
+                    type="text"
+                    inputMode="email"
+                    dir="ltr"
+                    value={identifier}
+                    onChange={(event) => setIdentifier(event.target.value)}
+                    autoComplete="username"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    placeholder={c.authUsernamePlaceholder}
+                    required
+                  />
+                </label>
+                <label className="field">
+                  <span>{c.authRecoverKeyLabel}</span>
+                  <input
+                    name="recovery-key"
+                    type="text"
+                    dir="ltr"
+                    value={key}
+                    onChange={(event) => setKey(event.target.value)}
+                    autoComplete="off"
+                    autoCapitalize="characters"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    placeholder={c.authRecoverKeyPlaceholder}
+                    required
+                  />
+                  <em>{c.authRecoverKeyD}</em>
+                </label>
+                <label className="field">
+                  <span>{c.authRecoverNewPassword}</span>
+                  <span className="field-wrap">
+                    <input
+                      name="new-password"
+                      type={showPassword ? 'text' : 'password'}
+                      dir="ltr"
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      autoComplete="new-password"
+                      placeholder={c.authPasswordPlaceholder}
+                      required
+                    />
+                    <button
+                      type="button"
+                      className="field-toggle"
+                      aria-label={showPassword ? c.authHide : c.authShow}
+                      aria-pressed={showPassword}
+                      onClick={() => setShowPassword(!showPassword)}
+                    >
+                      {showPassword ? c.authHide : c.authShow}
+                    </button>
+                  </span>
+                  {password ? <em>{c.authPasswordHint}</em> : null}
+                  {password ? (
+                    <span className="meter" data-score={meter.score}>
+                      <i />
+                      <i />
+                      <i />
+                      <b>{meter.label}</b>
+                    </span>
+                  ) : null}
+                </label>
+                <label className="field">
+                  <span>{c.authRecoverConfirm}</span>
+                  <span className="field-wrap">
+                    <input
+                      name="confirm-password"
+                      type={showConfirmation ? 'text' : 'password'}
+                      dir="ltr"
+                      value={confirmation}
+                      onChange={(event) => setConfirmation(event.target.value)}
+                      autoComplete="new-password"
+                      required
+                    />
+                    <button
+                      type="button"
+                      className="field-toggle"
+                      aria-label={showConfirmation ? c.authHide : c.authShow}
+                      aria-pressed={showConfirmation}
+                      onClick={() => setShowConfirmation(!showConfirmation)}
+                    >
+                      {showConfirmation ? c.authHide : c.authShow}
+                    </button>
+                  </span>
+                </label>
+                {error ? <p className="auth-error" role="alert">{error}</p> : null}
+                <button type="submit" className="btn btn-primary btn-block" disabled={busy} aria-busy={busy}>
+                  {busy ? <span className="spinner" aria-hidden="true" /> : null}
+                  {busy ? c.authRecoverResetting : c.authRecoverReset}
+                </button>
+              </form>
 
-            <label className="field">
-              <span>{c.authRecoverKeyLabel}</span>
-              <input value={key} onChange={(event) => setKey(event.target.value)} placeholder="plnr-••••-••••-••••-••••" />
-              <em>{c.authRecoverKeyD}</em>
-            </label>
-            {error ? <p className="auth-error">{error}</p> : null}
-            <button type="button" className="btn btn-primary btn-block" disabled={busy || key.trim().length < 8}>
-              {busy ? c.authPasskeyBusy : c.authContinue}
-            </button>
-          </div>
+              {passkeysSupported() ? (
+                <>
+                  <div className="auth-or reveal-in" style={{ animationDelay: '120ms' }}>
+                    <span>{c.authOr}</span>
+                  </div>
+                  <button type="button" className="btn btn-outline btn-block" disabled={busy} onClick={() => void recoverWithPasskey()}>
+                    <span className="btn-key" aria-hidden="true" />
+                    {c.authRecoverPasskey}
+                  </button>
+                  <p className="auth-hint">{c.authRecoverPasskeyD}</p>
+                </>
+              ) : null}
 
-          <footer className="auth-foot reveal-in" style={{ animationDelay: '140ms' }}>
-            <button type="button" className="link" onClick={() => navigate('/login')}>
-              {c.authRecoverBack}
-            </button>
-          </footer>
+              <footer className="auth-foot reveal-in" style={{ animationDelay: '150ms' }}>
+                <button type="button" className="link" onClick={() => navigate('/login')}>
+                  {c.authRecoverBack}
+                </button>
+              </footer>
+            </>
+          )}
         </div>
       </section>
     </div>

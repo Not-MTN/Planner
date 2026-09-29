@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { afterAll, describe, expect, it } from 'vitest';
 import { apiRoute, handleApiRequest } from './apiRouter';
 import { decoySalt } from './authApi';
@@ -26,6 +27,18 @@ function jsonRequest(method: string, path: string, body: unknown): Request {
 
 afterAll(() => resetRateLimits());
 
+describe('Vercel API routing', () => {
+  it('rewrites nested API requests to the single catch-all function', () => {
+    const config = JSON.parse(readFileSync(new URL('../../vercel.json', import.meta.url), 'utf8')) as {
+      rewrites?: Array<{ source: string; destination: string }>;
+    };
+    expect(config.rewrites?.[0]).toEqual({
+      source: '/api/(.*)',
+      destination: '/api/[...path]',
+    });
+  });
+});
+
 describe('apiRoute table', () => {
   it('maps every production API path and nothing else', () => {
     const paths = [
@@ -34,6 +47,8 @@ describe('apiRoute table', () => {
       '/api/auth/login',
       '/api/auth/logout',
       '/api/auth/note',
+      '/api/auth/recovery/start',
+      '/api/auth/recovery/complete',
       '/api/auth/salt',
       '/api/auth/session',
       '/api/auth/share',
@@ -105,6 +120,7 @@ describe('handleApiRequest', () => {
       role: 'student' as const,
       kdfSalt: 'c2FsdHNhbHRzYWx0c2E=',
       authToken: 'YXV0aFRva2VuYXV0aFRva2VuYXV0aFRva2VuMTI=',
+      recoveryHash: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
       wrappedDek: 'd3JhcHBlZERla3dyYXBwZWREZWt3cmFwcGVkRGVrMTI=',
       wrappedRecovery: 'd3JhcHBlZFJlY292ZXJ5d3JhcHBlZFJlY292ZXJ5MTI=',
       ciphertext: 'dmF1bHRjaXBoZXJ0ZXh0',
@@ -116,5 +132,15 @@ describe('handleApiRequest', () => {
     const salt = await handleApiRequest(jsonRequest('POST', '/api/auth/salt', { username: 'stranger' }), NO_ENV);
     expect(salt.status).toBe(200);
     await expect(salt.json()).resolves.toEqual({ kdfSalt: decoySalt('stranger') });
+
+    const recovery = await handleApiRequest(
+      jsonRequest('POST', '/api/auth/recovery/start', { username: 'rory' }),
+      NO_ENV,
+    );
+    expect(recovery.status).toBe(200);
+    await expect(recovery.json()).resolves.toEqual({
+      kdfSalt: account.kdfSalt,
+      wrappedRecovery: account.wrappedRecovery,
+    });
   });
 });

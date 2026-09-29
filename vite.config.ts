@@ -23,6 +23,8 @@ import {
   handlePasskeyLoginVerify,
   handlePasskeyRegisterOptions,
   handlePasskeyRegisterVerify,
+  handleRecoveryComplete,
+  handleRecoveryStart,
   handleSalt,
   handleSession,
   handleShare,
@@ -169,6 +171,10 @@ function authHandler(databaseUrl: string | undefined): NextHandleFunction {
     const run: ((webRequest: Request) => Promise<Response>) | null =
       pathname === '/signup'
         ? (webRequest) => authStore(databaseUrl).then((store) => handleSignup(webRequest, store))
+        : pathname === '/recovery/start'
+          ? (webRequest) => authStore(databaseUrl).then((store) => handleRecoveryStart(webRequest, store))
+          : pathname === '/recovery/complete'
+            ? (webRequest) => authStore(databaseUrl).then((store) => handleRecoveryComplete(webRequest, store))
         : pathname === '/salt'
           ? (webRequest) => authStore(databaseUrl).then((store) => handleSalt(webRequest, store))
           : pathname === '/login'

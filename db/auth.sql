@@ -17,14 +17,22 @@ CREATE TABLE IF NOT EXISTS planner_users (
 );
 
 -- auth_hash is a server-side scrypt of the client's Argon2id output. The
--- password itself is never transmitted, so it cannot be stored or leaked here.
+-- password itself is never transmitted. recovery_hash is a server-side scrypt
+-- of the client's SHA-256 recovery verifier; the recovery key itself never
+-- reaches the server, and the stored scrypt verifier is not reusable as proof.
 CREATE TABLE IF NOT EXISTS planner_credentials (
   user_id     text PRIMARY KEY REFERENCES planner_users(id) ON DELETE CASCADE,
   kdf_salt    text NOT NULL,
-  auth_hash   text NOT NULL,
-  hash_salt   text NOT NULL,
-  updated_at  timestamptz NOT NULL DEFAULT now()
+  auth_hash     text NOT NULL,
+  hash_salt     text NOT NULL,
+  recovery_hash      text,
+  recovery_hash_salt text,
+  updated_at         timestamptz NOT NULL DEFAULT now()
 );
+
+-- Existing tables acquire the nullable recovery verifier without affecting sign-in.
+ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS recovery_hash text;
+ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS recovery_hash_salt text;
 
 -- ciphertex           the whole planner, encrypted in the browser (AES-GCM-256)
 -- wrapped_dek         the vault key, encrypted under the password key

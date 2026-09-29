@@ -5,6 +5,7 @@ import {
   deriveFromPassword,
   encryptState,
   formatRecoveryKey,
+  hashRecoveryKey,
   keyFromRecovery,
   newSalt,
   normalizeRecoveryKey,
@@ -88,6 +89,13 @@ describe('vault crypto', () => {
     expect(normalizeRecoveryKey(key.slice(5))).toBe(key);
     expect(normalizeRecoveryKey('plnr-ABCD')).toBeNull();
     expect(normalizeRecoveryKey('plnr-0000-1111-2222-3333-4444')).toBeNull(); // 0/1 are not in the alphabet
+  });
+
+  it('creates the same one-way recovery verifier across accepted key formats', () => {
+    const key = formatRecoveryKey();
+    expect(hashRecoveryKey(key)).toBe(hashRecoveryKey(key.toLowerCase().replace(/-/g, ' ')));
+    expect(hashRecoveryKey(key)).toMatch(/^[A-Za-z0-9+/]{43}=$/);
+    expect(() => hashRecoveryKey('not a recovery key')).toThrow();
   });
 
   it('refuses to decrypt a tampered vault', async () => {

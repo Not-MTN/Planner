@@ -151,7 +151,7 @@ describe('sign-up journey', () => {
     // Still on step one, with the actual rule — and no request was made.
     expect(container.textContent).toContain('Create your planner');
     expect(container.textContent).not.toContain('Add a panel?');
-    expect(container.querySelector('.auth-error')?.textContent).toBe('Username must be 3–24 letters, numbers or underscores.');
+    expect(container.querySelector('.auth-error')?.textContent).toBe('Use 3–24 characters: English letters, numbers, or underscores.');
     expect(signUpCalls()).toHaveLength(0);
 
     // A username the rules accept moves on.
@@ -200,6 +200,44 @@ describe('sign-up journey', () => {
 
     // pushState alone would leave the marketing site on screen at /app.
     expect(assign).toHaveBeenCalledWith('/app');
+  }, 60_000);
+
+  it('resets a password from the recovery screen, issues a new key, and returns to sign-in', async () => {
+    const { signUp, endSession } = await import('../auth/session');
+    const { createEmptyState } = await import('../types');
+    const created = await signUp({
+      username: 'recoverflow',
+      email: 'recoverflow@example.com',
+      displayName: 'Recovery Flow',
+      role: 'personal',
+      password: 'a-long-enough-password',
+      initialState: createEmptyState(),
+      remember: false,
+    });
+    endSession();
+
+    await renderAt('/recover');
+    const inputs = [...container.querySelectorAll('input[type="text"], input[type="password"]')] as HTMLInputElement[];
+    setValue(inputs[0]!, 'recoverflow');
+    setValue(inputs[1]!, 'plnr-AAAA-AAAA-AAAA-AAAA-AAAA');
+    setValue(inputs[2]!, 'a-different-long-password');
+    setValue(inputs[3]!, 'a-different-long-password');
+    await click(container.querySelector('form.auth-fields button[type="submit"]'));
+    await waitFor(() => Boolean(container.querySelector('.auth-error')));
+    expect(container.querySelector('.auth-error')?.textContent).toContain('do not match');
+
+    setValue(inputs[1]!, created.recoveryKey);
+    await click(container.querySelector('form.auth-fields button[type="submit"]'));
+    await waitFor(() => container.textContent?.includes('Password updated') ?? false);
+    expect(container.textContent).toContain('Save this new recovery key somewhere safe.');
+    expect(container.textContent).toContain('plnr-');
+
+    const saved = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    setChecked(saved, true);
+    await click(buttonStartingWith('Back to sign in'));
+    expect(container.querySelector('.auth-head h1')?.textContent).toBe('Welcome back');
+    expect(requests).toContain('POST /api/auth/recovery/start');
+    expect(requests).toContain('POST /api/auth/recovery/complete');
   }, 60_000);
 
   it('opens the planner the same way after signing in', async () => {

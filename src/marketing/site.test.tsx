@@ -104,7 +104,7 @@ describe('marketing site', () => {
       window.history.pushState({}, '', '/recover');
       window.dispatchEvent(new PopStateEvent('popstate'));
     });
-    expect(container.textContent).toContain('Get back in');
+    expect(container.textContent).toContain('Reset your password');
   });
 
   it('asks for the details a panel needs before it lets you continue', async () => {
@@ -142,7 +142,7 @@ describe('marketing site', () => {
     await act(async () => {
       student?.click();
     });
-    expect(container.textContent).toContain('What do you study?');
+    expect(container.textContent).toContain('What are you studying?');
 
     // Continuing without them says so instead of creating a broken account.
     const continueButton = ([...container.querySelectorAll('button')] as HTMLButtonElement[]).find((button) =>
@@ -152,7 +152,7 @@ describe('marketing site', () => {
       continueButton?.click();
       await new Promise((resolve) => setTimeout(resolve, 40));
     });
-    expect(container.textContent).toContain('Add the details for the panel you picked');
+    expect(container.textContent).toContain('Add the details for the panel you chose');
     // Still on step 2, not the recovery step.
     expect(container.querySelector('.auth-steps li:nth-child(3)')?.className).not.toContain('is-active');
   });

@@ -9,6 +9,7 @@ Planner uses a local-first, privacy-preserving design, but no software can hones
 - Markdown is rendered as React elements rather than injected HTML; links are limited to HTTP(S) and open with `noopener noreferrer`.
 - The xAI proxy never exposes the API key, accepts only the narrow JSON shape Planner sends, permits only the configured model and data-URL images, caps request and response sizes, rejects cross-origin browser requests, and applies a best-effort per-client rate limit.
 - The sync API accepts only a validated hash-shaped sync id and bounded ciphertext. Planner content is encrypted in the browser with AES-GCM before it reaches Neon; the database does not receive the sync code or plaintext planner.
+- Account recovery checks a SHA-256 verifier of a randomly generated, high-entropy recovery key; the database stores only a separately salted scrypt verifier, not a reusable proof. The recovery key and vault key stay in the browser; a successful recovery rotates the password wrappers and revokes existing sessions.
 - AI memory is explicit and user-controlled. It is stored with the planner, sent to xAI only for a plan or review request, and can be edited or forgotten.
 - No secrets belong in the browser bundle. Keep `XAI_API_KEY` and `DATABASE_URL` server-side and never use a `VITE_` prefix for them.
 

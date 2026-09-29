@@ -5,6 +5,10 @@
   "outputDirectory": "dist",
   "fluid": true,
   "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/[...path]"
+    },
     { "source": "/app", "destination": "/index.html" },
     { "source": "/login", "destination": "/index.html" },
     { "source": "/signup", "destination": "/index.html" },
