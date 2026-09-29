@@ -3,7 +3,7 @@
  *
  * The browser's CSP forbids cross-origin fetch, and most calendar hosts don't
  * send CORS headers — so subscriptions go same-origin through this handler,
- * same pattern as the xAI proxy. Hardened against abuse:
+ * same pattern as the Groq proxy. Hardened against abuse:
  * - GET only, http(s) URLs only, no credentials forwarded
  * - private/loopback hostnames refused (basic SSRF guard)
  * - 10 s timeout, body capped at 2 MB, text output only

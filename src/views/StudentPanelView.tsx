@@ -12,7 +12,7 @@ import { BookIcon, FlagIcon, PlusIcon, StopwatchIcon, TrashIcon } from '../icons
 import { t } from '../i18n';
 import { daysUntil, GRADE_LABELS, gradeLabel, newId, splitExplanations, subjectMinutes, subjectProgress, weekOf, weekResults, withExplanation, withSubject, withoutExplanation, withoutSubject } from '../panels';
 import { normalizeLinkCode } from '../auth/crypto';
-import { friendlyXAIError, generateStudentAdvice, type StudentAdvice } from '../ai';
+import { friendlyGroqError, generateStudentAdvice, type StudentAdvice } from '../ai';
 import { SparkIcon } from '../icons';
 import { acceptInvitation, relayNotices, removeLink, shareWeeklyResults, syncLinks } from '../auth/links';
 import { AuthError } from '../auth/session';
@@ -50,7 +50,7 @@ export function StudentPanelView() {
     try {
       setAdvice(await generateStudentAdvice({ state }));
     } catch (error) {
-      flash(friendlyXAIError(error));
+      flash(friendlyGroqError(error));
     } finally {
       setAsking(false);
     }

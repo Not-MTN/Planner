@@ -130,7 +130,7 @@ function stepCopy(id: TourStopId): StepCopy {
     case 'settings':
       return {
         title: t("Your data, your rules"),
-        body: t("The gear holds sync between your own devices, backups, themes, voice accents, and the AI's xAI connection. You can also install Planner as a full offline app."),
+        body: t("The gear holds sync between your own devices, backups, themes, voice accents, and the AI's Groq connection. You can also install Planner as a full offline app."),
       };
     case 'done':
       return {

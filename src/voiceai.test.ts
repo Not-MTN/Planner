@@ -94,7 +94,7 @@ describe('voice ai', () => {
     expect(replyLang('باشه، deep work رو می‌ذارم عصر.')).toBe('fa');
   });
 
-  it('sends the utterance, bounded history and schedule context to the xAI proxy', async () => {
+  it('sends the utterance, bounded history and schedule context to the Groq proxy', async () => {
     const calls: Array<{ url: string; body: string }> = [];
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -125,7 +125,7 @@ describe('voice ai', () => {
       const state = createEmptyState();
       const result = await voiceTurn({ utterance: "I'm wiped. Make tomorrow soft?", history: [{ role: 'user', text: 'hi' }], state });
       expect(calls).toHaveLength(1);
-      expect(calls[0].url).toContain('/api/xai/chat/completions');
+      expect(calls[0].url).toContain('/api/groq/chat/completions');
       const body = JSON.parse(calls[0].body) as { messages: Array<{ role: string; content: string }>; response_format?: { type: string } };
       expect(body.response_format?.type).toBe('json_object');
       const userMessage = JSON.parse(body.messages[1].content) as {

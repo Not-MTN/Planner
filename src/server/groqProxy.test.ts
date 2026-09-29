@@ -2,18 +2,19 @@ import { readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import vercelFunction from '../../api/[...path]';
-import { MAX_PLAN_IMAGE_BYTES, XAI_CHAT_URL, XAI_STATUS_URL } from '../ai';
+import { MAX_PLAN_IMAGE_BYTES, GROQ_CHAT_URL, GROQ_STATUS_URL } from '../ai';
 import {
   MAX_PROXY_BODY_BYTES,
-  XAI_ALLOWED_MODEL,
-  XAI_UPSTREAM_CHAT_COMPLETIONS,
-  handleXAIChatCompletions,
-  handleXAIStatus,
+  GROQ_ALLOWED_MODEL,
+  GROQ_ALLOWED_VISION_MODEL,
+  GROQ_UPSTREAM_CHAT_COMPLETIONS,
+  handleGroqChatCompletions,
+  handleGroqStatus,
   normalizeApiKey,
   upstreamErrorResponse,
   isSameOriginRequest,
   validateChatPayload,
-} from './xaiProxy';
+} from './groqProxy';
 import { resetRateLimits } from './security';
 
 // Obviously fake placeholder; never a real credential.
@@ -28,7 +29,14 @@ function request(path: string, init: RequestInit & { origin?: string } = {}): Re
 }
 
 function chatBody(extra: Record<string, unknown> = {}): string {
-  return JSON.stringify({ model: 'grok-4.7', messages: [{ role: 'user', content: 'Plan my day' }], ...extra });
+  return JSON.stringify({ model: GROQ_ALLOWED_MODEL, messages: [{ role: 'user', content: 'Plan my day' }], ...extra });
+}
+
+function imageChatBody(model: string): string {
+  return JSON.stringify({
+    model,
+    messages: [{ role: 'user', content: [{ type: 'text', text: 'Read my plan' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } }] }],
+  });
 }
 
 function upstreamOk() {
@@ -56,14 +64,14 @@ describe('Vercel function discovery', () => {
     // Functions; the API has 16 routes, so they all share the one catch-all.
     expect(functions.map((file) => relative(apiRoot, file).split(sep).join('/'))).toEqual(['[...path].ts']);
     expect(typeof vercelFunction).toBe('function');
-    expect(await (await vercelFunction(request(XAI_STATUS_URL))).json()).toEqual({ configured: false });
+    expect(await (await vercelFunction(request(GROQ_STATUS_URL))).json()).toEqual({ configured: false });
   });
 });
 
 describe('status route', () => {
-  it('reports configured:true from XAI_API_KEY without exposing the key', async () => {
-    vi.stubEnv('XAI_API_KEY', FAKE_KEY);
-    const response = await vercelFunction(request(XAI_STATUS_URL));
+  it('reports configured:true from GROQ_API_KEY without exposing the key', async () => {
+    vi.stubEnv('GROQ_API_KEY', FAKE_KEY);
+    const response = await vercelFunction(request(GROQ_STATUS_URL));
     expect(response.status).toBe(200);
     expect(response.headers.get('cache-control')).toBe('no-store');
     const text = await response.text();
@@ -72,62 +80,62 @@ describe('status route', () => {
   });
 
   it('reports configured:false when the variable is missing or blank', async () => {
-    vi.stubEnv('XAI_API_KEY', '   ');
-    expect(await (await vercelFunction(request(XAI_STATUS_URL))).json()).toEqual({ configured: false });
-    expect(await handleXAIStatus(request('/api/xai/status'), undefined).json()).toEqual({ configured: false });
+    vi.stubEnv('GROQ_API_KEY', '   ');
+    expect(await (await vercelFunction(request(GROQ_STATUS_URL))).json()).toEqual({ configured: false });
+    expect(await handleGroqStatus(request('/api/groq/status'), undefined).json()).toEqual({ configured: false });
   });
 
   it('rejects cross-origin browser requests', () => {
-    const response = handleXAIStatus(request('/api/xai/status', { origin: 'https://evil.example' }), FAKE_KEY);
+    const response = handleGroqStatus(request('/api/groq/status', { origin: 'https://evil.example' }), FAKE_KEY);
     expect(response.status).toBe(403);
   });
 });
 
 describe('chat completions route', () => {
-  it('forwards the body to xAI with the server-side key and relays the reply', async () => {
-    vi.stubEnv('XAI_API_KEY', FAKE_KEY);
+  it('forwards the body to Groq with the server-side key and relays the reply', async () => {
+    vi.stubEnv('GROQ_API_KEY', FAKE_KEY);
     const fetchMock = upstreamOk();
     vi.stubGlobal('fetch', fetchMock);
     const body = chatBody();
-    const response = await vercelFunction(request(XAI_CHAT_URL, {
+    const response = await vercelFunction(request(GROQ_CHAT_URL, {
       method: 'POST', body, origin: `https://${HOST}`, headers: { 'content-type': 'application/json' },
     }));
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ choices: [{ message: { content: '{}' } }] });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe(XAI_UPSTREAM_CHAT_COMPLETIONS);
+    expect(url).toBe(GROQ_UPSTREAM_CHAT_COMPLETIONS);
     expect(new Headers(init?.headers).get('authorization')).toBe(`Bearer ${FAKE_KEY}`);
     expect(init?.body).toBe(body);
   });
 
-  it('returns 503 with setup guidance when the key is missing, without calling xAI', async () => {
+  it('returns 503 with setup guidance when the key is missing, without calling Groq', async () => {
     const fetchMock = upstreamOk();
-    const response = await handleXAIChatCompletions(
-      request('/api/xai/chat/completions', { method: 'POST', body: chatBody() }), undefined, { fetchImpl: fetchMock });
+    const response = await handleGroqChatCompletions(
+      request('/api/groq/chat/completions', { method: 'POST', body: chatBody() }), undefined, { fetchImpl: fetchMock });
     expect(response.status).toBe(503);
     expect(((await response.json()) as { error: { message: string } }).error.message).toContain('Vercel');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('rejects oversized bodies with 413 before contacting xAI', async () => {
+  it('rejects oversized bodies with 413 before contacting Groq', async () => {
     const fetchMock = upstreamOk();
     const huge = chatBody({ image: 'x'.repeat(MAX_PROXY_BODY_BYTES) });
-    const response = await handleXAIChatCompletions(
-      request('/api/xai/chat/completions', { method: 'POST', body: huge }), FAKE_KEY, { fetchImpl: fetchMock });
+    const response = await handleGroqChatCompletions(
+      request('/api/groq/chat/completions', { method: 'POST', body: huge }), FAKE_KEY, { fetchImpl: fetchMock });
     expect(response.status).toBe(413);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('rejects cross-origin, non-POST, and non-JSON requests', async () => {
     const fetchMock = upstreamOk();
-    const cross = await handleXAIChatCompletions(request('/api/xai/chat/completions', {
+    const cross = await handleGroqChatCompletions(request('/api/groq/chat/completions', {
       method: 'POST', body: chatBody(), origin: 'https://evil.example',
     }), FAKE_KEY, { fetchImpl: fetchMock });
     expect(cross.status).toBe(403);
-    const get = await handleXAIChatCompletions(request('/api/xai/chat/completions'), FAKE_KEY, { fetchImpl: fetchMock });
+    const get = await handleGroqChatCompletions(request('/api/groq/chat/completions'), FAKE_KEY, { fetchImpl: fetchMock });
     expect(get.status).toBe(405);
-    const bad = await handleXAIChatCompletions(request('/api/xai/chat/completions', {
+    const bad = await handleGroqChatCompletions(request('/api/groq/chat/completions', {
       method: 'POST', body: 'not json',
     }), FAKE_KEY, { fetchImpl: fetchMock });
     expect(bad.status).toBe(400);
@@ -138,24 +146,40 @@ describe('chat completions route', () => {
     const valid = JSON.parse(chatBody()) as Record<string, unknown>;
     expect(validateChatPayload(valid)).toBeNull();
     expect(validateChatPayload({ ...valid, model: 'another-model' })).toContain('model');
-    expect(XAI_ALLOWED_MODEL).toBe('grok-4.7');
+    expect(GROQ_ALLOWED_MODEL).toBe('openai/gpt-oss-120b');
+    expect(GROQ_ALLOWED_VISION_MODEL).toBe('qwen/qwen3.8-27b');
     expect(validateChatPayload({ ...valid, stream: true })).toContain('unsupported');
     expect(validateChatPayload({
       ...valid,
       messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: 'https://example.com/secret.png' } }] }],
     })).toContain('invalid');
+    // Groq's token cap moved from max_tokens to max_completion_tokens; both pass.
+    expect(validateChatPayload({ ...valid, max_completion_tokens: 3500 })).toBeNull();
+    expect(validateChatPayload({ ...valid, max_completion_tokens: 99_000 })).toContain('token limit');
+    // Groq documents 0-2 for its reasoning models.
+    expect(validateChatPayload({ ...valid, temperature: 1.4 })).toBeNull();
+    expect(validateChatPayload({ ...valid, temperature: 2.5 })).toContain('temperature');
+  });
+
+  it('sends images only to a model that can read them', () => {
+    const models = [GROQ_ALLOWED_MODEL, GROQ_ALLOWED_VISION_MODEL];
+    // Groq's text models reject array content, so the proxy names the real fix.
+    expect(validateChatPayload(JSON.parse(imageChatBody(GROQ_ALLOWED_MODEL)), models, GROQ_ALLOWED_VISION_MODEL)).toContain('vision model');
+    expect(validateChatPayload(JSON.parse(imageChatBody(GROQ_ALLOWED_VISION_MODEL)), models, GROQ_ALLOWED_VISION_MODEL)).toBeNull();
+    // A deployment that turned the vision model off refuses the image outright.
+    expect(validateChatPayload(JSON.parse(imageChatBody(GROQ_ALLOWED_VISION_MODEL)), [GROQ_ALLOWED_MODEL], undefined)).toContain('not available');
   });
 
   it('passes upstream errors through and maps network failures and timeouts', async () => {
-    const rejected = await handleXAIChatCompletions(request('/api/xai/chat/completions', { method: 'POST', body: chatBody() }), FAKE_KEY, {
+    const rejected = await handleGroqChatCompletions(request('/api/groq/chat/completions', { method: 'POST', body: chatBody() }), FAKE_KEY, {
       fetchImpl: async () => new Response(JSON.stringify({ error: 'bad key' }), { status: 401 }),
     });
     expect(rejected.status).toBe(401);
-    const offline = await handleXAIChatCompletions(request('/api/xai/chat/completions', { method: 'POST', body: chatBody() }), FAKE_KEY, {
+    const offline = await handleGroqChatCompletions(request('/api/groq/chat/completions', { method: 'POST', body: chatBody() }), FAKE_KEY, {
       fetchImpl: async () => { throw new TypeError('fetch failed'); },
     });
     expect(offline.status).toBe(502);
-    const slow = await handleXAIChatCompletions(request('/api/xai/chat/completions', { method: 'POST', body: chatBody() }), FAKE_KEY, {
+    const slow = await handleGroqChatCompletions(request('/api/groq/chat/completions', { method: 'POST', body: chatBody() }), FAKE_KEY, {
       fetchImpl: async () => { throw new DOMException('timed out', 'TimeoutError'); },
     });
     expect(slow.status).toBe(504);
@@ -163,13 +187,13 @@ describe('chat completions route', () => {
 });
 
 describe('abuse controls', () => {
-  it('throttles repeated xAI proxy calls before the upstream key is used again', async () => {
+  it('throttles repeated Groq proxy calls before the upstream key is used again', async () => {
     resetRateLimits();
     const fetchMock = upstreamOk();
     let last: Response | null = null;
     for (let index = 0; index < 21; index += 1) {
-      last = await handleXAIChatCompletions(
-        request('/api/xai/chat/completions', { method: 'POST', body: chatBody() }),
+      last = await handleGroqChatCompletions(
+        request('/api/groq/chat/completions', { method: 'POST', body: chatBody() }),
         FAKE_KEY,
         { fetchImpl: fetchMock },
       );
@@ -192,29 +216,29 @@ describe('request size budget', () => {
 
 describe('same-origin check', () => {
   it('accepts requests without Origin and matching request hosts', () => {
-    expect(isSameOriginRequest(new Request(`https://${HOST}/api/xai/status`))).toBe(true);
-    const forwarded = new Request('http://internal/api/xai/status', {
+    expect(isSameOriginRequest(new Request(`https://${HOST}/api/groq/status`))).toBe(true);
+    const forwarded = new Request('http://internal/api/groq/status', {
       headers: { origin: `https://${HOST}`, host: HOST },
     });
     expect(isSameOriginRequest(forwarded)).toBe(true);
-    const malformed = new Request(`https://${HOST}/api/xai/status`, { headers: { origin: 'null' } });
+    const malformed = new Request(`https://${HOST}/api/groq/status`, { headers: { origin: 'null' } });
     expect(isSameOriginRequest(malformed)).toBe(false);
-    const spoofedForwardedHost = new Request(`https://${HOST}/api/xai/status`, {
+    const spoofedForwardedHost = new Request(`https://${HOST}/api/groq/status`, {
       headers: { origin: 'https://evil.example', 'x-forwarded-host': 'evil.example' },
     });
     expect(isSameOriginRequest(spoofedForwardedHost)).toBe(false);
   });
 });
 
-describe('xAI key handling', () => {
+describe('Groq key handling', () => {
   it('cleans up the ways a key usually arrives from a paste', () => {
     // Surrounding quotes, a "Bearer " prefix and invisible characters all make
-    // xAI answer 401 even though the key itself is valid.
-    expect(normalizeApiKey('  xai-abc123  ')).toBe('xai-abc123');
-    expect(normalizeApiKey('"xai-abc123"')).toBe('xai-abc123');
-    expect(normalizeApiKey("'xai-abc123'")).toBe('xai-abc123');
-    expect(normalizeApiKey('Bearer xai-abc123')).toBe('xai-abc123');
-    expect(normalizeApiKey('xai-\u200Babc\u00A0123')).toBe('xai-abc123');
+    // Groq answer 401 even though the key itself is valid.
+    expect(normalizeApiKey('  key-abc123  ')).toBe('key-abc123');
+    expect(normalizeApiKey('"key-abc123"')).toBe('key-abc123');
+    expect(normalizeApiKey("'key-abc123'")).toBe('key-abc123');
+    expect(normalizeApiKey('Bearer key-abc123')).toBe('key-abc123');
+    expect(normalizeApiKey('key-\u200Babc\u00A0123')).toBe('key-abc123');
     expect(normalizeApiKey(undefined)).toBe('');
     expect(normalizeApiKey('   ')).toBe('');
   });
@@ -226,32 +250,32 @@ describe('xAI key handling', () => {
       sent = String((init.headers as Record<string, string>).Authorization);
       return new Response(JSON.stringify({ choices: [{ message: { content: '{}' } }] }), { status: 200 });
     });
-    const response = await handleXAIChatCompletions(
-      request('/api/xai/chat/completions', { method: 'POST', body: chatBody() }),
-      '  "Bearer xai-abc123"\n',
+    const response = await handleGroqChatCompletions(
+      request('/api/groq/chat/completions', { method: 'POST', body: chatBody() }),
+      '  "Bearer key-abc123"\n',
       { fetchImpl: fetchMock as unknown as typeof fetch },
     );
     expect(response.status).toBe(200);
-    expect(sent).toBe('Bearer xai-abc123');
+    expect(sent).toBe('Bearer key-abc123');
   });
 
   it('accepts a model override without a code change', async () => {
     resetRateLimits();
     const fetchMock = upstreamOk();
-    const response = await handleXAIChatCompletions(
-      request('/api/xai/chat/completions', {
+    const response = await handleGroqChatCompletions(
+      request('/api/groq/chat/completions', {
         method: 'POST',
-        body: JSON.stringify({ model: 'grok-4.6', messages: [{ role: 'user', content: 'hello' }] }),
+        body: JSON.stringify({ model: 'openai/gpt-oss-20b', messages: [{ role: 'user', content: 'hello' }] }),
       }),
       FAKE_KEY,
-      { fetchImpl: fetchMock as unknown as typeof fetch, model: 'grok-4.6' },
+      { fetchImpl: fetchMock as unknown as typeof fetch, model: 'openai/gpt-oss-20b' },
     );
     expect(response.status).toBe(200);
   });
 });
 
 describe('upstream error reporting', () => {
-  it('keeps the status but explains what xAI actually said', async () => {
+  it('keeps the status but explains what Groq actually said', async () => {
     const body = JSON.stringify({ error: { message: 'Incorrect API key provided' } });
     const response = upstreamErrorResponse(401, body);
     expect(response.status).toBe(401);
@@ -266,21 +290,21 @@ describe('upstream error reporting', () => {
     expect(response.status).toBe(404);
     const parsed = (await response.json()) as { error: { code: string; message: string } };
     expect(parsed.error.code).toBe('model_not_found');
-    expect(parsed.error.message).toContain('XAI_MODEL');
+    expect(parsed.error.message).toContain('GROQ_MODEL');
   });
 
-  it('falls back to actionable advice when xAI sends nothing useful', async () => {
+  it('falls back to actionable advice when Groq sends nothing useful', async () => {
     const response = upstreamErrorResponse(401, '<html>not json</html>');
     const parsed = (await response.json()) as { error: { code: string; message: string } };
     expect(parsed.error.code).toBe('upstream_auth');
-    expect(parsed.error.message).toContain('console.x.ai');
+    expect(parsed.error.message).toContain('console.groq.com');
   });
 
   it('passes upstream failures through with a code instead of a bare body', async () => {
     resetRateLimits();
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: 'bad key' }), { status: 401 }));
-    const response = await handleXAIChatCompletions(
-      request('/api/xai/chat/completions', { method: 'POST', body: chatBody() }),
+    const response = await handleGroqChatCompletions(
+      request('/api/groq/chat/completions', { method: 'POST', body: chatBody() }),
       FAKE_KEY,
       { fetchImpl: fetchMock as unknown as typeof fetch },
     );
@@ -291,37 +315,51 @@ describe('upstream error reporting', () => {
   });
 });
 
-describe('credit and license errors', () => {
-  // Verbatim shape xAI returns for a key on a team with no balance: a top-level
-  // `error` string plus a `code` that says "permission denied".
-  const NO_CREDITS_BODY = JSON.stringify({
-    code: 'The caller does not have permission to execute the specified operation',
-    error:
-      "Your newly created team doesn't have any credits or licenses yet. You can purchase those on https://console.x.ai/team/73b299bc-1441-46bb-961d-94500b552967",
+describe('billing errors', () => {
+  // Groq answers a *valid* key with a 429 once the free allowance is used up.
+  // The status says "slow down", which is exactly the wrong advice, so the
+  // proxy has to read the message rather than the status.
+  const EXHAUSTED_BODY = JSON.stringify({
+    error: {
+      message: 'Please add a payment method to continue using the API. Please visit https://console.groq.com/settings/billing to add a payment method.',
+      type: 'payment_required',
+      code: 'payment_required',
+    },
   });
 
-  it('reports an out-of-credit team as billing, not a bad key', async () => {
+  it('reports an exhausted free allowance as billing, not a bad key', async () => {
     for (const status of [401, 403, 429]) {
-      const response = upstreamErrorResponse(status, NO_CREDITS_BODY);
+      const response = upstreamErrorResponse(status, EXHAUSTED_BODY);
       expect(response.status).toBe(status);
       const parsed = (await response.json()) as { error: { code: string; message: string; upstream: number } };
-      expect(parsed.error.code).toBe('no_credits');
+      expect(parsed.error.code).toBe('billing');
       expect(parsed.error.upstream).toBe(status);
-      // The fix is in the xAI console, so the team link xAI gave us is kept.
-      expect(parsed.error.message).toContain('https://console.x.ai/team/73b299bc-1441-46bb-961d-94500b552967');
-      expect(parsed.error.message).toContain('no credits');
-      expect(parsed.error.message.toLowerCase()).not.toContain('re-copy it from console.x.ai');
+      expect(parsed.error.message).toContain('https://console.groq.com/settings/billing');
+      expect(parsed.error.message).toContain('free allowance');
+      expect(parsed.error.message.toLowerCase()).not.toContain('re-copy it from console.groq.com');
     }
   });
 
-  it('recognises the other ways xAI phrases an empty balance', () => {
+  it('recognises the other ways a provider phrases an empty balance', async () => {
     for (const message of [
       'Your credit balance is too low to use this model.',
-      'You exceeded your current credits, please check your plan.',
+      'You exceeded your current quota, please check your plan.',
       'insufficient_quota: there are no credits left',
     ]) {
-      expect(upstreamErrorResponse(429, JSON.stringify({ error: { message } })).headers).toBeDefined();
+      const response = upstreamErrorResponse(429, JSON.stringify({ error: { message } }));
+      const parsed = (await response.json()) as { error: { code: string } };
+      expect(parsed.error.code).toBe('billing');
     }
+  });
+
+  it('still calls a genuine rate limit a rate limit', async () => {
+    const response = upstreamErrorResponse(
+      429,
+      JSON.stringify({ error: { message: 'Rate limit reached for model openai/gpt-oss-120b. Limit 30, Used 30. Try again in 1s.' } }),
+    );
+    const parsed = (await response.json()) as { error: { code: string; message: string } };
+    expect(parsed.error.code).toBe('rate_limited');
+    expect(parsed.error.message).toContain('Rate limit reached');
   });
 
   it('still calls a genuinely wrong key an auth problem', async () => {
@@ -331,18 +369,18 @@ describe('credit and license errors', () => {
     expect(parsed.error.message).toContain('Incorrect API key provided');
   });
 
-  it('reaches the browser through the chat endpoint with the team link intact', async () => {
+  it('reaches the browser through the chat endpoint with the billing link intact', async () => {
     resetRateLimits();
-    const fetchMock = vi.fn(async () => new Response(NO_CREDITS_BODY, { status: 403 }));
-    const response = await handleXAIChatCompletions(
-      request('/api/xai/chat/completions', { method: 'POST', body: chatBody() }),
+    const fetchMock = vi.fn(async () => new Response(EXHAUSTED_BODY, { status: 429 }));
+    const response = await handleGroqChatCompletions(
+      request('/api/groq/chat/completions', { method: 'POST', body: chatBody() }),
       FAKE_KEY,
       { fetchImpl: fetchMock as unknown as typeof fetch },
     );
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(429);
     const parsed = (await response.json()) as { error: { code: string; message: string } };
-    expect(parsed.error.code).toBe('no_credits');
-    expect(parsed.error.message).toContain('console.x.ai/team/');
+    expect(parsed.error.code).toBe('billing');
+    expect(parsed.error.message).toContain('console.groq.com/settings/billing');
     expect(parsed.error.message).toContain('no redeploy');
   });
 });

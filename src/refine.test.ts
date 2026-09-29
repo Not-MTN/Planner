@@ -4,7 +4,7 @@ import { addEvent, addFixedCommitment, addTask, saveAIPlan, setMood, updateAIPla
 import { weekdayIndex } from './dates';
 import { createEmptyState } from './types';
 
-function mockXAI(content: unknown) {
+function mockGroq(content: unknown) {
   const payload = { choices: [{ message: { content: JSON.stringify(content) } }] };
   const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({
     ok: true,
@@ -48,7 +48,7 @@ describe('refineAIPlan', () => {
       title: 'Class', weekday: 2, startTime: '08:00', endTime: '10:00', category: 'learning', note: '',
     }, 'class', '2026-09-27T08:00:00.000Z');
     state = addTask(state, { title: 'Existing', priority: 'low', dueDate: '2026-09-29', dueTime: null, category: 'personal', note: '', goalId: null }, 't-1', '2026-09-27T08:00:00.000Z');
-    const fetchMock = mockXAI({
+    const fetchMock = mockGroq({
       summary: 'Lighter Tuesday.',
       tasks: [],
       events: [],

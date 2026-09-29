@@ -9,7 +9,7 @@
  */
 import { createHash } from 'node:crypto';
 import { Buffer } from 'node:buffer';
-import { isSameOriginRequest } from './xaiProxy.js';
+import { isSameOriginRequest } from './groqProxy.js';
 import { WebAuthnError, fromBase64Url, verifyAssertion, verifyRegistration } from './webauthn.js';
 import { API_SECURITY_HEADERS, BodyTooLargeError, rateLimitResponse, readLimitedBody } from './security.js';
 import {

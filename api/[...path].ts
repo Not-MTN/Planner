@@ -29,8 +29,9 @@ function currentEnv(): ApiEnv {
       process.env.DATABASE_URL ||
       process.env.POSTGRES_URL ||
       process.env.NEON_DATABASE_URL,
-    XAI_API_KEY: process.env.XAI_API_KEY,
-    XAI_MODEL: process.env.XAI_MODEL,
+    GROQ_API_KEY: process.env.GROQ_API_KEY,
+    GROQ_MODEL: process.env.GROQ_MODEL,
+    GROQ_VISION_MODEL: process.env.GROQ_VISION_MODEL,
   };
 }
 

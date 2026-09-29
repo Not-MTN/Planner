@@ -15,23 +15,30 @@ import type {
   WeekResults,
 } from './types';
 
-export const XAI_CHAT_URL = '/api/xai/chat/completions';
-export const XAI_STATUS_URL = '/api/xai/status';
-export const XAI_TEXT_MODEL = 'grok-4.7';
-export const XAI_VISION_MODEL = 'grok-4.7';
+export const GROQ_CHAT_URL = '/api/groq/chat/completions';
+export const GROQ_STATUS_URL = '/api/groq/status';
+export const GROQ_TEXT_MODEL = 'openai/gpt-oss-120b';
+/**
+ * Groq's text models reject array content outright, so image requests go to a
+ * model that accepts `image_url` parts. Both names are overridable on the server
+ * with GROQ_MODEL / GROQ_VISION_MODEL; keep the two lists in step.
+ */
+export const GROQ_VISION_MODEL = 'qwen/qwen3.8-27b';
 /**
  * Vercel Functions accept request bodies up to 4.5 MB. Base64 grows an image by ~33%,
  * so a 3 MB image (~4.2 MB encoded) plus the prompt still fits in one request.
  */
 export const MAX_PLAN_IMAGE_BYTES = 3 * 1024 * 1024;
-export const XAI_KEY_MISSING_MESSAGE = 'XAI_API_KEY is not configured on the server. On Vercel, add it under Project Settings → Environment Variables and redeploy. Locally, add it to .env.local and restart the dev server.';
+/** Groq's recommended range for GPT-OSS is 0.5-0.7; the proxy allows 0-2. */
+export const AI_TEMPERATURE = 0.6;
+export const GROQ_KEY_MISSING_MESSAGE = 'GROQ_API_KEY is not configured on the server. On Vercel, add it under Project Settings → Environment Variables and redeploy. Locally, add it to .env.local and restart the dev server.';
 /**
- * Used only when the proxy flagged `no_credits` without a message. The wording
- * mirrors `creditErrorMessage` in the server proxy; it is repeated here because
+ * Used only when the proxy flagged `billing` without a message. The wording
+ * mirrors `billingErrorMessage` in the server proxy; it is repeated here because
  * the browser must never import the server-only proxy module.
  */
-export const XAI_NO_CREDITS_MESSAGE =
-  'Your xAI key is working — the team it belongs to just has no credits or license seats. Add credits at https://console.x.ai/billing (or use a key from a team that already has them), then try again. No redeploy needed.';
+export const GROQ_BILLING_MESSAGE =
+  'Your Groq key is working — the account has just run out of free allowance. Add a payment method at https://console.groq.com/settings/billing, or wait for the per-day free allowance to reset, then try again. No redeploy needed.';
 
 export interface PlanRange {
   startDate: string;
@@ -208,7 +215,7 @@ function parseFrequency(value: unknown): HabitFrequency {
 
 function normalizePlan(rawValue: unknown, state: PlannerState, range: PlanRange): AIDraft {
   const raw = asRecord(rawValue);
-  if (!raw) throw new Error(t(t("xAI returned a plan in an unexpected format. Try again.")));
+  if (!raw) throw new Error(t(t("Groq returned a plan in an unexpected format. Try again.")));
   const tasks: TaskInput[] = [];
   const existingTaskKeys = new Set(
     state.tasks.map((task) => `${task.dueDate ?? ''}|${task.title.toLowerCase().trim()}`),
@@ -316,7 +323,7 @@ function extractContent(payload: unknown): string {
       return typeof text === 'string' ? [text] : [];
     }).join('\n');
   }
-  throw new Error(t(t("xAI did not return a response. Check the server configuration and try again.")));
+  throw new Error(t(t("Groq did not return a response. Check the server configuration and try again.")));
 }
 
 function parseJson(text: string): unknown {
@@ -328,7 +335,7 @@ function parseJson(text: string): unknown {
   }
 }
 
-async function xaiJsonInternal(system: string, user: string, imageDataUrl?: string, signal?: AbortSignal, maxTokens = 3500): Promise<unknown> {
+async function groqJsonInternal(system: string, user: string, imageDataUrl?: string, signal?: AbortSignal, maxTokens = 3500): Promise<unknown> {
   const content = imageDataUrl
     ? [
         { type: 'text', text: user },
@@ -337,14 +344,16 @@ async function xaiJsonInternal(system: string, user: string, imageDataUrl?: stri
     : user;
   let response: Response;
   try {
-    response = await fetch(XAI_CHAT_URL, {
+    response = await fetch(GROQ_CHAT_URL, {
       method: 'POST',
       signal: signal ?? null,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: imageDataUrl ? XAI_VISION_MODEL : XAI_TEXT_MODEL,
-        temperature: 0.35,
-        max_tokens: maxTokens,
+        model: imageDataUrl ? GROQ_VISION_MODEL : GROQ_TEXT_MODEL,
+        // Groq documents 0.5-0.7 for its reasoning models; lower values make
+        // GPT-OSS repetitive, and JSON output is already pinned by response_format.
+        temperature: AI_TEMPERATURE,
+        max_completion_tokens: maxTokens,
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: getLang() === 'fa' ? `${system}\n\nWrite every human-readable text value (summary, titles, notes, names, wins, improvements, wellness, reasons) in Persian (Farsi). Keep JSON keys, enum values, dates and times in English/ASCII exactly as specified.` : system },
@@ -354,7 +363,7 @@ async function xaiJsonInternal(system: string, user: string, imageDataUrl?: stri
     });
   } catch (cause) {
     if (cause instanceof Error && cause.name === 'AbortError') throw cause;
-    throw new Error(t(t("Could not reach the xAI proxy. Check the server and try again.")));
+    throw new Error(t(t("Could not reach the Groq proxy. Check the server and try again.")));
   }
   // Read the body once: prefer text (so a non-JSON error can be reported), and
   // fall back to json() for callers that only provide that.
@@ -367,28 +376,28 @@ async function xaiJsonInternal(system: string, user: string, imageDataUrl?: stri
     const message = cleanText(error?.message, 400);
     const code = typeof error?.code === 'string' ? error.code : '';
 
-    // A JSON error body means the proxy reached xAI and is telling us why.
+    // A JSON error body means the proxy reached Groq and is telling us why.
     if (payload) {
-      // Checked first: an out-of-credit team is billed a 401/403/429 upstream,
-      // and re-pasting a valid key would not fix it.
-      if (code === 'no_credits') {
-        throw new Error(message || t(XAI_NO_CREDITS_MESSAGE));
+      // Checked first: a used-up free allowance arrives as a 429, and neither
+      // re-pasting a valid key nor waiting for the rate limit would fix it.
+      if (code === 'billing') {
+        throw new Error(message || t(GROQ_BILLING_MESSAGE));
       }
       if (code === 'upstream_auth' || response.status === 401) {
-        throw new Error(message || t("xAI rejected XAI_API_KEY. Check the server environment variable."));
+        throw new Error(message || t("Groq rejected GROQ_API_KEY. Check the server environment variable."));
       }
       if (code === 'upstream_forbidden' || response.status === 403) {
-        throw new Error(message || t("xAI rejected XAI_API_KEY. Check the server environment variable."));
+        throw new Error(message || t("Groq rejected GROQ_API_KEY. Check the server environment variable."));
       }
-      if (code === 'model_not_found' || code === 'rate_limited') throw new Error(message || t("xAI request failed ({0}). Please try again.", { 0: response.status }));
-      if (response.status === 503) throw new Error(message || XAI_KEY_MISSING_MESSAGE);
+      if (code === 'model_not_found' || code === 'rate_limited') throw new Error(message || t("Groq request failed ({0}). Please try again.", { 0: response.status }));
+      if (response.status === 503) throw new Error(message || GROQ_KEY_MISSING_MESSAGE);
       if (response.status === 413) throw new Error(message || t("The image or plan is too large for one request. Use a smaller image (up to 3 MB)."));
-      if (response.status === 504) throw new Error(message || t("The xAI request timed out. Please try again."));
-      throw new Error(message || t("xAI request failed ({0}). Please try again.", { 0: response.status }));
+      if (response.status === 504) throw new Error(message || t("The Groq request timed out. Please try again."));
+      throw new Error(message || t("Groq request failed ({0}). Please try again.", { 0: response.status }));
     }
 
     // No JSON at all: something in front of the app answered, not our proxy.
-    if (response.status === 404) throw new Error(t("The xAI proxy was not found on this deployment. Redeploy with the api/ functions included."));
+    if (response.status === 404) throw new Error(t("The Groq proxy was not found on this deployment. Redeploy with the api/ functions included."));
     throw new Error(
       t("The server returned an unexpected response ({0}) instead of JSON. If this deployment has password protection or Vercel Authentication enabled, turn it off, or check that the api/ functions were deployed.", {
         0: response.status,
@@ -407,9 +416,9 @@ function parseJsonSafely(text: string): unknown {
   }
 }
 
-/** Voice/plain-text JSON chat against the xAI proxy (system + user in, parsed JSON out). */
-export async function xaiChatJson(system: string, user: string, signal?: AbortSignal): Promise<unknown> {
-  return xaiJsonInternal(system, user, undefined, signal);
+/** Voice/plain-text JSON chat against the Groq proxy (system + user in, parsed JSON out). */
+export async function groqChatJson(system: string, user: string, signal?: AbortSignal): Promise<unknown> {
+  return groqJsonInternal(system, user, undefined, signal);
 }
 
 /** Normalize a raw AI plan payload into a safe AIDraft for a range. */
@@ -467,9 +476,9 @@ export function habitFrequencyLabel(frequency: HabitFrequency): string {
   return labels.length ? labels.join(', ') : t("Custom schedule");
 }
 
-export async function checkXAIConfiguration(): Promise<boolean> {
+export async function checkGroqConfiguration(): Promise<boolean> {
   try {
-    const response = await fetch(XAI_STATUS_URL, { headers: { Accept: 'application/json' } });
+    const response = await fetch(GROQ_STATUS_URL, { headers: { Accept: 'application/json' } });
     if (!response.ok) return false;
     const payload = asRecord(await response.json());
     return payload?.configured === true;
@@ -573,7 +582,7 @@ export async function generateAIPlan(options: {
   const currentPlans = buildPlanningContext(state, range);
   const system = `You are a supportive, practical planning assistant inside a personal planner. Create a realistic plan, not a packed schedule. ${planSafetyRules(range)} ${spanGuidance(range.days)} ${PLAN_JSON_SHAPE}. Tasks must have a date inside the range. Use events only when a time is useful. Habits should be repeatable and few; do not add a habit that already exists. Avoid duplicating the user's current tasks and events. If the user uploaded a handwritten or printed plan, transcribe what is clear, preserve dates/times, and put unclear details in the summary rather than guessing.`;
   const user = `Planning request: ${prompt.trim() || 'Read the uploaded image and turn the plan into planner tasks, timed events, and a few repeatable habits where appropriate.'}\n\nCurrent schedule and constraints (do not add over existing times):\n${JSON.stringify(currentPlans)}`;
-  const raw = await xaiJsonInternal(system, user, imageDataUrl, undefined, range.days > 30 ? 6000 : 3500);
+  const raw = await groqJsonInternal(system, user, imageDataUrl, undefined, range.days > 30 ? 6000 : 3500);
   return normalizePlan(raw, state, range);
 }
 
@@ -605,7 +614,7 @@ export async function refineAIPlan(options: {
   const currentPlans = buildPlanningContext(state, range);
   const system = `You are a supportive, practical planning assistant inside a personal planner, now EDITING an existing draft plan. ${planSafetyRules(range)} Apply the user's change request precisely and minimally: keep every item they did not ask to change (same title, date, time), modify/move/remove only what the request affects, and add new items only when the request needs them. ${spanGuidance(range.days)} ${PLAN_JSON_SHAPE}. Return the FULL revised plan — not just the changed parts. Keep the summary accurate for the revised plan. Never re-add items the user already deleted from the draft; the currentDraft is the source of truth, not the planner history.`;
   const user = `Change request: ${request.trim()}\n\nCurrent draft to revise:\n${JSON.stringify(draftForModel(draft))}\n\nCurrent schedule and constraints (do not add over existing times):\n${JSON.stringify(currentPlans)}`;
-  const raw = await xaiJsonInternal(system, user, undefined, undefined, range.days > 30 ? 6000 : 3500);
+  const raw = await groqJsonInternal(system, user, undefined, undefined, range.days > 30 ? 6000 : 3500);
   return normalizePlan(raw, state, range);
 }
 
@@ -745,8 +754,8 @@ export async function generateAIReview(options: {
     unfinishedTasksToConsiderForCarryForward: openTasks.map((task) => ({ id: task.id, title: task.title, date: task.dueDate })),
   };
   const system = `You are a kind, honest planning coach. Review the planner data for ${range.startDate} through ${lastDate}. Be specific, balanced, and non-judgmental; never shame the user or equate productivity with self-worth. Point out concrete wins and one or two realistic improvements. Always include one gentle, broadly safe wellbeing idea without diagnosing or prescribing. The memory section contains facts and preferences the user explicitly chose to save; use it only when relevant, do not infer sensitive facts, and never invent or change memories. Learned patterns are weak activity signals, not certain truths. Return ONLY JSON: {"summary":"2-4 sentences","wins":["..."],"improvements":["..."],"wellness":"one optional, gentle wellbeing idea","carryForward":[{"taskId":"an exact supplied task id","date":"YYYY-MM-DD after ${today} and within the next 30 days","reason":"short reason"}]}. Carry forward each unfinished task only if it still appears useful, use only supplied IDs, and choose practical future dates that leave space. Never invent, delete, or mark tasks complete. This is reflective coaching, not medical advice.`;
-  const raw = asRecord(await xaiJsonInternal(system, `Here is the user's logged activity. Do not treat empty days as failures.\n${JSON.stringify(payload)}`));
-  if (!raw) throw new Error(t(t("xAI returned a review in an unexpected format. Try again.")));
+  const raw = asRecord(await groqJsonInternal(system, `Here is the user's logged activity. Do not treat empty days as failures.\n${JSON.stringify(payload)}`));
+  if (!raw) throw new Error(t(t("Groq returned a review in an unexpected format. Try again.")));
   return {
     summary: cleanText(raw.summary, 700) || t(t("You showed up for some of the things that mattered. Let’s make the next plan a little easier to keep.")),
     wins: stringList(raw.wins, 5),
@@ -880,7 +889,7 @@ export async function generateStudentAdvice(options: {
     'Be honest about overload: if the plan is bigger than the week, say so plainly and suggest what to drop. ' +
     'Never shame, never equate output with worth, and never claim to know how they feel. ' +
     'Return ONLY JSON: {"summary":"1-2 sentences","focus":["short, specific next step"],"watchOut":"one risk or nothing"}.';
-  const raw = await xaiJsonInternal(
+  const raw = await groqJsonInternal(
     system,
     `Here is the week's plan and what got done. Empty days are not failures.\n${JSON.stringify(payload)}`,
     undefined,
@@ -888,7 +897,7 @@ export async function generateStudentAdvice(options: {
     1200,
   );
   const advice = normalizeAdvice(raw);
-  if (!advice.summary && advice.focus.length === 0) throw new Error(t("xAI returned advice in an unexpected format. Try again."));
+  if (!advice.summary && advice.focus.length === 0) throw new Error(t("Groq returned advice in an unexpected format. Try again."));
   return advice;
 }
 
@@ -905,7 +914,7 @@ export async function generateGuardianGuidance(options: {
     'Offer two to four open, kind questions that invite a conversation rather than an interrogation, plus one true and encouraging observation drawn only from the numbers. ' +
     'Never diagnose, never moralise, never suggest punishment or rewards, and never guess at causes. ' +
     'Return ONLY JSON: {"summary":"1-2 sentences","questions":["open question"],"encouragement":"one kind, true observation"}.';
-  const raw = await xaiJsonInternal(
+  const raw = await groqJsonInternal(
     system,
     `Here are the weekly results the student chose to share.\n${JSON.stringify(payload)}`,
     undefined,
@@ -913,7 +922,7 @@ export async function generateGuardianGuidance(options: {
     1200,
   );
   const guidance = normalizeGuidance(raw);
-  if (!guidance.summary && guidance.questions.length === 0) throw new Error(t("xAI returned questions in an unexpected format. Try again."));
+  if (!guidance.summary && guidance.questions.length === 0) throw new Error(t("Groq returned questions in an unexpected format. Try again."));
   return guidance;
 }
 
@@ -924,7 +933,7 @@ export function hasReviewActivity(state: PlannerState, range: PlanRange): boolea
     state.habits.some((habit) => !habit.archived && habit.createdOn <= lastDate);
 }
 
-export function friendlyXAIError(error: unknown): string {
+export function friendlyGroqError(error: unknown): string {
   if (error instanceof Error) return error.message;
   return t(t("The AI could not complete that request. Please try again."));
 }

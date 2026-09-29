@@ -4,10 +4,10 @@
  * it stays testable without the speech UI.
  *
  * - STT: the browser's Web Speech service (see speech.ts), nothing recorded here.
- * - Brains: the existing xAI proxy (same as the typed plan builder).
+ * - Brains: the existing Groq proxy (same as the typed plan builder).
  * - TTS: the browser's speech synthesizer; no audio ever leaves the device.
  */
-import { xaiChatJson, normalizeDraftPlan, draftForModel, type AIDraft, type PlanRange } from './ai';
+import { groqChatJson, normalizeDraftPlan, draftForModel, type AIDraft, type PlanRange } from './ai';
 import { addDays, todayISO } from './dates';
 import { parsePlanDuration } from './duration';
 import { getLang, t } from './i18n';
@@ -162,7 +162,7 @@ export async function voiceTurn(options: { utterance: string; history: VoiceTurn
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const timer = setTimeout(() => controller?.abort(), VOICE_TURN_TIMEOUT_MS);
   try {
-    const raw = await xaiChatJson(systemForRange(range), JSON.stringify(payload), controller?.signal);
+    const raw = await groqChatJson(systemForRange(range), JSON.stringify(payload), controller?.signal);
     return normalizeVoiceReply(raw, options.state, range);
   } catch (cause) {
     if (cause instanceof Error && cause.name === 'AbortError') {

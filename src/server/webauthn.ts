@@ -15,7 +15,7 @@
  * backwards (a cloned authenticator).
  */
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { hostOf } from './xaiProxy.js';
+import { hostOf } from './groqProxy.js';
 
 export class WebAuthnError extends Error {}
 
