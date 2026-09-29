@@ -40,6 +40,7 @@ export function createFakeNeon(): FakeDb {
     planner_sessions: [],
     planner_links: [],
     planner_passkeys: [],
+    planner_sync: [],
   };
 
   const now = () => new Date().toISOString();
@@ -354,6 +355,34 @@ export function createFakeNeon(): FakeDb {
       const removed = kept.length !== tables.planner_passkeys.length;
       tables.planner_passkeys = kept;
       return removed ? [{ credential_id }] : [];
+    }
+
+    if (/^SELECT version, ciphertext, updated_at FROM planner_sync WHERE id = /i.test(q)) {
+      return tables.planner_sync.filter((row) => row.id === values[0]);
+    }
+
+    if (/^INSERT INTO planner_sync /i.test(q)) {
+      // `version` is the literal 1 in the statement, so it is not a value here.
+      const [id, ciphertext] = values;
+      if (tables.planner_sync.some((row) => row.id === id)) return []; // ON CONFLICT DO NOTHING
+      const row: Row = { id, version: 1, ciphertext, updated_at: now() };
+      tables.planner_sync.push(row);
+      return [{ ...row }];
+    }
+
+    if (/^UPDATE planner_sync SET /i.test(q)) {
+      const [ciphertext, id, baseVersion] = values;
+      const row = tables.planner_sync.find((item) => item.id === id && item.version === baseVersion);
+      if (!row) return [];
+      row.version = Number(row.version) + 1;
+      row.ciphertext = ciphertext;
+      row.updated_at = now();
+      return [{ ...row }];
+    }
+
+    if (/^DELETE FROM planner_sync WHERE id = /i.test(q)) {
+      tables.planner_sync = tables.planner_sync.filter((row) => row.id !== values[0]);
+      return [];
     }
 
     throw new Error(`Fake Neon does not understand: ${q}`);

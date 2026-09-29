@@ -9,7 +9,8 @@
  */
 import { scrypt as scryptCallback, randomBytes, timingSafeEqual, randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
-import type { AccountRole } from '../shared/authContract';
+import type { AccountRole } from '../shared/authContract.js';
+import type { NeonQueryFunction } from '@neondatabase/serverless';
 
 const scrypt = promisify(scryptCallback) as (
   password: string,
@@ -320,6 +321,73 @@ async function spendRecoveryFailureWork(recoveryHash: string): Promise<void> {
   safeEqual(dummy, dummy);
 }
 
+/* ------------------------------------------------------- database diagnostics */
+
+/**
+ * A DATABASE_URL that the Neon driver cannot even parse. Thrown lazily from
+ * store methods (which every handler turns into a JSON 502), never from store
+ * creation — an unparseable URL must not crash the whole serverless function,
+ * which the platform reports as an opaque HTML 500 the client cannot classify.
+ */
+export class DatabaseConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DatabaseConfigError';
+  }
+}
+
+/**
+ * Cleans the paste artifacts a human leaves in an environment variable copied
+ * out of a chat window, a markdown link, or the Neon console: surrounding
+ * whitespace, one layer of wrapping quotes, and angle brackets.
+ */
+export function cleanDatabaseUrl(raw: string): string {
+  let url = raw.trim();
+  url = url.replace(/^["'`<]+/, '').replace(/["'`>]+$/, '');
+  return url.trim();
+}
+
+/**
+ * Keeps credentials out of logs: the Neon driver embeds the whole connection
+ * string — password included — in its parse errors, and query errors can echo
+ * fragments of it too.
+ */
+export function redactDatabaseError(error: unknown): string {
+  const text = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  return text
+    // Any scheme://user:pass@host string — the driver echoes the whole
+    // connection string back on a parse failure, whatever its scheme.
+    .replace(/[a-z][a-z0-9+.-]*:\/\/[^\s]*@[^\s"')\]]*/gi, '[redacted-connection]')
+    .replace(/postgres(ql)?:\/\/\S+/gi, 'postgres://[redacted]')
+    .replace(/Neon-Connection-String[^\n]*/gi, 'Neon-Connection-String: [redacted]');
+}
+
+/**
+ * Wraps every store method so a database failure is logged (with the
+ * connection string redacted) before the handler turns it into a 502. Vercel
+ * keeps function logs, so this is what makes a production outage diagnosable.
+ */
+function withLoggedFailures(store: AuthStore): AuthStore {
+  return new Proxy(store, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      if (typeof value !== 'function') return value;
+      return async (...args: unknown[]) => {
+        try {
+          return await (value as (...a: unknown[]) => unknown).apply(target, args);
+        } catch (error) {
+          if (!(error instanceof DatabaseConfigError)) {
+            console.error(`[planner] database error in AuthStore.${String(property)}: ${redactDatabaseError(error)}`);
+          } else {
+            console.error(`[planner] ${redactDatabaseError(error)}`);
+          }
+          throw error;
+        }
+      };
+    },
+  });
+}
+
 /* ------------------------------------------------------------- memory store */
 
 /** Used only outside production when no database is configured. */
@@ -599,13 +667,25 @@ export function createMemoryAuthStore(): AuthStore {
 /* --------------------------------------------------------------- neon store */
 
 export async function createNeonAuthStore(databaseUrl: string | undefined): Promise<AuthStore | null> {
-  const url = databaseUrl?.trim();
+  const url = cleanDatabaseUrl(databaseUrl ?? '');
   if (!url) return null;
-  const { neon } = await import('@neondatabase/serverless');
-  const sql = neon(url);
+  // Assigned by ensure() before any method body runs its first query; the
+  // definite-assignment assertion keeps every store method's code unchanged.
+  let sql!: NeonQueryFunction<false, false>;
   let ready: Promise<unknown> | null = null;
   const ensure = () => {
     ready ??= (async () => {
+      // Created here, not at store creation: an unparseable DATABASE_URL must
+      // surface as a caught error inside a handler (JSON 502), not as a
+      // rejected store promise that crashes the function with a raw 500.
+      const { neon } = await import('@neondatabase/serverless');
+      try {
+        sql = neon(url);
+      } catch (error) {
+        throw new DatabaseConfigError(
+          `DATABASE_URL is not a valid database connection string. Check the value in Vercel → Settings → Environment Variables (no quotes or extra text). (${redactDatabaseError(error)})`,
+        );
+      }
       await sql`CREATE TABLE IF NOT EXISTS planner_users (
         id             text PRIMARY KEY CHECK (id ~ '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'),
         username       text NOT NULL,
@@ -683,7 +763,7 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
     return ready;
   };
 
-  return {
+  return withLoggedFailures({
     async createAccount(input) {
       await ensure();
       const id = newId();
@@ -1001,7 +1081,7 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
       `) as { credential_id: string }[];
       return rows.length > 0;
     },
-  };
+  });
 }
 
 let cached: { url: string | null; store: Promise<AuthStore | null> } | null = null;
@@ -1012,7 +1092,7 @@ let cached: { url: string | null; store: Promise<AuthStore | null> } | null = nu
  * configuration, which is why the fallback is explicit rather than silent.
  */
 export function authStore(databaseUrl: string | undefined): Promise<AuthStore | null> {
-  const url = databaseUrl?.trim() || null;
+  const url = cleanDatabaseUrl(databaseUrl ?? '') || null;
   if (!url) {
     if (process.env.NODE_ENV === 'production') return Promise.resolve(null);
     return Promise.resolve((cached ??= { url: null, store: Promise.resolve(createMemoryAuthStore()) }).store);
