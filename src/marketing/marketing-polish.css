@@ -3,11 +3,14 @@
    ============================================================ */
 
 .mkt {
-  --mkt-max: 1180px;
+  --mkt-max: 1120px;
   --mkt-gap: 28px;
-  --mkt-card-pad: 28px;
-  --mkt-radius: 22px;
+  --mkt-card-pad: 24px;
+  --mkt-radius: 24px;
   --mkt-radius-sm: 14px;
+  --mobile-bar-height: 60px;
+  --tab-bar-height: 66px;
+  --mobile-chrome-total: calc(var(--mobile-bar-height) + var(--tab-bar-height));
 }
 
 /* Progress bar */
@@ -36,7 +39,7 @@
 .mkt .nav.is-scrolled {
   background: color-mix(in srgb, var(--surface) 92%, transparent);
   border-bottom-color: var(--line);
-  box-shadow: 0 1px 0 var(--line), 0 8px 24px rgba(0,0,0,0.04);
+  box-shadow: 0 1px 0 var(--line), 0 8px 24px var(--shadow-soft);
 }
 .mkt .nav-inner {
   height: 64px;
@@ -129,11 +132,11 @@
 .mkt .btn-primary {
   background: var(--ink);
   color: var(--bg);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+  box-shadow: 0 2px 8px var(--shadow-soft);
 }
 .mkt .btn-primary:hover {
   background: color-mix(in srgb, var(--ink) 88%, black);
-  box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+  box-shadow: 0 6px 20px var(--shadow);
 }
 .mkt .btn-ghost {
   background: var(--surface-2);
@@ -182,6 +185,7 @@
   position: relative;
   z-index: 1;
 }
+
 .mkt .hero-title {
   font-size: clamp(36px, 5.5vw, 64px);
   font-weight: 850;
@@ -268,7 +272,10 @@
 }
 
 /* Cards and features */
-.mkt .feature, .mkt .card, .mkt .shot, .mkt .step {
+.mkt .feature,
+.mkt .card,
+.mkt .shot,
+.mkt .step {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--mkt-radius);
@@ -276,7 +283,8 @@
   box-shadow: var(--shadow-soft);
   transition: all 0.25s var(--ease);
 }
-.mkt .feature:hover, .mkt .card:hover {
+.mkt .feature:hover,
+.mkt .card:hover {
   transform: translateY(-2px);
   box-shadow: var(--shadow);
   border-color: var(--line-strong);
@@ -289,7 +297,7 @@
   gap: 48px;
   align-items: center;
 }
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
   .mkt .split {
     grid-template-columns: 1fr;
     gap: 32px;
@@ -385,7 +393,8 @@
   margin-bottom: 14px;
   color: var(--ink);
 }
-.mkt .foot-col button, .mkt .foot-col a {
+.mkt .foot-col button,
+.mkt .foot-col a {
   display: block;
   padding: 6px 0;
   font-size: 14px;
@@ -393,7 +402,8 @@
   transition: color 0.15s;
   text-align: start;
 }
-.mkt .foot-col button:hover, .mkt .foot-col a:hover {
+.mkt .foot-col button:hover,
+.mkt .foot-col a:hover {
   color: var(--ink);
 }
 .mkt .foot-brand {
@@ -434,6 +444,7 @@
   overflow: hidden;
   text-align: center;
 }
+
 .mkt .cta-inner {
   padding: 80px 0;
   position: relative;
@@ -553,4 +564,130 @@
 /* Reserve room for the show-password toggle so typed text never hides under it. */
 .field-wrap input {
   padding-inline-end: 120px;
+}
+
+/* ============================================================
+   Responsive - Aligned with app breakpoints (1024px mobile/tablet threshold)
+   ============================================================ */
+@media (max-width: 1024px) {
+  .mkt .split {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+}
+
+@media (max-width: 768px) {
+  .mkt .section {
+    padding: 56px 0;
+  }
+  .mkt .wrap {
+    padding: 0 20px;
+  }
+  .charts,
+  .steps,
+  .roles,
+  .offline-row {
+    grid-template-columns: 1fr;
+  }
+  .hero-actions .btn {
+    width: 100%;
+  }
+  .nav-tools .btn-quiet,
+  .nav-tools .btn-primary {
+    display: none;
+  }
+  .tiny-rhythm {
+    grid-template-columns: repeat(8, 1fr);
+    height: 60px;
+  }
+  .nav-burger {
+    display: flex;
+  }
+  .nav-links {
+    position: absolute;
+    top: 64px;
+    inset-inline: 0;
+    flex-direction: column;
+    gap: 2px;
+    padding: 12px 20px 20px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
+    box-shadow: var(--shadow);
+    transform: translateY(-8px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s var(--ease), transform 0.25s var(--ease);
+  }
+  .nav-links.is-open {
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+  }
+  .nav-links button {
+    padding: 12px;
+    font-size: 16px;
+  }
+}
+
+/* ---------- Fallbacks for browsers without color-mix() ---------- */
+@supports not (color: color-mix(in srgb, red, blue)) {
+  /* The sticky nav must stay opaque or page content scrolls through it. */
+  .mkt .nav {
+    background: var(--bg);
+  }
+
+  .mkt .nav.is-scrolled {
+    background: var(--surface);
+  }
+}
+
+/* ---------- Windows high contrast / forced colors ---------- */
+@media (forced-colors: active) {
+  .mkt .card,
+  .mkt .feature,
+  .mkt .shot,
+  .mkt .step,
+  .mkt .auth-card,
+  .mkt .panel,
+  .mkt .chart,
+  .mkt .phone {
+    border: 1px solid CanvasText !important;
+    forced-color-adjust: none;
+  }
+  .mkt .btn-primary,
+  .mkt .cta .btn-primary {
+    background: ButtonFace !important;
+    color: ButtonText !important;
+    border: 1px solid ButtonText !important;
+    box-shadow: none !important;
+  }
+}
+
+/* ---------- Print ---------- */
+@media print {
+  .mkt .nav,
+  .mkt .nav-burger,
+  .mkt .progress,
+  .mkt .hero-glow,
+  .mkt .hero-grain,
+  .mkt .cta-glow,
+  .mkt .auth-leaves,
+  .mkt .mobile-toggle,
+  .mkt .theme-toggle,
+  .mkt .lang-toggle {
+    display: none !important;
+  }
+  .mkt .hero,
+  .mkt .cta {
+    min-height: auto !important;
+  }
+  .mkt .wrap {
+    max-width: none;
+    padding: 0;
+  }
+  .mkt a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.8em;
+    color: #666;
+  }
 }

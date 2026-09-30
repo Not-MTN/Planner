@@ -50,9 +50,33 @@ export function applyDocumentLang(): void {
   document.documentElement.dir = info.dir;
 }
 
+const EASTERN_ARABIC = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
+
+/**
+ * Eastern Arabic numerals for Persian screens: "14:05" → "۱۴:۰۵".
+ * No-op in English, so Latin-script output never changes.
+ * Only ever applied to display strings — input `value`s keep ASCII digits.
+ */
+export function faDigits(value: string): string {
+  if (lang !== 'fa') return value;
+  return value.replace(/[0-9]/g, (digit) => EASTERN_ARABIC[Number(digit)]);
+}
+
+/** Display a number: Persian digits in fa, the plain number in English. */
+export function faNum(value: number): number | string {
+  return lang === 'fa' ? faDigits(String(value)) : value;
+}
+
 function interpolate(text: string, vars?: Record<string, string | number>): string {
   if (!vars) return text;
-  return text.replace(/\{(\w+)\}/g, (match, name: string) => (name in vars ? String(vars[name]) : match));
+  return text.replace(/\{(\w+)\}/g, (match, name: string) => {
+    if (!(name in vars)) return match;
+    const value = vars[name];
+    // Numbers — and bare numeric strings like "14:30" — follow the language
+    // (۱۲ in Persian). Anything with letters (titles, names) is left as given.
+    const numeric = typeof value === 'number' || /^\d+([:.]\d+)*$/.test(String(value));
+    return numeric ? faDigits(String(value)) : String(value);
+  });
 }
 
 export function t(text: string, vars?: Record<string, string | number>): string {

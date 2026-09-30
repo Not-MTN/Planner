@@ -86,7 +86,7 @@ export function EventRow({ event, onDropSwap }: { event: PlannerEvent; onDropSwa
         />
       </label>
       <div className="item-body">
-        <button type="button" className="item-title" onClick={() => openComposer({ mode: 'edit', type: 'event', id: editId })}>
+        <button type="button" className="item-title" dir="auto" onClick={() => openComposer({ mode: 'edit', type: 'event', id: editId })}>
           {event.title}
         </button>
         <p className="meta">
@@ -144,7 +144,7 @@ export function FixedEventRow({ event }: { event: PlannerEvent }) {
       <span className="fixed-repeat" aria-hidden="true">↻</span>
       <time className="fixed-time">{displayTime(event.startTime)}</time>
       <div className="item-body">
-        <span className="item-title fixed-title">{event.title}</span>
+        <span className="item-title fixed-title" dir="auto">{event.title}</span>
         <p className="meta">
           {categoryById(event.category).label}
           {duration ? ` · ${duration}` : ''}
@@ -211,7 +211,7 @@ export function TaskRow({
         {task.completed ? <TickIcon size={14} /> : null}
       </button>
       <div className="item-body">
-        <button type="button" className="item-title" onClick={() => openComposer({ mode: 'edit', type: 'task', id: task.id })}>
+        <button type="button" className="item-title" dir="auto" onClick={() => openComposer({ mode: 'edit', type: 'task', id: task.id })}>
           {task.title}
         </button>
         <p className="meta">

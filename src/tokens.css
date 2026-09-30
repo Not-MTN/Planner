@@ -38,6 +38,10 @@
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --sidebar: 252px;
   --content: 1120px;
+  --content-padding-bottom: 120px;
+  --mobile-bar-height: 60px;
+  --tab-bar-height: 66px;
+  --mobile-chrome-total: 132px;
 }
 
 /* ---------- Tokens: dark ---------- */
@@ -171,3 +175,31 @@ img { max-width: 100%; }
   z-index: 60;
 }
 .skip:focus { top: 12px; }
+
+/* ---------- Print: chrome off, content full-width, URLs after links ---------- */
+@media print {
+  .sidebar,
+  .sidebar-overlay,
+  .mobile-bar,
+  .tabbar,
+  .fab,
+  .quick-add,
+  .toast,
+  .skip {
+    display: none !important;
+  }
+  .app-shell,
+  .workspace,
+  .content {
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  a[href^="http"]::after { content: " (" attr(href) ")"; font-size: 0.8em; color: #666; }
+  a[href^="#"]::after { content: ""; }
+  a[href^="mailto:"]::after { content: " (" attr(href) ")"; }
+  a[href^="tel:"]::after { content: " (" attr(href) ")"; }
+  a { color: #000 !important; text-decoration: none; }
+}

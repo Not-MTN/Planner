@@ -481,46 +481,60 @@ export function Shell() {
                 <div className="more-divider" role="separator" />
               </>
             ) : null}
-            <button type="button" className={cx(route.name === 'goals' && 'on')} onClick={() => go('goals')}>
-              <FlagIcon size={18} /> {t("Goals")}
-            </button>
-            <button type="button" className={cx(route.name === 'notes' && 'on')} onClick={() => go('notes')}>
-              <NoteIcon size={18} /> {t("Notes")}
-            </button>
-            <button type="button" className={cx(route.name === 'insights' && 'on')} onClick={() => go('insights')}>
-              <ArcIcon size={18} /> {t("Insights")}
-            </button>
-            <button type="button" className={cx(route.name === 'matrix' && 'on')} onClick={() => go('matrix')}>
-              <FlagIcon size={18} /> {t("Matrix")}
-            </button>
-            <button type="button" onClick={() => { setMoreOpen(false); setNotificationsOpen(true); }}>
-              <BellIcon size={18} /> {t("Notifications")}
-              {unreadNotifications > 0 ? <span className="notification-badge">{unreadNotifications}</span> : null}
-            </button>
-            <button type="button" className={cx(route.name === 'review' && 'on')} onClick={() => go('review')}>
-              <WeekIcon size={18} /> {t("Weekly Review")}
-            </button>
-            <button type="button" className={cx(route.name === 'ai' && 'on')} onClick={() => go('ai')}>
-              <SparklesIcon size={18} /> {t("AI coach")}
-              {!aiSeen ? <i className="nav-attention more-attention" aria-hidden="true" /> : null}
-            </button>
-            <button type="button" className={cx(route.name === 'plans' && 'on')} onClick={() => go('plans')}>
-              <WeekIcon size={18} /> {t("Plans")}
-            </button>
-            {panelNav.map((item) => (
-              <button key={item.name} type="button" className={cx(route.name === item.name && 'on')} onClick={() => go(item.name)}>
-                <item.icon size={18} /> {item.label}
+            {/* Destinations as a grid of tiles: the old single 17-row column
+                made every tab switch a long scroll on a phone. */}
+            <div className="more-grid">
+              <button type="button" className={cx('more-tile', route.name === 'goals' && 'on')} onClick={() => go('goals')}>
+                <FlagIcon size={18} /> <span>{t("Goals")}</span>
               </button>
-            ))}
-            <button type="button" className={cx(route.name === 'panels' && 'on')} onClick={() => go('panels')}>
-              <HorizonIcon size={18} /> {t("Panels")}
-            </button>
-            <button type="button" onClick={() => { setMoreOpen(false); setShortcutsOpen(true); }}><HelpIcon size={18} /> {t("Keyboard shortcuts")}</button>
-            <button type="button" onClick={openSettings}><SlidersIcon size={18} /> {t("Settings")}</button>
-            <button type="button" onClick={requestTour}><HelpIcon size={18} /> {t("How Planner works")}</button>
-            <button type="button" onClick={() => { setMoreOpen(false); window.setTimeout(requestAbout, 60); }}><HeartIcon size={18} /> {t("Why Planner?")}</button>
-            <button type="button" onClick={exportData}><DownloadIcon size={18} /> {t("Export backup")}</button>
-            <button type="button" onClick={importFile.open}><UploadIcon size={18} /> {t("Import backup")}</button>
+              <button type="button" className={cx('more-tile', route.name === 'notes' && 'on')} onClick={() => go('notes')}>
+                <NoteIcon size={18} /> <span>{t("Notes")}</span>
+              </button>
+              <button type="button" className={cx('more-tile', route.name === 'insights' && 'on')} onClick={() => go('insights')}>
+                <ArcIcon size={18} /> <span>{t("Insights")}</span>
+              </button>
+              <button type="button" className={cx('more-tile', route.name === 'matrix' && 'on')} onClick={() => go('matrix')}>
+                <FlagIcon size={18} /> <span>{t("Matrix")}</span>
+              </button>
+              <button type="button" className="more-tile" onClick={() => { setMoreOpen(false); setNotificationsOpen(true); }}>
+                <BellIcon size={18} />{' '}
+                <span>
+                  {t("Notifications")}
+                  {unreadNotifications > 0 ? <span className="notification-badge">{unreadNotifications}</span> : null}
+                </span>
+              </button>
+              <button type="button" className={cx('more-tile', route.name === 'review' && 'on')} onClick={() => go('review')}>
+                <WeekIcon size={18} /> <span>{t("Weekly Review")}</span>
+              </button>
+              <button type="button" className={cx('more-tile', route.name === 'ai' && 'on')} onClick={() => go('ai')}>
+                <SparklesIcon size={18} />{' '}
+                <span>
+                  {t("AI coach")}
+                  {!aiSeen ? <i className="nav-attention more-attention" aria-hidden="true" /> : null}
+                </span>
+              </button>
+              <button type="button" className={cx('more-tile', route.name === 'plans' && 'on')} onClick={() => go('plans')}>
+                <WeekIcon size={18} /> <span>{t("Plans")}</span>
+              </button>
+              {panelNav.map((item) => (
+                <button key={item.name} type="button" className={cx('more-tile', route.name === item.name && 'on')} onClick={() => go(item.name)}>
+                  <item.icon size={18} /> <span>{item.label}</span>
+                </button>
+              ))}
+              <button type="button" className={cx('more-tile', route.name === 'panels' && 'on')} onClick={() => go('panels')}>
+                <HorizonIcon size={18} /> <span>{t("Panels")}</span>
+              </button>
+            </div>
+            <div className="more-divider" role="separator" />
+            {/* Utilities collapse into a tight two-column row. */}
+            <div className="more-actions">
+              <button type="button" onClick={() => { setMoreOpen(false); setShortcutsOpen(true); }}><HelpIcon size={18} /> {t("Keyboard shortcuts")}</button>
+              <button type="button" onClick={openSettings}><SlidersIcon size={18} /> {t("Settings")}</button>
+              <button type="button" onClick={requestTour}><HelpIcon size={18} /> {t("How Planner works")}</button>
+              <button type="button" onClick={() => { setMoreOpen(false); window.setTimeout(requestAbout, 60); }}><HeartIcon size={18} /> {t("Why Planner?")}</button>
+              <button type="button" onClick={exportData}><DownloadIcon size={18} /> {t("Export backup")}</button>
+              <button type="button" onClick={importFile.open}><UploadIcon size={18} /> {t("Import backup")}</button>
+            </div>
             {account ? (
               <button type="button" className="more-signout" onClick={() => { setMoreOpen(false); requestSignOut(); }}>
                 <ExitIcon size={18} /> {t("Sign out")}

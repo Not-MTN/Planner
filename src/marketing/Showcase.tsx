@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { COPY, type Lang } from './copy';
 import { pointerLeave, pointerMove, useCountUp, useInView, useStage } from './effects';
 
@@ -10,7 +10,12 @@ const SPOT = { onMouseMove: (event: React.MouseEvent<HTMLElement>) => pointerMov
 
 function PreviewPersonal({ lang }: { lang: Lang }) {
   const c = COPY[lang];
-  const pages = ['Today', 'Calendar', 'AI Coach', 'Plans', 'Tasks', 'Habits', 'Goals', 'Notes', 'Insights'];
+  // The app's own page names, localized exactly like the planner tabs
+  // (keys in locales/fa.ts), so the tiles don't stay English in fa mode.
+  const pages =
+    lang === 'fa'
+      ? ['امروز', 'تقویم', 'مربی هوش مصنوعی', 'برنامه‌ها', 'کارها', 'عادت‌ها', 'هدف‌ها', 'یادداشت‌ها', 'بینش‌ها']
+      : ['Today', 'Calendar', 'AI Coach', 'Plans', 'Tasks', 'Habits', 'Goals', 'Notes', 'Insights'];
   return (
     <div className="preview-inner">
       <div className="preview-grid">
@@ -99,10 +104,40 @@ export function RoleSwitcher({ lang }: { lang: Lang }) {
     ['guardian', c.roleTabGuardian, c.previewGuardianTitle, c.previewGuardianBody],
   ];
   const active = tabs.find(([id]) => id === role)!;
+  const roleIndex = tabs.findIndex(([id]) => id === role);
+
+  // The sliding pill is measured against the real button boxes: labels differ
+  // in width (per language and per role), so an equal-thirds step lands
+  // between the tabs. Runs before paint, so the first frame is already right.
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const inkRef = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const bar = tabsRef.current;
+    const ink = inkRef.current;
+    if (!bar || !ink) return;
+    const align = () => {
+      const button = bar.querySelectorAll<HTMLButtonElement>('button')[roleIndex];
+      if (!button) return;
+      const barBox = bar.getBoundingClientRect();
+      const box = button.getBoundingClientRect();
+      const rtl = getComputedStyle(bar).direction === 'rtl';
+      const border = parseFloat(rtl ? getComputedStyle(bar).borderRightWidth : getComputedStyle(bar).borderLeftWidth) || 0;
+      // inset-inline-start measures from the padding-box edge (border excluded).
+      const start = rtl ? barBox.right - border - box.right : box.left - barBox.left - border;
+      ink.style.insetInlineStart = `${Math.max(0, start)}px`;
+      ink.style.width = `${box.width}px`;
+    };
+    align();
+    // Web fonts arriving late change the label widths — re-measure after the
+    // first paint so the pill doesn't stay aligned to the fallback metrics.
+    if (document.fonts?.ready) void document.fonts.ready.then(align);
+    window.addEventListener('resize', align);
+    return () => window.removeEventListener('resize', align);
+  }, [roleIndex, lang]);
 
   return (
     <div className="switcher">
-      <div className="switcher-tabs reveal" data-reveal role="tablist">
+      <div className="switcher-tabs reveal" data-reveal role="tablist" ref={tabsRef}>
         {tabs.map(([id, label]) => (
           <button
             key={id}
@@ -115,7 +150,7 @@ export function RoleSwitcher({ lang }: { lang: Lang }) {
             {label}
           </button>
         ))}
-        <span className="switcher-ink" style={{ ['--i' as string]: tabs.findIndex(([id]) => id === role) }} aria-hidden="true" />
+        <span className="switcher-ink" aria-hidden="true" />
       </div>
 
       <div className="switcher-body">

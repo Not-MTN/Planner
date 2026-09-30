@@ -361,8 +361,8 @@ function parseEstimateToken(token: string): number | null {
 }
 
 export function formatEstimate(minutes: number): string {
-  if (minutes < 60) return `${minutes} min`;
+  if (minutes < 60) return t('{0} min', { 0: minutes });
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
-  return rest ? `${hours} h ${rest} min` : `${hours} h`;
+  return rest ? t('{0} h {1} min', { 0: hours, 1: rest }) : t('{0} h', { 0: hours });
 }

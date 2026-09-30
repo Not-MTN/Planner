@@ -200,6 +200,81 @@
 }
 .more-divider { height: 1px; background: var(--line); margin: 6px 4px; }
 
+/* ---------- 4b. More hub: destination tiles + compact utilities ---------- */
+/* The hub was one 17-row column, so switching tabs on a phone meant a long
+   scroll. Destinations become icon tiles; utilities shrink into two columns.
+   Selectors outrank the legacy `.more-list button` row rules. */
+.more-list .more-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  padding: 2px 0;
+}
+@media (min-width: 460px) {
+  .more-list .more-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+.more-list .more-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 76px;
+  padding: 10px 6px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-2);
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-align: center;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.15s;
+}
+.more-list .more-tile:hover {
+  background: var(--surface);
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+.more-list .more-tile:active { transform: scale(0.97); }
+.more-list .more-tile.on {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  color: var(--accent-deep);
+}
+.more-list .more-tile .notification-badge {
+  position: absolute;
+  top: 7px;
+  inset-inline-end: 9px;
+  margin: 0;
+}
+.more-list .more-tile .more-attention {
+  position: absolute;
+  top: 9px;
+  inset-inline-end: 11px;
+  margin: 0;
+}
+.more-list .more-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 8px;
+}
+.more-list .more-actions button {
+  min-height: 42px;
+  gap: 9px;
+  padding: 8px 10px;
+  border-radius: 11px;
+  font-size: 13.5px;
+  line-height: 1.25;
+  /* On very narrow phones a long utility label (e.g. Persian) may wrap;
+     let the row grow instead of clipping. */
+  overflow-wrap: anywhere;
+}
+@media (pointer: coarse) {
+  .more-list .more-actions button { min-height: 44px; }
+}
+
 /* ---------- 5. Mobile chrome: what the placement pass leaves open ---------- */
 @media (max-width: 1023px) {
   /* Pin the bar to a deterministic height so the sticky date chip can sit

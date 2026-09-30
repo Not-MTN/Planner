@@ -50,7 +50,7 @@
 .content {
   width: min(100% - 36px, var(--content));
   margin: 0 auto;
-  padding: 30px 0 120px;
+  padding: 30px 0 var(--content-padding-bottom, 120px);
 }
 .view { display: flex; flex-direction: column; gap: 20px; }
 .view-enter { animation: rise 0.4s var(--ease); }
@@ -263,6 +263,10 @@
     border-radius: 12px;
   }
   .tab.active { color: var(--accent-deep); }
+  .tab:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
   .tab-icon { display: grid; place-items: center; }
   .tab.active .tab-icon { transform: translateY(-1px); }
   .fab {
@@ -3655,6 +3659,26 @@ html, body { overflow-x: clip; }
   .swatch-planned { background: var(--muted); }
   .swatch-done { background: var(--accent); }
   .spinner { border-color: currentColor; border-top-color: currentColor; }
+
+  /* Cards and fixed chrome: without a background these go transparent and
+     content shows through — solid token colours instead of the mix. */
+  .card { background: var(--surface); }
+  .mobile-bar { background: var(--bg); }
+  .tabbar { background: var(--surface); }
+  .habit-card { background: var(--surface); }
+  .intention { background: var(--accent-soft); }
+  .wash-sage, .wash-lav { background: var(--surface); }
+
+  /* Tinted chips/tiles whose colour is the whole surface. */
+  .week-chip { background: var(--surface-3); }
+  .cell-title { background: var(--surface-3); }
+  .chip-label { background: var(--surface-3); }
+  .icon-well { background: var(--surface-3); }
+  .heat-cell.open { background: var(--accent-soft); border-color: var(--line); }
+  .load-cell i { background: var(--accent-soft); }
+  .load-cell.is-steady i { background: var(--accent); }
+  .filter.on .filter-count { background: var(--accent-soft); }
+  .btn-danger:hover { background: var(--danger-soft); }
 }
 
 /* ============================================================
@@ -3756,6 +3780,30 @@ html, body { overflow-x: clip; }
 @media (max-width: 380px) {
   .content {
     width: min(100% - 20px, var(--content));
+  }
+
+  /* Month grid: seven columns inside 300px means ~40px cells — tighten the
+     padding and the day badge so the number never clips (design floor 320px). */
+  .month-grid {
+    gap: 3px;
+  }
+
+  .cell {
+    min-height: 64px;
+    padding: 5px 4px;
+    border-radius: 10px;
+  }
+
+  .cell-num {
+    width: 22px;
+    height: 22px;
+    font-size: 13.5px;
+    border-radius: 7px;
+  }
+
+  .cell-title {
+    font-size: 9.5px;
+    padding: 1.5px 4px;
   }
 
   .hero-title {
