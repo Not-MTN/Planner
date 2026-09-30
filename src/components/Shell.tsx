@@ -527,19 +527,26 @@ export function Shell() {
             </div>
             <div className="more-divider" role="separator" />
             {/* Utilities collapse into a tight two-column row. */}
-            <div className="more-actions">
-              <button type="button" onClick={() => { setMoreOpen(false); setShortcutsOpen(true); }}><HelpIcon size={18} /> {t("Keyboard shortcuts")}</button>
-              <button type="button" onClick={openSettings}><SlidersIcon size={18} /> {t("Settings")}</button>
-              <button type="button" onClick={requestTour}><HelpIcon size={18} /> {t("How Planner works")}</button>
-              <button type="button" onClick={() => { setMoreOpen(false); window.setTimeout(requestAbout, 60); }}><HeartIcon size={18} /> {t("Why Planner?")}</button>
-              <button type="button" onClick={exportData}><DownloadIcon size={18} /> {t("Export backup")}</button>
-              <button type="button" onClick={importFile.open}><UploadIcon size={18} /> {t("Import backup")}</button>
-            </div>
-            {account ? (
-              <button type="button" className="more-signout" onClick={() => { setMoreOpen(false); requestSignOut(); }}>
-                <ExitIcon size={18} /> {t("Sign out")}
-              </button>
-            ) : null}
+            <details className="more-tools">
+              <summary className="more-tools-summary">
+                <SlidersIcon size={18} />
+                <span>{t("Tools & settings")}</span>
+                <span className="more-tools-hint">{t("Settings, backups and help")}</span>
+              </summary>
+              <div className="more-actions">
+                <button type="button" onClick={() => { setMoreOpen(false); setShortcutsOpen(true); }}><HelpIcon size={18} /> {t("Keyboard shortcuts")}</button>
+                <button type="button" onClick={() => { setMoreOpen(false); openSettings(); }}><SlidersIcon size={18} /> {t("Settings")}</button>
+                <button type="button" onClick={() => { setMoreOpen(false); requestTour(); }}><HelpIcon size={18} /> {t("How Planner works")}</button>
+                <button type="button" onClick={() => { setMoreOpen(false); window.setTimeout(requestAbout, 60); }}><HeartIcon size={18} /> {t("Why Planner?")}</button>
+                <button type="button" onClick={() => { setMoreOpen(false); exportData(); }}><DownloadIcon size={18} /> {t("Export backup")}</button>
+                <button type="button" onClick={() => { setMoreOpen(false); importFile.open(); }}><UploadIcon size={18} /> {t("Import backup")}</button>
+              </div>
+              {account ? (
+                <button type="button" className="more-signout" onClick={() => { setMoreOpen(false); requestSignOut(); }}>
+                  <ExitIcon size={18} /> {t("Sign out")}
+                </button>
+              ) : null}
+            </details>
           </div>
         </Modal>
       ) : null}

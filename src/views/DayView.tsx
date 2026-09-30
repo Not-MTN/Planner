@@ -222,6 +222,7 @@ export function DayView({ date }: { date: string }) {
             <div className="timeline timeline-empty">
               {isToday ? <NowMark time={clock} /> : null}
               <Empty
+                compact
                 image="/img/spot-calendar.jpg"
                 title={t("Nothing timed yet.")}
                 text={t("Add a time only for what you want to protect.")}
@@ -293,6 +294,7 @@ export function DayView({ date }: { date: string }) {
             ) : null}
             {openTasks.length === 0 && doneTasks.length === 0 ? (
               <Empty
+                compact
                 image="/img/spot-tasks.jpg"
                 title={t("No tasks for this day.")}
                 text={t("A short list is easier to finish.")}
@@ -303,17 +305,31 @@ export function DayView({ date }: { date: string }) {
                 }
               />
             ) : (
-              <ul className="item-list">
-                {[...openTasks, ...doneTasks].map((task) => (
-                  <TaskRow
-                    key={task.id}
-                    task={task}
-                    onDropSwap={(sourceId) => {
-                      if (sourceId !== task.id) swapTasks(sourceId, task.id);
-                    }}
-                  />
-                ))}
-              </ul>
+              <>
+                {openTasks.length > 0 ? (
+                  <ul className="item-list">
+                    {openTasks.map((task) => (
+                      <TaskRow
+                        key={task.id}
+                        task={task}
+                        onDropSwap={(sourceId) => {
+                          if (sourceId !== task.id) swapTasks(sourceId, task.id);
+                        }}
+                      />
+                    ))}
+                  </ul>
+                ) : null}
+                {doneTasks.length > 0 ? (
+                  <details className="day-completed">
+                    <summary>{t("Completed ({0})", { 0: doneTasks.length })}</summary>
+                    <ul className="item-list">
+                      {doneTasks.map((task) => (
+                        <TaskRow key={task.id} task={task} />
+                      ))}
+                    </ul>
+                  </details>
+                ) : null}
+              </>
             )}
           </section>
 
@@ -329,6 +345,7 @@ export function DayView({ date }: { date: string }) {
             </header>
             {habits.length === 0 ? (
               <Empty
+                compact
                 image="/img/spot-library.jpg"
                 title={t("No habits for this day.")}
                 text={t("Start with one thing you want to repeat.")}
@@ -347,13 +364,16 @@ export function DayView({ date }: { date: string }) {
             )}
           </section>
 
-          <JournalCard key={`journal-${date}`} date={date} />
-
-          <DayNotes date={date} />
+          <details className="day-notes-disclosure">
+            <summary>{t("Journal & notes")}</summary>
+            <div className="day-notes-content">
+              <JournalCard key={`journal-${date}`} date={date} />
+              <DayNotes date={date} />
+            </div>
+          </details>
         </div>
       </div>
 
-      {isToday ? <AICoachCard onOpen={() => navigate({ name: 'ai', tab: 'plan' })} /> : null}
       {fresh && isToday ? <WelcomeCard /> : null}
       {isToday ? <BackupReminder onExport={planner.exportData} /> : null}
       {isToday ? <PanelHub /> : null}
@@ -362,26 +382,6 @@ export function DayView({ date }: { date: string }) {
       {isToday ? <MoodCard date={today} /> : null}
       {essentials.length > 0 ? <EssentialsCard date={date} habits={essentials} /> : null}
     </div>
-  );
-}
-
-/**
- * The AI coach is the planner's most powerful feature — give it a home on
- * Today so nobody has to hunt through Settings to discover it.
- */
-function AICoachCard({ onOpen }: { onOpen: () => void }) {
-  return (
-    <button type="button" className="card ai-coach-card" onClick={onOpen}>
-      <span className="ai-coach-orb" aria-hidden="true"><SparklesIcon size={22} /></span>
-      <span className="ai-coach-copy">
-        <span className="ai-coach-kicker">{t("AI coach")}</span>
-        <strong className="ai-coach-title">{t("Let the AI coach plan with you")}</strong>
-        <span className="ai-coach-body">{t("Speak or type — English or فارسی, however casual. It drafts the day around your real schedule; you approve everything.")}</span>
-      </span>
-      <span className="btn btn-primary btn-small ai-coach-btn" aria-hidden="true">
-        <SparklesIcon size={15} /> {t("Open")}
-      </span>
-    </button>
   );
 }
 
