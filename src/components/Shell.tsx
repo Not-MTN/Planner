@@ -143,6 +143,14 @@ export function Shell() {
   const importFile = useImportFile(importText);
   const key = routeKey(route);
   const today = todayISO();
+  const [tabletFlyout, setTabletFlyout] = useState<null | 'plan' | 'focus' | 'track' | 'panels'>(null);
+  // Close tablet flyout when route changes or on Escape
+  useEffect(() => { setTabletFlyout(null); }, [key]);
+  useEffect(() => {
+    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setTabletFlyout(null); };
+    window.addEventListener('keydown', onEsc);
+    return () => window.removeEventListener('keydown', onEsc);
+  }, []);
 
   useEffect(() => {
     document.title = route.name === 'today' ? t("Planner — today") : t("{0} · Planner", { 0: routeTitle(route) });
@@ -263,7 +271,8 @@ export function Shell() {
           <span>{t("Search or add…")}</span>
           <kbd className="kbd">{t("⌘K")}</kbd>
         </button>
-        <nav className="side-nav" aria-label={t("Planner")}>
+        {/* Desktop: full labelled sidebar, all destinations visible without scrolling */}
+        <nav className="side-nav side-nav-desktop" aria-label={t("Planner")}>
           {planNav.length > 0 ? <><p className="nav-label">{t("Plan")}</p>
             {planNav.map((item) => <NavButton key={item.name} item={item} active={route.name === item.name || (item.name === 'calendar' && route.name === 'calendar')} attention={item.name === 'ai' && !aiSeen} onClick={() => go(item.name)} />)}</> : null}
           {focusNav.length > 0 ? <><p className="nav-label">{t("Focus")}</p>
@@ -283,6 +292,33 @@ export function Shell() {
               />
             </>
           ) : null}
+        </nav>
+        {/* Tablet: 66px icon rail + contextual flyout (design board) */}
+        <nav className="side-nav side-nav-rail" aria-label={t("Planner")}>
+          <div className="rail-group">
+            <button type="button" className={cx('rail-btn', tabletFlyout === 'plan' && 'on', planNav.some(n => route.name === n.name) && 'active')} aria-label={t("Plan")} title={t("Plan")} onClick={() => setTabletFlyout(tabletFlyout === 'plan' ? null : 'plan')}>
+              <CalendarIcon size={20} />
+              <i className="rail-cat">{t("Plan").slice(0,2)}</i>
+            </button>
+            <button type="button" className={cx('rail-btn', tabletFlyout === 'focus' && 'on', focusNav.some(n => route.name === n.name) && 'active')} aria-label={t("Focus")} title={t("Focus")} onClick={() => setTabletFlyout(tabletFlyout === 'focus' ? null : 'focus')}>
+              <FlagIcon size={20} />
+              <i className="rail-cat">{t("Focus").slice(0,2)}</i>
+            </button>
+            <button type="button" className={cx('rail-btn', tabletFlyout === 'track' && 'on', trackNav.some(n => route.name === n.name) && 'active')} aria-label={t("Track")} title={t("Track")} onClick={() => setTabletFlyout(tabletFlyout === 'track' ? null : 'track')}>
+              <ArcIcon size={20} />
+              <i className="rail-cat">{t("Track").slice(0,2)}</i>
+            </button>
+            {panelNav.length > 0 ? (
+              <button type="button" className={cx('rail-btn', tabletFlyout === 'panels' && 'on', (panelNav.some(n => route.name === n.name) || route.name === 'panels') && 'active')} aria-label={t("Panels")} title={t("Panels")} onClick={() => setTabletFlyout(tabletFlyout === 'panels' ? null : 'panels')}>
+                <HorizonIcon size={20} />
+                <i className="rail-cat">{t("Panels").slice(0,2)}</i>
+              </button>
+            ) : null}
+          </div>
+          <div className="rail-foot">
+            <button type="button" className="rail-btn" aria-label={t("Search")} title={t("Search")} onClick={openPalette}><SearchIcon size={18} /></button>
+            <button type="button" className="rail-btn" aria-label={t("Settings")} title={t("Settings")} onClick={openSettings}><SlidersIcon size={18} /></button>
+          </div>
         </nav>
         <div className="side-foot">
           <div className="side-history">
@@ -358,6 +394,30 @@ export function Shell() {
           ) : null}
         </div>
       </aside>
+
+      {/* Tablet flyout: contextual panel beside 66px rail, content stays visible behind scrim */}
+      {tabletFlyout ? (
+        <>
+          <div className="tablet-scrim" onClick={() => setTabletFlyout(null)} aria-hidden="true" />
+          <div className="tablet-flyout" role="dialog" aria-label={t("Navigation")}>
+            <div className="tablet-flyout-head">
+              <strong>{tabletFlyout === 'plan' ? t("Plan") : tabletFlyout === 'focus' ? t("Focus") : tabletFlyout === 'track' ? t("Track") : t("Panels")}</strong>
+              <button type="button" className="icon-btn round" aria-label={t("Close")} onClick={() => setTabletFlyout(null)}>✕</button>
+            </div>
+            <div className="tablet-flyout-body">
+              {tabletFlyout === 'plan' && planNav.map((item) => <NavButton key={item.name} item={item} active={route.name === item.name || (item.name === 'calendar' && route.name === 'calendar')} attention={item.name === 'ai' && !aiSeen} onClick={() => { go(item.name); setTabletFlyout(null); }} />)}
+              {tabletFlyout === 'focus' && focusNav.map((item) => <NavButton key={item.name} item={item} active={route.name === item.name} onClick={() => { go(item.name); setTabletFlyout(null); }} />)}
+              {tabletFlyout === 'track' && trackNav.map((item) => <NavButton key={item.name} item={item} active={route.name === item.name} attention={item.name === 'ai' && !aiSeen} onClick={() => { go(item.name); setTabletFlyout(null); }} />)}
+              {tabletFlyout === 'panels' && (
+                <>
+                  {panelNav.map((item) => <NavButton key={item.name} item={item} active={route.name === item.name} onClick={() => { go(item.name); setTabletFlyout(null); }} />)}
+                  <NavButton item={{ name: 'panels', label: t("All panels"), icon: HorizonIcon }} active={route.name === 'panels'} onClick={() => { go('panels'); setTabletFlyout(null); }} />
+                </>
+              )}
+            </div>
+          </div>
+        </>
+      ) : null}
 
       <div className="workspace">
         <header className="mobile-bar">

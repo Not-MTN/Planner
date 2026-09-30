@@ -3310,3 +3310,155 @@
     transition: none;
   }
 }
+
+/* ============================================================
+   Website + app unified responsive pass — fits device
+   Ensures marketing site (landing, auth, footer) fits 320px to ultrawide
+   Same tokens as app: bidi isolation, tile height, safe-area
+   ============================================================ */
+
+/* ---------- Bidi isolation for website (Chromium verified) ---------- */
+.mkt :where(.brand-name, .nav-links button, .btn, .kicker, .pill, .hero-title, .hero-sub, .step h3, .role h3, .link-rail h3, .foot-col h4, .auth-head h1, .field > span){
+  unicode-bidi:isolate;
+}
+.mkt :where(.kbd, .pill, .badge, .auth .field-wrap input, .recovery code){
+  unicode-bidi:isolate;
+}
+
+/* ---------- Tile height and device fit ---------- */
+.mkt .step,
+.mkt .role,
+.mkt .chart,
+.mkt .offline-card {
+  min-height: 0;
+  height: auto;
+  min-width: 0;
+  max-width: 100%;
+}
+.mkt .hero,
+.mkt .section,
+.mkt .wrap,
+.mkt .nav-inner,
+.mkt .foot {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- 320px floor for website ---------- */
+@media (max-width: 380px){
+  .mkt .wrap {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .mkt .hero {
+    padding: 40px 0 28px;
+  }
+  .mkt .hero-title {
+    font-size: clamp(26px, 8.5vw, 32px);
+    line-height: 1.08;
+  }
+  .mkt .hero-sub {
+    font-size: 15px;
+    line-height: 1.6;
+  }
+  .mkt .section {
+    padding: 36px 0;
+  }
+  .mkt .section-head h2 {
+    font-size: clamp(22px, 6.5vw, 28px);
+  }
+  .mkt .btn {
+    min-height: 44px;
+    font-size: 14px;
+  }
+  .mkt .btn-lg {
+    min-height: 48px;
+    width: 100%;
+  }
+  .mkt .hero-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+/* ---------- Tablet: website uses rail-aware padding ---------- */
+@media (min-width: 768px) and (max-width: 1023px){
+  .mkt .wrap {
+    max-width: 92%;
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+  .mkt .hero {
+    padding: 56px 0 40px;
+  }
+  .mkt .split {
+    gap: 28px;
+  }
+  .mkt .steps,
+  .mkt .roles,
+  .mkt .charts {
+    gap: 16px;
+  }
+}
+
+/* ---------- Safe-area for website ---------- */
+.mkt .nav,
+.mkt .foot,
+.mkt .cta,
+.mkt .hero,
+.mkt .section {
+  padding-left: max(0px, env(safe-area-inset-left));
+  padding-right: max(0px, env(safe-area-inset-right));
+}
+.mkt .nav-inner {
+  padding-left: max(20px, env(safe-area-inset-left));
+  padding-right: max(20px, env(safe-area-inset-right));
+  min-height: 60px;
+  height: auto;
+}
+@media (max-width: 1023px){
+  .mkt .nav-inner {
+    min-height: 58px;
+    gap: 12px;
+  }
+  .mkt .nav-tools {
+    gap: 6px;
+    margin-inline-start: auto;
+  }
+  .mkt .brand {
+    font-size: 15px;
+    gap: 8px;
+    min-width: 0;
+  }
+  .mkt .brand-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+/* ---------- Prevent horizontal overflow ---------- */
+.mkt, .mkt-main, .mkt .wrap, .mkt .section, .mkt .hero {
+  overflow-x: clip;
+}
+.mkt img, .mkt video, .mkt svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* ---------- Touch targets: 44px minimum ---------- */
+@media (pointer: coarse){
+  .mkt .nav-links button,
+  .mkt .btn,
+  .mkt .icon-btn,
+  .mkt .nav-burger {
+    min-height: 44px;
+  }
+  .mkt .foot-col button,
+  .mkt .foot-col a {
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+  }
+}
