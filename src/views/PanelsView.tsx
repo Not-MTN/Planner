@@ -12,7 +12,7 @@ import { cx } from '../cx';
 import { Field } from '../components/ui';
 import { HeartIcon, StudyIcon } from '../icons';
 import { t } from '../i18n';
-import { GRADE_LABELS } from '../panels';
+import { GRADE_LABELS, gradeLabel } from '../panels';
 import type { GuardianKind, Panels } from '../types';
 
 export function PanelsView() {
@@ -107,7 +107,7 @@ export function PanelsView() {
           <ul className="panel-points">
             <li>{t("Subjects with exam dates and a weekly focus target.")}</li>
             <li>{t("Your week as results: what was planned, what got done, how long you focused.")}</li>
-            <li>{t("A place to explain a significant change, so a guardian sees what changed and why.")}</li>
+            <li>{t("Share a weekly headline with guardians while keeping your reasons private.")}</li>
           </ul>
 
           {form === 'student' ? (
@@ -126,7 +126,7 @@ export function PanelsView() {
                   <option value="">—</option>
                   {GRADE_LABELS.map((option) => (
                     <option key={option.id} value={option.id}>
-                      {option.label}
+                      {gradeLabel(option.id)}
                     </option>
                   ))}
                 </select>
@@ -174,7 +174,7 @@ export function PanelsView() {
           <ul className="panel-points">
             <li>{t("Watch one or more students, as a parent or as an advisor.")}</li>
             <li>{t("Weekly results only — never the detail of someone’s day.")}</li>
-            <li>{t("Every significant change arrives with the student’s own reason for it.")}</li>
+            <li>{t("See the student’s latest shared headline alongside their weekly totals.")}</li>
           </ul>
 
           {form === 'guardian' ? (

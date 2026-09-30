@@ -64,6 +64,28 @@ If the first line says `text/html`, protection is on; if the second prints a 404
 **Installed as an app?** The service worker keeps the shell offline, so a stale install can open the login page from cache and fail every API call with the same symptom. Uninstalling the PWA (or “Update” in Settings, or clearing site data) clears the cached shell.
 
 
+## Student and guardian panels
+
+Panels are optional additions to the personal planner. Open **Today → See the panels** (or **All panels** in the sidebar) to add a student panel, a guardian panel, or both. Each can be removed without deleting the personal planner.
+
+### Student workspace
+
+- **Study queue:** create subject-linked tasks, filter Today / This week / All open and by subject, complete work, or launch the focus timer. Overdue work stays visible; completed and waiting tasks stay out of the queue.
+- **Upcoming exams:** upcoming dates sorted nearest first, with one-click revision-task drafts. Past exams stay in the subject tracker.
+- **Editable subjects:** set exam dates and weekly study targets, see remaining focus time, and rename subjects without losing task completion or focus attribution. Matching task and event categories are renamed together, in one undoable change. Removing a tracker keeps its tasks and history.
+- **Sharing preview:** see the exact weekly snapshot a guardian receives before sharing it. Totals cover the personal planner's whole week, not only tracked study tasks.
+
+### Guardian workspace
+
+- **Student circle:** linked/current/waiting counts, searchable names and usernames, result freshness filters, and name/latest-update sorting. Pending invitations and linked students awaiting their first share are separate states.
+- **Compact roster:** expand one student to see weekly charts, focused-subject totals, AI-guided questions, shared notes, and sent-plan progress. A snapshot is current when its own seven-day period includes today, even when the student and guardian use different week starts.
+- **Plan composer:** send an editable day/week/month suggestion, optionally starting with exam preparation or balanced study. Each step can have a subject, effort estimate, and date within the plan's period. Current-period starters begin today rather than assigning work to elapsed days. Steps and total effort are previewed before sending; a linked student can receive plans before their first results arrive.
+- **Supportive messages:** turn an AI question into an editable note for the student and their guardian circle. Messages and plans use the existing encrypted links, not email.
+
+**Privacy boundary:** weekly results contain planned/completed counts, focused minutes, up to four subject totals, and the student's latest chosen headline. Task details, private notes, exam dates, targets, and detailed reasons are not sent automatically. The sharing preview and UI copy follow that same boundary. Guardian suggestions never silently create or change personal tasks or calendar entries; students see them in their panel and tick off steps themselves.
+
+Both workspaces support mobile layouts, light/dark themes, keyboard controls, and Persian/RTL. Existing backups need no new schema or migration. Automated coverage includes helper and UI tests (`src/panelFeatures*.test.*`), slow-sync regression tests, and desktop/mobile browser checks (`e2e/panels.spec.ts`).
+
 ## Languages (English / فارسی)
 
 Settings → **Language** switches the whole interface to Persian with a right-to-left layout (Vazirmatn font, mirrored arrows, logical CSS). Choosing فارسی also sets Persian day/month names and a Saturday week start; the page reloads to apply. The AI coach replies in Persian while it is selected.

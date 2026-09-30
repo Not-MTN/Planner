@@ -85,8 +85,9 @@ import { fetchFeedEvents, loadFeeds, mergeFeedEvents, saveFeeds, type CalendarFe
 import { loadWeatherSettings, saveWeatherSettings, type WeatherSettings } from './weather';
 import { applyTheme, loadAccent, loadThemeMode, resolvedMode, type ThemeMode } from './theme';
 import type { Accent } from './constants';
-import { createEmptyState, type AIMemoryInput, type AttachmentRef, type ComposerState, type EventInput, type FixedCommitmentInput, type GoalInput, type HabitInput, type MoodValue, type NoteInput, type Panels, type PlannerState, type SavedAIPlanInput, type TaskInput } from './types';
+import { createEmptyState, type AIMemoryInput, type AttachmentRef, type ComposerState, type EventInput, type FixedCommitmentInput, type GoalInput, type HabitInput, type MoodValue, type NoteInput, type Panels, type PlannerState, type SavedAIPlanInput, type StudentSubject, type TaskInput } from './types';
 import { t } from './i18n';
+import { saveStudentSubject as saveStudentSubjectIn } from './panelFeatures';
 import { isTestEnv } from './env';
 import { attachmentNotice, MAX_ATTACHMENTS_PER_NOTE, storeAttachment, sweepAttachmentBlobs } from './files';
 
@@ -136,7 +137,9 @@ interface PlannerContextValue {
   loadSample: () => void;
   panels: Panels;
   /** Replaces the panels block. Panels are optional extras on top of the planner. */
-  updatePanels: (next: Panels) => void;
+  updatePanels: (next: Panels | ((current: Panels) => Panels)) => void;
+  /** Saves a subject and preserves its task/focus attribution when renamed. */
+  saveStudentSubject: (subject: StudentSubject) => void;
   /** Adds or removes a panel. The personal planner is never affected. */
   setPanelEnabled: (panel: 'student' | 'guardian', enabled: boolean) => void;
   flash: (message: string, action?: NoticeAction) => void;
@@ -545,7 +548,9 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
         // These helpers always build new objects; only a real change is saved,
         // otherwise this would quietly loop forever.
         if (JSON.stringify(panels) !== JSON.stringify(current.panels)) {
-          commit(() => ({ ...current, panels }));
+          // A slow link request must never roll back work done while it was in flight.
+          // If panels changed too, the next scheduled sync will pick up the result.
+          commit((latest) => latest.panels === current.panels ? { ...latest, panels } : latest);
         }
       } catch {
         /* sharing is best effort; the next save tries again */
@@ -831,8 +836,11 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
   // Panels are additive: switching one on or off never touches tasks, events,
   // habits or anything else in the personal planner.
   const updatePanels = useCallback(
-    (next: Panels) => {
-      commit((current) => (current.panels === next ? current : { ...current, panels: next }));
+    (next: Panels | ((current: Panels) => Panels)) => {
+      commit((current) => {
+        const panels = typeof next === 'function' ? next(current.panels) : next;
+        return current.panels === panels ? current : { ...current, panels };
+      });
     },
     [commit],
   );
@@ -1059,6 +1067,7 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     state,
     panels: state.panels,
     updatePanels,
+    saveStudentSubject: (subject) => commit((current) => saveStudentSubjectIn(current, subject)),
     setPanelEnabled,
     ready,
     error,
