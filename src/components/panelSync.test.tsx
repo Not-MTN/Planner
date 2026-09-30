@@ -11,6 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { App } from '../App';
+import { PlannerProvider, usePlanner } from '../context';
+import { refreshResults } from '../auth/links';
 import { createEmptyState } from '../types';
 import type { GuardianLink, PlannerState } from '../types';
 
@@ -104,6 +106,7 @@ afterEach(() => {
   container?.remove();
   root = null;
   container = null;
+  vi.useRealTimers();
 });
 
 describe('panel link syncing', () => {
@@ -134,4 +137,39 @@ describe('panel link syncing', () => {
     expect(calls.share).toBe(0);
     expect(calls.relay).toBe(0);
   }, 60_000);
+
+  it.each(['task', 'panel'] as const)('does not roll back a %s edit made while results are loading', async (edit) => {
+    vi.useFakeTimers();
+    let planner!: ReturnType<typeof usePlanner>;
+    let finish!: () => void;
+    let started = false;
+    vi.mocked(refreshResults).mockImplementationOnce(async (panels) => new Promise((resolve) => {
+      started = true;
+      finish = () => resolve({
+        changed: true,
+        panels: { ...panels, guardian: { ...panels.guardian, links: panels.guardian.links.map((link) => ({ ...link, results: { weekOf: '2026-09-28', planned: 2, done: 1, focusMinutes: 25, subjects: [], headline: null, updatedAt: '2026-09-30T10:00:00Z' } })) } },
+      });
+    }));
+    function Probe() { planner = usePlanner(); return null; }
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root?.render(<PlannerProvider initialState={stateWithGuardian()}><Probe /></PlannerProvider>); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+    expect(started).toBe(true);
+    act(() => {
+      if (edit === 'task') planner.addTask({ title: 'Added while loading', category: 'Physics', priority: 'medium', dueDate: null, dueTime: null, note: '', goalId: null });
+      else planner.updatePanels((current) => ({ ...current, student: { ...current.student, subjects: [{ id: 'new-subject', name: 'Physics', accent: 'blue', examDate: null, targetMinutes: 60 }] } }));
+    });
+    await act(async () => { finish(); await Promise.resolve(); });
+    if (edit === 'task') {
+      expect(planner.state.tasks[0]?.title).toBe('Added while loading');
+      expect(planner.panels.guardian.links[0].results?.done).toBe(1);
+    } else {
+      expect(planner.panels.student.subjects[0]?.name).toBe('Physics');
+      // The stale panels snapshot is deferred; a later sync will fetch it again.
+      expect(planner.panels.guardian.links[0].results).toBeNull();
+    }
+  });
+
 });

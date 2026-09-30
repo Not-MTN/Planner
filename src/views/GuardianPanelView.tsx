@@ -1,56 +1,53 @@
-/**
- * The guardian panel: who you follow, and their week as results.
- *
- * A guardian never sees the detail of a student's day — only weekly counts and
- * the student's own reason for a significant change. Parent and advisor are two
- * separate roles; either can follow several students.
- */
+/** Guardians receive results, not a live view of a student's private planner. */
 import { useEffect, useState } from 'react';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
-import { HeartIcon, PlusIcon, SparkIcon, TrashIcon } from '../icons';
+import { formatEdited } from '../dates';
+import {
+  BellIcon,
+  BookIcon,
+  CheckIcon,
+  HeartIcon,
+  PlusIcon,
+  SearchIcon,
+  SlidersIcon,
+  SparkIcon,
+  TrashIcon,
+  UserIcon,
+} from '../icons';
 import { friendlyGroqError, generateGuardianGuidance, type GuardianGuidance } from '../ai';
 import { t } from '../i18n';
 import { Field, Empty } from '../components/ui';
 import { CompletionRing, FocusTrend, SubjectSplit, WeekBars, minutesLabel } from '../components/charts';
-import { dropPlan, inviteStudent, markNoticesRead, postNotice, readNotices, refreshResults, removeLink, sendPlan, syncLinks, type Invitation } from '../auth/links';
-import { planPeriodLabel, planProgress, planStartFor } from '../panels';
-import { AuthError } from '../auth/session';
+import { GuardianPlanComposer } from '../components/GuardianPlanComposer';
+import {
+  dropPlan,
+  inviteStudent,
+  markNoticesRead,
+  postNotice,
+  readNotices,
+  refreshResults,
+  removeLink,
+  syncLinks,
+  type Invitation,
+} from '../auth/links';
+import { planPeriodLabel, planProgress, withoutLinkPlan } from '../panels';
+import {
+  filterGuardianLinks,
+  guardianResultStatus,
+  guardianStatusLabel,
+  type RosterFilter,
+  type RosterSort,
+} from '../panelFeatures';
 import type { GuardianLink, PlanCadence } from '../types';
-
-interface DraftItem {
-  title: string;
-  subject: string;
-  minutes: string;
-}
-
-interface PlanDraftState {
-  cadence: PlanCadence;
-  start: string;
-  title: string;
-  note: string;
-  items: DraftItem[];
-}
-
-function freshPlanDraft(cadence: PlanCadence = 'week'): PlanDraftState {
-  return {
-    cadence,
-    start: planStartFor(cadence),
-    title: '',
-    note: '',
-    items: [
-      { title: '', subject: '', minutes: '' },
-      { title: '', subject: '', minutes: '' },
-      { title: '', subject: '', minutes: '' },
-    ],
-  };
-}
+import '../panels.css';
 
 export function GuardianPanelView() {
   const { panels, updatePanels, flash, navigate, requestConfirm } = usePlanner();
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [lastChecked, setLastChecked] = useState<string | null>(null);
   const [invitation, setInvitation] = useState<Invitation | null>(null);
   const [copied, setCopied] = useState(false);
   const [draft, setDraft] = useState({ username: '', displayName: '' });
@@ -58,48 +55,63 @@ export function GuardianPanelView() {
   const [sending, setSending] = useState<string | null>(null);
   const [guidance, setGuidance] = useState<Record<string, GuardianGuidance>>({});
   const [guiding, setGuiding] = useState<string | null>(null);
-  // The plan composer: one open at a time, with its items.
-  const [planning, setPlanning] = useState<string | null>(null);
-  const [sendingPlan, setSendingPlan] = useState(false);
-  const [planDraft, setPlanDraft] = useState<PlanDraftState>(freshPlanDraft());
+  const [planning, setPlanning] = useState<{ id: string; cadence: PlanCadence } | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<RosterFilter>('all');
+  const [sort, setSort] = useState<RosterSort>('name');
   const guardian = panels.guardian;
   const unread = guardian.notices.filter((notice) => !notice.read).length;
+  const links = filterGuardianLinks(guardian.links, search, filter, sort);
+  const linked = guardian.links.filter((link) => link.status === 'linked').length;
+  const current = guardian.links.filter((link) => guardianResultStatus(link) === 'current').length;
+  const waiting = guardian.links.filter((link) => ['pending', 'awaiting'].includes(guardianResultStatus(link))).length;
 
-  // Once signed in, results arrive on their own: check when the panel opens and
-  // whenever the planner is saved again.
   useEffect(() => {
+    if (!panels.guardian.enabled) return;
     let cancelled = false;
-    void syncLinks(panels)
-      .then((sync) => (cancelled ? null : refreshResults(sync.panels)))
-      .then((refreshed) => (cancelled || !refreshed ? null : readNotices(refreshed.panels)))
-      .then((notices) => {
-        if (cancelled || !notices) return;
-        if (notices.changed) updatePanels(notices.panels);
-      })
-      .catch(() => undefined);
+    void (async () => {
+      const sync = await syncLinks(panels);
+      const refreshed = await refreshResults(sync.panels);
+      const incoming = await readNotices(refreshed.panels);
+      if (cancelled) return;
+      if (JSON.stringify(incoming.panels) !== JSON.stringify(panels))
+        updatePanels((latest) => (latest === panels ? incoming.panels : latest));
+      setLastChecked(new Date().toISOString());
+    })().catch(() => undefined);
     return () => {
       cancelled = true;
     };
+    // Link syncing also runs in the provider; this immediate pull is just for opening the panel.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const addLink = async () => {
+  const addLink = async (event: React.FormEvent) => {
+    event.preventDefault();
     const username = draft.username.trim().replace(/^@/, '').toLowerCase();
     if (!username || busy) return;
     if (guardian.links.some((link) => link.username === username)) {
-      flash(t("You already follow that student."));
+      flash(t('You already follow that student.'));
+      return;
+    }
+    if (guardian.links.length >= 20) {
+      flash(t('You can follow up to 20 students.'));
       return;
     }
     setBusy(true);
     try {
-      const { panels: next, invitation: made } = await inviteStudent(panels, username, draft.displayName);
-      updatePanels(next);
+      const { invitation: made } = await inviteStudent(panels, username, draft.displayName);
+      updatePanels((latest) => ({
+        ...latest,
+        guardian: { ...latest.guardian, links: [...latest.guardian.links, made.link] },
+      }));
       setInvitation(made);
+      setCopied(false);
       setDraft({ username: '', displayName: '' });
       setAdding(false);
-      flash(t("Invitation ready. Give the code to your student."));
+      flash(t('Invitation ready. Give the code to your student.'));
     } catch (error) {
-      flash(error instanceof AuthError || error instanceof Error ? error.message : t("That invitation could not be sent."));
+      flash(error instanceof Error ? error.message : t('That invitation could not be sent.'));
     } finally {
       setBusy(false);
     }
@@ -110,9 +122,9 @@ export function GuardianPanelView() {
     try {
       await navigator.clipboard.writeText(invitation.code);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 2200);
     } catch {
       setCopied(false);
+      flash(t('Could not copy. Select the code and copy it manually.'));
     }
   };
 
@@ -123,10 +135,11 @@ export function GuardianPanelView() {
       const synced = await syncLinks(panels);
       const results = await refreshResults(synced.panels);
       const incoming = await readNotices(results.panels);
-      updatePanels(incoming.panels);
-      flash(t("Student results refreshed."));
+      updatePanels((latest) => (latest === panels ? incoming.panels : latest));
+      setLastChecked(new Date().toISOString());
+      flash(t('Student results refreshed.'));
     } catch (error) {
-      flash(error instanceof Error ? error.message : t("Could not refresh student results."));
+      flash(error instanceof Error ? error.message : t('Could not refresh student results.'));
     } finally {
       setRefreshing(false);
     }
@@ -137,7 +150,7 @@ export function GuardianPanelView() {
     setGuiding(link.id);
     try {
       const result = await generateGuardianGuidance({ results: link.results, history: link.history });
-      setGuidance((current) => ({ ...current, [link.id]: result }));
+      setGuidance((previous) => ({ ...previous, [link.id]: result }));
     } catch (error) {
       flash(friendlyGroqError(error));
     } finally {
@@ -145,548 +158,671 @@ export function GuardianPanelView() {
     }
   };
 
-  const send = async (link: GuardianLink) => {
+  const send = async (link: GuardianLink, event: React.FormEvent) => {
+    event.preventDefault();
     const text = (notes[link.id] ?? '').trim();
     if (!text || !link.linkId || sending) return;
     setSending(link.id);
     try {
       const next = await postNotice(panels, link.linkId, text);
-      updatePanels(next);
-      setNotes((current) => ({ ...current, [link.id]: '' }));
-      flash(t("Sent. The other guardians of {0} will see it next time they sync.", { 0: link.displayName }));
+      const previousIds = new Set(guardian.notices.map((notice) => notice.id));
+      const added = next.guardian.notices.filter((notice) => !previousIds.has(notice.id));
+      updatePanels((latest) => ({
+        ...latest,
+        guardian: {
+          ...latest.guardian,
+          notices: [
+            ...added,
+            ...latest.guardian.notices.filter((notice) => !added.some((item) => item.id === notice.id)),
+          ].slice(0, 20),
+        },
+      }));
+      setNotes((previous) => ({ ...previous, [link.id]: '' }));
+      flash(t('Sent to {0}. The other guardians receive it after the student syncs.', { 0: link.displayName }));
     } catch (error) {
-      flash(error instanceof Error ? error.message : t("That note could not be sent."));
+      flash(error instanceof Error ? error.message : t('That note could not be sent.'));
     } finally {
       setSending(null);
     }
   };
 
-  const stopFollowing = (link: GuardianLink) => {
-    const end = async () => {
-      const next = link.linkId ? await removeLink(panels, link.linkId) : {
-        ...panels,
-        guardian: { ...guardian, links: guardian.links.filter((item) => item.id !== link.id) },
-      };
-      updatePanels(next);
-      flash(t("Stopped following {0}.", { 0: link.displayName }));
-    };
+  const stopFollowing = (link: GuardianLink) =>
     requestConfirm({
-      title: t("Stop following {0}?", { 0: link.displayName }),
-      body: t("Their weekly results will no longer appear here. Nothing is deleted from their planner."),
-      confirmLabel: t("Stop following"),
-      onConfirm: () => void end(),
-    });
-  };
-
-  const openPlanner = (link: GuardianLink, cadence: PlanCadence = 'week') => {
-    setPlanning(link.id);
-    setPlanDraft(freshPlanDraft(cadence));
-  };
-
-  const setDraftItem = (index: number, patch: Partial<DraftItem>) => {
-    setPlanDraft((current) => ({
-      ...current,
-      items: current.items.map((item, position) => (position === index ? { ...item, ...patch } : item)),
-    }));
-  };
-
-  const submitPlan = async (link: GuardianLink) => {
-    if (!link.linkId || sendingPlan) return;
-    const items = planDraft.items
-      .map((item) => ({
-        title: item.title.trim(),
-        subject: item.subject.trim() || null,
-        minutes: item.minutes ? Math.max(0, Math.round(Number(item.minutes))) || null : null,
-        date: null as string | null,
-      }))
-      .filter((item) => item.title);
-    if (!planDraft.title.trim() || items.length === 0) {
-      flash(t("Give the plan a name and at least one thing to do."));
-      return;
-    }
-    setSendingPlan(true);
-    try {
-      const next = await sendPlan(panels, link.linkId, {
-        cadence: planDraft.cadence,
-        start: planDraft.start,
-        title: planDraft.title,
-        note: planDraft.note,
-        items,
-      });
-      updatePanels(next);
-      setPlanning(null);
-      flash(t("The plan is on its way to {0}.", { 0: link.displayName }));
-    } catch (error) {
-      flash(error instanceof Error ? error.message : t("That plan could not be sent."));
-    } finally {
-      setSendingPlan(false);
-    }
-  };
-
-  const dropSentPlan = (link: GuardianLink, planId: string) => {
-    requestConfirm({
-      title: t("Take this plan back?"),
-      body: t("It disappears from their panel the next time they sync. Anything they already ticked stays with them."),
-      confirmLabel: t("Take it back"),
+      title: t('Stop following {0}?', { 0: link.displayName }),
+      body: t('Their weekly results will no longer appear here. Nothing is deleted from their planner.'),
+      confirmLabel: t('Stop following'),
       onConfirm: () => {
         void (async () => {
-          const next = link.linkId ? await dropPlan(panels, link.linkId, planId) : panels;
-          updatePanels(next);
-          flash(t("Plan taken back."));
-        })();
+          if (link.linkId) await removeLink(panels, link.linkId);
+          updatePanels((latest) => ({
+            ...latest,
+            guardian: { ...latest.guardian, links: latest.guardian.links.filter((item) => item.id !== link.id) },
+          }));
+          if (expanded === link.id) setExpanded(null);
+          if (planning?.id === link.id) setPlanning(null);
+          flash(t('Stopped following {0}.', { 0: link.displayName }));
+        })().catch((error: unknown) =>
+          flash(error instanceof Error ? error.message : t('That link could not be removed.')),
+        );
       },
     });
+
+  const openPlanner = (link: GuardianLink, cadence: PlanCadence) => {
+    setExpanded(link.id);
+    setPlanning({ id: link.id, cadence });
   };
+  const dropSentPlan = (link: GuardianLink, planId: string) =>
+    requestConfirm({
+      title: t('Take this plan back?'),
+      body: t('It disappears from their panel the next time they sync. Anything they already ticked stays with them.'),
+      confirmLabel: t('Take it back'),
+      onConfirm: () => {
+        void (async () => {
+          if (!link.linkId) return;
+          await dropPlan(panels, link.linkId, planId);
+          updatePanels((latest) => withoutLinkPlan(latest, link.linkId!, planId));
+          flash(t('Plan taken back.'));
+        })().catch((error: unknown) =>
+          flash(error instanceof Error ? error.message : t('That plan could not be taken back.')),
+        );
+      },
+    });
 
-  const hours = (minutes: number) => (minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`);
-
-  if (!guardian.enabled || !guardian.kind) {
+  if (!guardian.enabled || !guardian.kind)
     return (
       <div className="view panels-view">
         <Empty
-          title={t("The guardian panel is not added")}
-          text={t("Your planner is untouched — the panel is simply not on. Add it whenever you want it.")}
+          title={t('The guardian panel is not added')}
+          text={t('Your planner is untouched — the panel is simply not on. Add it whenever you want it.')}
           action={
             <button type="button" className="btn btn-primary btn-small" onClick={() => navigate({ name: 'panels' })}>
-              {t("See the panels")}
+              {t('See the panels')}
             </button>
           }
         />
       </div>
     );
-  }
 
   return (
-    <div className="view panels-view">
-      <header className="view-head">
+    <div className="view panels-view guardian-panel-view">
+      <header className="view-head panel-page-head">
         <div>
-          <p className="kicker">{guardian.kind === 'parent' ? t("Parent panel") : t("Advisor panel")}</p>
-          <h1 className="view-title">{t("The week, as results")}</h1>
+          <p className="kicker panel-page-kicker">
+            <HeartIcon size={16} />
+            {guardian.kind === 'parent' ? t('Parent panel') : t('Advisor panel')}
+          </p>
+          <h1 className="view-title">{t('The week, as results')}</h1>
           <p className="view-sub">
-            {t("You see how the week went, not what was in it. Anything personal to the student stays with them.")}
+            {t('You see how the week went, not what was in it. Anything personal to the student stays with them.')}
           </p>
         </div>
+        <div className="panel-page-actions">
+          <button
+            type="button"
+            className="btn btn-outline btn-small"
+            disabled={refreshing}
+            onClick={() => void refreshPanel()}
+          >
+            {refreshing ? <span className="spinner" aria-hidden="true" /> : null}
+            {refreshing ? t('Refreshing…') : t('Refresh results')}
+          </button>
+          <button type="button" className="btn btn-ghost btn-small" onClick={() => navigate({ name: 'panels' })}>
+            <SlidersIcon size={14} />
+            {t('Manage panels')}
+          </button>
+        </div>
       </header>
-
       <p className="panel-identity">
-        <strong>{guardian.kind === 'parent' ? t("Parent") : t("Advisor")}</strong>
+        <strong>{guardian.kind === 'parent' ? t('Parent') : t('Advisor')}</strong>
         {guardian.field ? <span>{guardian.field}</span> : null}
       </p>
+      <section className="panel-overview" aria-label={t('Your student circle')}>
+        <div className="panel-stat">
+          <span className="panel-stat-icon">
+            <UserIcon size={18} />
+          </span>
+          <p>{t('Linked students')}</p>
+          <strong>{linked}</strong>
+          <span>{t('Connected with their consent')}</span>
+        </div>
+        <div className="panel-stat">
+          <span className="panel-stat-icon">
+            <CheckIcon size={18} />
+          </span>
+          <p>{t('Updated this week')}</p>
+          <strong>{current}</strong>
+          <span>{t('Weekly results available')}</span>
+        </div>
+        <div className="panel-stat">
+          <span className="panel-stat-icon">
+            <BookIcon size={18} />
+          </span>
+          <p>{t('Waiting for results')}</p>
+          <strong>{waiting}</strong>
+          <span>{t('Invitations or first shares')}</span>
+        </div>
+        <div className="panel-stat">
+          <span className="panel-stat-icon">
+            <BellIcon size={18} />
+          </span>
+          <p>{t('Unread notes')}</p>
+          <strong>{unread}</strong>
+          <span>{t('From your shared circle')}</span>
+        </div>
+      </section>
 
-      <section className="card">
+      <section className="card guardian-roster" aria-label={t('Who you follow')}>
         <header className="card-head">
           <div>
-            <p className="kicker">{t("Students")}</p>
-            <h2 className="card-title">{t("Who you follow")}</h2>
+            <p className="kicker">{t('Students')}</p>
+            <h2 className="card-title">{t('Who you follow')}</h2>
           </div>
-          <span className="panel-head-actions">
-            <button type="button" className="btn btn-ghost btn-tiny" disabled={refreshing} onClick={() => void refreshPanel()}>
-              {refreshing ? <span className="spinner" aria-hidden="true" /> : null}
-              {refreshing ? t("Refreshing…") : t("Refresh results")}
-            </button>
-            <button type="button" className="btn btn-tiny" onClick={() => setAdding((value) => !value)}>
-              <PlusIcon size={14} /> {t("Student")}
-            </button>
-          </span>
+          <button
+            type="button"
+            className="btn btn-soft btn-small"
+            aria-expanded={adding}
+            onClick={() => setAdding(!adding)}
+          >
+            <PlusIcon size={14} />
+            {t('Student')}
+          </button>
         </header>
-
         {adding ? (
-          <div className="panel-form">
-            <Field label={t("Their username")}>
-              <input
-                className="input"
-                value={draft.username}
-                autoFocus
-                placeholder={t("username")}
-                onChange={(event) => setDraft({ ...draft, username: event.target.value })}
-              />
-            </Field>
-            <Field label={t("Name you’ll see")}>
-              <input
-                className="input"
-                value={draft.displayName}
-                onChange={(event) => setDraft({ ...draft, displayName: event.target.value })}
-              />
-            </Field>
-            <div className="panel-form-actions">
-              <button type="button" className="btn btn-primary btn-small" disabled={!draft.username.trim() || busy} onClick={() => void addLink()}>
-                {busy ? <span className="spinner" aria-hidden="true" /> : null}
-                {t("Add student")}
-              </button>
-              <button type="button" className="btn btn-ghost btn-small" onClick={() => setAdding(false)}>
-                {t("Cancel")}
-              </button>
+          <form className="panel-form panel-inline-form" onSubmit={(event) => void addLink(event)}>
+            <div className="panel-form-grid">
+              <Field label={t('Their username')}>
+                <input
+                  className="input"
+                  value={draft.username}
+                  autoFocus
+                  required
+                  maxLength={25}
+                  placeholder={t('username')}
+                  disabled={busy}
+                  onChange={(event) => setDraft({ ...draft, username: event.target.value })}
+                />
+              </Field>
+              <Field label={t('Name you’ll see')}>
+                <input
+                  className="input"
+                  value={draft.displayName}
+                  maxLength={60}
+                  disabled={busy}
+                  onChange={(event) => setDraft({ ...draft, displayName: event.target.value })}
+                />
+              </Field>
             </div>
-            <p className="hint">{t("They choose whether to share. Until they accept, nothing of theirs is shown here.")}</p>
-          </div>
-        ) : null}
-
-        {guardian.notices.length > 0 ? (
-          <section className="card notice-card">
-            <header className="card-head">
-              <div>
-                <p className="kicker">{t("From the other guardians")}</p>
-                <h2 className="card-title">
-                  {t("What changed")}
-                  {unread > 0 ? <span className="badge-count"> {unread}</span> : null}
-                </h2>
-              </div>
-              {unread > 0 ? (
-                <button type="button" className="btn btn-ghost btn-tiny" onClick={() => updatePanels(markNoticesRead(panels))}>
-                  {t("Mark all read")}
-                </button>
-              ) : null}
-            </header>
-            <ul className="notice-list">
-              {guardian.notices.slice(0, 8).map((notice) => (
-                <li key={notice.id} className={cx('notice', !notice.read && 'unread')}>
-                  <div className="notice-body">
-                    <p className="notice-text">{notice.summary}</p>
-                    <p className="notice-meta">
-                      {notice.author} · @{notice.student}
-                      {notice.weekOf ? ` · ${notice.weekOf}` : ''}
-                    </p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
-
-        {invitation ? (
-          <div className="invite-card">
-            <p className="invite-lead">{t("Give this code to {0}", { 0: invitation.link.displayName })}</p>
-            <code className="invite-code">{invitation.code}</code>
-            <div className="invite-actions">
-              <button type="button" className="btn btn-outline btn-small" onClick={copyCode}>
-                {copied ? t("Code copied") : t("Copy code")}
+            <div className="panel-form-actions">
+              <button type="submit" className="btn btn-primary btn-small" disabled={!draft.username.trim() || busy}>
+                {busy ? <span className="spinner" aria-hidden="true" /> : null}
+                {t('Add student')}
               </button>
-              <button type="button" className="btn btn-ghost btn-small" onClick={() => setInvitation(null)}>
-                {t("Done")}
+              <button
+                type="button"
+                className="btn btn-ghost btn-small"
+                disabled={busy}
+                onClick={() => setAdding(false)}
+              >
+                {t('Cancel')}
               </button>
             </div>
             <p className="hint">
-              {t("They type it once in their own panel. After that their weekly results come to you on their own — the code is never stored on our servers.")}
+              {t('They choose whether to share. Until they accept, nothing of theirs is shown here.')}
+            </p>
+          </form>
+        ) : null}
+        {invitation ? (
+          <div className="invite-card" role="status">
+            <p className="invite-lead">{t('Give this code to {0}', { 0: invitation.link.displayName })}</p>
+            <code className="invite-code" dir="ltr">
+              {invitation.code}
+            </code>
+            <div className="invite-actions">
+              <button type="button" className="btn btn-outline btn-small" onClick={() => void copyCode()}>
+                {copied ? t('Code copied') : t('Copy code')}
+              </button>
+              <button type="button" className="btn btn-ghost btn-small" onClick={() => setInvitation(null)}>
+                {t('Done')}
+              </button>
+            </div>
+            <p className="hint">
+              {t(
+                'They type it once in their own panel. After that their weekly results come to you on their own — the code is never stored on our servers.',
+              )}
             </p>
           </div>
         ) : null}
-
+        {guardian.links.length > 0 ? (
+          <>
+            <div className="roster-toolbar">
+              <label className="roster-search">
+                <SearchIcon size={16} />
+                <input
+                  className="input"
+                  type="search"
+                  aria-label={t('Search students')}
+                  value={search}
+                  placeholder={t('Search name or username')}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
+              </label>
+              <Field label={t('Results')}>
+                <select
+                  className="input"
+                  aria-label={t('Filter students')}
+                  value={filter}
+                  onChange={(event) => setFilter(event.target.value as RosterFilter)}
+                >
+                  <option value="all">{t('All students')}</option>
+                  <option value="current">{t('Updated this week')}</option>
+                  <option value="waiting">{t('Waiting for results')}</option>
+                  <option value="older">{t('Older results')}</option>
+                </select>
+              </Field>
+              <Field label={t('Sort')}>
+                <select
+                  className="input"
+                  aria-label={t('Sort students')}
+                  value={sort}
+                  onChange={(event) => setSort(event.target.value as RosterSort)}
+                >
+                  <option value="name">{t('Name')}</option>
+                  <option value="updated">{t('Latest update')}</option>
+                </select>
+              </Field>
+            </div>
+            <div className="roster-summary">
+              <span aria-live="polite">{t('{0} of {1} students', { 0: links.length, 1: guardian.links.length })}</span>
+              {lastChecked ? <span>{t('Last checked {0}', { 0: formatEdited(lastChecked) })}</span> : null}
+            </div>
+          </>
+        ) : null}
         {guardian.links.length === 0 ? (
-          <Empty title={t("No students yet")} text={t("Add one to start receiving their weekly results.")} />
+          <Empty title={t('No students yet')} text={t('Add one to start receiving their weekly results.')} />
+        ) : links.length === 0 ? (
+          <Empty
+            title={t('No matching students')}
+            text={t('Try a different name or results filter.')}
+            action={
+              <button
+                type="button"
+                className="btn btn-ghost btn-small"
+                onClick={() => {
+                  setSearch('');
+                  setFilter('all');
+                }}
+              >
+                {t('Clear filters')}
+              </button>
+            }
+          />
         ) : (
-          <ul className="student-cards">
-            {guardian.links.map((link) => (
-              <li key={link.id} className={cx('student-card', link.status === 'pending' && 'is-pending')}>
-                <div className="student-card-head">
-                  <span className="student-avatar" aria-hidden="true">
-                    <HeartIcon size={15} />
-                  </span>
-                  <div>
-                    <p className="student-name">{link.displayName}</p>
-                    <p className="student-user">@{link.username}</p>
+          <ul className="student-cards guardian-student-grid">
+            {links.map((link) => {
+              const status = guardianResultStatus(link);
+              const isExpanded = expanded === link.id;
+              const ready = link.status === 'linked' && !!link.linkId && !!link.wrappedShareKey;
+              const ticks = link.plans.reduce(
+                (sum, plan) => ({
+                  done: sum.done + planProgress(plan).done,
+                  total: sum.total + planProgress(plan).total,
+                }),
+                { done: 0, total: 0 },
+              );
+              return (
+                <li
+                  key={link.id}
+                  className={cx('student-card', status === 'pending' && 'is-pending', isExpanded && 'is-expanded')}
+                >
+                  <div className="student-card-head">
+                    <span className="student-avatar" aria-hidden="true">
+                      {link.displayName.trim().charAt(0).toUpperCase() || <HeartIcon size={15} />}
+                    </span>
+                    <div>
+                      <h3 className="student-name">{link.displayName}</h3>
+                      <p className="student-user">
+                        <bdi>@{link.username}</bdi>
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="icon-btn round"
+                      aria-label={t('Stop following {0}', { 0: link.displayName })}
+                      onClick={() => stopFollowing(link)}
+                    >
+                      <TrashIcon size={14} />
+                    </button>
                   </div>
-                  <button type="button" className="icon-btn round" aria-label={t("Delete")} onClick={() => stopFollowing(link)}>
-                    <TrashIcon size={14} />
-                  </button>
-                </div>
-
-                {link.status === 'pending' || !link.results ? (
-                  <p className="student-pending">
-                    {t("Waiting for them to accept — no results yet.")}
-                    {link.code ? (
-                      <>
-                        {' '}
-                        <button type="button" className="text-btn" onClick={() => setInvitation({ link, code: link.code! })}>
-                          {t("Show the code again")}
-                        </button>
-                      </>
-                    ) : null}
-                  </p>
-                ) : (
-                  <>
-                    <div className="result-row">
-                      <CompletionRing done={link.results.done} planned={link.results.planned} />
-                      <div className="result-stack">
-                        <div className="result">
-                          <p className="kicker">{t("Done")}</p>
-                          <p className="result-num">
+                  <div className="student-status-line">
+                    <span className={cx('panel-status', `panel-status-${status}`)}>{guardianStatusLabel(status)}</span>
+                    {link.results ? <span>{t('Week of {0}', { 0: link.results.weekOf })}</span> : null}
+                  </div>
+                  {link.results && link.status === 'linked' ? (
+                    <>
+                      <div className="student-summary-values">
+                        <CompletionRing done={link.results.done} planned={link.results.planned} />
+                        <div>
+                          <p>{t('Done')}</p>
+                          <strong>
                             {link.results.done}
-                            <span className="result-of">/{link.results.planned}</span>
-                          </p>
+                            <small> / {link.results.planned}</small>
+                          </strong>
                         </div>
-                        <div className="result">
-                          <p className="kicker">{t("Focused")}</p>
-                          <p className="result-num">{hours(link.results.focusMinutes)}</p>
+                        <div>
+                          <p>{t('Focused')}</p>
+                          <strong>{minutesLabel(link.results.focusMinutes)}</strong>
                         </div>
                       </div>
-                    </div>
-                    {link.results.headline ? (
-                      <p className="student-headline">“{link.results.headline}”</p>
-                    ) : (
-                      <p className="student-headline muted">{t("No change explained this week.")}</p>
-                    )}
-                    <p className="student-week">{t("Week of {0}", { 0: link.results.weekOf })}</p>
-
-                    {link.history.length > 1 ? (
-                      <div className="student-charts">
-                        <section className="chart-block">
-                          <p className="chart-title">{t("Planned against done")}</p>
-                          <p className="chart-note">{t("The last {0} weeks.", { 0: link.history.length })}</p>
-                          <WeekBars weeks={link.history} />
-                          <div className="chart-keys">
-                            <span>
-                              <i className="swatch swatch-planned" aria-hidden="true" />
-                              {t("Planned")}
-                            </span>
-                            <span>
-                              <i className="swatch swatch-done" aria-hidden="true" />
-                              {t("Done")}
-                            </span>
-                          </div>
-                        </section>
-
-                        <section className="chart-block">
-                          <p className="chart-title">{t("Focused time")}</p>
-                          <p className="chart-note">{t("Peak {0}.", { 0: minutesLabel(Math.max(...link.history.map((week) => week.focusMinutes))) })}</p>
-                          <FocusTrend weeks={link.history} />
-                        </section>
-                      </div>
-                    ) : (
-                      <p className="chart-empty">{t("Charts appear once there is more than one week to compare.")}</p>
-                    )}
-
-                    {link.results.subjects.length > 0 ? (
-                      <section className="chart-block">
-                        <p className="chart-title">{t("Where the time went")}</p>
-                        <SubjectSplit subjects={link.results.subjects} />
-                      </section>
-                    ) : null}
-
-                    <div className="guidance">
-                      <div className="guidance-head">
-                        <p className="chart-title">{t("What should I ask?")}</p>
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-tiny"
-                          disabled={guiding === link.id}
-                          onClick={() => void ask(link)}
-                        >
-                          {guiding === link.id ? <span className="spinner" aria-hidden="true" /> : <SparkIcon size={13} />}
-                          {guidance[link.id] ? t("Ask again") : t("Ask")}
-                        </button>
-                      </div>
-                      {guidance[link.id] ? (
-                        <div className="advice">
-                          {guidance[link.id].summary ? <p className="advice-summary">{guidance[link.id].summary}</p> : null}
-                          {guidance[link.id].questions.length > 0 ? (
-                            <ul className="advice-list">
-                              {guidance[link.id].questions.map((question) => (
-                                <li key={question}>{question}</li>
-                              ))}
-                            </ul>
-                          ) : null}
-                          {guidance[link.id].encouragement ? (
-                            <p className="advice-watchout">{guidance[link.id].encouragement}</p>
-                          ) : null}
-                        </div>
+                      {link.results.headline ? (
+                        <p className="student-headline">“{link.results.headline}”</p>
                       ) : (
-                        <p className="chart-note">
-                          {t("Questions come from these results only — never from their tasks or notes.")}
-                        </p>
+                        <p className="student-headline muted">{t('No headline shared this week.')}</p>
                       )}
-                    </div>
-
-                    <div className="notice-form">
-                      <Field label={t("Tell the other guardians what you changed")}>
-                        <input
-                          className="input"
-                          value={notes[link.id] ?? ''}
-                          maxLength={160}
-                          placeholder={t("Moved Thursday's chemistry session to the evening.")}
-                          onChange={(event) => setNotes((current) => ({ ...current, [link.id]: event.target.value }))}
-                        />
-                      </Field>
-                      <div className="panel-form-actions">
-                        <button
-                          type="button"
-                          className="btn btn-outline btn-small"
-                          disabled={sending === link.id || !(notes[link.id] ?? '').trim()}
-                          onClick={() => void send(link)}
-                        >
-                          {sending === link.id ? <span className="spinner" aria-hidden="true" /> : null}
-                          {t("Send")}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="gplan-actions">
-                      <p className="chart-title">{t("Plan their time")}</p>
-                      <p className="chart-note">{t("A day, a week, or a month — it lands in their panel.")}</p>
-                      <div className="gplan-picks">
-                        <button type="button" className="btn btn-ghost btn-tiny" onClick={() => openPlanner(link, 'day')}>
-                          {t("A day")}
-                        </button>
-                        <button type="button" className="btn btn-ghost btn-tiny" onClick={() => openPlanner(link, 'week')}>
-                          {t("A week")}
-                        </button>
-                        <button type="button" className="btn btn-ghost btn-tiny" onClick={() => openPlanner(link, 'month')}>
-                          {t("A month")}
-                        </button>
-                      </div>
-                    </div>
-
-                    {planning === link.id ? (
-                      <div className="panel-form gplan-composer">
-                        <Field label={t("What is this plan?")}>
-                          <input
-                            className="input"
-                            value={planDraft.title}
-                            autoFocus
-                            placeholder={t("Chemistry week")}
-                            onChange={(event) => setPlanDraft({ ...planDraft, title: event.target.value })}
-                          />
-                        </Field>
-                        <Field label={t("Covers")}>
-                          <div className="gplan-covers">
-                            <select
-                              className="input"
-                              aria-label={t("How far it stretches")}
-                              value={planDraft.cadence}
-                              onChange={(event) => {
-                                const cadence = event.target.value as PlanCadence;
-                                setPlanDraft({ ...planDraft, cadence, start: planStartFor(cadence) });
-                              }}
-                            >
-                              <option value="day">{t("A day")}</option>
-                              <option value="week">{t("A week")}</option>
-                              <option value="month">{t("A month")}</option>
-                            </select>
-                            <input
-                              className="input"
-                              type="date"
-                              aria-label={t("First day it covers")}
-                              value={planDraft.start}
-                              onChange={(event) => event.target.value && setPlanDraft({ ...planDraft, start: event.target.value })}
-                            />
-                          </div>
-                        </Field>
-                        <Field label={t("A note to go with it")}>
-                          <textarea
-                            className="input"
-                            rows={2}
-                            value={planDraft.note}
-                            placeholder={t("Keep the evenings light before Thursday's exam.")}
-                            onChange={(event) => setPlanDraft({ ...planDraft, note: event.target.value })}
-                          />
-                        </Field>
-                        <ul className="gplan-draft-items">
-                          {planDraft.items.map((item, index) => (
-                            <li key={index}>
-                              <input
+                      {formatEdited(link.results.updatedAt) ? (
+                        <p className="student-week">{t('Updated {0}', { 0: formatEdited(link.results.updatedAt) })}</p>
+                      ) : null}
+                    </>
+                  ) : (
+                    <p className="student-pending">
+                      {status === 'pending'
+                        ? t('Waiting for them to accept — no results yet.')
+                        : t('Linked. Their first results will appear after they share.')}
+                    </p>
+                  )}
+                  {ticks.total > 0 ? (
+                    <p className="sent-progress-note">
+                      {t('Sent plan progress: {0} of {1} steps done', { 0: ticks.done, 1: ticks.total })}
+                    </p>
+                  ) : null}
+                  <div className="student-card-actions">
+                    {link.status === 'pending' && link.code ? (
+                      <button
+                        type="button"
+                        className="btn btn-outline btn-small"
+                        onClick={() => {
+                          setInvitation({ link, code: link.code! });
+                          setCopied(false);
+                        }}
+                      >
+                        {t('Show the code again')}
+                      </button>
+                    ) : null}
+                    {link.status === 'linked' ? (
+                      <button
+                        type="button"
+                        className="btn btn-outline btn-small"
+                        aria-expanded={isExpanded}
+                        aria-controls={`student-details-${link.id}`}
+                        onClick={() => {
+                          setExpanded(isExpanded ? null : link.id);
+                          if (isExpanded) setPlanning(null);
+                        }}
+                      >
+                        {isExpanded ? t('Close details') : t('View student')}
+                      </button>
+                    ) : null}
+                  </div>
+                  {isExpanded && link.status === 'linked' ? (
+                    <div className="student-detail" id={`student-details-${link.id}`}>
+                      {status === 'older' ? (
+                        <p className="panel-context-note">
+                          {t(
+                            'These are older results, not a live view. The student can share a fresh snapshot from their panel.',
+                          )}
+                        </p>
+                      ) : null}
+                      <div className="student-detail-grid">
+                        <section className="student-detail-results" aria-label={t('Weekly results')}>
+                          <p className="chart-title">{t('The last weeks')}</p>
+                          {link.history.length > 1 ? (
+                            <div className="student-charts">
+                              <section className="chart-block">
+                                <p className="chart-title">{t('Planned against done')}</p>
+                                <p className="chart-note">{t('The last {0} weeks.', { 0: link.history.length })}</p>
+                                <WeekBars weeks={link.history} />
+                                <div className="chart-keys">
+                                  <span>
+                                    <i className="swatch swatch-planned" aria-hidden="true" />
+                                    {t('Planned')}
+                                  </span>
+                                  <span>
+                                    <i className="swatch swatch-done" aria-hidden="true" />
+                                    {t('Done')}
+                                  </span>
+                                </div>
+                              </section>
+                              <section className="chart-block">
+                                <p className="chart-title">{t('Focused time')}</p>
+                                <FocusTrend weeks={link.history} />
+                              </section>
+                            </div>
+                          ) : (
+                            <p className="chart-empty">
+                              {t('Charts appear once there is more than one week to compare.')}
+                            </p>
+                          )}
+                          {link.results?.subjects.length ? (
+                            <section className="chart-block">
+                              <p className="chart-title">{t('Where the time went')}</p>
+                              <SubjectSplit subjects={link.results.subjects} />
+                            </section>
+                          ) : null}
+                          {!link.results ? (
+                            <p className="hint">
+                              {t(
+                                'You can send a supportive note or a suggested plan before their first results arrive.',
+                              )}
+                            </p>
+                          ) : null}
+                        </section>
+                        <section className="student-detail-support" aria-label={t('Support this student')}>
+                          {link.results ? (
+                            <div className="guidance">
+                              <div className="guidance-head">
+                                <p className="chart-title">{t('What should I ask?')}</p>
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost btn-tiny"
+                                  disabled={guiding !== null}
+                                  onClick={() => void ask(link)}
+                                >
+                                  {guiding === link.id ? (
+                                    <span className="spinner" aria-hidden="true" />
+                                  ) : (
+                                    <SparkIcon size={13} />
+                                  )}
+                                  {guidance[link.id] ? t('Ask again') : t('Ask')}
+                                </button>
+                              </div>
+                              {guidance[link.id] ? (
+                                <div className="advice">
+                                  <p className="advice-summary">{guidance[link.id].summary}</p>
+                                  <ul className="guidance-questions">
+                                    {guidance[link.id].questions.map((question, index) => (
+                                      <li key={index}>
+                                        <p>{question}</p>
+                                        <button
+                                          type="button"
+                                          className="text-btn"
+                                          onClick={() =>
+                                            setNotes((previous) => ({ ...previous, [link.id]: question.slice(0, 160) }))
+                                          }
+                                        >
+                                          {t('Use this question')}
+                                        </button>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                  {guidance[link.id].encouragement ? (
+                                    <p className="advice-watchout">{guidance[link.id].encouragement}</p>
+                                  ) : null}
+                                </div>
+                              ) : (
+                                <p className="chart-note">
+                                  {t('Questions come from these results only — never from their tasks or notes.')}
+                                </p>
+                              )}
+                            </div>
+                          ) : null}
+                          <form className="notice-form" onSubmit={(event) => void send(link, event)}>
+                            <Field label={t('A note for your student and their guardians')}>
+                              <textarea
                                 className="input"
-                                value={item.title}
-                                placeholder={t("What should they do?")}
-                                onChange={(event) => setDraftItem(index, { title: event.target.value })}
+                                rows={2}
+                                maxLength={160}
+                                value={notes[link.id] ?? ''}
+                                placeholder={t('What would make this week feel more manageable?')}
+                                disabled={!ready || sending === link.id}
+                                onChange={(event) =>
+                                  setNotes((previous) => ({ ...previous, [link.id]: event.target.value }))
+                                }
                               />
-                              <input
-                                className="input gplan-subject"
-                                value={item.subject}
-                                placeholder={t("Subject")}
-                                onChange={(event) => setDraftItem(index, { subject: event.target.value })}
-                              />
-                              <input
-                                className="input gplan-minutes"
-                                type="number"
-                                min="0"
-                                step="5"
-                                value={item.minutes}
-                                placeholder={t("min")}
-                                onChange={(event) => setDraftItem(index, { minutes: event.target.value })}
-                              />
+                            </Field>
+                            <div className="panel-form-actions">
                               <button
-                                type="button"
-                                className="icon-btn round"
-                                aria-label={t("Remove")}
-                                onClick={() => setPlanDraft({ ...planDraft, items: planDraft.items.filter((_, i) => i !== index) })}
+                                type="submit"
+                                className="btn btn-outline btn-small"
+                                disabled={!ready || sending !== null || !(notes[link.id] ?? '').trim()}
                               >
-                                <TrashIcon size={13} />
+                                {sending === link.id ? <span className="spinner" aria-hidden="true" /> : null}
+                                {t('Send note')}
                               </button>
-                            </li>
-                          ))}
-                        </ul>
-                        <div className="panel-form-actions">
+                              <span className="note-character-count">{(notes[link.id] ?? '').length}/160</span>
+                            </div>
+                          </form>
+                        </section>
+                      </div>
+                      <section className="gplan-actions">
+                        <p className="chart-title">{t('Plan their time')}</p>
+                        <p className="chart-note">{t('A day, a week, or a month — it lands in their panel.')}</p>
+                        <div className="gplan-picks">
                           <button
                             type="button"
                             className="btn btn-ghost btn-small"
-                            onClick={() => setPlanDraft({ ...planDraft, items: [...planDraft.items, { title: '', subject: '', minutes: '' }] })}
+                            disabled={!ready}
+                            onClick={() => openPlanner(link, 'day')}
                           >
-                            <PlusIcon size={13} /> {t("Add item")}
+                            {t('A day')}
                           </button>
-                          <button type="button" className="btn btn-primary btn-small" disabled={sendingPlan} onClick={() => void submitPlan(link)}>
-                            {sendingPlan ? <span className="spinner" aria-hidden="true" /> : null}
-                            {t("Send the plan")}
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-small"
+                            disabled={!ready}
+                            onClick={() => openPlanner(link, 'week')}
+                          >
+                            {t('A week')}
                           </button>
-                          <button type="button" className="btn btn-ghost btn-small" onClick={() => setPlanning(null)}>
-                            {t("Cancel")}
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-small"
+                            disabled={!ready}
+                            onClick={() => openPlanner(link, 'month')}
+                          >
+                            {t('A month')}
                           </button>
                         </div>
-                      </div>
-                    ) : null}
-
-                    {link.plans.length > 0 ? (
-                      <div className="gplan-sent">
-                        <p className="chart-title">{t("Plans you sent")}</p>
-                        <ul className="gplan-list">
-                          {link.plans.map((plan) => {
-                            const progress = planProgress(plan);
-                            const percent = progress.total ? Math.round((progress.done / progress.total) * 100) : 0;
-                            return (
-                              <li key={plan.id} className="gplan-card">
-                                <div className="gplan-head">
-                                  <div>
-                                    <p className="gplan-kicker">
-                                      <span className={cx('gplan-cadence', `gplan-cadence-${plan.cadence}`)}>
-                                        {plan.cadence === 'day' ? t("Day plan") : plan.cadence === 'week' ? t("Week plan") : t("Month plan")}
-                                      </span>
-                                      {planPeriodLabel(plan)}
-                                    </p>
-                                    <p className="gplan-title">{plan.title}</p>
-                                  </div>
-                                  <div className="gplan-progress">
-                                    <strong>{progress.done}</strong>
-                                    <span>/{progress.total}</span>
-                                    <button type="button" className="icon-btn round" aria-label={t("Take it back")} onClick={() => dropSentPlan(link, plan.id)}>
-                                      <TrashIcon size={13} />
+                        {!ready ? (
+                          <p className="hint">{t('This link needs to sync before you can send notes or plans.')}</p>
+                        ) : null}
+                      </section>
+                      {planning?.id === link.id ? (
+                        <GuardianPlanComposer
+                          key={`${link.id}-${planning.cadence}`}
+                          link={link}
+                          cadence={planning.cadence}
+                          onClose={() => setPlanning(null)}
+                        />
+                      ) : null}
+                      {link.plans.length > 0 ? (
+                        <section className="gplan-sent">
+                          <p className="chart-title">{t('Plans you sent')}</p>
+                          <ul className="gplan-list">
+                            {link.plans.map((plan) => {
+                              const progress = planProgress(plan);
+                              const percent = progress.total ? Math.round((progress.done / progress.total) * 100) : 0;
+                              return (
+                                <li key={plan.id} className="gplan-card">
+                                  <div className="gplan-head">
+                                    <div>
+                                      <p className="gplan-kicker">{planPeriodLabel(plan)}</p>
+                                      <p className="gplan-title">{plan.title}</p>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      className="icon-btn round"
+                                      aria-label={t('Take back {0}', { 0: plan.title })}
+                                      onClick={() => dropSentPlan(link, plan.id)}
+                                    >
+                                      <TrashIcon size={14} />
                                     </button>
                                   </div>
-                                </div>
-                                {plan.note ? <p className="gplan-note">{plan.note}</p> : null}
-                                <div className="gplan-bar" aria-hidden="true">
-                                  <i style={{ width: `${percent}%` }} />
-                                </div>
-                                <p className="gplan-from">{t("{0} of {1} done", { 0: progress.done, 1: progress.total })}</p>
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      </div>
-                    ) : null}
-                  </>
-                )}
-              </li>
-            ))}
+                                  {plan.note ? <p className="gplan-note">{plan.note}</p> : null}
+                                  <div
+                                    className="gplan-bar"
+                                    role="progressbar"
+                                    aria-label={t('Progress for {0}', { 0: plan.title })}
+                                    aria-valuemin={0}
+                                    aria-valuemax={100}
+                                    aria-valuenow={percent}
+                                  >
+                                    <i style={{ width: `${percent}%` }} />
+                                  </div>
+                                  <p className="gplan-from">
+                                    {t('{0} of {1} done', { 0: progress.done, 1: progress.total })}
+                                  </p>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </section>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>
 
-      <p className="panel-footnote">
-        {t("A parent and an advisor are different roles, and both can follow several students. When one of you changes something for a student, the other is told.")}
-      </p>
-
-      <p className="panel-footnote">
-        <button type="button" className="text-btn" onClick={() => navigate({ name: 'panels' })}>
-          {t("Manage panels")}
-        </button>
+      {guardian.notices.length > 0 ? (
+        <section className="card notice-card" aria-label={t('Shared updates')}>
+          <header className="card-head">
+            <div>
+              <p className="kicker">{t('From your shared circle')}</p>
+              <h2 className="card-title">
+                {t('Shared updates')}
+                {unread > 0 ? <span className="badge-count"> {unread}</span> : null}
+              </h2>
+            </div>
+            {unread > 0 ? (
+              <button
+                type="button"
+                className="btn btn-ghost btn-tiny"
+                onClick={() => updatePanels((latest) => markNoticesRead(latest))}
+              >
+                {t('Mark all read')}
+              </button>
+            ) : null}
+          </header>
+          <ul className="notice-list">
+            {guardian.notices.slice(0, 8).map((notice) => (
+              <li key={notice.id} className={cx('notice', !notice.read && 'unread')}>
+                <div className="notice-body">
+                  <p className="notice-text">{notice.summary}</p>
+                  <p className="notice-meta">
+                    {notice.author} · <bdi>@{notice.student}</bdi>
+                    {notice.weekOf ? ` · ${notice.weekOf}` : ''}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      <p className="panel-trust-line">
+        <HeartIcon size={15} />
+        {t('Support, not surveillance. Weekly results stay separate from their private planner.')}
       </p>
     </div>
   );

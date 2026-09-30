@@ -9,6 +9,7 @@
  * the app's colours, and they work without JavaScript-driven layout.
  */
 import { cx } from '../cx';
+import { t } from '../i18n';
 import type { WeekResults } from '../types';
 
 /** Monday, shortened: "28 Sep". */
@@ -31,7 +32,7 @@ interface BarsProps {
 /** Planned against done, week by week. The one chart that shows effort. */
 export function WeekBars({ weeks, height = 150 }: BarsProps) {
   if (weeks.length === 0) return null;
-  const ordered = [...weeks].reverse(); // oldest first, left to right
+  const ordered = [...weeks].sort((a, b) => a.weekOf.localeCompare(b.weekOf)); // oldest first
   const max = Math.max(1, ...ordered.map((week) => Math.max(week.planned, week.done)));
   const width = 320;
   const barWidth = Math.max(8, (width / ordered.length) * 0.34);
@@ -43,7 +44,7 @@ export function WeekBars({ weeks, height = 150 }: BarsProps) {
       <div className="chart-legend">
         <span className="chart-key chart-key-planned">{/* label comes from the caller */}</span>
       </div>
-      <svg className="chart-svg" viewBox={`0 0 ${width} ${height}`} role="img" preserveAspectRatio="none">
+      <svg className="chart-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={t('Weekly planned and completed items')} preserveAspectRatio="none">
         {[0, 0.5, 1].map((line) => (
           <line
             key={line}
@@ -78,7 +79,7 @@ export function WeekBars({ weeks, height = 150 }: BarsProps) {
 /** Focused minutes per week, as a line. The trend matters more than the exact values. */
 export function FocusTrend({ weeks, height = 130 }: BarsProps) {
   if (weeks.length === 0) return null;
-  const ordered = [...weeks].reverse();
+  const ordered = [...weeks].sort((a, b) => a.weekOf.localeCompare(b.weekOf));
   const width = 320;
   const max = Math.max(60, ...ordered.map((week) => week.focusMinutes));
   const points = ordered.map((week, index) => {
@@ -91,7 +92,7 @@ export function FocusTrend({ weeks, height = 130 }: BarsProps) {
 
   return (
     <div className="chart">
-      <svg className="chart-svg" viewBox={`0 0 ${width} ${height}`} role="img" preserveAspectRatio="none">
+      <svg className="chart-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={t('Weekly focused time')} preserveAspectRatio="none">
         <polygon className="chart-area" points={area} />
         <polyline className="chart-line" points={line} />
         {points.map((point) => (
@@ -122,7 +123,7 @@ export function CompletionRing({ done, planned }: RingProps) {
   const radius = 42;
   const circumference = 2 * Math.PI * radius;
   return (
-    <div className="completion-ring" role="img">
+    <div className="completion-ring" role="img" aria-label={t('Completion: {0} of {1} planned items', { 0: done, 1: planned })}>
       <svg viewBox="0 0 100 100" className="completion-ring-svg">
         <circle className="completion-ring-track" cx={50} cy={50} r={radius} />
         <circle

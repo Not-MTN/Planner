@@ -176,7 +176,7 @@ export function planStartFor(cadence: PlanCadence, from = todayISO()): string {
 }
 
 /** The last day a plan covers: its start, plus the rest of the day/week/month. */
-export function planEnd(plan: GuardianPlan): string {
+export function planEnd(plan: Pick<GuardianPlan, 'cadence' | 'start'>): string {
   if (plan.cadence === 'day') return plan.start;
   if (plan.cadence === 'week') return addDays(plan.start, 6);
   const date = parseISODate(plan.start);
