@@ -8,21 +8,20 @@ export interface HabitPreset {
   icon: HabitIconId;
   accent: Accent;
   frequency: HabitFrequency;
-  essential?: boolean;
   blurb?: string;
 }
 
 /**
- * The must-do-every-day jobs. Pinned to the top of Today as
- * “Daily essentials” so they are impossible to miss.
+ * Everyday suggestions — opt-in ideas only. They arrive unticked in the picker,
+ * never as must-dos, and stay out of the planner until the user chooses them.
  */
 export const ESSENTIAL_PRESETS: HabitPreset[] = [
-  { id: 'water', get name() { return t('Drink water'); }, icon: 'water', accent: 'blue', frequency: { type: 'daily' }, essential: true, get blurb() { return t('Eight glasses, more or less.'); } },
-  { id: 'move', get name() { return t('Move for 30 minutes'); }, icon: 'stretch', accent: 'sage', frequency: { type: 'daily' }, essential: true, get blurb() { return t('A walk counts. So does dancing.'); } },
-  { id: 'outside', get name() { return t('Get outside'); }, icon: 'sun', accent: 'peach', frequency: { type: 'daily' }, essential: true, get blurb() { return t('Ten minutes of daylight.'); } },
-  { id: 'sleep', get name() { return t('Sleep by 11'); }, icon: 'moon', accent: 'lav', frequency: { type: 'daily' }, essential: true, get blurb() { return t('Tomorrow starts tonight.'); } },
-  { id: 'tidy', get name() { return t('Tidy for 10 minutes'); }, icon: 'home', accent: 'pink', frequency: { type: 'daily' }, essential: true, get blurb() { return t('A little, every day.'); } },
-  { id: 'vitamins', get name() { return t('Take vitamins'); }, icon: 'heart', accent: 'sage', frequency: { type: 'daily' }, essential: true, get blurb() { return t('The small daily dose.'); } },
+  { id: 'water', get name() { return t('Drink water'); }, icon: 'water', accent: 'blue', frequency: { type: 'daily' }, get blurb() { return t('Eight glasses, more or less.'); } },
+  { id: 'move', get name() { return t('Move for 30 minutes'); }, icon: 'stretch', accent: 'sage', frequency: { type: 'daily' }, get blurb() { return t('A walk counts. So does dancing.'); } },
+  { id: 'outside', get name() { return t('Get outside'); }, icon: 'sun', accent: 'peach', frequency: { type: 'daily' }, get blurb() { return t('Ten minutes of daylight.'); } },
+  { id: 'sleep', get name() { return t('Sleep by 11'); }, icon: 'moon', accent: 'lav', frequency: { type: 'daily' }, get blurb() { return t('Tomorrow starts tonight.'); } },
+  { id: 'tidy', get name() { return t('Tidy for 10 minutes'); }, icon: 'home', accent: 'pink', frequency: { type: 'daily' }, get blurb() { return t('A little, every day.'); } },
+  { id: 'vitamins', get name() { return t('Take vitamins'); }, icon: 'heart', accent: 'sage', frequency: { type: 'daily' }, get blurb() { return t('The small daily dose.'); } },
 ];
 
 export interface HabitGroup {
@@ -90,6 +89,8 @@ export function presetToInput(preset: HabitPreset): HabitInput {
     icon: preset.icon,
     accent: preset.accent,
     frequency: preset.frequency,
-    essential: Boolean(preset.essential),
+    // Suggestions are never must-dos; the user can flag any habit as
+    // essential later from the habit editor.
+    essential: false,
   };
 }

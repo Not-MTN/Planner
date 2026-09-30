@@ -19,6 +19,16 @@ function strength(password: string, lang: Lang): { score: 0 | 1 | 2 | 3; label: 
   return { score: 1, label: c.authStrengthFair };
 }
 
+/** Tracks Caps Lock while someone types a password, so a hint can appear. */
+function useCapsLock(): readonly [boolean, { onKeyUp: (event: React.KeyboardEvent) => void; onKeyDown: (event: React.KeyboardEvent) => void }] {
+  const [caps, setCaps] = useState(false);
+  const watch = {
+    onKeyUp: (event: React.KeyboardEvent) => setCaps(event.getModifierState('CapsLock')),
+    onKeyDown: (event: React.KeyboardEvent) => setCaps(event.getModifierState('CapsLock')),
+  };
+  return [caps, watch] as const;
+}
+
 /** Maps API failures to the selected language without leaking English server copy into Persian screens. */
 function errorText(code: AuthErrorCode | null, detail: string | null, c: Record<string, string>, lang: Lang): string {
   if (code === 'bad_credentials') return c.errBadCredentials;
@@ -159,8 +169,14 @@ function Aside({ lang }: { lang: Lang }) {
         ))}
         <div className="auth-aside-veil" />
       </div>
+      <div className="auth-leaves">
+        <i /><i /><i /><i /><i />
+      </div>
       <div className="auth-aside-body">
-        <p className="auth-mark">{c.brand}</p>
+        <p className="auth-mark">
+          <img className="auth-mark-logo" src="/logo-mark.svg" alt="" width="30" height="30" />
+          {c.brand}
+        </p>
         <blockquote key={quote.key} className="auth-quote">
           <p>{c[quote.key]}</p>
           <cite>{c[quote.by]}</cite>
@@ -170,7 +186,13 @@ function Aside({ lang }: { lang: Lang }) {
         </ul>
         <div className="auth-dots">
           {QUOTES.map((item, position) => (
-            <span key={item.art} className={position === index ? 'is-active' : undefined} />
+            <button
+              key={item.art}
+              type="button"
+              tabIndex={-1}
+              className={position === index ? 'is-active' : undefined}
+              onClick={() => setIndex(position)}
+            />
           ))}
         </div>
       </div>
@@ -192,6 +214,7 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
   const [remember, setRemember] = useState(true);
+  const [caps, watchCaps] = useCapsLock();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
@@ -292,6 +315,7 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
                   autoComplete="current-password"
                   placeholder={c.authPasswordPlaceholder}
                   required
+                  {...watchCaps}
                 />
                 <button
                   type="button"
@@ -303,6 +327,7 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
                   {show ? c.authHide : c.authShow}
                 </button>
               </span>
+              {caps && !show ? <small className="auth-caps">{c.authCapsLock}</small> : null}
             </label>
 
             <label className="check">
@@ -374,6 +399,7 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
   const [role, setRole] = useState<Role>('personal');
+  const [caps, watchCaps] = useCapsLock();
   const [guardianKind, setGuardianKind] = useState<'advisor' | 'parent'>('advisor');
   const [studentField, setStudentField] = useState('');
   const [studentGrade, setStudentGrade] = useState('');
@@ -614,6 +640,7 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
                       autoComplete="new-password"
                       placeholder={c.authPasswordPlaceholder}
                       required
+                      {...watchCaps}
                     />
                     <button
                       type="button"
@@ -625,6 +652,7 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
                       {show ? c.authHide : c.authShow}
                     </button>
                   </span>
+                  {caps && !show ? <small className="auth-caps">{c.authCapsLock}</small> : null}
                   <em>{c.authPasswordHint}</em>
                   <span className="meter" data-score={meter.score}>
                     <i />
@@ -855,6 +883,7 @@ function Recover({ lang, navigate }: { lang: Lang; navigate: Nav }) {
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [caps, watchCaps] = useCapsLock();
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1027,6 +1056,7 @@ function Recover({ lang, navigate }: { lang: Lang; navigate: Nav }) {
                       autoComplete="new-password"
                       placeholder={c.authPasswordPlaceholder}
                       required
+                      {...watchCaps}
                     />
                     <button
                       type="button"
@@ -1038,6 +1068,7 @@ function Recover({ lang, navigate }: { lang: Lang; navigate: Nav }) {
                       {showPassword ? c.authHide : c.authShow}
                     </button>
                   </span>
+                  {caps && !showPassword ? <small className="auth-caps">{c.authCapsLock}</small> : null}
                   {password ? <em>{c.authPasswordHint}</em> : null}
                   {password ? (
                     <span className="meter" data-score={meter.score}>

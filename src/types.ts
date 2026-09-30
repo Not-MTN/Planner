@@ -246,6 +246,8 @@ export interface StudentPanel {
   subjects: StudentSubject[];
   /** Why the student changed something significant. Detail kept for the active week only. */
   explanations: ChangeNote[];
+  /** What guardians sent: short notices and day/week/month plans. */
+  inbox: StudentInbox;
 }
 
 /** Curated so a guardian can read it at a glance; 'other' keeps everyone included. */
@@ -322,6 +324,52 @@ export interface ChangeNote {
   reason: string;
 }
 
+/** How far a plan stretches: one day, one week, or one month. */
+export type PlanCadence = 'day' | 'week' | 'month';
+
+/** One step in a guardian's plan. The student ticks these off. */
+export interface PlanItem {
+  id: string;
+  title: string;
+  /** Day within the plan this is for (ISO), or null when it fits anywhere. */
+  date: string | null;
+  /** Suggested time, in minutes. */
+  minutes: number | null;
+  /** Subject name, when the guardian tied it to one. */
+  subject: string | null;
+  done: boolean;
+}
+
+/**
+ * A plan a guardian makes for their student — a day, a week, or a month of it.
+ * It travels over the same encrypted link as everything else; the server only
+ * ever sees ciphertext. The student sees it in their panel and ticks items off,
+ * and the ticks travel back so the guardian can track how it is going.
+ */
+export interface GuardianPlan {
+  id: string;
+  /** Who wrote it, so the student knows which guardian sent it. */
+  author: string;
+  /** The link it travels on — the return address for the student's ticks. */
+  linkId: string;
+  cadence: PlanCadence;
+  /** First day the plan covers (ISO): today, Monday of the week, or the 1st. */
+  start: string;
+  title: string;
+  note: string;
+  items: PlanItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** What a guardian has sent this student: brief notices and full plans. */
+export interface StudentInbox {
+  /** Newest first. */
+  notices: GuardianNotice[];
+  /** Active plans, newest first. */
+  plans: GuardianPlan[];
+}
+
 /** One week of results: all a guardian ever sees of a student's planner. */
 /** Minutes per subject, most-focused first. Counts only — never task titles. */
 export interface WeekSubjectMinutes {
@@ -356,6 +404,8 @@ export interface GuardianLink {
   wrappedShareKey: string | null;
   /** Latest weekly results. Replaced every week — never accumulated. */
   results: WeekResults | null;
+  /** Plans sent to this student, newest first. Ticks come back and land on items. */
+  plans: GuardianPlan[];
 }
 
 export interface PlannerState {
@@ -467,7 +517,15 @@ export function createEmptyState(): PlannerState {
 
 export function createEmptyPanels(): Panels {
   return {
-    student: { enabled: false, field: null, grade: null, guardians: [], subjects: [], explanations: [] },
+    student: {
+      enabled: false,
+      field: null,
+      grade: null,
+      guardians: [],
+      subjects: [],
+      explanations: [],
+      inbox: { notices: [], plans: [] },
+    },
     guardian: { enabled: false, kind: null, field: null, links: [], notices: [] },
   };
 }

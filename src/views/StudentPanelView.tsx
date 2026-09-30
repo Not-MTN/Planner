@@ -10,11 +10,12 @@ import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { BookIcon, FlagIcon, PlusIcon, StopwatchIcon, TrashIcon } from '../icons';
 import { t } from '../i18n';
-import { daysUntil, GRADE_LABELS, gradeLabel, newId, splitExplanations, subjectMinutes, subjectProgress, weekOf, weekResults, withExplanation, withSubject, withoutExplanation, withoutSubject } from '../panels';
+import { daysUntil, GRADE_LABELS, gradeLabel, markInboxRead, newId, planPeriodLabel, planProgress, splitExplanations, subjectMinutes, subjectProgress, weeklyHistory, weekOf, weekResults, withExplanation, withPlanItemToggled, withSubject, withoutExplanation, withoutSubject } from '../panels';
+import { CompletionRing, FocusTrend, SubjectSplit, WeekBars, minutesLabel } from '../components/charts';
 import { normalizeLinkCode } from '../auth/crypto';
 import { friendlyGroqError, generateStudentAdvice, type StudentAdvice } from '../ai';
 import { SparkIcon } from '../icons';
-import { acceptInvitation, relayNotices, removeLink, shareWeeklyResults, syncLinks } from '../auth/links';
+import { acceptInvitation, removeLink, shareWeeklyResults, syncLinks, syncStudentInbox } from '../auth/links';
 import { AuthError } from '../auth/session';
 import type { ChangeNote, StudentSubject } from '../types';
 import { Field, Empty } from '../components/ui';
@@ -30,14 +31,17 @@ export function StudentPanelView() {
   const [asking, setAsking] = useState(false);
   const [sharing, setSharing] = useState(false);
 
-  // Keep in step with the server: a guardian may have ended the link.
+  // Keep in step with the server: a guardian may have ended the link, or sent
+  // something new. Notes left by one guardian are passed to the others here —
+  // only this planner holds every link's key, so it is the only one that can.
   useEffect(() => {
     let cancelled = false;
     void syncLinks(panels)
-      // Notes left by one guardian are passed to the others here: only this
-      // planner holds every link's key, so it is the only one that can.
-      .then((result) => (cancelled ? null : relayNotices(result.panels)))
-      .then(() => undefined)
+      .then((result) => (cancelled ? null : syncStudentInbox(result.panels)))
+      .then((inbox) => {
+        if (cancelled || !inbox) return;
+        if (inbox.changed) updatePanels(inbox.panels);
+      })
       .catch(() => undefined);
     return () => {
       cancelled = true;
@@ -109,6 +113,9 @@ export function StudentPanelView() {
   const week = useMemo(() => weekOf(), []);
   const results = useMemo(() => weekResults(state, week), [state, week]);
   const { current, past } = useMemo(() => splitExplanations(panels.student.explanations, week), [panels.student.explanations, week]);
+  const history = useMemo(() => weeklyHistory(state, 6, week), [state, week]);
+  const inbox = panels.student.inbox;
+  const unreadInbox = inbox.notices.filter((notice) => !notice.read).length;
 
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState({ name: '', examDate: '', targetHours: '' });
@@ -254,6 +261,156 @@ export function StudentPanelView() {
         <p className="result-note">
           {t("These are results, not detail. Next week this row is all that stays of this week.")}
         </p>
+      </section>
+
+      {panels.student.guardians.length > 0 ? (
+        <section className="card inbox-card" aria-label={t("From your guardians")}>
+          <header className="card-head">
+            <div>
+              <p className="kicker">{t("From your guardians")}</p>
+              <h2 className="card-title">
+                {t("Plans and notes for you")}
+                {unreadInbox > 0 ? <span className="badge-count"> {unreadInbox}</span> : null}
+              </h2>
+            </div>
+            {unreadInbox > 0 ? (
+              <button type="button" className="btn btn-ghost btn-tiny" onClick={() => updatePanels(markInboxRead(panels))}>
+                {t("Mark all read")}
+              </button>
+            ) : null}
+          </header>
+
+          {inbox.notices.length === 0 && inbox.plans.length === 0 ? (
+            <p className="empty-note">
+              {t("Nothing yet. When a parent or advisor plans your week or leaves a note, it shows up here.")}
+            </p>
+          ) : null}
+
+          {inbox.notices.length > 0 ? (
+            <ul className="inbox-notices">
+              {inbox.notices.slice(0, 6).map((notice) => (
+                <li key={notice.id} className={cx('inbox-notice', !notice.read && 'unread')}>
+                  <p className="inbox-notice-text">{notice.summary}</p>
+                  <p className="inbox-notice-meta">
+                    {notice.author}
+                    {notice.weekOf ? ` · ${t("Week of {0}", { 0: notice.weekOf })}` : ''}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          {inbox.plans.length > 0 ? (
+            <ul className="gplan-list">
+              {inbox.plans.map((plan) => {
+                const progress = planProgress(plan);
+                return (
+                  <li key={plan.id} className="gplan-card">
+                    <div className="gplan-head">
+                      <div>
+                        <p className="gplan-kicker">
+                          <span className={cx('gplan-cadence', `gplan-cadence-${plan.cadence}`)}>
+                            {plan.cadence === 'day' ? t("Day plan") : plan.cadence === 'week' ? t("Week plan") : t("Month plan")}
+                          </span>
+                          {planPeriodLabel(plan)}
+                        </p>
+                        <p className="gplan-title">{plan.title}</p>
+                      </div>
+                      <div className="gplan-progress" aria-label={t("{0} of {1} done", { 0: progress.done, 1: progress.total })}>
+                        <strong>{progress.done}</strong>
+                        <span>/{progress.total}</span>
+                      </div>
+                    </div>
+                    {plan.note ? <p className="gplan-note">{plan.note}</p> : null}
+                    <div className="gplan-bar" aria-hidden="true">
+                      <i style={{ width: `${progress.total ? Math.round((progress.done / progress.total) * 100) : 0}%` }} />
+                    </div>
+                    {plan.items.length > 0 ? (
+                      <ul className="gplan-items">
+                        {plan.items.map((item) => (
+                          <li key={item.id} className={cx('gplan-item', item.done && 'done')}>
+                            <label>
+                              <input
+                                type="checkbox"
+                                checked={item.done}
+                                onChange={() => updatePanels(withPlanItemToggled(panels, plan.id, item.id))}
+                              />
+                              <span className="gplan-item-title">{item.title}</span>
+                            </label>
+                            <span className="gplan-item-meta">
+                              {item.subject ? <span>{item.subject}</span> : null}
+                              {item.minutes ? <span>{minutesLabel(item.minutes)}</span> : null}
+                              {item.date ? <span>{item.date.slice(5)}</span> : null}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    <p className="gplan-from">{t("From {0}", { 0: plan.author })}</p>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+        </section>
+      ) : null}
+
+      <section className="card" aria-label={t("Tracking")}>
+        <header className="card-head">
+          <div>
+            <p className="kicker">{t("Tracking")}</p>
+            <h2 className="card-title">{t("The last weeks")}</h2>
+          </div>
+        </header>
+        <div className="student-charts">
+          <section className="chart-block">
+            <p className="chart-title">{t("This week at a glance")}</p>
+            <div className="result-row">
+              <CompletionRing done={results.done} planned={results.planned} />
+              <div className="result-stack">
+                <div className="result">
+                  <p className="kicker">{t("Focused")}</p>
+                  <p className="result-num">{hours(results.focusMinutes)}</p>
+                </div>
+                <div className="result">
+                  <p className="kicker">{t("Peak week")}</p>
+                  <p className="result-num">{minutesLabel(Math.max(0, ...history.map((entry) => entry.focusMinutes)))}</p>
+                </div>
+              </div>
+            </div>
+          </section>
+          {history.length > 1 ? (
+            <>
+              <section className="chart-block">
+                <p className="chart-title">{t("Planned against done")}</p>
+                <p className="chart-note">{t("The last {0} weeks.", { 0: history.length })}</p>
+                <WeekBars weeks={history} />
+                <div className="chart-keys">
+                  <span>
+                    <i className="swatch swatch-planned" aria-hidden="true" />
+                    {t("Planned")}
+                  </span>
+                  <span>
+                    <i className="swatch swatch-done" aria-hidden="true" />
+                    {t("Done")}
+                  </span>
+                </div>
+              </section>
+              <section className="chart-block">
+                <p className="chart-title">{t("Focused time")}</p>
+                <FocusTrend weeks={history} />
+              </section>
+            </>
+          ) : (
+            <p className="chart-empty">{t("Charts appear once there is more than one week to compare.")}</p>
+          )}
+          {results.subjects.length > 0 ? (
+            <section className="chart-block">
+              <p className="chart-title">{t("Where the time went")}</p>
+              <SubjectSplit subjects={results.subjects} />
+            </section>
+          ) : null}
+        </div>
       </section>
 
       <section className="card">

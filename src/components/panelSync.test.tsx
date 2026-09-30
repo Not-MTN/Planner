@@ -17,9 +17,9 @@ import type { GuardianLink, PlannerState } from '../types';
 const calls = { relay: 0, share: 0, sync: 0, refresh: 0, notices: 0 };
 
 vi.mock('../auth/links', () => ({
-  relayNotices: vi.fn(async (panels: unknown) => {
+  syncStudentInbox: vi.fn(async (panels: unknown) => {
     calls.relay += 1;
-    return { panels, relayed: 0 };
+    return { panels, added: { notices: [], plans: [] }, relayed: 0, changed: false };
   }),
   shareWeeklyResults: vi.fn(async (_state: unknown, panels: unknown) => {
     calls.share += 1;
@@ -39,6 +39,9 @@ vi.mock('../auth/links', () => ({
   }),
   removeLink: vi.fn(async (panels: unknown) => ({ panels })),
   postNotice: vi.fn(async (panels: unknown) => panels),
+  sendPlan: vi.fn(async (panels: unknown) => panels),
+  dropPlan: vi.fn(async (panels: unknown) => panels),
+  inviteStudent: vi.fn(async (panels: unknown) => ({ panels, invitation: null })),
   markNoticesRead: vi.fn((panels: unknown) => panels),
 }));
 
@@ -57,6 +60,7 @@ function stateWithGuardian(): PlannerState {
     code: null,
     wrappedShareKey: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=',
     results: null,
+    plans: [],
   };
   return {
     ...state,

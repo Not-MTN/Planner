@@ -1,16 +1,21 @@
-/* The unlock screen that stands in front of /app until the vault is open. */
+/* The unlock screen that stands in front of /app until the vault is open.
+   One side is the morning-sprout photograph, the other the card. */
 .gate {
+  position: relative;
   min-height: 100vh;
   min-height: 100dvh;
   display: grid;
-  place-items: center;
-  padding: 24px;
+  grid-template-columns: 1.05fr minmax(0, 1fr);
   background:
     radial-gradient(120% 90% at 50% -10%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 60%),
     linear-gradient(180deg, var(--bg), var(--bg-deep));
 }
 
 .gate-card {
+  grid-column: 2;
+  align-self: center;
+  justify-self: center;
+  margin: 24px;
   width: 100%;
   max-width: 420px;
   padding: 30px 28px 26px;
@@ -177,4 +182,201 @@
 @media (prefers-reduced-motion: reduce) {
   .gate-card { animation: none; }
   .gate-spinner { animation-duration: 2s; }
+}
+
+/* ---------------------------------------------------------------- gate art */
+
+.gate-art {
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-deep);
+}
+
+.gate-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  animation: gate-art-in 1.2s var(--ease) both;
+}
+
+@keyframes gate-art-in {
+  from { opacity: 0; transform: scale(1.05); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* Blends the photograph into the form side and keeps the seam soft. */
+.gate-art-veil {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, transparent 62%, var(--bg-deep)),
+    radial-gradient(80% 60% at 20% 12%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 70%);
+}
+
+/* ------------------------------------------------------------ gate leaves */
+
+/* Leaves drifting down the whole screen — a quiet nod to the sprout logo. */
+.gate-leaves {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.gate-leaves i {
+  position: absolute;
+  top: -8%;
+  width: 13px;
+  height: 13px;
+  background: color-mix(in srgb, var(--accent) 44%, transparent);
+  border-radius: 0 72% 0 72%;
+  opacity: 0;
+  animation: gate-leaf-fall 17s linear infinite;
+}
+
+.gate-leaves i:nth-child(1) { left: 10%; animation-duration: 19s; animation-delay: -3s; width: 11px; height: 11px; }
+.gate-leaves i:nth-child(2) { left: 26%; animation-duration: 15s; animation-delay: -9s; width: 15px; height: 15px; }
+.gate-leaves i:nth-child(3) { left: 41%; animation-duration: 21s; animation-delay: -14s; }
+.gate-leaves i:nth-child(4) { left: 58%; animation-duration: 16s; animation-delay: -6s; width: 10px; height: 10px; }
+.gate-leaves i:nth-child(5) { left: 71%; animation-duration: 20s; animation-delay: -17s; width: 14px; height: 14px; }
+.gate-leaves i:nth-child(6) { left: 87%; animation-duration: 18s; animation-delay: -11s; }
+
+@keyframes gate-leaf-fall {
+  0% { transform: translateY(-4vh) translateX(0) rotate(0deg); opacity: 0; }
+  10% { opacity: 0.28; }
+  88% { opacity: 0.28; }
+  100% { transform: translateY(112vh) translateX(36px) rotate(320deg); opacity: 0; }
+}
+
+/* ---------------------------------------------------------- gate card bits */
+
+/* The product icon in place of the old emoji, with a gentle arrival. */
+.gate-logo {
+  display: block;
+  width: 56px;
+  height: 56px;
+  margin-bottom: 16px;
+  border-radius: 16px;
+  box-shadow: 0 16px 34px color-mix(in srgb, var(--accent) 32%, transparent);
+  animation: gate-logo-in 0.75s var(--ease) both;
+}
+
+@keyframes gate-logo-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.86) rotate(-6deg); }
+  to { opacity: 1; transform: none; }
+}
+
+/* The form arrives piece by piece, just behind the card. */
+.gate-form > * {
+  animation: gate-rise 0.5s var(--ease) both;
+}
+
+.gate-form > *:nth-child(1) { animation-delay: 0.06s; }
+.gate-form > *:nth-child(2) { animation-delay: 0.12s; }
+.gate-form > *:nth-child(3) { animation-delay: 0.18s; }
+.gate-form > *:nth-child(4) { animation-delay: 0.24s; }
+.gate-form > *:nth-child(5) { animation-delay: 0.3s; }
+.gate-form > *:nth-child(6) { animation-delay: 0.36s; }
+
+.gate-input-wrap {
+  position: relative;
+  display: block;
+}
+
+.gate-input-wrap .gate-input {
+  width: 100%;
+  padding-inline-end: 124px;
+}
+
+.gate-field-toggle {
+  position: absolute;
+  inset-inline-end: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  padding: 8px 10px;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.gate-field-toggle:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.gate-caps {
+  margin: -6px 0 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+  animation: gate-rise 0.3s var(--ease) both;
+}
+
+/* A wrong password nudges the message instead of silently appearing. */
+.gate-error {
+  animation: gate-shake 0.38s ease both;
+}
+
+@keyframes gate-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  50% { transform: translateX(5px); }
+  75% { transform: translateX(-3px); }
+}
+
+/* Unlocking succeeded: the whole gate says a soft goodbye. */
+.gate-leaving .gate-card {
+  animation: gate-away 0.24s ease both;
+}
+
+@keyframes gate-away {
+  to { opacity: 0; transform: translateY(-10px) scale(1.015); filter: blur(3px); }
+}
+
+/* Narrow screens: the photograph becomes a quiet backdrop. */
+@media (max-width: 880px) {
+  .gate { grid-template-columns: 1fr; }
+  .gate-art { position: absolute; inset: 0; z-index: 0; }
+  .gate-art img { opacity: 0.22; }
+  .gate-art-veil {
+    background: linear-gradient(180deg, color-mix(in srgb, var(--bg) 30%, transparent), var(--bg) 92%);
+  }
+  .gate-card { grid-column: 1; z-index: 2; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gate-art img,
+  .gate-logo,
+  .gate-form > *,
+  .gate-caps,
+  .gate-error {
+    animation: none;
+  }
+
+  .gate-leaves { display: none; }
+
+  .gate-leaving .gate-card {
+    animation: gate-away 0.24s ease both;
+    filter: none;
+    transform: none;
+  }
+}
+
+/* ------------------------------------------------- cross-device finishing */
+
+/* Keep the card clear of the notch in landscape (viewport-fit=cover). */
+.gate-card {
+  margin-inline: max(24px, env(safe-area-inset-left, 0px)) max(24px, env(safe-area-inset-right, 0px));
+}
+
+/* Comfortable tap target for the show-password toggle. */
+.gate-field-toggle {
+  min-height: 40px;
+  padding: 10px 12px;
 }

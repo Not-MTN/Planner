@@ -13,9 +13,38 @@ import { friendlyGroqError, generateGuardianGuidance, type GuardianGuidance } fr
 import { t } from '../i18n';
 import { Field, Empty } from '../components/ui';
 import { CompletionRing, FocusTrend, SubjectSplit, WeekBars, minutesLabel } from '../components/charts';
-import { inviteStudent, markNoticesRead, postNotice, readNotices, refreshResults, removeLink, syncLinks, type Invitation } from '../auth/links';
+import { dropPlan, inviteStudent, markNoticesRead, postNotice, readNotices, refreshResults, removeLink, sendPlan, syncLinks, type Invitation } from '../auth/links';
+import { planPeriodLabel, planProgress, planStartFor } from '../panels';
 import { AuthError } from '../auth/session';
-import type { GuardianLink } from '../types';
+import type { GuardianLink, PlanCadence } from '../types';
+
+interface DraftItem {
+  title: string;
+  subject: string;
+  minutes: string;
+}
+
+interface PlanDraftState {
+  cadence: PlanCadence;
+  start: string;
+  title: string;
+  note: string;
+  items: DraftItem[];
+}
+
+function freshPlanDraft(cadence: PlanCadence = 'week'): PlanDraftState {
+  return {
+    cadence,
+    start: planStartFor(cadence),
+    title: '',
+    note: '',
+    items: [
+      { title: '', subject: '', minutes: '' },
+      { title: '', subject: '', minutes: '' },
+      { title: '', subject: '', minutes: '' },
+    ],
+  };
+}
 
 export function GuardianPanelView() {
   const { panels, updatePanels, flash, navigate, requestConfirm } = usePlanner();
@@ -29,6 +58,10 @@ export function GuardianPanelView() {
   const [sending, setSending] = useState<string | null>(null);
   const [guidance, setGuidance] = useState<Record<string, GuardianGuidance>>({});
   const [guiding, setGuiding] = useState<string | null>(null);
+  // The plan composer: one open at a time, with its items.
+  const [planning, setPlanning] = useState<string | null>(null);
+  const [sendingPlan, setSendingPlan] = useState(false);
+  const [planDraft, setPlanDraft] = useState<PlanDraftState>(freshPlanDraft());
   const guardian = panels.guardian;
   const unread = guardian.notices.filter((notice) => !notice.read).length;
 
@@ -145,6 +178,66 @@ export function GuardianPanelView() {
     });
   };
 
+  const openPlanner = (link: GuardianLink, cadence: PlanCadence = 'week') => {
+    setPlanning(link.id);
+    setPlanDraft(freshPlanDraft(cadence));
+  };
+
+  const setDraftItem = (index: number, patch: Partial<DraftItem>) => {
+    setPlanDraft((current) => ({
+      ...current,
+      items: current.items.map((item, position) => (position === index ? { ...item, ...patch } : item)),
+    }));
+  };
+
+  const submitPlan = async (link: GuardianLink) => {
+    if (!link.linkId || sendingPlan) return;
+    const items = planDraft.items
+      .map((item) => ({
+        title: item.title.trim(),
+        subject: item.subject.trim() || null,
+        minutes: item.minutes ? Math.max(0, Math.round(Number(item.minutes))) || null : null,
+        date: null as string | null,
+      }))
+      .filter((item) => item.title);
+    if (!planDraft.title.trim() || items.length === 0) {
+      flash(t("Give the plan a name and at least one thing to do."));
+      return;
+    }
+    setSendingPlan(true);
+    try {
+      const next = await sendPlan(panels, link.linkId, {
+        cadence: planDraft.cadence,
+        start: planDraft.start,
+        title: planDraft.title,
+        note: planDraft.note,
+        items,
+      });
+      updatePanels(next);
+      setPlanning(null);
+      flash(t("The plan is on its way to {0}.", { 0: link.displayName }));
+    } catch (error) {
+      flash(error instanceof Error ? error.message : t("That plan could not be sent."));
+    } finally {
+      setSendingPlan(false);
+    }
+  };
+
+  const dropSentPlan = (link: GuardianLink, planId: string) => {
+    requestConfirm({
+      title: t("Take this plan back?"),
+      body: t("It disappears from their panel the next time they sync. Anything they already ticked stays with them."),
+      confirmLabel: t("Take it back"),
+      onConfirm: () => {
+        void (async () => {
+          const next = link.linkId ? await dropPlan(panels, link.linkId, planId) : panels;
+          updatePanels(next);
+          flash(t("Plan taken back."));
+        })();
+      },
+    });
+  };
+
   const hours = (minutes: number) => (minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`);
 
   if (!guardian.enabled || !guardian.kind) {
@@ -229,7 +322,7 @@ export function GuardianPanelView() {
         ) : null}
 
         {guardian.notices.length > 0 ? (
-          <section className="card notices">
+          <section className="card notice-card">
             <header className="card-head">
               <div>
                 <p className="kicker">{t("From the other guardians")}</p>
@@ -425,6 +518,159 @@ export function GuardianPanelView() {
                         </button>
                       </div>
                     </div>
+
+                    <div className="gplan-actions">
+                      <p className="chart-title">{t("Plan their time")}</p>
+                      <p className="chart-note">{t("A day, a week, or a month — it lands in their panel.")}</p>
+                      <div className="gplan-picks">
+                        <button type="button" className="btn btn-ghost btn-tiny" onClick={() => openPlanner(link, 'day')}>
+                          {t("A day")}
+                        </button>
+                        <button type="button" className="btn btn-ghost btn-tiny" onClick={() => openPlanner(link, 'week')}>
+                          {t("A week")}
+                        </button>
+                        <button type="button" className="btn btn-ghost btn-tiny" onClick={() => openPlanner(link, 'month')}>
+                          {t("A month")}
+                        </button>
+                      </div>
+                    </div>
+
+                    {planning === link.id ? (
+                      <div className="panel-form gplan-composer">
+                        <Field label={t("What is this plan?")}>
+                          <input
+                            className="input"
+                            value={planDraft.title}
+                            autoFocus
+                            placeholder={t("Chemistry week")}
+                            onChange={(event) => setPlanDraft({ ...planDraft, title: event.target.value })}
+                          />
+                        </Field>
+                        <Field label={t("Covers")}>
+                          <div className="gplan-covers">
+                            <select
+                              className="input"
+                              aria-label={t("How far it stretches")}
+                              value={planDraft.cadence}
+                              onChange={(event) => {
+                                const cadence = event.target.value as PlanCadence;
+                                setPlanDraft({ ...planDraft, cadence, start: planStartFor(cadence) });
+                              }}
+                            >
+                              <option value="day">{t("A day")}</option>
+                              <option value="week">{t("A week")}</option>
+                              <option value="month">{t("A month")}</option>
+                            </select>
+                            <input
+                              className="input"
+                              type="date"
+                              aria-label={t("First day it covers")}
+                              value={planDraft.start}
+                              onChange={(event) => event.target.value && setPlanDraft({ ...planDraft, start: event.target.value })}
+                            />
+                          </div>
+                        </Field>
+                        <Field label={t("A note to go with it")}>
+                          <textarea
+                            className="input"
+                            rows={2}
+                            value={planDraft.note}
+                            placeholder={t("Keep the evenings light before Thursday's exam.")}
+                            onChange={(event) => setPlanDraft({ ...planDraft, note: event.target.value })}
+                          />
+                        </Field>
+                        <ul className="gplan-draft-items">
+                          {planDraft.items.map((item, index) => (
+                            <li key={index}>
+                              <input
+                                className="input"
+                                value={item.title}
+                                placeholder={t("What should they do?")}
+                                onChange={(event) => setDraftItem(index, { title: event.target.value })}
+                              />
+                              <input
+                                className="input gplan-subject"
+                                value={item.subject}
+                                placeholder={t("Subject")}
+                                onChange={(event) => setDraftItem(index, { subject: event.target.value })}
+                              />
+                              <input
+                                className="input gplan-minutes"
+                                type="number"
+                                min="0"
+                                step="5"
+                                value={item.minutes}
+                                placeholder={t("min")}
+                                onChange={(event) => setDraftItem(index, { minutes: event.target.value })}
+                              />
+                              <button
+                                type="button"
+                                className="icon-btn round"
+                                aria-label={t("Remove")}
+                                onClick={() => setPlanDraft({ ...planDraft, items: planDraft.items.filter((_, i) => i !== index) })}
+                              >
+                                <TrashIcon size={13} />
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                        <div className="panel-form-actions">
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-small"
+                            onClick={() => setPlanDraft({ ...planDraft, items: [...planDraft.items, { title: '', subject: '', minutes: '' }] })}
+                          >
+                            <PlusIcon size={13} /> {t("Add item")}
+                          </button>
+                          <button type="button" className="btn btn-primary btn-small" disabled={sendingPlan} onClick={() => void submitPlan(link)}>
+                            {sendingPlan ? <span className="spinner" aria-hidden="true" /> : null}
+                            {t("Send the plan")}
+                          </button>
+                          <button type="button" className="btn btn-ghost btn-small" onClick={() => setPlanning(null)}>
+                            {t("Cancel")}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {link.plans.length > 0 ? (
+                      <div className="gplan-sent">
+                        <p className="chart-title">{t("Plans you sent")}</p>
+                        <ul className="gplan-list">
+                          {link.plans.map((plan) => {
+                            const progress = planProgress(plan);
+                            const percent = progress.total ? Math.round((progress.done / progress.total) * 100) : 0;
+                            return (
+                              <li key={plan.id} className="gplan-card">
+                                <div className="gplan-head">
+                                  <div>
+                                    <p className="gplan-kicker">
+                                      <span className={cx('gplan-cadence', `gplan-cadence-${plan.cadence}`)}>
+                                        {plan.cadence === 'day' ? t("Day plan") : plan.cadence === 'week' ? t("Week plan") : t("Month plan")}
+                                      </span>
+                                      {planPeriodLabel(plan)}
+                                    </p>
+                                    <p className="gplan-title">{plan.title}</p>
+                                  </div>
+                                  <div className="gplan-progress">
+                                    <strong>{progress.done}</strong>
+                                    <span>/{progress.total}</span>
+                                    <button type="button" className="icon-btn round" aria-label={t("Take it back")} onClick={() => dropSentPlan(link, plan.id)}>
+                                      <TrashIcon size={13} />
+                                    </button>
+                                  </div>
+                                </div>
+                                {plan.note ? <p className="gplan-note">{plan.note}</p> : null}
+                                <div className="gplan-bar" aria-hidden="true">
+                                  <i style={{ width: `${percent}%` }} />
+                                </div>
+                                <p className="gplan-from">{t("{0} of {1} done", { 0: progress.done, 1: progress.total })}</p>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    ) : null}
                   </>
                 )}
               </li>

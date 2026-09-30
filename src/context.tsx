@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { parseHash, toHash, type Route } from './route';
 import { downloadState, loadFrom, parseBackup, sanitizeState, saveTo, serialize, STORAGE_FULL, STORAGE_KEY } from './storage';
 import { flushVaultPush, scheduleVaultPush } from './auth/vault';
-import { readNotices, refreshResults, relayNotices, shareWeeklyResults, syncLinks } from './auth/links';
+import { readNotices, refreshResults, shareWeeklyResults, syncLinks, syncStudentInbox } from './auth/links';
 import { idbRead, idbWrite, savedAt } from './idb';
 import {
   addAIMemory as addAIMemoryTo,
@@ -516,7 +516,24 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
       let panels = current.panels;
       try {
         if (current.panels.student.enabled && panels.student.guardians.length > 0) {
-          await relayNotices(panels);
+          const inbox = await syncStudentInbox(panels);
+          panels = inbox.panels;
+          // Anything new from a guardian is an in-app notification: it lands in
+          // the bell whether or not the panel page is open.
+          for (const notice of inbox.added.notices) {
+            appendNotifications([
+              { key: `inbox|${notice.id}`, title: notice.summary, body: t("{0} sent you a note.", { 0: notice.author }) },
+            ]);
+          }
+          for (const plan of inbox.added.plans) {
+            appendNotifications([
+              { key: `inbox|${plan.id}`, title: plan.title, body: t("A new plan from {0}.", { 0: plan.author }) },
+            ]);
+          }
+          const firstPlan = inbox.added.plans[0];
+          const firstNotice = inbox.added.notices[0];
+          if (firstPlan) flash(`🔔 ${firstPlan.title}`);
+          else if (firstNotice) flash(`🔔 ${firstNotice.summary}`);
           const shared = await shareWeeklyResults(current, panels);
           panels = shared.panels;
         }
@@ -534,7 +551,7 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
         /* sharing is best effort; the next save tries again */
       }
     },
-    [commit],
+    [commit, flash],
   );
 
   // Runs shortly after the planner changes, and once when it opens.
@@ -958,9 +975,11 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
       appendNotifications(due, now);
       for (const reminder of due) {
         fired.add(reminder.key);
-        void showNotification(reminder).then((shown) => {
-          if (!shown) flash(`🔔 ${reminder.title} — ${reminder.body}`);
-        });
+        // The system notification is a bonus for when the app is in the
+        // background; the in-app toast always shows, so a reminder is never
+        // invisible while Planner is open.
+        void showNotification(reminder);
+        flash(`🔔 ${reminder.title} — ${reminder.body}`);
       }
       saveFired(fired);
     };

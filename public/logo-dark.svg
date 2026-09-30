@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<defs>
+  <linearGradient id="tile-d" x1="0.1" y1="0" x2="0.6" y2="1">
+    <stop offset="0" stop-color="#242019"/><stop offset="1" stop-color="#161209"/>
+  </linearGradient>
+  <radialGradient id="glow-d" cx="0.28" cy="0.2" r="0.8">
+    <stop offset="0" stop-color="#FFF7E6" stop-opacity="0.07"/>
+    <stop offset="1" stop-color="#FFF7E6" stop-opacity="0"/>
+  </radialGradient>
+  <linearGradient id="sage-d" x1="0.15" y1="0" x2="0.8" y2="1">
+    <stop offset="0" stop-color="#8FBA9D"/><stop offset="1" stop-color="#5C8A69"/>
+  </linearGradient>
+  <linearGradient id="sageBack-d" x1="0.1" y1="0" x2="0.75" y2="1">
+    <stop offset="0" stop-color="#6C9A7B"/><stop offset="1" stop-color="#456A50"/>
+  </linearGradient>
+</defs><rect width="512" height="512" rx="140" fill="url(#tile-d)"/>
+<rect width="512" height="512" rx="140" fill="url(#glow-d)"/>
+<rect x="18" y="18" width="476" height="476" rx="122" fill="none" stroke="#ECE5D6" stroke-opacity="0.1" stroke-width="3"/><g transform="translate(256 262) scale(1.05) translate(-256 -262) translate(0 -14)"><path d="M248 304C243 241 190 191 130 190C135 249 189 299 248 304Z" fill="url(#sageBack-d)"/>
+<path d="M256 418C259.5 374 251 324 256 268" fill="none" stroke="url(#sage-d)" stroke-width="27" stroke-linecap="round"/>
+<path d="M264 282C332 278 379 228 384 160C315 164 268 212 264 282Z" fill="url(#sage-d)"/>
+<path d="M272 273C316 241 352 196 375 167" fill="none" stroke="#14120D" stroke-opacity="0.35" stroke-width="9" stroke-linecap="round"/></g>
+</svg>

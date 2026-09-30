@@ -16,6 +16,11 @@ export function Modal({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  // Keep the latest onClose without re-running the focus/trap effect: parents
+  // often pass inline callbacks, and re-focusing on every re-render is what
+  // made sheets and pages jump to the top whenever state changed.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     const root = ref.current;
@@ -26,12 +31,12 @@ export function Modal({
         (element) => !element.hasAttribute('disabled') && element.tabIndex !== -1 && !element.closest('[hidden]'),
       );
     const preferred = [...root.querySelectorAll<HTMLElement>('[data-autofocus]')].find((element) => !element.closest('[hidden]'));
-    (preferred ?? focusable().find((element) => !element.closest('[hidden]')))?.focus();
+    (preferred ?? focusable().find((element) => !element.closest('[hidden]')))?.focus({ preventScroll: true });
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== 'Tab') return;
@@ -53,9 +58,13 @@ export function Modal({
     return () => {
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = previousOverflow;
-      previous?.focus?.();
+      // Put focus back where it came from — but never scroll for it, and never
+      // into the closing sheet itself (its buttons are about to unmount).
+      if (previous && document.contains(previous) && !root.contains(previous)) {
+        previous.focus({ preventScroll: true });
+      }
     };
-  }, [onClose]);
+  }, []);
 
   return (
     <div

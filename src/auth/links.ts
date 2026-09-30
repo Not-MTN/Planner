@@ -29,8 +29,9 @@ import {
   wrapKey,
 } from './crypto';
 import { getActiveSession, request } from './session';
-import { newId, weekOf, weekResults } from '../panels';
-import type { GuardianLink, GuardianNotice, Panels, PlannerState, StudentGuardian, WeekResults, WeekSubjectMinutes } from '../types';
+import { newId, weekOf, weekResults, withLinkPlan, withoutLinkPlan } from '../panels';
+import { t } from '../i18n';
+import type { GuardianLink, GuardianNotice, GuardianPlan, Panels, PlanItem, PlannerState, StudentGuardian, WeekResults, WeekSubjectMinutes } from '../types';
 /** Matches the cap in storage.ts, so the vault and the view agree. */
 const WEEKS_KEPT = 12;
 import type { AcceptLinkResponse, LinksResponse, ShareResponse } from '../shared/authContract';
@@ -82,6 +83,7 @@ export async function inviteStudent(panels: Panels, username: string, displayNam
     code,
     wrappedShareKey,
     results: null,
+    plans: [],
   };
   return {
     panels: { ...panels, guardian: { ...panels.guardian, links: [...panels.guardian.links, link] } },
@@ -152,17 +154,152 @@ export async function removeLink(panels: Panels, linkId: string): Promise<Panels
   };
 }
 
-/* ----------------------------------------------------------------- notices */
+/* ---------------------------------------------------------------- mailbox */
 
 async function shareKeyFor(dek: CryptoKey, wrapped: string): Promise<CryptoKey> {
   const raw = await unwrapKeyRaw(wrapped, dek);
   return importDek(raw, false);
 }
 
+/** How a plan's ticks travel back: which items the student has finished. */
+interface PlanTick {
+  planId: string;
+  doneIds: string[];
+  updatedAt: string;
+}
+
 /**
- * Guardian: tell the other adults following this student what you changed.
- * The student's own device passes it on, so no key is ever shared with the
- * server or with a stranger.
+ * Each link owns two encrypted slots the server can never read:
+ *
+ *   note_to_student — the guardian's outbox: notices and plans for the student
+ *   note_to_guardian — the student's outbox: plan ticks, plus whatever the
+ *                      other guardians said, so the adults stay in step
+ *
+ * Both writers send full state rather than one-shot messages, so nothing is
+ * lost to a well-timed overwrite — a reader who misses a poll simply catches
+ * up on the next one.
+ */
+interface GuardianOutbox {
+  v: 2;
+  notices: Array<Omit<GuardianNotice, 'read'>>;
+  plans: GuardianPlan[];
+}
+
+interface StudentOutbox {
+  v: 2;
+  relayed: Array<Omit<GuardianNotice, 'read'>>;
+  progress: PlanTick[];
+}
+
+const OUTBOX_PLANS = 5;
+const OUTBOX_NOTICES = 10;
+const PLAN_ITEMS_MAX = 40;
+
+function wireNotice(value: unknown): Omit<GuardianNotice, 'read'> | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.summary !== 'string' || !raw.summary.trim()) return null;
+  return {
+    id: String(raw.id ?? '').slice(0, 80) || 'note',
+    student: String(raw.student ?? '').slice(0, 40),
+    author: String(raw.author ?? '').slice(0, 60),
+    summary: raw.summary.trim().slice(0, 160),
+    weekOf: String(raw.weekOf ?? '').slice(0, 10),
+    createdAt: String(raw.createdAt ?? new Date().toISOString()).slice(0, 40),
+  };
+}
+
+function wirePlan(value: unknown): GuardianPlan | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const cadence = raw.cadence === 'day' || raw.cadence === 'week' || raw.cadence === 'month' ? (raw.cadence as GuardianPlan['cadence']) : null;
+  const start = String(raw.start ?? '');
+  if (!cadence || !/^\d{4}-\d{2}-\d{2}$/.test(start)) return null;
+  const items = (Array.isArray(raw.items) ? raw.items : [])
+    .flatMap((item): PlanItem[] => {
+      if (!item || typeof item !== 'object') return [];
+      const entry = item as Record<string, unknown>;
+      if (typeof entry.title !== 'string' || !entry.title.trim()) return [];
+      return [{
+        id: String(entry.id ?? '').slice(0, 80) || 'item',
+        title: entry.title.trim().slice(0, 120),
+        date: /^\d{4}-\d{2}-\d{2}$/.test(String(entry.date ?? '')) ? String(entry.date) : null,
+        minutes: typeof entry.minutes === 'number' && Number.isFinite(entry.minutes) ? Math.max(0, Math.round(entry.minutes)) : null,
+        subject: typeof entry.subject === 'string' && entry.subject.trim() ? entry.subject.trim().slice(0, 60) : null,
+        done: entry.done === true,
+      }];
+    })
+    .slice(0, PLAN_ITEMS_MAX);
+  return {
+    id: String(raw.id ?? '').slice(0, 80) || 'plan',
+    author: String(raw.author ?? '').slice(0, 60),
+    linkId: String(raw.linkId ?? '').slice(0, 64),
+    cadence,
+    start,
+    title: String(raw.title ?? '').trim().slice(0, 120) || 'Plan',
+    note: String(raw.note ?? '').trim().slice(0, 400),
+    items,
+    createdAt: String(raw.createdAt ?? new Date().toISOString()).slice(0, 40),
+    updatedAt: String(raw.updatedAt ?? new Date().toISOString()).slice(0, 40),
+  };
+}
+
+async function readSlot(linkId: string, wrappedShareKey: string, dek: CryptoKey): Promise<unknown> {
+  const key = await shareKeyFor(dek, wrappedShareKey);
+  const incoming = await request<{ ciphertext: string | null }>(`/api/auth/note?linkId=${encodeURIComponent(linkId)}`);
+  if (!incoming.ciphertext) return null;
+  return decryptJson<unknown>(incoming.ciphertext, key);
+}
+
+async function writeSlot(linkId: string, wrappedShareKey: string, dek: CryptoKey, payload: unknown): Promise<void> {
+  const key = await shareKeyFor(dek, wrappedShareKey);
+  const ciphertext = await encryptJson(payload, key);
+  await request('/api/auth/note', {
+    method: 'PUT',
+    body: JSON.stringify({ linkId, ciphertext, weekOf: weekOf() }),
+  });
+}
+
+/** The guardian's outbox for one link; a legacy single note folds in as one notice. */
+function asGuardianOutbox(payload: unknown): { notices: Array<Omit<GuardianNotice, 'read'>>; plans: GuardianPlan[] } {
+  const raw = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
+  const legacy = wireNotice(payload);
+  const notices = [
+    ...(Array.isArray(raw.notices) ? raw.notices.flatMap((item) => (wireNotice(item) ? [wireNotice(item)!] : [])) : []),
+    ...(legacy && !Array.isArray(raw.notices) ? [legacy] : []),
+  ].slice(0, OUTBOX_NOTICES);
+  const plans = (Array.isArray(raw.plans) ? raw.plans : [])
+    .flatMap((item) => (wirePlan(item) ? [wirePlan(item)!] : []))
+    .slice(0, OUTBOX_PLANS);
+  return { notices, plans };
+}
+
+/** The student's outbox for one link; a legacy relayed note folds in too. */
+function asStudentOutbox(payload: unknown): { relayed: Array<Omit<GuardianNotice, 'read'>>; progress: PlanTick[] } {
+  const raw = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
+  const legacy = wireNotice(payload);
+  const relayed = [
+    ...(Array.isArray(raw.relayed) ? raw.relayed.flatMap((item) => (wireNotice(item) ? [wireNotice(item)!] : [])) : []),
+    ...(legacy && !Array.isArray(raw.relayed) ? [legacy] : []),
+  ].slice(0, OUTBOX_NOTICES);
+  const progress = (Array.isArray(raw.progress) ? raw.progress : [])
+    .flatMap((item): PlanTick[] => {
+      if (!item || typeof item !== 'object') return [];
+      const tick = item as Record<string, unknown>;
+      if (typeof tick.planId !== 'string' || !tick.planId) return [];
+      return [{
+        planId: tick.planId.slice(0, 80),
+        doneIds: (Array.isArray(tick.doneIds) ? tick.doneIds : []).filter((id): id is string => typeof id === 'string').slice(0, PLAN_ITEMS_MAX),
+        updatedAt: String(tick.updatedAt ?? new Date().toISOString()).slice(0, 40),
+      }];
+    })
+    .slice(0, OUTBOX_PLANS);
+  return { relayed, progress };
+}
+
+/**
+ * Guardian: tell the student and the other adults following them what you
+ * changed. The note lands in the student's inbox and in their next relay.
  */
 export async function postNotice(panels: Panels, linkId: string, summary: string): Promise<Panels> {
   const session = await requireSession();
@@ -171,7 +308,6 @@ export async function postNotice(panels: Panels, linkId: string, summary: string
   const text = summary.trim().slice(0, 160);
   if (!text) return panels;
 
-  const key = await shareKeyFor(session.dek, link.wrappedShareKey);
   const note = {
     id: newId('note'),
     student: link.username,
@@ -180,107 +316,243 @@ export async function postNotice(panels: Panels, linkId: string, summary: string
     weekOf: weekOf(),
     createdAt: new Date().toISOString(),
   };
-  const ciphertext = await encryptJson(note, key);
-  await request('/api/auth/note', {
-    method: 'PUT',
-    body: JSON.stringify({ linkId, ciphertext, weekOf: note.weekOf }),
-  });
+  // Full-state write: whatever plans are already out there must survive.
+  let outbox: GuardianOutbox = { v: 2, notices: [note], plans: [] };
+  try {
+    const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek));
+    outbox = {
+      v: 2,
+      notices: [note, ...current.notices.filter((item) => item.id !== note.id)].slice(0, OUTBOX_NOTICES),
+      plans: current.plans,
+    };
+  } catch {
+    /* first write, or the slot is empty */
+  }
+  await writeSlot(linkId, link.wrappedShareKey, session.dek, outbox);
   // The author sees their own note straight away, marked as read.
   const notice: GuardianNotice = { ...note, read: true };
   return { ...panels, guardian: { ...panels.guardian, notices: [notice, ...panels.guardian.notices].slice(0, 20) } };
 }
 
+export interface PlanDraft {
+  cadence: GuardianPlan['cadence'];
+  /** First day the plan covers (ISO). */
+  start: string;
+  title: string;
+  note: string;
+  items: Array<Pick<PlanItem, 'title' | 'date' | 'minutes' | 'subject'>>;
+}
+
 /**
- * Student: collect what a guardian left for you, and pass it to the others.
- * Only the student holds every link's key, so they are the only one who can
- * translate a note from one guardian into the other's language.
+ * Guardian: put a day, week, or month plan in the student's inbox. The student
+ * sees it in their panel, ticks items off, and the ticks travel back.
  */
-export async function relayNotices(panels: Panels): Promise<{ panels: Panels; relayed: number }> {
+export async function sendPlan(panels: Panels, linkId: string, draft: PlanDraft): Promise<Panels> {
+  const session = await requireSession();
+  const link = panels.guardian.links.find((item) => item.linkId === linkId);
+  if (!link?.wrappedShareKey) throw new LinkError('That link is not ready yet.');
+
+  const now = new Date().toISOString();
+  const plan: GuardianPlan = {
+    id: newId('plan'),
+    author: session.user.displayName || session.user.username,
+    linkId,
+    cadence: draft.cadence,
+    start: draft.start,
+    title: draft.title.trim().slice(0, 120) || t('Plan'),
+    note: draft.note.trim().slice(0, 400),
+    items: draft.items.slice(0, PLAN_ITEMS_MAX).map((item) => ({
+      id: newId('item'),
+      title: item.title.trim().slice(0, 120),
+      date: item.date ?? null,
+      minutes: item.minutes,
+      subject: item.subject?.trim() ? item.subject.trim().slice(0, 60) : null,
+      done: false,
+    })),
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  let outbox: GuardianOutbox = { v: 2, notices: [], plans: [plan] };
+  try {
+    const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek));
+    outbox = {
+      v: 2,
+      notices: current.notices,
+      plans: [plan, ...current.plans.filter((item) => item.id !== plan.id)].slice(0, OUTBOX_PLANS),
+    };
+  } catch {
+    /* first write */
+  }
+  await writeSlot(linkId, link.wrappedShareKey, session.dek, outbox);
+  return withLinkPlan(panels, linkId, plan);
+}
+
+/** Guardian: take a plan back (the student's panel drops it on the next pull). */
+export async function dropPlan(panels: Panels, linkId: string, planId: string): Promise<Panels> {
+  const session = await requireSession();
+  const link = panels.guardian.links.find((item) => item.linkId === linkId);
+  if (!link?.wrappedShareKey) throw new LinkError('That link is not ready yet.');
+  try {
+    const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek));
+    await writeSlot(linkId, link.wrappedShareKey, session.dek, {
+      v: 2,
+      notices: current.notices,
+      plans: current.plans.filter((item) => item.id !== planId),
+    } satisfies GuardianOutbox);
+  } catch {
+    /* dropping locally is still the right outcome */
+  }
+  return withoutLinkPlan(panels, linkId, planId);
+}
+
+/**
+ * Student: collect what the guardians left (notices and plans), pass each
+ * guardian's note to the others, and send everyone the ticks for their own
+ * plans. Only the student holds every link's key, so they are the only one who
+ * can translate a note from one guardian into the other's language.
+ */
+export async function syncStudentInbox(
+  panels: Panels,
+): Promise<{ panels: Panels; added: { notices: GuardianNotice[]; plans: GuardianPlan[] }; relayed: number; changed: boolean }> {
   const session = await requireSession();
   const guardians = panels.student.guardians;
-  if (guardians.length === 0) return { panels, relayed: 0 };
+  if (guardians.length === 0) return { panels, added: { notices: [], plans: [] }, relayed: 0, changed: false };
 
-  const week = weekOf();
-  let relayed = 0;
+  let notices = panels.student.inbox.notices;
+  let plans = panels.student.inbox.plans;
+  let changed = false;
+  const added: { notices: GuardianNotice[]; plans: GuardianPlan[] } = { notices: [], plans: [] };
 
   for (const source of guardians) {
-    interface RelayNote {
-      id?: string;
-      weekOf?: string;
-      summary?: string;
-      author?: string;
-      student?: string;
-      createdAt?: string;
-    }
-    let note: RelayNote | null = null;
+    let outbox: { notices: Array<Omit<GuardianNotice, 'read'>>; plans: GuardianPlan[] };
     try {
-      const sourceKey = await shareKeyFor(session.dek, source.wrappedShareKey);
-      const incoming = await request<{ ciphertext: string | null }>(`/api/auth/note?linkId=${encodeURIComponent(source.linkId)}`);
-      if (!incoming.ciphertext) continue;
-      note = await decryptJson<RelayNote>(incoming.ciphertext, sourceKey);
+      outbox = asGuardianOutbox(await readSlot(source.linkId, source.wrappedShareKey, session.dek));
     } catch {
       continue;
     }
-    if (!note?.summary) continue;
-
-    // Hand it to every other guardian, sealed with each of their own keys.
-    for (const target of guardians) {
-      if (target.linkId === source.linkId) continue;
-      try {
-        const targetKey = await shareKeyFor(session.dek, target.wrappedShareKey);
-        const ciphertext = await encryptJson(
-          { ...note, id: `${note.id ?? 'note'}-${source.linkId.slice(0, 4)}`, student: session.user.username },
-          targetKey,
-        );
-        await request('/api/auth/note', { method: 'PUT', body: JSON.stringify({ linkId: target.linkId, ciphertext, weekOf: note.weekOf ?? week }) });
-        relayed += 1;
-      } catch {
-        /* one guardian offline must not block the rest */
-      }
+    for (const notice of outbox.notices) {
+      // Tag the id with its source link, so relays stay deduplicated.
+      const id = `${notice.id}-${source.linkId.slice(0, 4)}`;
+      if (notices.some((item) => item.id === id)) continue;
+      const received: GuardianNotice = { ...notice, id, student: session.user.username, read: false };
+      notices = [received, ...notices];
+      added.notices.push(received);
+      changed = true;
     }
+    for (const plan of outbox.plans) {
+      const existing = plans.find((item) => item.id === plan.id);
+      if (!existing) {
+        plans = [plan, ...plans];
+        added.plans.push(plan);
+        changed = true;
+        continue;
+      }
+      if (plan.updatedAt === existing.updatedAt) continue;
+      // The guardian edited it: take their items but keep finished ticks.
+      const done = new Set(existing.items.filter((item) => item.done).map((item) => item.id));
+      const merged: GuardianPlan = {
+        ...plan,
+        items: plan.items.map((item) => (done.has(item.id) ? { ...item, done: true } : item)),
+      };
+      plans = plans.map((item) => (item.id === plan.id ? merged : item));
+      changed = true;
+    }
+  }
 
-    // Clear the note now that it is on its way.
+  notices = notices.slice(0, 20);
+  plans = plans.slice(0, 10);
+
+  // Everyone gets a full-state outbox: what the others said, and the ticks for
+  // their own plans. One guardian being offline never blocks the rest.
+  let relayed = 0;
+  for (const target of guardians) {
+    const tag = `-${target.linkId.slice(0, 4)}`;
+    const passed = notices
+      .filter((notice) => !notice.id.endsWith(tag))
+      .slice(0, OUTBOX_NOTICES)
+      .map(({ read: _read, ...rest }) => rest);
+    const progress: PlanTick[] = plans
+      .filter((plan) => plan.linkId === target.linkId)
+      .map((plan) => ({
+        planId: plan.id,
+        doneIds: plan.items.filter((item) => item.done).map((item) => item.id),
+        updatedAt: new Date().toISOString(),
+      }));
+    const outbox: StudentOutbox = { v: 2, relayed: passed, progress };
     try {
-      await request('/api/auth/note', { method: 'PUT', body: JSON.stringify({ linkId: source.linkId, ciphertext: null, weekOf: note.weekOf ?? week }) });
+      await writeSlot(target.linkId, target.wrappedShareKey, session.dek, outbox);
+      relayed += passed.length;
     } catch {
       /* best effort */
     }
   }
 
-  return { panels, relayed };
+  return {
+    panels: { ...panels, student: { ...panels.student, inbox: { notices, plans } } },
+    added,
+    relayed,
+    changed,
+  };
 }
 
-/** Guardian: pick up whatever the others left for you. */
+/** Guardian: pick up whatever the others left for you, and the plan ticks. */
 export async function readNotices(panels: Panels): Promise<{ panels: Panels; changed: boolean }> {
   const session = await requireSession();
   const known = new Set(panels.guardian.notices.map((notice) => notice.id));
   const found: GuardianNotice[] = [];
+  let changed = false;
 
-  for (const link of panels.guardian.links) {
+  const links = [...panels.guardian.links];
+
+  for (const link of links) {
     if (link.status !== 'linked' || !link.linkId || !link.wrappedShareKey) continue;
+    let outbox: { relayed: Array<Omit<GuardianNotice, 'read'>>; progress: PlanTick[] };
     try {
-      const key = await shareKeyFor(session.dek, link.wrappedShareKey);
-      const incoming = await request<{ ciphertext: string | null }>(`/api/auth/note?linkId=${encodeURIComponent(link.linkId)}`);
-      if (!incoming.ciphertext) continue;
-      const note = await decryptJson<GuardianNotice>(incoming.ciphertext, key);
-      if (!note?.summary || known.has(note.id)) continue;
-      found.push({
-        id: String(note.id).slice(0, 80),
-        student: String(note.student ?? link.username).slice(0, 40),
-        author: String(note.author ?? '').slice(0, 60) || link.displayName,
-        summary: String(note.summary).slice(0, 160),
-        weekOf: String(note.weekOf ?? '').slice(0, 10),
-        createdAt: String(note.createdAt ?? new Date().toISOString()).slice(0, 40),
-        read: false,
-      });
+      outbox = asStudentOutbox(await readSlot(link.linkId, link.wrappedShareKey, session.dek));
     } catch {
-      /* an unreadable note is skipped, not fatal */
+      /* an unreadable outbox is skipped, not fatal */
+      continue;
+    }
+    for (const note of outbox.relayed) {
+      if (!note.summary || known.has(note.id)) continue;
+      found.push({ ...note, student: note.student || link.username, read: false });
+    }
+    // Ticks land back on the plans they belong to.
+    if (outbox.progress.length > 0 && link.plans.length > 0) {
+      const plans = link.plans.map((plan) => {
+        const tick = outbox.progress.find((item) => item.planId === plan.id);
+        if (!tick) return plan;
+        const done = new Set(tick.doneIds);
+        const next: GuardianPlan = {
+          ...plan,
+          items: plan.items.map((item) => ({ ...item, done: done.has(item.id) })),
+        };
+        return next;
+      });
+      if (JSON.stringify(plans) !== JSON.stringify(link.plans)) {
+        changed = true;
+        const index = panels.guardian.links.indexOf(link);
+        links[index] = { ...link, plans };
+      }
     }
   }
 
-  if (found.length === 0) return { panels, changed: false };
+  if (found.length > 0) {
+    changed = true;
+  }
   const notices = [...found, ...panels.guardian.notices].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 20);
-  return { panels: { ...panels, guardian: { ...panels.guardian, notices } }, changed: true };
+  return {
+    panels: {
+      ...panels,
+      guardian: {
+        ...panels.guardian,
+        links: [...links],
+        notices: found.length > 0 ? notices : panels.guardian.notices,
+      },
+    },
+    changed,
+  };
 }
 
 /** Guardian: mark every notice as read. */

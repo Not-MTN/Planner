@@ -5,9 +5,9 @@
  * inside the active week, and once the week rolls over only the results remain.
  * A guardian never receives the detail at all — only weekly results.
  */
-import { addDays, startOfWeek, todayISO } from './dates';
+import { addDays, parseISODate, startOfWeek, toISODate, todayISO } from './dates';
 import { t } from './i18n';
-import type { ChangeNote, Panels, PlannerState, StudentSubject, WeekResults } from './types';
+import type { ChangeNote, GuardianPlan, Panels, PlanCadence, PlannerState, StudentSubject, WeekResults } from './types';
 
 export function weekOf(date = todayISO()): string {
   return startOfWeek(date);
@@ -158,4 +158,89 @@ export function withExplanation(panels: Panels, note: ChangeNote): Panels {
 
 export function withoutExplanation(panels: Panels, id: string): Panels {
   return { ...panels, student: { ...panels.student, explanations: panels.student.explanations.filter((item) => item.id !== id) } };
+}
+
+/* ------------------------------------------------------------------- plans */
+
+/** How many of a plan's items are ticked off. */
+export function planProgress(plan: GuardianPlan): { done: number; total: number } {
+  return { done: plan.items.filter((item) => item.done).length, total: plan.items.length };
+}
+
+/** The first day a new plan should cover, for its cadence. */
+export function planStartFor(cadence: PlanCadence, from = todayISO()): string {
+  if (cadence === 'day') return from;
+  if (cadence === 'week') return startOfWeek(from);
+  const date = parseISODate(from);
+  return toISODate(new Date(date.getFullYear(), date.getMonth(), 1));
+}
+
+/** The last day a plan covers: its start, plus the rest of the day/week/month. */
+export function planEnd(plan: GuardianPlan): string {
+  if (plan.cadence === 'day') return plan.start;
+  if (plan.cadence === 'week') return addDays(plan.start, 6);
+  const date = parseISODate(plan.start);
+  return toISODate(new Date(date.getFullYear(), date.getMonth() + 1, 0));
+}
+
+/** \"Week of 28 Sep\", \"Today\", or \"September 2026\" — what the plan covers. */
+export function planPeriodLabel(plan: GuardianPlan, from = todayISO()): string {
+  if (plan.cadence === 'day') {
+    if (plan.start === from) return t('Today');
+    return plan.start;
+  }
+  if (plan.cadence === 'week') return t('Week of {0}', { 0: plan.start });
+  const date = parseISODate(plan.start);
+  return date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+}
+
+/** Tick a plan item on or off, on the student's side. */
+export function withPlanItemToggled(panels: Panels, planId: string, itemId: string): Panels {
+  const plans = panels.student.inbox.plans.map((plan) =>
+    plan.id !== planId
+      ? plan
+      : {
+          ...plan,
+          items: plan.items.map((item) => (item.id === itemId ? { ...item, done: !item.done } : item)),
+        },
+  );
+  return { ...panels, student: { ...panels.student, inbox: { ...panels.student.inbox, plans } } };
+}
+
+/** Student side: every inbox notice has been seen. */
+export function markInboxRead(panels: Panels): Panels {
+  if (panels.student.inbox.notices.every((notice) => notice.read)) return panels;
+  const notices = panels.student.inbox.notices.map((notice) => (notice.read ? notice : { ...notice, read: true }));
+  return { ...panels, student: { ...panels.student, inbox: { ...panels.student.inbox, notices } } };
+}
+
+/** Guardian side: the plans sent to one student, newest first. */
+export function withLinkPlan(panels: Panels, linkId: string, plan: GuardianPlan): Panels {
+  const links = panels.guardian.links.map((link) =>
+    link.linkId !== linkId
+      ? link
+      : { ...link, plans: [plan, ...link.plans.filter((item) => item.id !== plan.id)].slice(0, 10) },
+  );
+  return { ...panels, guardian: { ...panels.guardian, links } };
+}
+
+export function withoutLinkPlan(panels: Panels, linkId: string, planId: string): Panels {
+  const links = panels.guardian.links.map((link) =>
+    link.linkId !== linkId ? link : { ...link, plans: link.plans.filter((item) => item.id !== planId) },
+  );
+  return { ...panels, guardian: { ...panels.guardian, links } };
+}
+
+/**
+ * Weekly results for the past few weeks, oldest first — the student's own
+ * charts. Everything is computed from the planner; nothing new is stored.
+ */
+export function weeklyHistory(state: PlannerState, count = 6, from = todayISO()): WeekResults[] {
+  const weeks: WeekResults[] = [];
+  let week = startOfWeek(from);
+  for (let index = 0; index < count; index += 1) {
+    weeks.push(weekResults(state, week));
+    week = addDays(week, -7);
+  }
+  return weeks.reverse();
 }
