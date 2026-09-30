@@ -1745,6 +1745,15 @@
   transform: scale(1.12);
 }
 
+/* In dark mode the backdrop is near-black, and multiply blends the
+   photograph straight into it — the art vanished. Show it normally instead. */
+[data-theme="dark"] .auth-aside-art {
+  mix-blend-mode: normal;
+}
+[data-theme="dark"] .auth-aside-art.is-active {
+  opacity: 0.7;
+}
+
 /* Keeps the type legible over whatever photograph happens to be showing. */
 .auth-aside-veil {
   position: absolute;
