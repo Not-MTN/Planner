@@ -11,6 +11,7 @@ import {
   DownloadIcon,
   ExitIcon,
   FlagIcon,
+  FlameIcon,
   LeafIcon,
   MoonIcon,
   NoteIcon,
@@ -21,6 +22,7 @@ import {
   HorizonIcon,
   SlidersIcon,
   SparklesIcon,
+  StopwatchIcon,
   StudyIcon,
   SunIcon,
   UndoIcon,
@@ -108,6 +110,7 @@ export function Shell() {
     closePalette,
     settingsOpen,
     openSettings,
+    startFocus,
     syncStatus,
     undo,
     redo,
@@ -138,12 +141,18 @@ export function Shell() {
     ...(planner.panels.guardian.enabled ? [{ name: 'guardian' as const, label: t("Guardian"), icon: HeartIcon }] : []),
   ];
   const planNav = NAV.slice(0, 4).filter((item) => visiblePages.includes(item.name));
-  const focusNav = NAV.slice(4, 6).filter((item) => visiblePages.includes(item.name));
+  const growthNav = NAV.slice(4, 6).filter((item) => visiblePages.includes(item.name));
   const trackNav = NAV.slice(6).filter((item) => visiblePages.includes(item.name));
+  const openTasksCount = planner.state.tasks.filter((task) => !task.completed).length;
   const importFile = useImportFile(importText);
   const key = routeKey(route);
   const today = todayISO();
-  const [tabletFlyout, setTabletFlyout] = useState<null | 'plan' | 'focus' | 'track' | 'panels'>(null);
+  const [tabletFlyout, setTabletFlyout] = useState<null | 'plan' | 'focus' | 'growth' | 'track' | 'panels'>(null);
+  const launchFocus = () => {
+    setMoreOpen(false);
+    setTabletFlyout(null);
+    startFocus({ taskId: null, title: t("Focus session"), minutes: 25 });
+  };
   // Close tablet flyout when route changes or on Escape
   useEffect(() => { setTabletFlyout(null); }, [key]);
   useEffect(() => {
@@ -253,7 +262,7 @@ export function Shell() {
     setMoreOpen(false);
   };
 
-  const moreActive = ['goals', 'notes', 'insights', 'ai', 'plans', 'matrix', 'review'].includes(route.name);
+  const moreActive = ['goals', 'notes', 'insights', 'ai', 'plans', 'matrix', 'review', 'panels', 'student', 'guardian'].includes(route.name);
 
   return (
     <div className="app-shell">
@@ -273,98 +282,164 @@ export function Shell() {
         </button>
         {/* Desktop: full labelled sidebar, all destinations visible without scrolling */}
         <nav className="side-nav side-nav-desktop" aria-label={t("Planner")}>
-          {planNav.length > 0 ? <><p className="nav-label">{t("Plan")}</p>
-            {planNav.map((item) => <NavButton key={item.name} item={item} active={route.name === item.name || (item.name === 'calendar' && route.name === 'calendar')} attention={item.name === 'ai' && !aiSeen} onClick={() => go(item.name)} />)}</> : null}
-          {focusNav.length > 0 ? <><p className="nav-label">{t("Focus")}</p>
-            {focusNav.map((item) => <NavButton key={item.name} item={item} active={route.name === item.name} onClick={() => go(item.name)} />)}</> : null}
-          {trackNav.length > 0 ? <><p className="nav-label">{t("Track")}</p>
-            {trackNav.map((item) => <NavButton key={item.name} item={item} active={route.name === item.name} attention={item.name === 'ai' && !aiSeen} onClick={() => go(item.name)} />)}</> : null}
-          {panelNav.length > 0 ? (
+          {planNav.length > 0 ? (
             <>
-              <p className="nav-label">{t("Panels")}</p>
-              {panelNav.map((item) => (
-                <NavButton key={item.name} item={item} active={route.name === item.name} onClick={() => go(item.name)} />
+              <p className="nav-label">{t("Plan")}</p>
+              {planNav.map((item) => (
+                <NavButton
+                  key={item.name}
+                  item={item}
+                  active={route.name === item.name || (item.name === 'calendar' && route.name === 'calendar')}
+                  badge={item.name === 'tasks' && openTasksCount > 0 ? String(openTasksCount) : undefined}
+                  onClick={() => go(item.name)}
+                />
               ))}
-              <NavButton
-                item={{ name: 'panels', label: t("All panels"), icon: HorizonIcon }}
-                active={route.name === 'panels'}
-                onClick={() => go('panels')}
-              />
             </>
           ) : null}
+          <p className="nav-label">{t("Focus")}</p>
+          <NavButton
+            item={{ name: 'focus', label: t("Focus"), icon: StopwatchIcon }}
+            active={Boolean(planner.focus)}
+            kbd="25′"
+            onClick={launchFocus}
+          />
+          {growthNav.length > 0 ? (
+            <>
+              <p className="nav-label">{t("Growth")}</p>
+              {growthNav.map((item) => (
+                <NavButton key={item.name} item={item} active={route.name === item.name} onClick={() => go(item.name)} />
+              ))}
+            </>
+          ) : null}
+          {trackNav.length > 0 ? (
+            <>
+              <p className="nav-label">{t("Track")}</p>
+              {trackNav.map((item) => (
+                <NavButton
+                  key={item.name}
+                  item={item}
+                  active={route.name === item.name}
+                  attention={item.name === 'ai' && !aiSeen}
+                  violet={item.name === 'ai'}
+                  onClick={() => go(item.name)}
+                />
+              ))}
+            </>
+          ) : null}
+          <div className="side-panels-card">
+            <p className="side-panels-cap">
+              <HorizonIcon size={14} />
+              <span>{t("Panels · separate workspace")}</span>
+            </p>
+            {panelNav.map((item) => (
+              <NavButton key={item.name} item={item} active={route.name === item.name} onClick={() => go(item.name)} />
+            ))}
+            <NavButton
+              item={{ name: 'panels', label: t("All panels"), icon: HorizonIcon }}
+              active={route.name === 'panels'}
+              onClick={() => go('panels')}
+            />
+          </div>
         </nav>
         {/* Tablet: 66px icon rail + contextual flyout (design board) */}
         <nav className="side-nav side-nav-rail" aria-label={t("Planner")}>
           <div className="rail-group">
-            <button type="button" className={cx('rail-btn', tabletFlyout === 'plan' && 'on', planNav.some(n => route.name === n.name) && 'active')} aria-label={t("Plan")} title={t("Plan")} onClick={() => setTabletFlyout(tabletFlyout === 'plan' ? null : 'plan')}>
-              <CalendarIcon size={20} />
-              <i className="rail-cat">{t("Plan").slice(0,2)}</i>
+            <button type="button" className="rail-btn rail-search" aria-label={t("Search")} title={t("Search")} onClick={openPalette}>
+              <SearchIcon size={18} />
             </button>
-            <button type="button" className={cx('rail-btn', tabletFlyout === 'focus' && 'on', focusNav.some(n => route.name === n.name) && 'active')} aria-label={t("Focus")} title={t("Focus")} onClick={() => setTabletFlyout(tabletFlyout === 'focus' ? null : 'focus')}>
-              <FlagIcon size={20} />
-              <i className="rail-cat">{t("Focus").slice(0,2)}</i>
+            <button type="button" className={cx('rail-btn', tabletFlyout === 'plan' && 'on', planNav.some((n) => route.name === n.name) && 'active')} aria-label={t("Plan")} title={t("Plan")} onClick={() => setTabletFlyout(tabletFlyout === 'plan' ? null : 'plan')}>
+              <CalendarIcon size={19} />
+              <i className="rail-cat">{t("Plan")}</i>
             </button>
-            <button type="button" className={cx('rail-btn', tabletFlyout === 'track' && 'on', trackNav.some(n => route.name === n.name) && 'active')} aria-label={t("Track")} title={t("Track")} onClick={() => setTabletFlyout(tabletFlyout === 'track' ? null : 'track')}>
-              <ArcIcon size={20} />
-              <i className="rail-cat">{t("Track").slice(0,2)}</i>
+            <button type="button" className={cx('rail-btn', tabletFlyout === 'focus' && 'on', Boolean(planner.focus) && 'active')} aria-label={t("Focus")} title={t("Focus")} onClick={() => setTabletFlyout(tabletFlyout === 'focus' ? null : 'focus')}>
+              <StopwatchIcon size={19} />
+              <i className="rail-cat">{t("Focus")}</i>
             </button>
-            {panelNav.length > 0 ? (
-              <button type="button" className={cx('rail-btn', tabletFlyout === 'panels' && 'on', (panelNav.some(n => route.name === n.name) || route.name === 'panels') && 'active')} aria-label={t("Panels")} title={t("Panels")} onClick={() => setTabletFlyout(tabletFlyout === 'panels' ? null : 'panels')}>
-                <HorizonIcon size={20} />
-                <i className="rail-cat">{t("Panels").slice(0,2)}</i>
-              </button>
-            ) : null}
+            <button type="button" className={cx('rail-btn', tabletFlyout === 'growth' && 'on', growthNav.some((n) => route.name === n.name) && 'active')} aria-label={t("Growth")} title={t("Growth")} onClick={() => setTabletFlyout(tabletFlyout === 'growth' ? null : 'growth')}>
+              <FlameIcon size={19} />
+              <i className="rail-cat">{t("Growth")}</i>
+            </button>
+            <button type="button" className={cx('rail-btn', tabletFlyout === 'track' && 'on', trackNav.some((n) => route.name === n.name) && 'active')} aria-label={t("Track")} title={t("Track")} onClick={() => setTabletFlyout(tabletFlyout === 'track' ? null : 'track')}>
+              <ArcIcon size={19} />
+              <i className="rail-cat">{t("Track")}</i>
+            </button>
+            <button type="button" className={cx('rail-btn rail-btn-ws', tabletFlyout === 'panels' && 'on', (panelNav.some((n) => route.name === n.name) || route.name === 'panels') && 'active')} aria-label={t("Panels")} title={t("Panels")} onClick={() => setTabletFlyout(tabletFlyout === 'panels' ? null : 'panels')}>
+              <HorizonIcon size={19} />
+              <i className="rail-cat">{t("Panels")}</i>
+            </button>
           </div>
           <div className="rail-foot">
-            <button type="button" className="rail-btn" aria-label={t("Search")} title={t("Search")} onClick={openPalette}><SearchIcon size={18} /></button>
-            <button type="button" className="rail-btn" aria-label={t("Settings")} title={t("Settings")} onClick={openSettings}><SlidersIcon size={18} /></button>
+            <button type="button" className={cx('rail-btn rail-util', route.name === 'review' && 'active')} aria-label={t("Weekly Review")} title={t("Weekly Review")} onClick={() => go('review')}>
+              <WeekIcon size={17} />
+            </button>
+            <button type="button" className="rail-btn rail-util" aria-label={t("Notifications")} title={t("Notifications")} onClick={() => setNotificationsOpen(true)}>
+              <BellIcon size={17} />
+              {unreadNotifications > 0 ? <span className="rail-badge" aria-hidden="true" /> : null}
+            </button>
+            <button type="button" className="rail-btn rail-util" aria-label={t("Settings")} title={t("Settings")} onClick={openSettings}>
+              <SlidersIcon size={17} />
+            </button>
+            <button type="button" className="rail-btn rail-util" aria-label={t("How it works")} title={t("How Planner works")} onClick={() => requestTour()}>
+              <HelpIcon size={17} />
+            </button>
           </div>
         </nav>
         <div className="side-foot">
-          <div className="side-history">
-            <button
-              type="button"
-              className="icon-btn round"
-              aria-label={t("Undo last change")}
-              title={t("Undo (⌘Z)")}
-              disabled={!canUndo}
-              onClick={undo}
-            >
-              <UndoIcon size={16} />
-            </button>
-            <button
-              type="button"
-              className="icon-btn round"
-              aria-label={t("Redo")}
-              title={t("Redo (⌘⇧Z)")}
-              disabled={!canRedo}
-              onClick={redo}
-            >
-              <RedoIcon size={16} />
-            </button>
-          </div>
+          <button
+            type="button"
+            className={cx('side-tool', route.name === 'review' && 'active')}
+            onClick={() => go('review')}
+            title={t("Weekly Review")}
+          >
+            <WeekIcon size={16} />
+            <span>{t("Weekly Review")}</span>
+          </button>
           <button type="button" className="side-tool notification-trigger" onClick={() => setNotificationsOpen(true)}>
             <BellIcon size={16} />
             <span>{t("Notifications")}</span>
             {unreadNotifications > 0 ? <span className="notification-badge">{unreadNotifications > 9 ? '9+' : unreadNotifications}</span> : null}
           </button>
-          <button
-            type="button"
-            className="side-tool"
-            onClick={() => setThemeMode(isDark ? 'light' : 'dark')}
-            title={isDark ? t("Switch to light mode") : t("Switch to dark mode")}
-          >
-            {isDark ? <SunIcon size={16} /> : <MoonIcon size={16} />}
-            <span>{isDark ? t("Light mode") : t("Dark mode")}</span>
+          <button type="button" className="side-tool" data-tour="settings" onClick={openSettings} title={t("Settings")}>
+            <SlidersIcon size={16} />
+            <span>{t("Settings")}</span>
           </button>
           <button type="button" className="side-tool side-help" onClick={() => requestTour()} title={t("How Planner works")}>
             <HelpIcon size={16} />
             <span>{t("How it works")}</span>
           </button>
-          <button type="button" className="side-tool" data-tour="settings" onClick={openSettings} title={t("Settings")}>
-            <SlidersIcon size={16} />
-            <span>{t("Settings")}</span>
-          </button>
+          <div className="side-utility-row">
+            <button
+              type="button"
+              className="side-tool side-theme-toggle"
+              onClick={() => setThemeMode(isDark ? 'light' : 'dark')}
+              title={isDark ? t("Switch to light mode") : t("Switch to dark mode")}
+            >
+              {isDark ? <SunIcon size={16} /> : <MoonIcon size={16} />}
+              <span>{isDark ? t("Light mode") : t("Dark mode")}</span>
+            </button>
+            <div className="side-history">
+              <button
+                type="button"
+                className="icon-btn round"
+                aria-label={t("Undo last change")}
+                title={t("Undo (⌘Z)")}
+                disabled={!canUndo}
+                onClick={undo}
+              >
+                <UndoIcon size={15} />
+              </button>
+              <button
+                type="button"
+                className="icon-btn round"
+                aria-label={t("Redo")}
+                title={t("Redo (⌘⇧Z)")}
+                disabled={!canRedo}
+                onClick={redo}
+              >
+                <RedoIcon size={15} />
+              </button>
+            </div>
+          </div>
           <p className="side-note">
             {syncStatus === 'off' ? t("Saved on this device") : (
               <>
@@ -401,18 +476,57 @@ export function Shell() {
           <div className="tablet-scrim" onClick={() => setTabletFlyout(null)} aria-hidden="true" />
           <div className="tablet-flyout" role="dialog" aria-label={t("Navigation")}>
             <div className="tablet-flyout-head">
-              <strong>{tabletFlyout === 'plan' ? t("Plan") : tabletFlyout === 'focus' ? t("Focus") : tabletFlyout === 'track' ? t("Track") : t("Panels")}</strong>
+              <strong>
+                {tabletFlyout === 'plan'
+                  ? t("Plan")
+                  : tabletFlyout === 'focus'
+                    ? t("Focus")
+                    : tabletFlyout === 'growth'
+                      ? t("Growth")
+                      : tabletFlyout === 'track'
+                        ? t("Track")
+                        : t("Panels")}
+              </strong>
               <button type="button" className="icon-btn round" aria-label={t("Close")} onClick={() => setTabletFlyout(null)}>✕</button>
             </div>
             <div className="tablet-flyout-body">
-              {tabletFlyout === 'plan' && planNav.map((item) => <NavButton key={item.name} item={item} active={route.name === item.name || (item.name === 'calendar' && route.name === 'calendar')} attention={item.name === 'ai' && !aiSeen} onClick={() => { go(item.name); setTabletFlyout(null); }} />)}
-              {tabletFlyout === 'focus' && focusNav.map((item) => <NavButton key={item.name} item={item} active={route.name === item.name} onClick={() => { go(item.name); setTabletFlyout(null); }} />)}
-              {tabletFlyout === 'track' && trackNav.map((item) => <NavButton key={item.name} item={item} active={route.name === item.name} attention={item.name === 'ai' && !aiSeen} onClick={() => { go(item.name); setTabletFlyout(null); }} />)}
+              {tabletFlyout === 'plan' && planNav.map((item) => (
+                <NavButton
+                  key={item.name}
+                  item={item}
+                  active={route.name === item.name || (item.name === 'calendar' && route.name === 'calendar')}
+                  badge={item.name === 'tasks' && openTasksCount > 0 ? String(openTasksCount) : undefined}
+                  onClick={() => { go(item.name); setTabletFlyout(null); }}
+                />
+              ))}
+              {tabletFlyout === 'focus' && (
+                <NavButton
+                  item={{ name: 'focus', label: t("Focus"), icon: StopwatchIcon }}
+                  active={Boolean(planner.focus)}
+                  kbd="25′"
+                  onClick={launchFocus}
+                />
+              )}
+              {tabletFlyout === 'growth' && growthNav.map((item) => (
+                <NavButton key={item.name} item={item} active={route.name === item.name} onClick={() => { go(item.name); setTabletFlyout(null); }} />
+              ))}
+              {tabletFlyout === 'track' && trackNav.map((item) => (
+                <NavButton
+                  key={item.name}
+                  item={item}
+                  active={route.name === item.name}
+                  attention={item.name === 'ai' && !aiSeen}
+                  violet={item.name === 'ai'}
+                  onClick={() => { go(item.name); setTabletFlyout(null); }}
+                />
+              ))}
               {tabletFlyout === 'panels' && (
-                <>
-                  {panelNav.map((item) => <NavButton key={item.name} item={item} active={route.name === item.name} onClick={() => { go(item.name); setTabletFlyout(null); }} />)}
+                <div className="side-panels-card">
+                  {panelNav.map((item) => (
+                    <NavButton key={item.name} item={item} active={route.name === item.name} onClick={() => { go(item.name); setTabletFlyout(null); }} />
+                  ))}
                   <NavButton item={{ name: 'panels', label: t("All panels"), icon: HorizonIcon }} active={route.name === 'panels'} onClick={() => { go('panels'); setTabletFlyout(null); }} />
-                </>
+                </div>
               )}
             </div>
           </div>
@@ -541,50 +655,102 @@ export function Shell() {
                 <div className="more-divider" role="separator" />
               </>
             ) : null}
-            {/* Destinations as a grid of tiles: the old single 17-row column
-                made every tab switch a long scroll on a phone. */}
-            <div className="more-grid">
-              <button type="button" className={cx('more-tile', route.name === 'goals' && 'on')} onClick={() => go('goals')}>
-                <FlagIcon size={18} /> <span>{t("Goals")}</span>
-              </button>
-              <button type="button" className={cx('more-tile', route.name === 'notes' && 'on')} onClick={() => go('notes')}>
-                <NoteIcon size={18} /> <span>{t("Notes")}</span>
-              </button>
-              <button type="button" className={cx('more-tile', route.name === 'insights' && 'on')} onClick={() => go('insights')}>
-                <ArcIcon size={18} /> <span>{t("Insights")}</span>
-              </button>
-              <button type="button" className={cx('more-tile', route.name === 'matrix' && 'on')} onClick={() => go('matrix')}>
-                <FlagIcon size={18} /> <span>{t("Matrix")}</span>
-              </button>
-              <button type="button" className="more-tile" onClick={() => { setMoreOpen(false); setNotificationsOpen(true); }}>
-                <BellIcon size={18} />{' '}
-                <span>
-                  {t("Notifications")}
-                  {unreadNotifications > 0 ? <span className="notification-badge">{unreadNotifications}</span> : null}
-                </span>
-              </button>
-              <button type="button" className={cx('more-tile', route.name === 'review' && 'on')} onClick={() => go('review')}>
-                <WeekIcon size={18} /> <span>{t("Weekly Review")}</span>
-              </button>
-              <button type="button" className={cx('more-tile', route.name === 'ai' && 'on')} onClick={() => go('ai')}>
-                <SparklesIcon size={18} />{' '}
-                <span>
-                  {t("AI coach")}
-                  {!aiSeen ? <i className="nav-attention more-attention" aria-hidden="true" /> : null}
-                </span>
-              </button>
-              <button type="button" className={cx('more-tile', route.name === 'plans' && 'on')} onClick={() => go('plans')}>
-                <WeekIcon size={18} /> <span>{t("Plans")}</span>
-              </button>
-              {panelNav.map((item) => (
-                <button key={item.name} type="button" className={cx('more-tile', route.name === item.name && 'on')} onClick={() => go(item.name)}>
-                  <item.icon size={18} /> <span>{item.label}</span>
+            {/* Grouped navigation sheet matching the multi-device design board */}
+            <div className="more-section">
+              <p className="more-group-label">{t("Plan")}</p>
+              <div className="more-grid more-grid-2">
+                <button type="button" className={cx('more-tile', route.name === 'today' && 'on')} onClick={() => go('today')}>
+                  <SunIcon size={18} /> <span>{t("Today")}</span>
                 </button>
-              ))}
-              <button type="button" className={cx('more-tile', route.name === 'panels' && 'on')} onClick={() => go('panels')}>
-                <HorizonIcon size={18} /> <span>{t("Panels")}</span>
-              </button>
+                <button type="button" className={cx('more-tile', route.name === 'calendar' && 'on')} onClick={() => go('calendar')}>
+                  <CalendarIcon size={18} /> <span>{t("Calendar")}</span>
+                </button>
+                <button type="button" className={cx('more-tile', route.name === 'tasks' && 'on')} onClick={() => go('tasks')}>
+                  <CheckIcon size={18} />
+                  <span>
+                    {t("Tasks")}
+                    {openTasksCount > 0 ? <span className="notification-badge">{openTasksCount}</span> : null}
+                  </span>
+                </button>
+                <button type="button" className={cx('more-tile', route.name === 'matrix' && 'on')} onClick={() => go('matrix')}>
+                  <FlagIcon size={18} /> <span>{t("Matrix")}</span>
+                </button>
+              </div>
             </div>
+
+            <div className="more-section">
+              <p className="more-group-label">{t("Focus & growth")}</p>
+              <div className="more-grid more-grid-3">
+                <button type="button" className={cx('more-tile', Boolean(planner.focus) && 'on')} onClick={launchFocus}>
+                  <StopwatchIcon size={18} /> <span>{t("Focus")}</span>
+                </button>
+                <button type="button" className={cx('more-tile', route.name === 'habits' && 'on')} onClick={() => go('habits')}>
+                  <FlameIcon size={18} /> <span>{t("Habits")}</span>
+                </button>
+                <button type="button" className={cx('more-tile', route.name === 'goals' && 'on')} onClick={() => go('goals')}>
+                  <HorizonIcon size={18} /> <span>{t("Goals")}</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="more-section">
+              <p className="more-group-label">{t("Track")}</p>
+              <div className="more-grid more-grid-2">
+                <button type="button" className={cx('more-tile', route.name === 'notes' && 'on')} onClick={() => go('notes')}>
+                  <NoteIcon size={18} /> <span>{t("Notes")}</span>
+                </button>
+                <button type="button" className={cx('more-tile', route.name === 'plans' && 'on')} onClick={() => go('plans')}>
+                  <WeekIcon size={18} /> <span>{t("Plans")}</span>
+                </button>
+                <button type="button" className={cx('more-tile', route.name === 'insights' && 'on')} onClick={() => go('insights')}>
+                  <ArcIcon size={18} /> <span>{t("Insights")}</span>
+                </button>
+                <button type="button" className={cx('more-tile more-tile-violet', route.name === 'ai' && 'on')} onClick={() => go('ai')}>
+                  <SparklesIcon size={18} />{' '}
+                  <span>
+                    {t("AI coach")}
+                    {!aiSeen ? <i className="nav-attention more-attention" aria-hidden="true" /> : null}
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            <div className="more-section more-section-ws">
+              <p className="more-group-label">{t("Panels · separate workspace")}</p>
+              <div className="more-grid more-grid-ws">
+                {panelNav.map((item) => (
+                  <button key={item.name} type="button" className={cx('more-tile more-tile-ws', route.name === item.name && 'on')} onClick={() => go(item.name)}>
+                    <item.icon size={18} /> <span>{item.label}</span>
+                  </button>
+                ))}
+                <button type="button" className={cx('more-tile more-tile-ws more-tile-wide', route.name === 'panels' && 'on')} onClick={() => go('panels')}>
+                  <HorizonIcon size={18} /> <span>{t("All panels")}</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="more-section more-section-sys">
+              <p className="more-group-label">{t("System & tools")}</p>
+              <div className="more-grid more-grid-2">
+                <button type="button" className="more-tile" onClick={() => { setMoreOpen(false); setNotificationsOpen(true); }}>
+                  <BellIcon size={18} />{' '}
+                  <span>
+                    {t("Notifications")}
+                    {unreadNotifications > 0 ? <span className="notification-badge">{unreadNotifications}</span> : null}
+                  </span>
+                </button>
+                <button type="button" className="more-tile" onClick={() => { setMoreOpen(false); openSettings(); }}>
+                  <SlidersIcon size={18} /> <span>{t("Settings")}</span>
+                </button>
+                <button type="button" className={cx('more-tile', route.name === 'review' && 'on')} onClick={() => go('review')}>
+                  <WeekIcon size={18} /> <span>{t("Weekly Review")}</span>
+                </button>
+                <button type="button" className="more-tile" onClick={() => { setMoreOpen(false); requestTour(); }}>
+                  <HelpIcon size={18} /> <span>{t("How it works")}</span>
+                </button>
+              </div>
+            </div>
+
             <div className="more-divider" role="separator" />
             {/* Utilities collapse into a tight two-column row. */}
             <details className="more-tools">
@@ -693,21 +859,29 @@ function NavButton({
   item,
   active,
   attention,
+  badge,
+  kbd,
+  violet,
   onClick,
 }: {
   item: { name: string; label: string; icon: typeof SunIcon };
   active: boolean;
   attention?: boolean;
+  badge?: string;
+  kbd?: string;
+  violet?: boolean;
   onClick: () => void;
 }) {
   const Icon = item.icon;
   return (
-    <button type="button" data-tour-nav={item.name} className={cx('nav-link', active && 'active')} aria-current={active ? 'page' : undefined} title={item.label} onClick={onClick}>
+    <button type="button" data-tour-nav={item.name} className={cx('nav-link', active && 'active', violet && 'nav-link-violet')} aria-current={active ? 'page' : undefined} title={item.label} onClick={onClick}>
       <span className="nav-icon-wrap">
-        <Icon size={18} />
+        <Icon size={17} />
         {attention && !active ? <i className="nav-attention" aria-hidden="true" /> : null}
       </span>
       <span className="nav-text">{item.label}</span>
+      {badge ? <span className="nav-tail"><span className="nav-badge">{badge}</span></span> : null}
+      {kbd ? <span className="nav-tail"><kbd className="kbd">{kbd}</kbd></span> : null}
     </button>
   );
 }

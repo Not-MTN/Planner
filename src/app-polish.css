@@ -101,11 +101,11 @@
 
 /* ---------- 3. Sidebar: small refinements ---------- */
 @media (min-width: 1024px) {
-  .sidebar { padding: 18px 14px 14px; }
-  .sidebar .brand { padding: 6px 10px 14px; }
-  .nav-link { min-height: 42px; border-radius: 13px; }
+  .sidebar { padding: 12px 12px 10px; gap: 3px; }
+  .sidebar .brand { padding: 2px 8px 8px; }
+  .nav-link { min-height: 30px; height: 30px; border-radius: 9px; font-size: 12.5px; }
   .nav-link.active { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent); }
-  .side-tool { min-height: 40px; }
+  .side-tool { min-height: 30px; height: 30px; font-size: 12.5px; }
 }
 
 /* Hover states are a pointer luxury — gate them so they never stick on touch. */
@@ -200,37 +200,78 @@
 }
 .more-divider { height: 1px; background: var(--line); margin: 6px 4px; }
 
-/* ---------- 4b. More hub: destination tiles + compact utilities ---------- */
-/* The hub was one 17-row column, so switching tabs on a phone meant a long
-   scroll. Destinations become icon tiles; utilities shrink into two columns.
-   Selectors outrank the legacy `.more-list button` row rules. */
+/* ---------- 4b. More hub: grouped destination tiles + compact utilities ---------- */
+.more-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.more-section {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.more-group-label {
+  margin: 0;
+  padding: 0 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  unicode-bidi: isolate;
+}
+.more-group-label::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
 .more-list .more-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 7px;
-  padding: 2px 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding: 0;
 }
-@media (min-width: 460px) {
-  .more-list .more-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.more-list .more-grid.more-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 .more-list .more-tile {
   position: relative;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  justify-content: center;
-  gap: 7px;
-  min-height: 76px;
-  padding: 10px 6px;
+  justify-content: flex-start;
+  gap: 8px;
+  min-height: 42px;
+  height: auto;
+  padding: 8px 11px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--surface-2);
   color: var(--ink-soft);
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 600;
-  line-height: 1.3;
-  text-align: center;
+  line-height: 1.25;
+  text-align: start;
   transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.15s;
+}
+.more-list .more-tile.more-tile-wide {
+  grid-column: 1 / -1;
+}
+.more-list .more-tile.more-tile-ws {
+  background: color-mix(in srgb, var(--cat-peach) 12%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--cat-peach) 28%, var(--line));
+}
+[data-theme="dark"] .more-list .more-tile.more-tile-ws {
+  background: #2a2420;
+  border-color: rgba(211, 160, 110, 0.28);
+}
+.more-list .more-tile.more-tile-violet svg {
+  color: var(--cat-lav-text, #a496d2);
 }
 .more-list .more-tile:hover {
   background: var(--surface);
@@ -244,10 +285,7 @@
   color: var(--accent-deep);
 }
 .more-list .more-tile .notification-badge {
-  position: absolute;
-  top: 7px;
-  inset-inline-end: 9px;
-  margin: 0;
+  margin-inline-start: 6px;
 }
 .more-list .more-tile .more-attention {
   position: absolute;
@@ -276,7 +314,7 @@
 }
 
 /* ---------- 5. Mobile chrome: what the placement pass leaves open ---------- */
-@media (max-width: 1023px) {
+@media (max-width: 767px) {
   /* Pin the bar to a deterministic height so the sticky date chip can sit
      exactly beneath it on every device family (icons are 36–44px tall
      depending on the pointer). box-sizing is border-box everywhere. */
@@ -294,20 +332,12 @@
   .content { padding-bottom: calc(126px + env(safe-area-inset-bottom, 0px)); }
 }
 
-/* Tablets: a dock the width of a thumb, not the width of a desk. */
-@media (min-width: 601px) and (max-width: 1023px) {
-  .tabbar {
-    inset-inline-start: max(48px, calc((100% - 600px) / 2));
-    inset-inline-end: max(48px, calc((100% - 600px) / 2));
-  }
+/* Tablet & Desktop: phone chrome stays off, no matter which layer loaded before. */
+@media (min-width: 768px) {
+  .tabbar, .mobile-bar, .fab, .mobile-date { display: none !important; }
 }
 
-/* Desktop: phone chrome stays off, no matter which layer loaded before. */
-@media (min-width: 1024px) {
-  .tabbar, .mobile-bar, .fab, .mobile-date { display: none; }
-}
-
-/* ---------- 6. Sheets: bottom-anchored, home-indicator safe ---------- */
+/* ---------- 6. Sheets: bottom-anchored, 79% height on mobile ---------- */
 @media (max-width: 699px) {
   .modal-overlay { padding: 0; }
   .sheet {
@@ -315,8 +345,8 @@
     border-inline: 0;
     border-bottom: 0;
     border-radius: 24px 24px 0 0;
-    padding: 10px 20px calc(28px + env(safe-area-inset-bottom, 0px));
-    max-height: min(92dvh, 780px);
+    padding: 10px 18px calc(24px + env(safe-area-inset-bottom, 0px));
+    max-height: 79dvh;
   }
 }
 @media (min-width: 700px) {
@@ -324,12 +354,12 @@
 }
 
 /* ---------- 7. Less hunting and less thumb travel ---------- */
-/* Keep the desktop rail compact enough that its destinations rarely need an
-   inner scroll; the full-size hit target remains comfortably above 36px. */
+/* Keep the desktop rail compact enough that all 19 destinations are visible
+   without scrolling. */
 @media (min-width: 1024px) {
-  .side-nav { gap: 0; }
-  .nav-label { margin: 10px 10px 4px; }
-  .nav-link { min-height: 36px; height: 36px; }
+  .side-nav { gap: 1px; }
+  .nav-label { margin: 7px 10px 2px; }
+  .nav-link { min-height: 30px; height: 30px; }
 }
 
 /* Day view: the first screen stays about the plan, not decorative whitespace. */
