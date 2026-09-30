@@ -38,12 +38,46 @@ function blockedReason(error: AuthError): string {
   return t('Something went wrong while opening your planner.');
 }
 
+/** Drifting leaves that echo the sprout logo; pure decoration. */
+function GateLeaves() {
+  return (
+    <div className="gate-leaves" aria-hidden="true">
+      <i />
+      <i />
+      <i />
+      <i />
+      <i />
+      <i />
+    </div>
+  );
+}
+
+/**
+ * The shared look of every gate screen: the morning-sprout photograph on one
+ * side, drifting leaves, and the card slot on the other.
+ */
+function GateFrame({ leaving = false, children }: { leaving?: boolean; children: React.ReactNode }) {
+  return (
+    <div className={leaving ? 'gate gate-leaving' : 'gate'}>
+      <div className="gate-art" aria-hidden="true">
+        <img src="/img/auth-gate.jpg" alt="" width="1024" height="1536" loading="eager" decoding="async" />
+        <div className="gate-art-veil" />
+      </div>
+      <GateLeaves />
+      <div className="gate-card">{children}</div>
+    </div>
+  );
+}
+
 export function AccountGate() {
   const [boot, setBoot] = useState<Boot>(null);
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [caps, setCaps] = useState(false);
+  const [leaving, setLeaving] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -89,11 +123,10 @@ export function AccountGate() {
   if (boot?.status === 'blocked') {
     const { error } = boot;
     return (
-      <div className="gate">
-        <div className="gate-card">
-          <div className="gate-mark" aria-hidden="true">
-            ⚠️
-          </div>
+      <GateFrame>
+        <div className="gate-mark" aria-hidden="true">
+          ⚠️
+        </div>
           <h1 className="gate-title">{t("Can't open your planner")}</h1>
           <p className="gate-sub">{blockedReason(error)}</p>
           {error.detail ? (
@@ -111,8 +144,7 @@ export function AccountGate() {
               {t('Back to the website')}
             </button>
           </div>
-        </div>
-      </div>
+      </GateFrame>
     );
   }
 
@@ -124,7 +156,15 @@ export function AccountGate() {
     setBusy(true);
     setError(null);
     void unlockWithPassword(password, remember).then(
-      (result) => setBoot(result),
+      (result) => {
+        // A short goodbye: the gate fades out instead of snapping to the app.
+        if (result.status === 'ready') {
+          setLeaving(true);
+          window.setTimeout(() => setBoot(result), 240);
+          return;
+        }
+        setBoot(result);
+      },
       (err: unknown) => {
         setBusy(false);
         setError(
@@ -145,19 +185,16 @@ export function AccountGate() {
   };
 
   return (
-    <div className="gate">
-      <div className="gate-card">
-        {!locked ? (
-          <p className="gate-loading">
-            <span className="gate-spinner" aria-hidden="true" />
-            {t('Checking your account…')}
-          </p>
-        ) : (
-          <>
-            <div className="gate-mark" aria-hidden="true">
-              🔐
-            </div>
-            <h1 className="gate-title">{t('Unlock your planner')}</h1>
+    <GateFrame leaving={leaving}>
+      {!locked ? (
+        <p className="gate-loading">
+          <span className="gate-spinner" aria-hidden="true" />
+          {t('Checking your account…')}
+        </p>
+      ) : (
+        <>
+          <img className="gate-logo" src="/logo.svg" alt="" width="56" height="56" />
+          <h1 className="gate-title">{t('Unlock your planner')}</h1>
             <p className="gate-sub">
               {t('Welcome back')}, {locked.displayName || locked.username}.{' '}
               {t('Enter your password to open your planner on this device.')}
@@ -166,16 +203,29 @@ export function AccountGate() {
             <form className="gate-form" onSubmit={submit}>
               <label className="gate-label">
                 {t('Password')}
-                <input
-                  className="gate-input"
-                  type="password"
-                  value={password}
-                  autoComplete="current-password"
-                  autoFocus
-                  required
-                  onChange={(event) => setPassword(event.target.value)}
-                />
+                <span className="gate-input-wrap">
+                  <input
+                    className="gate-input"
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    autoComplete="current-password"
+                    autoFocus
+                    required
+                    onChange={(event) => setPassword(event.target.value)}
+                    onKeyUp={(event) => setCaps(event.getModifierState('CapsLock'))}
+                    onKeyDown={(event) => setCaps(event.getModifierState('CapsLock'))}
+                  />
+                  <button
+                    type="button"
+                    className="gate-field-toggle"
+                    aria-pressed={showPassword}
+                    onClick={() => setShowPassword((value) => !value)}
+                  >
+                    {showPassword ? t('Hide password') : t('Show password')}
+                  </button>
+                </span>
               </label>
+              {caps && !showPassword ? <p className="gate-caps">{t('Caps Lock is on.')}</p> : null}
 
               <label className="gate-check">
                 <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />
@@ -213,8 +263,7 @@ export function AccountGate() {
               </p>
             </form>
           </>
-        )}
-      </div>
-    </div>
+      )}
+    </GateFrame>
   );
 }

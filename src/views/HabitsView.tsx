@@ -64,7 +64,7 @@ export function HabitsView() {
           <div className="library-empty-body">
             <p className="kicker">{t("Habit library")}</p>
             <h2 className="section-title">{t("Start with a classic")}</h2>
-            <p className="lede">{t("Built-in habits and daily must-dos, ready in one tap.")}</p>
+            <p className="lede">{t("Built-in habit ideas, ready in one tap.")}</p>
             <div className="preset-grid">
               {ESSENTIAL_PRESETS.map((preset) => (
                 <button

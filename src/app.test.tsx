@@ -158,21 +158,33 @@ describe('app smoke', () => {
     });
     expect(text()).toContain('Finish the report');
     expect(text()).toContain('Read 20 minutes');
-    expect(text()).toContain('Daily essentials');
+    expect(text()).toContain('Morning walk');
   });
 
-  it('adds the daily essentials from the welcome card', () => {
+  it('adds picked suggestions from the welcome card, none pre-set', () => {
     mountApp();
     const add = [...document.querySelectorAll<HTMLButtonElement>('.welcome-actions .btn')].find((button) =>
-      button.textContent?.includes('essential'),
+      button.textContent?.includes('suggestion'),
     );
     expect(add).toBeTruthy();
+    // Nothing is pre-picked — suggestions arrive unticked and the button waits.
+    expect(add?.disabled).toBe(true);
+    for (const name of ['Drink water', 'Sleep by 11']) {
+      const chip = [...document.querySelectorAll<HTMLButtonElement>('.preset-chip')].find((button) =>
+        button.textContent?.includes(name),
+      );
+      expect(chip).toBeTruthy();
+      act(() => {
+        chip?.click();
+      });
+    }
+    expect(add?.disabled).toBe(false);
     act(() => {
       add?.click();
     });
-    expect(text()).toContain('Daily essentials');
     expect(text()).toContain('Drink water');
     expect(text()).toContain('Sleep by 11');
+    expect(text()).not.toContain('Daily must-do');
     expect(document.querySelector('.welcome-card')).toBeFalsy();
   });
 
@@ -196,7 +208,8 @@ describe('app smoke', () => {
     });
     expect(document.querySelector('.habit-card')).toBeTruthy();
     expect(text()).toContain('Drink water');
-    expect(text()).toContain('Daily must-do');
+    // Suggestions are never must-dos.
+    expect(text()).not.toContain('Daily must-do');
   });
 
   it('toggles dark mode from the sidebar', () => {

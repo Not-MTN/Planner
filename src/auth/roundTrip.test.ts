@@ -108,6 +108,7 @@ function sampleState(): PlannerState {
         guardians: [],
         subjects: [],
         explanations: [],
+        inbox: { notices: [], plans: [] },
       },
       guardian: { enabled: false, kind: null, field: null, links: [], notices: [] },
     },

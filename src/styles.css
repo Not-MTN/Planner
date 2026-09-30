@@ -816,7 +816,7 @@ h1, .page-head h1 {
 .task:hover .grip, .event:hover .grip, .grip.dragging { opacity: 0.7; }
 .grip.dragging { opacity: 1; cursor: grabbing; }
 .row-delete, .row-focus { opacity: 0; }
-.task:hover .row-delete, .event:hover .row-delete, .task:hover .row-focus, .event:hover .row-delete { opacity: 1; }
+.task:hover .row-delete, .event:hover .row-delete, .task:hover .row-focus, .event:hover .row-focus { opacity: 1; }
 @media (hover: none) {
   .row-delete, .row-focus, .grip { opacity: 0.55; }
 }
@@ -4196,4 +4196,164 @@ body {
     width: 30px;
     height: 30px;
   }
+}
+
+/* ---------- Guardian plans and the student inbox ---------- */
+.inbox-notices { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.inbox-notice {
+  padding: 11px 13px;
+  border-radius: 13px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-2) 70%, transparent);
+}
+.inbox-notice.unread {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+  background: var(--accent-soft);
+}
+.inbox-notice-text { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--ink); overflow-wrap: anywhere; }
+.inbox-notice-meta { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+
+.gplan-list { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.gplan-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 15px;
+  border-radius: var(--radius-small);
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-2) 60%, transparent);
+}
+.gplan-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.gplan-kicker {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.gplan-cadence {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.gplan-cadence-day { background: color-mix(in srgb, var(--cat-peach) 18%, transparent); color: var(--cat-peach-text); }
+.gplan-cadence-week { background: color-mix(in srgb, var(--cat-sage) 18%, transparent); color: var(--cat-sage-text); }
+.gplan-cadence-month { background: color-mix(in srgb, var(--cat-lav) 18%, transparent); color: var(--cat-lav-text); }
+.gplan-title { margin: 2px 0 0; font-family: var(--serif); font-size: 15.5px; font-weight: 560; color: var(--ink); overflow-wrap: anywhere; }
+.gplan-note { margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--ink-soft); overflow-wrap: anywhere; }
+.gplan-progress { display: flex; align-items: center; gap: 2px; font-variant-numeric: tabular-nums; }
+.gplan-progress strong { font-size: 16px; color: var(--ink); }
+.gplan-progress span { font-size: 12px; color: var(--muted); }
+.gplan-bar { height: 6px; border-radius: 999px; background: color-mix(in srgb, var(--ink) 8%, transparent); overflow: hidden; }
+.gplan-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent-deep));
+  transition: width 0.3s var(--ease);
+}
+.gplan-items { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-direction: column; }
+.gplan-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 38px;
+  padding: 5px 2px;
+  border-bottom: 1px solid var(--line);
+}
+.gplan-item:last-child { border-bottom: 0; }
+.gplan-item label { display: flex; align-items: center; gap: 9px; min-width: 0; cursor: pointer; }
+.gplan-item input[type='checkbox'] { width: 16px; height: 16px; accent-color: var(--accent); flex: none; cursor: pointer; }
+.gplan-item-title { font-size: 13.5px; color: var(--ink); overflow-wrap: anywhere; }
+.gplan-item.done .gplan-item-title { text-decoration: line-through; color: var(--muted); }
+.gplan-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.gplan-from { margin: 0; font-size: 11.5px; color: var(--muted); }
+.gplan-actions { margin-top: 4px; display: flex; flex-direction: column; gap: 7px; }
+.gplan-picks { display: flex; flex-wrap: wrap; gap: 6px; }
+.gplan-composer { border-top: 1px dashed var(--line-strong); margin-top: 10px; padding-top: 12px; }
+.gplan-covers { display: flex; flex-wrap: wrap; gap: 8px; }
+.gplan-covers .input { flex: 1; min-width: 140px; }
+.gplan-draft-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.gplan-draft-items li { display: flex; align-items: center; gap: 7px; }
+.gplan-draft-items li .input { flex: 1; min-width: 0; }
+.gplan-subject { max-width: 120px; flex: none; }
+.gplan-minutes { max-width: 76px; flex: none; }
+.gplan-sent { margin-top: 6px; }
+.gplan-sent .gplan-card { padding: 11px 13px; }
+
+@media (max-width: 640px) {
+  .gplan-draft-items li { flex-wrap: wrap; }
+  .gplan-subject, .gplan-minutes { max-width: none; }
+}
+
+/* -------------------------------------------------- panel badges and forms */
+
+/* The unread count beside a card title. */
+.badge-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  margin-inline-start: 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0;
+  vertical-align: 3px;
+}
+
+/* The two feature cards of the panels carry a quiet accent edge. */
+.inbox-card,
+.notice-card {
+  border-color: color-mix(in srgb, var(--accent) 20%, var(--line));
+}
+
+/* A guardian's note to the other guardians. */
+.notice-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+/* iOS and iPadOS Safari zoom the whole page whenever a focused input is set
+   below 16px. Keep every text-entry control at least that size there. */
+@supports (-webkit-touch-callout: none) {
+  input, textarea, select {
+    font-size: max(16px, 1em) !important;
+  }
+}
+
+.subject-time,
+.subject-tasks {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.past-count {
+  font-size: 12.5px;
+  color: var(--muted);
+  text-align: end;
 }

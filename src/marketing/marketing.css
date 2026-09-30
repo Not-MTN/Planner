@@ -1738,15 +1738,22 @@
   margin-top: 18px;
 }
 
-.auth-dots span {
+.auth-dots button {
   width: 22px;
   height: 3px;
+  /* Generous tap target around a thin bar: content-box keeps the bar 3px. */
+  box-sizing: content-box;
+  padding: 12px 4px;
+  margin: -12px -4px;
+  border: 0;
+  cursor: pointer;
   border-radius: 999px;
   background: color-mix(in srgb, currentColor 22%, transparent);
+  background-clip: content-box;
   transition: background 0.5s ease, width 0.5s ease;
 }
 
-.auth-dots span.is-active {
+.auth-dots button.is-active {
   width: 38px;
   background: var(--accent);
 }

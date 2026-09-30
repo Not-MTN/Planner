@@ -25,7 +25,7 @@ export function HabitLibrary({ onClose }: { onClose: () => void }) {
   return (
     <Modal title={t("Habit library")} onClose={onClose} className="sheet-library">
       <img className="library-banner" src="/img/spot-library.jpg" alt="" loading="lazy" />
-      <p className="lede">{t("Built-in habits and daily must-dos, one tap away. Add what fits; leave the rest.")}</p>
+      <p className="lede">{t("Built-in habit ideas, one tap away. Add what fits; leave the rest.")}</p>
       {HABIT_GROUPS.map((group) => (
         <section key={group.id} className="library-group">
           <header className="library-group-head">
@@ -59,7 +59,6 @@ export function HabitLibrary({ onClose }: { onClose: () => void }) {
                       <strong>{preset.name}</strong>
                       <small>
                         {frequencyLabelOf(preset.frequency)}
-                        {preset.essential ? t(" · must-do") : ''}
                       </small>
                     </span>
                     {added ? <span className="chip">{t("Added")}</span> : <span className="library-add">{t("Add")}</span>}

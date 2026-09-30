@@ -3,7 +3,7 @@ import { isBase64 } from './shared/authContract';
 import { isValidISODate, isValidTime, localDateFromTimestamp, timeToMinutes } from './dates';
 import { REPEAT_SET } from './recurrence';
 import { MAX_PLAN_DAYS } from './duration';
-import { AI_PLAN_LIMIT, createEmptyPanels, createEmptyState, isGradeLevel, type AIMemory, type AttachmentRef, type AIMemoryCategory, type ChangeNote, type EventInput, type FixedCommitment, type FocusLog, type GuardianKind, type GuardianLink, type GuardianNotice, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Panels, type StudentGuardian, type StudentSubject, type Subtask, type TaskInput, type TaskRepeat, type WeekResults, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task } from './types';
+import { AI_PLAN_LIMIT, createEmptyPanels, createEmptyState, isGradeLevel, type AIMemory, type AttachmentRef, type AIMemoryCategory, type ChangeNote, type EventInput, type FixedCommitment, type FocusLog, type GuardianKind, type GuardianLink, type GuardianNotice, type GuardianPlan, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Panels, type PlanCadence, type PlanItem, type StudentGuardian, type StudentInbox, type StudentSubject, type Subtask, type TaskInput, type TaskRepeat, type WeekResults, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task } from './types';
 import { t } from './i18n';
 
 export const STORAGE_KEY = 'personal-planner.v1';
@@ -566,6 +566,73 @@ function sanitizeGuardianNotice(value: unknown): GuardianNotice | null {
   };
 }
 
+function sanitizePlanItem(value: unknown): PlanItem | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = asString(raw.id, 80);
+  const title = asString(raw.title, 120)?.trim();
+  if (!id || !title) return null;
+  const minutes = typeof raw.minutes === 'number' && Number.isFinite(raw.minutes) ? Math.max(0, Math.round(raw.minutes)) : null;
+  return {
+    id,
+    title,
+    date: /^\d{4}-\d{2}-\d{2}$/.test(String(raw.date ?? '')) ? String(raw.date) : null,
+    minutes,
+    subject: asString(raw.subject, 60)?.trim() || null,
+    done: raw.done === true,
+  };
+}
+
+function sanitizeGuardianPlan(value: unknown): GuardianPlan | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = asString(raw.id, 80);
+  const cadence = raw.cadence === 'day' || raw.cadence === 'week' || raw.cadence === 'month' ? (raw.cadence as PlanCadence) : null;
+  const start = asString(raw.start, 10) ?? '';
+  if (!id || !cadence || !/^\d{4}-\d{2}-\d{2}$/.test(start)) return null;
+  return {
+    id,
+    author: (asString(raw.author, 60) ?? '').trim() || t('A guardian'),
+    linkId: asString(raw.linkId, 64) ?? '',
+    cadence,
+    start,
+    title: (asString(raw.title, 120) ?? '').trim() || t('Plan'),
+    note: (asString(raw.note, 400) ?? '').trim(),
+    items: uniqueBy(
+      (Array.isArray(raw.items) ? raw.items : []).flatMap((item) => {
+        const planItem = sanitizePlanItem(item);
+        return planItem ? [planItem] : [];
+      }),
+      (item) => item.id,
+    ).slice(0, 60),
+    createdAt: asString(raw.createdAt, 40) ?? new Date(0).toISOString(),
+    updatedAt: asString(raw.updatedAt, 40) ?? new Date(0).toISOString(),
+  };
+}
+
+function sanitizeStudentInbox(value: unknown): StudentInbox {
+  const raw = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
+  const notices = uniqueBy(
+    (Array.isArray(raw.notices) ? raw.notices : []).flatMap((item) => {
+      const notice = sanitizeGuardianNotice(item);
+      return notice ? [notice] : [];
+    }),
+    (item) => item.id,
+  )
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, 20);
+  const plans = uniqueBy(
+    (Array.isArray(raw.plans) ? raw.plans : []).flatMap((item) => {
+      const plan = sanitizeGuardianPlan(item);
+      return plan ? [plan] : [];
+    }),
+    (item) => item.id,
+  )
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, 10);
+  return { notices, plans };
+}
+
 function sanitizeGuardianLink(value: unknown): GuardianLink | null {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Record<string, unknown>;
@@ -589,6 +656,15 @@ function sanitizeGuardianLink(value: unknown): GuardianLink | null {
     code: asString(raw.code, 40),
     wrappedShareKey: isBase64(raw.wrappedShareKey, 44, 512) ? String(raw.wrappedShareKey) : null,
     results: sanitizeWeekResults(raw.results),
+    plans: uniqueBy(
+      (Array.isArray(raw.plans) ? raw.plans : []).flatMap((item) => {
+        const plan = sanitizeGuardianPlan(item);
+        return plan ? [plan] : [];
+      }),
+      (item) => item.id,
+    )
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, 10),
   };
 }
 
@@ -663,7 +739,15 @@ export function sanitizePanels(value: unknown): Panels {
     .slice(0, 20);
 
   return {
-    student: { enabled: student.enabled === true, field: field(student.field), grade, guardians, subjects, explanations },
+    student: {
+      enabled: student.enabled === true,
+      field: field(student.field),
+      grade,
+      guardians,
+      subjects,
+      explanations,
+      inbox: sanitizeStudentInbox(student.inbox),
+    },
     guardian: { enabled: guardian.enabled === true && kind !== null, kind, field: field(guardian.field), links, notices },
   };
 }

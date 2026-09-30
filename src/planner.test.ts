@@ -431,34 +431,41 @@ describe('habit library and daily essentials', () => {
   const now = '2026-09-27T10:00:00.000Z';
   const today = '2026-09-27';
 
-  it('ships essentials as must-do daily habits', () => {
+  it('ships essentials as opt-in daily suggestions, never must-dos', () => {
     expect(ESSENTIAL_PRESETS.length).toBeGreaterThanOrEqual(5);
     for (const preset of ESSENTIAL_PRESETS) {
-      expect(preset.essential).toBe(true);
       expect(preset.frequency.type).toBe('daily');
       expect(preset.name.trim().length).toBeGreaterThan(0);
     }
   });
 
-  it('adds habits in bulk and keeps the essential flag', () => {
+  it('adds habits in bulk unflagged, and keeps an explicit essential flag', () => {
     let state = addHabits(createEmptyState(), ESSENTIAL_PRESETS.map(presetToInput), now, today);
     expect(state.habits).toHaveLength(ESSENTIAL_PRESETS.length);
-    expect(state.habits.every((habit) => habit.essential)).toBe(true);
+    expect(state.habits.every((habit) => !habit.essential)).toBe(true);
     state = addHabit(
       state,
-      { name: 'Journal one line', icon: 'pencil', accent: 'pink', frequency: { type: 'daily' } },
+      { name: 'Journal one line', icon: 'pencil', accent: 'pink', frequency: { type: 'daily' }, essential: true },
       'h-extra',
       now,
       today,
     );
-    expect(state.habits[state.habits.length - 1].essential).toBe(false);
+    expect(state.habits[state.habits.length - 1].essential).toBe(true);
     const restored = sanitizeState(JSON.parse(JSON.stringify(state)) as unknown);
-    expect(restored?.habits.filter((habit) => habit.essential)).toHaveLength(ESSENTIAL_PRESETS.length);
+    expect(restored?.habits.filter((habit) => habit.essential)).toHaveLength(1);
   });
 
-  it('lists the essentials due on a day', () => {
-    const state = addHabits(createEmptyState(), ESSENTIAL_PRESETS.map(presetToInput), now, today);
-    expect(essentialHabits(state, today)).toHaveLength(ESSENTIAL_PRESETS.length);
+  it('lists only explicitly essential habits due on a day', () => {
+    let state = addHabits(createEmptyState(), ESSENTIAL_PRESETS.map(presetToInput), now, today);
+    expect(essentialHabits(state, today)).toHaveLength(0);
+    state = addHabit(
+      state,
+      { name: 'Water the plants', icon: 'water', accent: 'blue', frequency: { type: 'daily' }, essential: true },
+      'h-must',
+      now,
+      today,
+    );
+    expect(essentialHabits(state, today).map((habit) => habit.id)).toEqual(['h-must']);
   });
 });
 

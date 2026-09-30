@@ -9,7 +9,7 @@
  */
 import { sanitizeState, serialize } from './storage';
 import { AI_PLAN_LIMIT } from './types';
-import type { Panels, PlannerState } from './types';
+import type { GuardianPlan, Panels, PlannerState } from './types';
 
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O/1/I/L
 const SETTINGS_KEY = 'planner-sync';
@@ -148,6 +148,26 @@ export function mergePanels(local: Panels, remote: Panels): Panels {
     for (const item of a) map.set(key(item), item);
     return [...map.values()];
   };
+  // Plans merge by id: the newer shape wins, but a tick on either device stays
+  // ticked — progress should never be lost to a sync.
+  const mergePlans = (a: GuardianPlan[], b: GuardianPlan[]): GuardianPlan[] => {
+    const map = new Map<string, GuardianPlan>();
+    for (const plan of [...b, ...a]) {
+      const other = map.get(plan.id);
+      if (!other) {
+        map.set(plan.id, plan);
+        continue;
+      }
+      const newer = (plan.updatedAt ?? '') >= (other.updatedAt ?? '') ? plan : other;
+      const older = newer === plan ? other : plan;
+      const done = new Set(older.items.filter((item) => item.done).map((item) => item.id));
+      map.set(plan.id, {
+        ...newer,
+        items: newer.items.map((item) => (done.has(item.id) ? { ...item, done: true } : item)),
+      });
+    }
+    return [...map.values()];
+  };
   return {
     student: {
       enabled: local.student.enabled || remote.student.enabled,
@@ -158,6 +178,14 @@ export function mergePanels(local: Panels, remote: Panels): Panels {
       explanations: byId(local.student.explanations, remote.student.explanations)
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         .slice(0, 200),
+      inbox: {
+        notices: byId(local.student.inbox?.notices ?? [], remote.student.inbox?.notices ?? [])
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+          .slice(0, 20),
+        plans: mergePlans(local.student.inbox?.plans ?? [], remote.student.inbox?.plans ?? [])
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+          .slice(0, 10),
+      },
     },
     guardian: {
       enabled: local.guardian.enabled || remote.guardian.enabled,

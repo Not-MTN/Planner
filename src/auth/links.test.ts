@@ -229,9 +229,11 @@ describe('linking a guardian and a student', () => {
     // The student passes it on.
     endSession();
     await signIn('student9', PASSWORD, false);
-    const { relayNotices: relay } = await import('./links');
+    const { syncStudentInbox: relay } = await import('./links');
     const relayed = await relay(studentPanels);
     expect(relayed.relayed).toBe(1);
+    // And keeps it: the note is the student's to read too.
+    expect(relayed.added.notices[0]?.summary).toContain('Thursday');
 
     // The advisor picks it up.
     endSession();
