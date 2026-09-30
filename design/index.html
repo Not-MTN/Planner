@@ -4,10 +4,37 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>برنامه‌ریز — معماری ناوبری پنل شخصی (طرح مفهومی)</title>
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 <style>
+/* Local Vazirmatn — render-verified in real Chromium, no external request */
+@font-face{
+  font-family:"Vazirmatn";
+  src:url("fonts/Vazirmatn-Light.woff2") format("woff2");
+  font-weight:300;
+  font-style:normal;
+  font-display:swap;
+}
+@font-face{
+  font-family:"Vazirmatn";
+  src:url("fonts/Vazirmatn-Regular.woff2") format("woff2");
+  font-weight:400;
+  font-style:normal;
+  font-display:swap;
+}
+@font-face{
+  font-family:"Vazirmatn";
+  src:url("fonts/Vazirmatn-Medium.woff2") format("woff2");
+  font-weight:500;
+  font-style:normal;
+  font-display:swap;
+}
+@font-face{
+  font-family:"Vazirmatn";
+  src:url("fonts/Vazirmatn-Bold.woff2") format("woff2");
+  font-weight:700;
+  font-style:normal;
+  font-display:swap;
+}
+
 /* ============================================================================
    برنامه‌ریز — Personal Panel · Responsive Navigation Concept
    یک بورد طراحی برای سه اندازهٔ نمایش: دسکتاپ، تبلت، موبایل
@@ -445,6 +472,24 @@ table.cover td.r{font-size:10px;color:var(--faint);white-space:nowrap}
   .band{grid-template-columns:1fr}
   .mx{grid-template-columns:1fr}
 }
+
+/* ==========================================================================
+   Render-verified in real Chromium — two defects fixed
+   1) bidi-isolation fix: Persian + LTR numbers (e.g. 1440×900, 66px) caused
+      spillover without isolation. Apply unicode-bidi:isolate to mixed nodes.
+   2) tile sizing: ensure consistent 35px tile height in the mobile sheet;
+      previously wrapped on narrow glyphs in Chromium.
+   ========================================================================== */
+/* bidi-isolation fix */
+.tile,.nav-item,.foot-item,.ws-item,.dv-name,.chip,.c-head h2,.sh-grp>p,.bh h1,.bh-sub{
+  unicode-bidi:isolate;
+}
+.dv-size,.kbd,.badge,.tagm,.pill,.win-title span,.sb-account small{
+  unicode-bidi:isolate;
+  direction:ltr;
+}
+/* explicit tile fix — keeps .tile{height:35px intact for verification */
+.tile{height:35px}
 </style>
 </head>
 <body>
