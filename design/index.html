@@ -1,0 +1,1128 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>برنامه‌ریز — معماری ناوبری پنل شخصی (طرح مفهومی)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================================
+   برنامه‌ریز — Personal Panel · Responsive Navigation Concept
+   یک بورد طراحی برای سه اندازهٔ نمایش: دسکتاپ، تبلت، موبایل
+   ========================================================================== */
+
+:root{
+  /* palette — taken from the product's own dark tokens */
+  --bg:#100e0b;
+  --bg-2:#171410;
+  --surface:#1f1b15;
+  --surface-2:#262117;
+  --surface-3:#2d271d;
+  --beige:#2a2420;
+  --beige-2:#332c25;
+  --ink:#ece5d6;
+  --ink-soft:#c6bcaa;
+  --muted:#a89d8c;
+  --faint:#7d7466;
+  --line:rgba(236,229,214,.08);
+  --line-2:rgba(236,229,214,.14);
+  --line-3:rgba(236,229,214,.22);
+
+  --sage:#7dab8c;
+  --sage-deep:#a9cdb5;
+  --sage-soft:#22302a;
+  --sage-soft-2:rgba(125,171,140,.14);
+
+  --violet:#a496d2;
+  --violet-soft:#272238;
+
+  --wine:#c1838f;
+  --wine-soft:#332527;
+
+  --amber:#d3a06e;
+  --amber-soft:#322818;
+
+  --radius:22px;
+  --radius-m:16px;
+  --radius-s:12px;
+  --radius-xs:9px;
+
+  --shadow:0 1px 0 rgba(255,255,255,.03) inset, 0 18px 40px rgba(0,0,0,.35);
+  --shadow-lift:0 1px 0 rgba(255,255,255,.05) inset, 0 26px 60px rgba(0,0,0,.5);
+
+  --sans:"Vazirmatn","Estedad","Estedad Variable","Vazir","IRANSansX","Noto Naskh Arabic","Segoe UI",Tahoma,sans-serif;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:
+    radial-gradient(1100px 620px at 84% -6%, rgba(125,171,140,.09), transparent 62%),
+    radial-gradient(900px 560px at 6% 108%, rgba(164,150,210,.07), transparent 64%),
+    var(--bg);
+  color:var(--ink);
+  font-family:var(--sans);
+  font-size:15px;
+  line-height:1.7;
+  -webkit-font-smoothing:antialiased;
+  padding:26px 22px 40px;
+}
+.board{max-width:2000px;margin:0 auto}
+
+/* ---------- board header ---------- */
+.bh{display:flex;align-items:flex-end;justify-content:space-between;gap:28px;flex-wrap:wrap;padding:6px 4px 22px}
+.bh-id{display:flex;align-items:center;gap:14px}
+.bh-mark{width:44px;height:44px;border-radius:14px;background:var(--sage-soft);border:1px solid rgba(125,171,140,.28);display:grid;place-items:center;color:var(--sage-deep);flex:0 0 auto}
+.bh-mark svg{width:22px;height:22px}
+.bh-kicker{margin:0 0 2px;font-size:11px;font-weight:500;color:var(--muted);letter-spacing:.05em}
+.bh h1{margin:0;font-size:27px;font-weight:600;letter-spacing:-.3px;line-height:1.35}
+.bh-sub{margin:6px 0 0;font-size:13px;color:var(--muted);max-width:660px;line-height:1.8}
+.bh-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 11px;border-radius:999px;border:1px solid var(--line-2);background:rgba(236,229,214,.03);font-size:11.5px;color:var(--ink-soft)}
+.chip i{width:7px;height:7px;border-radius:50%;background:var(--sage);display:block}
+.chip.v i{background:var(--violet)}
+.chip.b i{background:var(--amber)}
+.chip.w i{background:var(--wine)}
+
+/* ---------- stage ---------- */
+.stage-wrap{overflow-x:auto;overflow-y:hidden;padding:4px 0 6px}
+.stage{display:flex;align-items:flex-start;gap:34px;width:max-content;margin:0 auto;transform-origin:top center}
+.device{display:flex;flex-direction:column;gap:11px}
+
+.dv-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 4px}
+.dv-id{display:flex;align-items:center;gap:9px}
+.dv-num{width:22px;height:22px;border-radius:50%;border:1px solid var(--line-3);display:grid;place-items:center;font-size:11px;color:var(--ink-soft);background:rgba(236,229,214,.04)}
+.dv-name{font-size:13.5px;font-weight:600}
+.dv-size{font-size:11px;color:var(--faint);direction:ltr}
+.dv-notes{display:flex;flex-wrap:wrap;gap:6px}
+.dv-notes span{font-size:11px;color:var(--muted);background:rgba(236,229,214,.03);border:1px solid var(--line);border-radius:7px;padding:3px 8px}
+
+/* ---------- generic app atoms ---------- */
+.ic{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto}
+.ic.s{width:14px;height:14px}
+.ic.l{width:18px;height:18px}
+.dot-live{width:6px;height:6px;border-radius:50%;background:var(--sage);box-shadow:0 0 0 3px rgba(125,171,140,.14)}
+.badge{min-width:17px;height:17px;padding:0 4px;border-radius:99px;background:var(--wine);color:#fdf1f3;font-size:10px;font-weight:600;display:grid;place-items:center;line-height:1}
+.avatar{border-radius:50%;background:linear-gradient(150deg,var(--sage),#4e7a5e);color:#0e1510;font-weight:600;display:grid;place-items:center;letter-spacing:0}
+.kbd{font-size:10px;color:var(--muted);border:1px solid var(--line-2);border-radius:6px;padding:1px 5px;background:rgba(236,229,214,.04)}
+
+/* ============================================================================
+   1 · WINDOWS DESKTOP
+   ========================================================================== */
+.win{
+  width:980px;height:816px;border-radius:15px;overflow:hidden;
+  background:var(--bg-2);border:1px solid var(--line-2);
+  box-shadow:var(--shadow-lift), 0 0 0 1px rgba(0,0,0,.5);
+  display:flex;flex-direction:column;
+}
+.win-bar{height:38px;flex:0 0 38px;display:flex;align-items:center;gap:12px;padding:0 13px;background:linear-gradient(#232019,#1c1915);border-bottom:1px solid var(--line)}
+.win-title{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--ink-soft)}
+.win-title svg{width:14px;height:14px;color:var(--sage)}
+.win-title b{font-weight:600}
+.win-title span{color:var(--faint)}
+.win-ctl{display:flex;align-items:center;gap:18px;margin-inline-start:auto;color:var(--faint)}
+.win-ctl i{display:block;width:11px;height:11px;position:relative}
+.win-ctl i.min::before{content:"";position:absolute;inset:5px 0 auto;height:1.3px;background:currentColor}
+.win-ctl i.max{border:1.3px solid currentColor;border-radius:2.5px}
+.win-ctl i.cls::before,.win-ctl i.cls::after{content:"";position:absolute;inset-block-start:5px;inset-inline-start:-1px;width:13px;height:1.3px;background:currentColor}
+.win-ctl i.cls::before{transform:rotate(45deg)}
+.win-ctl i.cls::after{transform:rotate(-45deg)}
+
+.app{display:flex;flex:1;min-height:0}
+
+/* ---------- sidebar ---------- */
+.sidebar{
+  width:250px;flex:0 0 250px;background:linear-gradient(180deg,#1c1915,#181512);
+  border-inline-end:1px solid var(--line);display:flex;flex-direction:column;min-height:0;
+}
+.sb-brand{display:flex;align-items:center;gap:9px;padding:9px 12px 6px}
+.sb-brand .mk{width:28px;height:28px;border-radius:9px;background:var(--sage-soft);border:1px solid rgba(125,171,140,.26);display:grid;place-items:center;color:var(--sage-deep)}
+.sb-brand .mk svg{width:15px;height:15px}
+.sb-brand b{display:block;font-size:13.5px;font-weight:600;line-height:1.4}
+.sb-brand small{display:block;font-size:10px;color:var(--faint);line-height:1.4}
+.sb-search{margin:0 11px 8px;height:32px;border-radius:10px;border:1px solid var(--line);background:rgba(236,229,214,.035);display:flex;align-items:center;gap:8px;padding:0 10px;color:var(--muted);font-size:12px}
+.sb-search .kbd{margin-inline-start:auto}
+
+.sb-nav{flex:1;min-height:0;overflow:hidden;padding:2px 9px 6px;display:flex;flex-direction:column}
+.nav-label{margin:7px 8px 3px;font-size:9.5px;line-height:13px;font-weight:600;color:var(--muted);letter-spacing:.14em;display:flex;align-items:center;gap:7px}
+.nav-label em{flex:1;height:1px;background:var(--line);font-style:normal}
+.nav-item{position:relative;display:flex;align-items:center;gap:9px;height:25px;padding:0 9px;border-radius:9px;color:var(--ink-soft);font-size:12.5px;line-height:1.5}
+.nav-item+.nav-item{margin-top:1px}
+.nav-item svg{color:var(--faint)}
+.nav-item .tail{margin-inline-start:auto;display:flex;align-items:center;gap:6px}
+.nav-item.on{background:var(--sage-soft);color:var(--sage-deep);font-weight:600}
+.nav-item.focus{box-shadow:0 0 0 2px rgba(125,171,140,.85) inset,0 0 0 3px rgba(125,171,140,.18)}
+.nav-item.on svg{color:var(--sage)}
+.nav-item.on::before{content:"";position:absolute;inset-inline-start:0;top:6px;bottom:6px;width:2.5px;border-radius:3px;background:var(--sage)}
+.nav-item.ai svg{color:var(--violet)}
+.nav-item.ai.on{background:var(--violet-soft);color:#cec2ee}
+.nav-item.ai.on::before{background:var(--violet)}
+
+.ws-card{margin:9px 8px 4px;margin-top:auto;border-radius:14px;background:var(--beige);border:1px solid var(--line);padding:7px 7px 6px}
+.ws-card .cap{display:flex;align-items:center;gap:6px;font-size:9.5px;line-height:14px;color:var(--amber);letter-spacing:.08em;font-weight:600;padding:0 4px 4px}
+.ws-item{display:flex;align-items:center;gap:8px;height:24px;padding:0 8px;border-radius:8px;font-size:12px;line-height:1.4;color:var(--ink-soft)}
+.ws-item svg{color:var(--faint)}
+.ws-item.top{border-top:1px solid var(--line);margin-top:4px;padding-top:2px;height:27px}
+.ws-item.on{background:rgba(125,171,140,.12);color:var(--sage-deep)}
+
+.sb-foot{border-top:1px solid var(--line);padding:6px 9px 8px;background:rgba(0,0,0,.14);flex:0 0 auto}
+.foot-item{display:flex;align-items:center;gap:9px;height:25px;padding:0 9px;border-radius:9px;font-size:12px;line-height:1.5;color:var(--ink-soft)}
+.foot-item svg{color:var(--faint)}
+.foot-item .tail{margin-inline-start:auto;display:flex;align-items:center;gap:6px}
+.foot-item .tag{font-size:9.5px;color:var(--faint);border:1px solid var(--line-2);border-radius:5px;padding:0 5px;line-height:16px}
+.foot-sep{height:1px;background:var(--line);margin:6px 6px}
+.sb-account{display:flex;align-items:center;gap:9px;padding:6px 8px 0;margin-top:3px;border-top:1px solid var(--line)}
+.sb-account .avatar{width:26px;height:26px;font-size:11.5px}
+.sb-account .who{min-width:0}
+.sb-account b{display:block;font-size:12px;font-weight:600;line-height:1.45}
+.sb-account small{display:block;font-size:10px;color:var(--faint);direction:ltr;line-height:1.4}
+.sb-account .ic{margin-inline-start:auto;color:var(--faint)}
+
+/* ---------- desktop content ---------- */
+.content{flex:1;min-width:0;padding:16px 18px 18px;display:flex;flex-direction:column;gap:12px;overflow:hidden}
+.c-head{display:flex;align-items:flex-start;gap:12px}
+.c-head .kick{font-size:10.5px;color:var(--faint);letter-spacing:.12em;margin:0 0 3px;display:flex;align-items:center;gap:6px}
+.c-head h2{margin:0;font-size:21px;font-weight:600;letter-spacing:-.2px;line-height:1.4}
+.c-head .sub{margin:4px 0 0;font-size:11.5px;color:var(--muted)}
+.c-head .acts{margin-inline-start:auto;display:flex;align-items:center;gap:7px}
+.btn{display:inline-flex;align-items:center;gap:6px;height:31px;padding:0 12px;border-radius:10px;font-size:12px;border:1px solid var(--line-2);background:rgba(236,229,214,.04);color:var(--ink-soft)}
+.btn.sage{background:var(--sage-soft);border-color:rgba(125,171,140,.3);color:var(--sage-deep);font-weight:600}
+.btn.violet{background:var(--violet-soft);border-color:rgba(164,150,210,.3);color:#cdc0ee;font-weight:600}
+.btn.icon{width:31px;padding:0;justify-content:center}
+
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-m);padding:11px 13px;display:flex;align-items:center;gap:11px;box-shadow:var(--shadow)}
+.stat .num{font-size:19px;font-weight:600;line-height:1.3;letter-spacing:-.3px}
+.stat .num small{font-size:11px;color:var(--faint);font-weight:400}
+.stat .lab{font-size:10.5px;color:var(--faint);margin:0 0 1px}
+.stat .hint{font-size:10px;color:var(--faint)}
+.ring{width:38px;height:38px;flex:0 0 auto}
+.ring circle{fill:none;stroke-width:4;stroke-linecap:round}
+
+.grid-main{display:grid;grid-template-columns:1.32fr 1fr;gap:12px;flex:1;min-height:0}
+.col{display:flex;flex-direction:column;gap:12px;min-height:0}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-m);padding:13px 14px;box-shadow:var(--shadow);display:flex;flex-direction:column}
+.card-head{display:flex;align-items:center;gap:9px;margin-bottom:9px}
+.card-head h3{margin:0;font-size:13px;font-weight:600}
+.card-head .k{font-size:10px;color:var(--faint)}
+.card-head .more{margin-inline-start:auto;color:var(--faint);display:flex;align-items:center;gap:8px}
+.card.ai{background:linear-gradient(155deg,var(--violet-soft),#1e1a2a);border-color:rgba(164,150,210,.22)}
+.card.ai .card-head h3{color:#d2c6f2}
+
+.trow{display:flex;align-items:center;gap:10px;padding:8px 2px;border-top:1px solid var(--line)}
+.trow:first-of-type{border-top:0}
+.trow .box{width:16px;height:16px;border-radius:5px;border:1.5px solid var(--line-3);flex:0 0 auto}
+.trow .tt{font-size:12.5px;color:var(--ink)}
+.trow .meta{margin-inline-start:auto;display:flex;align-items:center;gap:7px;font-size:10px;color:var(--faint)}
+.tagm{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line-2);border-radius:6px;padding:1px 6px;font-size:9.5px;color:var(--muted)}
+.tagm.sage{border-color:rgba(125,171,140,.3);color:var(--sage)}
+.tagm.violet{border-color:rgba(164,150,210,.3);color:var(--violet)}
+.tagm.wine{border-color:rgba(193,131,143,.32);color:var(--wine)}
+.tagm.amber{border-color:rgba(211,160,110,.3);color:var(--amber)}
+.addrow{display:flex;align-items:center;gap:8px;padding:9px 2px 1px;border-top:1px solid var(--line);color:var(--faint);font-size:11.5px;margin-top:2px}
+
+.evrow{display:flex;align-items:center;gap:9px;padding:7px 0;border-top:1px solid var(--line)}
+.evrow:first-of-type{border-top:0}
+.evrow .time{font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums;direction:ltr;min-width:46px}
+.evrow .bar{width:3px;height:22px;border-radius:3px;background:var(--sage)}
+.evrow .bar.b2{background:var(--amber)}
+.evrow .bar.b3{background:var(--violet)}
+.evrow .tt{font-size:12px}
+
+.ai-copy{font-size:11.5px;color:var(--ink-soft);line-height:1.75;margin:0 0 10px}
+.ai-foot{display:flex;align-items:center;gap:8px;font-size:10px;color:var(--faint);margin-top:auto}
+
+.prog{display:flex;align-items:flex-end;gap:9px;height:88px;padding-top:4px}
+.prog .pcol{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end}
+.prog .pbar{width:100%;max-width:26px;border-radius:6px 6px 3px 3px;background:linear-gradient(180deg,rgba(125,171,140,.5),rgba(125,171,140,.16))}
+.prog .pcol.today .pbar{background:linear-gradient(180deg,var(--sage),rgba(125,171,140,.35))}
+.prog .plab{font-size:10px;color:var(--faint)}
+.prog .pcol.today .plab{color:var(--sage-deep);font-weight:600}
+.legend{display:flex;gap:14px;font-size:10px;color:var(--faint);margin-top:2px}
+.legend i{display:inline-block;width:8px;height:8px;border-radius:3px;background:var(--sage);margin-inline-end:5px;vertical-align:middle}
+.legend i.alt{background:rgba(125,171,140,.25)}
+
+/* ============================================================================
+   2 · iPAD
+   ========================================================================== */
+.pad{width:560px;padding:11px;border-radius:30px;background:#131110;border:1px solid var(--line-2);box-shadow:var(--shadow-lift)}
+.pad-screen{position:relative;height:718px;border-radius:21px;overflow:hidden;background:var(--bg-2);border:1px solid rgba(0,0,0,.6)}
+.pad-home{position:absolute;bottom:6px;inset-inline:0;margin:auto;width:120px;height:4px;border-radius:99px;background:rgba(236,229,214,.22);z-index:9}
+
+.pad-content{position:absolute;inset:0;padding:15px 16px;display:flex;flex-direction:column;gap:11px}
+.pc-head{display:flex;align-items:center;gap:10px}
+.pc-head h2{margin:0;font-size:17px;font-weight:600}
+.pc-head .sub{font-size:10.5px;color:var(--faint);margin:2px 0 0}
+.pc-head .acts{margin-inline-start:auto;display:flex;gap:6px}
+.stats2{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.stat2{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:10px 12px;display:flex;align-items:center;gap:10px}
+.stat2 .num{font-size:16px;font-weight:600}
+.stat2 .lab{font-size:10px;color:var(--faint)}
+
+.pad-scrim{position:absolute;inset-block:0;inset-inline-start:272px;inset-inline-end:0;background:rgba(8,7,6,.45);backdrop-filter:blur(1.5px);z-index:3}
+.pad-flyout{
+  position:absolute;inset-block:0;inset-inline-start:66px;width:206px;z-index:5;
+  background:linear-gradient(180deg,#211d18,#1c1915);border-inline-end:1px solid var(--line-2);
+  border-inline-start:1px solid rgba(0,0,0,.5);
+  box-shadow:-22px 0 46px rgba(0,0,0,.45);
+  padding:14px 12px;display:flex;flex-direction:column;gap:3px;
+}
+.fo-head{padding:0 8px 10px;border-bottom:1px solid var(--line)}
+.fo-head h3{margin:0;font-size:14.5px;font-weight:600}
+.fo-head p{margin:3px 0 0;font-size:10.5px;color:var(--faint)}
+.fo-item{position:relative;display:flex;align-items:center;gap:9px;height:36px;padding:0 9px;border-radius:10px;font-size:12.5px;color:var(--ink-soft)}
+.fo-item svg{color:var(--faint)}
+.fo-item.on{background:var(--sage-soft);color:var(--sage-deep);font-weight:600}
+.fo-item.on svg{color:var(--sage)}
+.fo-item.on::before{content:"";position:absolute;inset-inline-start:0;top:8px;bottom:8px;width:2.5px;border-radius:3px;background:var(--sage)}
+.fo-item.ai svg{color:var(--violet)}
+.fo-item .tail{margin-inline-start:auto}
+.fo-hint{margin-top:auto;font-size:10px;color:var(--muted);padding:9px 8px 2px;border-top:1px solid var(--line);display:flex;align-items:center;gap:6px}
+
+.pad-rail{
+  position:absolute;inset-block:0;inset-inline-start:0;width:66px;z-index:6;
+  background:linear-gradient(180deg,#1e1a16,#181512);border-inline-end:1px solid var(--line);
+  display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 0 14px;
+}
+.rail-mark{width:32px;height:32px;border-radius:11px;background:var(--sage-soft);border:1px solid rgba(125,171,140,.26);display:grid;place-items:center;color:var(--sage-deep);margin-bottom:3px}
+.rail-btn{width:40px;height:40px;border-radius:13px;display:grid;place-items:center;color:var(--muted);position:relative}
+.rail-btn .lbl{position:absolute;inset-inline-end:44px;top:50%;transform:translateY(-50%);background:#0d0b09;border:1px solid var(--line-2);color:var(--ink);font-size:10.5px;padding:3px 8px;border-radius:7px;white-space:nowrap;box-shadow:var(--shadow)}
+.rail-btn.on{background:var(--sage-soft);color:var(--sage-deep)}
+.rail-btn.cat{height:auto;min-height:46px;padding:6px 0 4px;display:flex;flex-direction:column;gap:3px;border-radius:13px}
+.rail-btn.cat i{font-style:normal;font-size:8.5px;line-height:10px;color:var(--muted);letter-spacing:.02em}
+.rail-btn.cat.on i{color:var(--sage-deep)}
+.rail-cap{font-size:8.5px;line-height:11px;color:var(--faint);letter-spacing:.14em;margin:3px 0 1px}
+.rail-btn.on::after{content:"";position:absolute;inset-inline-end:-1px;top:12px;bottom:12px;width:2.5px;border-radius:3px;background:var(--sage)}
+.rail-sep{width:26px;height:1px;background:var(--line-2);margin:7px 0}
+.rail-spacer{flex:1}
+.rail-badge{position:absolute;top:6px;inset-inline-start:9px;width:7px;height:7px;border-radius:50%;background:var(--wine);box-shadow:0 0 0 2px #1b1815}
+.rail-av{width:30px;height:30px;font-size:12px;border-radius:50%}
+
+/* ============================================================================
+   3 · iPHONE
+   ========================================================================== */
+.phone{width:322px;padding:9px;border-radius:42px;background:#131110;border:1px solid var(--line-2);box-shadow:var(--shadow-lift)}
+.ph-screen{position:relative;height:694px;border-radius:34px;overflow:hidden;background:var(--bg-2)}
+.ph-island{position:absolute;top:9px;inset-inline:0;margin:auto;width:86px;height:23px;border-radius:99px;background:#000;z-index:8}
+.ph-status{position:absolute;top:0;inset-inline:0;height:42px;display:flex;align-items:center;justify-content:space-between;padding:12px 22px 0;font-size:11.5px;color:var(--ink-soft);z-index:7;font-variant-numeric:tabular-nums}
+.ph-status .sig{display:flex;gap:4px;align-items:center}
+.ph-status .sig i{width:3px;background:var(--ink-soft);border-radius:1px;display:block}
+.ph-content{position:absolute;inset:42px 0 0;padding:6px 14px}
+.ph-title{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+.ph-title b{font-size:15.5px;font-weight:600}
+.ph-title span{font-size:10.5px;color:var(--faint)}
+.ph-title .pill{margin-inline-start:auto;font-size:10px;color:var(--sage);background:var(--sage-soft);border-radius:99px;padding:2px 9px}
+.ph-title .ph-av{width:26px;height:26px;font-size:11px;flex:0 0 auto}
+.ph-title .who{display:flex;align-items:center;gap:2px;flex:0 0 auto}
+.ph-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.ph-stat{background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:9px 10px}
+.ph-stat .lab{font-size:9.5px;color:var(--muted)}
+.ph-stat .num{font-size:15px;font-weight:600;margin-top:1px}
+.ph-card{margin-top:9px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:10px 11px}
+
+.ph-dim{position:absolute;inset:0;background:rgba(8,7,6,.52);backdrop-filter:blur(3px);z-index:4}
+.ph-sheet{
+  position:absolute;inset-inline:0;height:548px;bottom:62px;z-index:6;
+  background:linear-gradient(180deg,#241f1a 0%,#1c1915 42%,#191512 100%);
+  border-top:1px solid var(--line-3);border-radius:26px 26px 0 0;
+  box-shadow:0 -26px 52px rgba(0,0,0,.6);
+  display:flex;flex-direction:column;overflow:hidden;
+}
+.sh-grab{padding:6px 0 2px;display:grid;place-items:center;flex:0 0 auto}
+.sh-grab i{width:42px;height:4px;border-radius:99px;background:rgba(236,229,214,.3);display:block}
+.sh-head{padding:2px 14px 8px;display:flex;align-items:center;gap:8px;flex:0 0 auto}
+.sh-head h3{margin:0;font-size:14px;font-weight:600;line-height:20px}
+.sh-head p{margin:1px 0 0;font-size:10px;line-height:14px;color:var(--faint)}
+.sh-head .state{margin-inline-start:auto;font-size:9.5px;color:var(--faint);border:1px solid var(--line-2);border-radius:7px;padding:2px 7px;display:flex;align-items:center;gap:4px}
+.sh-body{flex:1;min-height:0;overflow:hidden;padding:0 14px 8px;display:flex;flex-direction:column;justify-content:space-between;gap:9px}
+.sh-grp{flex:0 0 auto}
+.sh-grp>p{margin:0 2px 4px;font-size:10px;line-height:15px;font-weight:600;color:var(--muted);letter-spacing:.1em;display:flex;align-items:center;gap:7px}
+.sh-grp>p em{flex:1;height:1px;background:var(--line);font-style:normal}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.tile{height:35px;border-radius:10px;background:rgba(236,229,214,.045);border:1px solid var(--line);display:flex;align-items:center;gap:7px;padding:0 9px;font-size:11.5px;line-height:1.35;color:var(--ink-soft)}
+.tile svg{color:var(--faint)}
+.tile .tail{margin-inline-start:auto;display:flex;align-items:center;gap:5px}
+.tile.wide{grid-column:span 2}
+.tile.on{background:var(--sage-soft);border-color:rgba(125,171,140,.3);color:var(--sage-deep);font-weight:600}
+.tile.on svg{color:var(--sage)}
+.tile.violet svg{color:var(--violet)}
+.tile.ws{background:rgba(211,160,110,.07);border-color:rgba(211,160,110,.22)}
+.tile.ws svg{color:var(--amber)}
+.tile.three{grid-template-columns:repeat(3,1fr)}
+.sh-foot{flex:0 0 auto;border-top:1px solid var(--line);background:rgba(0,0,0,.22);padding:7px 14px 9px}
+.sh-foot>p{margin:0 2px 5px;font-size:10px;line-height:14px;font-weight:600;color:var(--muted);letter-spacing:.1em;display:flex;align-items:center;gap:7px}
+.sh-foot>p em{flex:1;height:1px;background:var(--line);font-style:normal}
+.sh-foot .frow{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.fitem{display:flex;align-items:center;gap:7px;height:30px;padding:0 9px;border-radius:9px;background:rgba(236,229,214,.045);border:1px solid var(--line);font-size:11px;color:var(--ink-soft)}
+.fitem svg{color:var(--faint)}
+.fitem .tail{margin-inline-start:auto;display:flex;align-items:center;gap:5px}
+
+
+.ph-tabbar{
+  position:absolute;bottom:0;inset-inline:0;height:62px;z-index:9;
+  background:rgba(24,20,17,.94);backdrop-filter:blur(14px);border-top:1px solid var(--line-2);
+  display:grid;grid-template-columns:repeat(5,1fr);align-items:center;padding-bottom:6px;
+}
+.tab{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:9.5px;color:var(--faint)}
+.tab.on{color:var(--sage-deep);font-weight:600}
+.tab.on svg{color:var(--sage)}
+.tab .ind{width:4px;height:4px;border-radius:50%;background:var(--sage);margin-top:-1px}
+
+/* phone state strip */
+.mini{display:flex;gap:9px;align-items:flex-end}
+.mini .frame{flex:1;height:132px;border-radius:13px;background:#131110;border:1px solid var(--line-2);position:relative;overflow:hidden;padding:5px}
+.mini .frame .scr{position:absolute;inset:5px;border-radius:9px;background:var(--bg-2);overflow:hidden}
+.mini .frame .sheet{position:absolute;inset-inline:0;bottom:16px;background:linear-gradient(180deg,#2a2520,#1e1a16);border-top:1px solid var(--line-3);border-radius:8px 8px 0 0;box-shadow:0 -10px 20px rgba(0,0,0,.5)}
+.mini .frame .tb{position:absolute;inset-inline:0;bottom:0;height:16px;background:rgba(30,26,22,.95);border-top:1px solid var(--line)}
+.mini .frame .grab{position:absolute;top:5px;inset-inline:0;margin:auto;width:16px;height:2px;border-radius:9px;background:rgba(236,229,214,.35)}
+.mini2 .frame{height:104px}
+.mrail{position:absolute;inset-block:5px;inset-inline-start:5px;width:13px;border-radius:5px;background:linear-gradient(180deg,#221e19,#1b1814);border:1px solid var(--line)}
+.mfly{position:absolute;inset-block:5px;inset-inline-start:18px;width:40px;border-radius:5px;background:linear-gradient(180deg,#241f1a,#1e1a16);border:1px solid var(--line-2)}
+.mscrim{position:absolute;inset-block:5px;inset-inline-start:58px;inset-inline-end:5px;border-radius:5px;background:rgba(8,7,6,.42)}
+.mini figcaption{text-align:center;font-size:9.5px;color:var(--faint);margin-top:5px}
+.mini figure{margin:0;flex:1}
+
+/* ============================================================================
+   BOTTOM BAND — tree · coverage · tokens
+   ========================================================================== */
+.band{display:grid;grid-template-columns:1.02fr 1.34fr 1fr;gap:18px;margin-top:30px;padding:0 2px}
+.band2{grid-template-columns:1fr 1fr;margin-top:18px}
+.rules{margin:12px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:8px}
+.rules li{display:grid;grid-template-columns:19px 1fr;gap:10px;font-size:11.5px;color:var(--ink-soft);line-height:1.8}
+.rules .n{width:19px;height:19px;border-radius:6px;background:rgba(125,171,140,.12);border:1px solid rgba(125,171,140,.28);color:var(--sage);font-size:10px;display:grid;place-items:center;margin-top:4px}
+.rules b{color:var(--ink);font-weight:600}
+.rules code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10px;color:var(--violet);background:rgba(164,150,210,.1);border-radius:5px;padding:1px 5px;direction:ltr;display:inline-block}
+.panel{background:linear-gradient(180deg,rgba(31,27,21,.9),rgba(24,21,17,.9));border:1px solid var(--line);border-radius:20px;padding:17px 18px;box-shadow:var(--shadow)}
+.panel>h3{margin:0 0 3px;font-size:15px;font-weight:600;display:flex;align-items:center;gap:8px}
+.panel>h3 svg{color:var(--sage)}
+.panel>.sub{margin:0 0 14px;font-size:11.5px;color:var(--muted)}
+
+.tree,.tree ul{list-style:none;margin:0;padding:0}
+.tree ul{margin-inline-start:7px;padding-inline-start:15px;border-inline-start:1px solid var(--line-2)}
+.tree li{position:relative;padding-block:3px}
+.tree ul>li::before{content:"";position:absolute;inset-inline-start:-15px;top:16px;width:11px;height:1px;background:var(--line-2)}
+.nd{display:inline-flex;align-items:center;gap:8px;font-size:12.5px}
+.nd .dm{width:8px;height:8px;border-radius:3px;background:var(--sage);flex:0 0 auto}
+.nd .dm.f{background:var(--amber)}
+.nd .dm.g{background:#9ec4a8}
+.nd .dm.t{background:var(--violet)}
+.nd .dm.p{background:#c9a37c}
+.nd .dm.s{background:var(--faint)}
+.nd .dm.root{background:var(--sage);border-radius:50%}
+.nd b{font-weight:600}
+.nd small{font-size:10px;color:var(--faint)}
+.nd .pill{font-size:9.5px;color:var(--faint);border:1px dashed var(--line-3);border-radius:6px;padding:0 6px}
+.leaf-note{margin:12px 0 0;font-size:10.5px;color:var(--faint);border-top:1px solid var(--line);padding-top:10px;line-height:1.9}
+.leaf-note b{color:var(--ink-soft);font-weight:600}
+
+.mx{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px}
+table.cover{width:100%;border-collapse:collapse;font-size:11.5px}
+table.cover th{font-size:10px;color:var(--faint);font-weight:500;text-align:start;padding:0 6px 6px;border-bottom:1px solid var(--line)}
+table.cover td{padding:4px 6px;border-bottom:1px solid rgba(236,229,214,.05);color:var(--ink-soft)}
+table.cover td.n{color:var(--ink)}
+table.cover td.c{text-align:center}
+table.cover td.c svg{width:13px;height:13px;color:var(--sage);stroke-width:2.4}
+table.cover td.r{font-size:10px;color:var(--faint);white-space:nowrap}
+
+.sw{display:flex;flex-wrap:wrap;gap:9px;margin-bottom:13px}
+.sw div{width:62px;font-size:9px;color:var(--faint);text-align:center}
+.sw i{display:block;height:36px;border-radius:11px;border:1px solid var(--line-2);margin-bottom:5px}
+.kv{font-size:11.5px;color:var(--ink-soft);display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid rgba(236,229,214,.05)}
+.kv span{color:var(--muted)}
+.kv b{font-weight:500;color:var(--ink);font-size:11.5px}
+.kv code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;color:var(--sage);direction:ltr}
+.principles{margin:12px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:7px}
+.principles li{display:flex;gap:8px;font-size:11.5px;color:var(--ink-soft);line-height:1.75}
+.principles svg{color:var(--sage);margin-top:3px}
+
+.board-foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:space-between;margin-top:22px;padding:14px 4px 0;border-top:1px solid var(--line);font-size:11px;color:var(--faint)}
+.board-foot b{color:var(--ink-soft);font-weight:500}
+
+@media (max-width:900px){
+  body{padding:18px 14px 30px}
+  .band{grid-template-columns:1fr}
+  .mx{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-leaf" viewBox="0 0 24 24"><path d="M12 21v-7.4"/><path d="M12 13.6c0-3.6 2.7-6.6 6.4-7.3.2 4.2-2.4 7.4-6.4 7.3Z"/><path d="M12 15.4c0-2.6-1.9-4.8-4.6-5.4-.1 3 1.7 5.4 4.6 5.4Z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M15.9 15.9 20.5 20.5"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.8"/><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.6A8.4 8.4 0 0 1 9.4 4 8.4 8.4 0 1 0 20 14.6Z"/></symbol>
+  <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="3.4"/><path d="M3.5 10h17M8.2 3.2v3.6M15.8 3.2v3.6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><rect x="3.6" y="3.6" width="16.8" height="16.8" rx="4.6"/><path d="M8.2 12.4l2.6 2.6 5-5.4"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3.6" y="3.6" width="7" height="7" rx="2.2"/><rect x="13.4" y="3.6" width="7" height="7" rx="2.2"/><rect x="3.6" y="13.4" width="7" height="7" rx="2.2"/><rect x="13.4" y="13.4" width="7" height="7" rx="2.2"/></symbol>
+  <symbol id="i-timer" viewBox="0 0 24 24"><circle cx="12" cy="13.4" r="7.4"/><path d="M12 9.6v3.8l2.4 1.6M9.4 3.2h5.2"/></symbol>
+  <symbol id="i-flame" viewBox="0 0 24 24"><path d="M12 3.4c2.9 3.6 5 5.7 5 8.8a5 5 0 0 1-10 0c0-2 1-3.6 2-5 .5 1.2 1.4 2 2.4 2.3-.2-2.2.2-4.2.6-6.1Z"/></symbol>
+  <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="12" r="4.6"/><circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-note" viewBox="0 0 24 24"><rect x="4.6" y="3.4" width="14.8" height="17.2" rx="3.2"/><path d="M8.4 8.6h7.2M8.4 12.2h7.2M8.4 15.8h4.2"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M7.2 5.2A2.2 2.2 0 0 1 9.4 3h4.4l4.8 4.8v11A2.2 2.2 0 0 1 16.4 21H9.4a2.2 2.2 0 0 1-2.2-2.2Z"/><path d="M13.6 3v4.6h5"/><path d="M9.6 13h6M9.6 16.4h4"/></symbol>
+  <symbol id="i-bars" viewBox="0 0 24 24"><path d="M4 19.6h16"/><path d="M7.4 19.6v-6.2M12 19.6V7.4M16.6 19.6v-8.6"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M11.6 3.4l1.9 4.8 4.8 1.9-4.8 1.9-1.9 4.8-1.9-4.8L4.9 10.1l4.8-1.9z"/><path d="M18.2 15.6l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20.2 12a8.2 8.2 0 1 1-2.4-5.8"/><path d="M20.4 4.4v4.2h-4.2"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6.6 16.2V10.8a5.4 5.4 0 0 1 10.8 0v5.4l1.4 2.4H5.2z"/><path d="M10 20.4a2 2 0 0 0 4 0"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7.4h4.2M12.6 7.4H20M4 16.6h7.4M15.8 16.6H20"/><circle cx="10.4" cy="7.4" r="2.2"/><circle cx="13.6" cy="16.6" r="2.2"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.4"/><path d="M9.7 9.6a2.4 2.4 0 1 1 3.4 2.2c-.7.4-1.1.9-1.1 1.7"/><circle cx="12" cy="16.6" r=".9" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8.4" r="3.6"/><path d="M5.2 20c1.1-3.4 3.7-5.2 6.8-5.2s5.7 1.8 6.8 5.2"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3.6 20 8l-8 4.4L4 8z"/><path d="M4.6 12.4 12 16.5l7.4-4.1"/></symbol>
+  <symbol id="i-layout" viewBox="0 0 24 24"><rect x="3.6" y="4.6" width="16.8" height="14.8" rx="3.2"/><path d="M15 4.6v14.8"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 6.6C10.4 5 8.4 4.4 6 4.4c-.9 0-1.6.6-1.6 1.5v10c0 .9.7 1.5 1.6 1.5 2.4 0 4.4.6 6 2.2 1.6-1.6 3.6-2.2 6-2.2.9 0 1.6-.6 1.6-1.5v-10c0-.9-.7-1.5-1.6-1.5-2.4 0-4.4.6-6 2.2Z"/><path d="M12 6.6v13"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20.2S4.6 15.7 4.6 10.6A4.3 4.3 0 0 1 12 7.3a4.3 4.3 0 0 1 7.4 3.3c0 5.1-7.4 9.6-7.4 9.6Z"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.2"/><path d="M12 7.6V12l3 1.8"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5.4v13.2M5.4 12h13.2"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6.4 6.4l11.2 11.2M17.6 6.4 6.4 17.6"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M14.4 6.6 9 12l5.4 5.4"/></symbol>
+  <symbol id="i-dots" viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="1.5" fill="currentColor" stroke="none"/></symbol>
+</svg>
+
+<div class="board">
+
+  <!-- ======================= HEADER ======================= -->
+  <header class="bh">
+    <div class="bh-id">
+      <span class="bh-mark"><svg class="ic"><use href="#i-leaf"/></svg></span>
+      <div>
+        <p class="bh-kicker">طرح مفهومی رابط کاربری · نسخهٔ ۱ · فقط پنل شخصی</p>
+        <h1>معماری ناوبری واکنش‌گرا — پنل شخصی «برنامه‌ریز»</h1>
+        <p class="bh-sub">یک ساختار اطلاعاتی واحد، سه نمایش متناسب با اندازهٔ صفحه. هیچ مقصدی حذف نمی‌شود؛ فقط شکل دسترسی به آن تغییر می‌کند.</p>
+      </div>
+    </div>
+    <div class="bh-meta">
+      <span class="chip"><i></i>دسکتاپ · سایدبار کامل</span>
+      <span class="chip v"><i></i>تبلت · ریل + پنل برچسب‌دار</span>
+      <span class="chip b"><i></i>موبایل · نوار پایین + شیت</span>
+      <span class="chip"><i></i>پنل‌ها = فضای کاری جدا</span>
+    </div>
+  </header>
+
+  <!-- ======================= THREE DEVICES ======================= -->
+  <div class="stage-wrap" id="stageWrap">
+  <div class="stage" id="stage">
+
+    <!-- ------------------------------------------------ DESKTOP -->
+    <section class="device">
+      <div class="dv-head">
+        <div class="dv-id"><span class="dv-num">۱</span><span class="dv-name">ویندوز — دسکتاپ</span></div>
+        <span class="dv-size">1440 × 900</span>
+      </div>
+
+      <div class="win">
+        <div class="win-bar">
+          <div class="win-title">
+            <svg class="ic"><use href="#i-leaf"/></svg>
+            <b>برنامه‌ریز</b><span>— چهارشنبه ۸ مهر</span>
+          </div>
+          <div class="win-ctl"><i class="min"></i><i class="max"></i><i class="cls"></i></div>
+        </div>
+
+        <div class="app">
+          <!-- sidebar -->
+          <aside class="sidebar">
+            <div class="sb-brand">
+              <span class="mk"><svg class="ic"><use href="#i-leaf"/></svg></span>
+              <span>
+                <b>برنامه‌ریز</b>
+                <small>برنامه‌ریزی روزانهٔ آرام</small>
+              </span>
+            </div>
+
+            <div class="sb-search">
+              <svg class="ic s"><use href="#i-search"/></svg>
+              <span>جست‌وجو یا افزودن…</span>
+              <span class="kbd">⌘K</span>
+            </div>
+
+            <nav class="sb-nav">
+              <p class="nav-label">برنامه<em></em></p>
+              <div class="nav-item on"><svg class="ic s"><use href="#i-sun"/></svg><span>امروز</span></div>
+              <div class="nav-item"><svg class="ic s"><use href="#i-cal"/></svg><span>تقویم</span></div>
+              <div class="nav-item"><svg class="ic s"><use href="#i-check"/></svg><span>کارها</span><span class="tail"><span class="tagm">۴</span></span></div>
+              <div class="nav-item"><svg class="ic s"><use href="#i-grid"/></svg><span>ماتریس</span></div>
+
+              <p class="nav-label">تمرکز<em></em></p>
+              <div class="nav-item"><svg class="ic s"><use href="#i-timer"/></svg><span>تمرکز</span><span class="tail"><span class="kbd">۲۵′</span></span></div>
+
+              <p class="nav-label">رشد<em></em></p>
+              <div class="nav-item"><svg class="ic s"><use href="#i-flame"/></svg><span>عادت‌ها</span><span class="tail"><span class="dot-live"></span></span></div>
+              <div class="nav-item focus"><svg class="ic s"><use href="#i-target"/></svg><span>هدف‌ها</span><span class="tail"><span class="kbd">focus-visible</span></span></div>
+
+              <p class="nav-label">پیگیری<em></em></p>
+              <div class="nav-item"><svg class="ic s"><use href="#i-note"/></svg><span>یادداشت‌ها</span></div>
+              <div class="nav-item"><svg class="ic s"><use href="#i-file"/></svg><span>برنامه‌ها</span></div>
+              <div class="nav-item"><svg class="ic s"><use href="#i-bars"/></svg><span>بینش‌ها</span></div>
+              <div class="nav-item ai"><svg class="ic s"><use href="#i-spark"/></svg><span>مربی هوش مصنوعی</span><span class="tail"><span class="dot-live"></span></span></div>
+
+              <div class="ws-card">
+                <p class="cap"><svg class="ic s"><use href="#i-layers"/></svg>پنل‌ها · فضای کاری جدا</p>
+                <div class="ws-item"><svg class="ic s"><use href="#i-book"/></svg><span>پنل دانشجو</span></div>
+                <div class="ws-item"><svg class="ic s"><use href="#i-heart"/></svg><span>پنل والدین</span></div>
+                <div class="ws-item top"><svg class="ic s"><use href="#i-layout"/></svg><span>همهٔ پنل‌ها</span><span class="tail"><svg class="ic s"><use href="#i-chev"/></svg></span></div>
+              </div>
+            </nav>
+
+            <div class="sb-foot">
+              <div class="foot-item"><svg class="ic s"><use href="#i-refresh"/></svg><span>مرور هفتگی</span><span class="tail"><span class="tag">هفتگی</span></span></div>
+              <div class="foot-item"><svg class="ic s"><use href="#i-bell"/></svg><span>اعلان‌ها</span><span class="tail"><span class="badge">۲</span></span></div>
+              <div class="foot-item"><svg class="ic s"><use href="#i-sliders"/></svg><span>تنظیمات</span></div>
+              <div class="foot-item"><svg class="ic s"><use href="#i-help"/></svg><span>راهنما</span><span class="tail"><span class="kbd">؟</span></span></div>
+              <div class="sb-account">
+                <span class="avatar">س</span>
+                <span class="who">
+                  <b>سارا محمدی</b>
+                  <small>@sara.m</small>
+                </span>
+                <svg class="ic s"><use href="#i-chev"/></svg>
+              </div>
+            </div>
+          </aside>
+
+          <!-- content -->
+          <main class="content">
+            <div class="c-head">
+              <div>
+                <p class="kick"><svg class="ic s"><use href="#i-leaf"/></svg>پنل شخصی</p>
+                <h2>چهارشنبه</h2>
+                <p class="sub">۸ مهر ۱۴۰۵ · هفتهٔ دوم مهر</p>
+              </div>
+              <div class="acts">
+                <span class="btn"><svg class="ic s"><use href="#i-search"/></svg>جست‌وجو</span>
+                <span class="btn violet"><svg class="ic s"><use href="#i-spark"/></svg>مربی هوش مصنوعی</span>
+                <span class="btn icon"><svg class="ic s"><use href="#i-moon"/></svg></span>
+                <span class="btn icon"><svg class="ic s"><use href="#i-bell"/></svg></span>
+              </div>
+            </div>
+
+            <div class="stats">
+              <div class="stat">
+                <svg class="ring" viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" stroke="rgba(236,229,214,.12)"/><circle cx="20" cy="20" r="16" stroke="#7dab8c" stroke-dasharray="0 101"/></svg>
+                <div>
+                  <p class="lab">پیشرفت امروز</p>
+                  <p class="num">۰<small> / ۴ انجام‌شده</small></p>
+                  <p class="hint">روز تازه است</p>
+                </div>
+              </div>
+              <div class="stat">
+                <svg class="ring" viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" stroke="rgba(236,229,214,.12)"/><circle cx="20" cy="20" r="16" stroke="#d3a06e" stroke-dasharray="0 101"/></svg>
+                <div>
+                  <p class="lab">تمرکز امروز</p>
+                  <p class="num">۰ <small>دقیقه</small></p>
+                  <p class="hint">هدف: ۹۰ دقیقه</p>
+                </div>
+              </div>
+              <div class="stat">
+                <svg class="ring" viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" stroke="rgba(236,229,214,.12)"/><circle cx="20" cy="20" r="16" stroke="#7dab8c" stroke-dasharray="50 101"/></svg>
+                <div>
+                  <p class="lab">عادت‌ها</p>
+                  <p class="num">۴ <small>فعال</small></p>
+                  <p class="hint">۲ مانده برای امروز</p>
+                </div>
+              </div>
+              <div class="stat">
+                <svg class="ring" viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" stroke="rgba(236,229,214,.12)"/><circle cx="20" cy="20" r="16" stroke="#c1838f" stroke-dasharray="0 101"/></svg>
+                <div>
+                  <p class="lab">موعد امروز</p>
+                  <p class="num">۰</p>
+                  <p class="hint">چیزی سررسید نشده</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="grid-main">
+              <div class="col">
+                <section class="card" style="flex:1">
+                  <div class="card-head">
+                    <h3>کارهای امروز</h3>
+                    <span class="k">۵ کار</span>
+                    <span class="more"><svg class="ic s"><use href="#i-plus"/></svg><svg class="ic s"><use href="#i-dots"/></svg></span>
+                  </div>
+                  <div class="trow"><span class="box"></span><span class="tt">مرور فصل ۳ زیست</span><span class="meta"><span class="tagm">۰۹:۳۰</span><span class="tagm sage">درس</span></span></div>
+                  <div class="trow"><span class="box"></span><span class="tt">نوشتن برنامهٔ هفته</span><span class="meta"><span class="tagm">۱۱:۰۰</span><span class="tagm amber">کار</span></span></div>
+                  <div class="trow"><span class="box"></span><span class="tt">۳۰ دقیقه دویدن</span><span class="meta"><span class="tagm">عصر</span><span class="tagm sage">سلامت</span></span></div>
+                  <div class="trow"><span class="box"></span><span class="tt">تماس با مشاور</span><span class="meta"><span class="tagm">۱۶:۳۰</span><span class="tagm wine">شخصی</span></span></div>
+                  <div class="trow"><span class="box"></span><span class="tt">مرتب کردن میز کار</span><span class="meta"><span class="tagm">بدون ساعت</span></span></div>
+                  <div class="addrow"><svg class="ic s"><use href="#i-plus"/></svg>افزودن کار… <span class="kbd" style="margin-inline-start:auto">N</span></div>
+                </section>
+
+                <section class="card" style="flex:0 0 auto">
+                  <div class="card-head"><h3>پیشرفت این هفته</h3><span class="k more">۷ روز</span></div>
+                  <div class="prog">
+                    <div class="pcol"><span class="pbar" style="height:34%"></span><span class="plab">ش</span></div>
+                    <div class="pcol"><span class="pbar" style="height:52%"></span><span class="plab">ی</span></div>
+                    <div class="pcol"><span class="pbar" style="height:22%"></span><span class="plab">د</span></div>
+                    <div class="pcol"><span class="pbar" style="height:66%"></span><span class="plab">س</span></div>
+                    <div class="pcol today"><span class="pbar" style="height:8%"></span><span class="plab">چ</span></div>
+                    <div class="pcol"><span class="pbar" style="height:12%"></span><span class="plab">پ</span></div>
+                    <div class="pcol"><span class="pbar" style="height:6%"></span><span class="plab">ج</span></div>
+                  </div>
+                  <div class="legend"><span><i></i>انجام‌شده</span><span><i class="alt"></i>برنامه‌ریزی‌شده</span></div>
+                </section>
+              </div>
+
+              <div class="col">
+                <section class="card">
+                  <div class="card-head"><h3>تقویم امروز</h3><span class="k">۳ رویداد</span><span class="more"><svg class="ic s"><use href="#i-chev"/></svg></span></div>
+                  <div class="evrow"><span class="time">۱۰:۰۰</span><span class="bar"></span><span class="tt">کلاس فیزیک</span></div>
+                  <div class="evrow"><span class="time">۱۶:۳۰</span><span class="bar b2"></span><span class="tt">جلسه با مشاور</span></div>
+                  <div class="evrow"><span class="time">۱۹:۰۰</span><span class="bar b3"></span><span class="tt">تمرین گروهی</span></div>
+                </section>
+
+                <section class="card ai" style="flex:1">
+                  <div class="card-head">
+                    <svg class="ic s" style="color:#a496d2"><use href="#i-spark"/></svg>
+                    <h3>برنامه‌ریزی با هوش مصنوعی</h3>
+                  </div>
+                  <p class="ai-copy">بر پایهٔ ۵ کار و ۳ رویداد امروز، یک روز واقع‌بینانه و با فاصلهٔ استراحت می‌سازم.</p>
+                  <span class="btn violet" style="align-self:flex-start"><svg class="ic s"><use href="#i-spark"/></svg>ساخت پیش‌نویس برنامه</span>
+                  <div class="ai-foot"><svg class="ic s"><use href="#i-clock"/></svg>پیش‌نویس تا زمانی که تأیید نکنی، وارد برنامه نمی‌شود.</div>
+                </section>
+              </div>
+            </div>
+          </main>
+        </div>
+      </div>
+
+      <div class="dv-notes">
+        <span>سایدبار ثابت ۲۵۰px</span>
+        <span>۱۹ مقصد بدون اسکرول</span>
+        <span>برچسب‌های گروه کوچک و کم‌رنگ</span>
+        <span>پنل‌ها روی سطح بژ و جدا از بهره‌وری</span>
+        <span>نمونهٔ حالت فوکوس روی ردیف «هدف‌ها»</span>
+      </div>
+    </section>
+
+    <!-- ------------------------------------------------ TABLET -->
+    <section class="device">
+      <div class="dv-head">
+        <div class="dv-id"><span class="dv-num">۲</span><span class="dv-name">آیپد — تبلت</span></div>
+        <span class="dv-size">834 × 1112 ·عمودی</span>
+      </div>
+
+      <div class="pad">
+        <div class="pad-screen">
+          <!-- content stays behind, only partly covered -->
+          <div class="pad-content">
+            <div class="pc-head">
+              <div>
+                <h2>چهارشنبه</h2>
+                <p class="sub">۸ مهر ۱۴۰۵ · پنل شخصی</p>
+              </div>
+              <div class="acts">
+                <span class="btn icon"><svg class="ic s"><use href="#i-search"/></svg></span>
+                <span class="btn violet"><svg class="ic s"><use href="#i-spark"/></svg>هوش مصنوعی</span>
+              </div>
+            </div>
+
+            <div class="stats2">
+              <div class="stat2">
+                <svg class="ring" viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" stroke="rgba(236,229,214,.12)"/><circle cx="20" cy="20" r="16" stroke="#7dab8c" stroke-dasharray="0 101"/></svg>
+                <div><p class="lab">پیشرفت امروز</p><p class="num">۰ / ۴</p></div>
+              </div>
+              <div class="stat2">
+                <svg class="ring" viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" stroke="rgba(236,229,214,.12)"/><circle cx="20" cy="20" r="16" stroke="#d3a06e" stroke-dasharray="0 101"/></svg>
+                <div><p class="lab">تمرکز امروز</p><p class="num">۰ دقیقه</p></div>
+              </div>
+              <div class="stat2">
+                <svg class="ring" viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" stroke="rgba(236,229,214,.12)"/><circle cx="20" cy="20" r="16" stroke="#7dab8c" stroke-dasharray="50 101"/></svg>
+                <div><p class="lab">عادت‌ها</p><p class="num">۴ فعال</p></div>
+              </div>
+              <div class="stat2">
+                <svg class="ring" viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" stroke="rgba(236,229,214,.12)"/><circle cx="20" cy="20" r="16" stroke="#c1838f" stroke-dasharray="0 101"/></svg>
+                <div><p class="lab">موعد امروز</p><p class="num">۰</p></div>
+              </div>
+            </div>
+
+            <section class="card">
+              <div class="card-head"><h3>کارهای امروز</h3><span class="k">۵ کار</span></div>
+              <div class="trow"><span class="box"></span><span class="tt">مرور فصل ۳ زیست</span><span class="meta"><span class="tagm">۰۹:۳۰</span></span></div>
+              <div class="trow"><span class="box"></span><span class="tt">نوشتن برنامهٔ هفته</span><span class="meta"><span class="tagm">۱۱:۰۰</span></span></div>
+              <div class="trow"><span class="box"></span><span class="tt">۳۰ دقیقه دویدن</span><span class="meta"><span class="tagm">عصر</span></span></div>
+              <div class="trow"><span class="box"></span><span class="tt">تماس با مشاور</span><span class="meta"><span class="tagm">۱۶:۳۰</span></span></div>
+            </section>
+
+            <section class="card">
+              <div class="card-head"><h3>تقویم امروز</h3><span class="k">۳ رویداد</span></div>
+              <div class="evrow"><span class="time">۱۰:۰۰</span><span class="bar"></span><span class="tt">کلاس فیزیک</span></div>
+              <div class="evrow"><span class="time">۱۶:۳۰</span><span class="bar b2"></span><span class="tt">جلسه با مشاور</span></div>
+            </section>
+          </div>
+
+          <div class="pad-scrim"></div>
+
+          <!-- expanded contextual navigation -->
+          <div class="pad-flyout">
+            <div class="fo-head">
+              <h3>پیگیری</h3>
+              <p>آنچه می‌نویسی و می‌سنجی</p>
+            </div>
+            <div class="fo-item"><svg class="ic s"><use href="#i-note"/></svg><span>یادداشت‌ها</span></div>
+            <div class="fo-item"><svg class="ic s"><use href="#i-file"/></svg><span>برنامه‌ها</span><span class="tail"><span class="tagm">۳</span></span></div>
+            <div class="fo-item on"><svg class="ic s"><use href="#i-bars"/></svg><span>بینش‌ها</span></div>
+            <div class="fo-item ai"><svg class="ic s"><use href="#i-spark"/></svg><span>مربی هوش مصنوعی</span><span class="tail"><span class="dot-live"></span></span></div>
+            <div class="fo-hint"><svg class="ic s"><use href="#i-chev"/></svg>بیرون بزنید تا بسته شود</div>
+          </div>
+
+          <!-- icon rail -->
+          <div class="pad-rail">
+            <span class="rail-mark"><svg class="ic"><use href="#i-leaf"/></svg></span>
+            <span class="rail-btn"><svg class="ic l"><use href="#i-search"/></svg></span>
+            <span class="rail-cap">بخش‌ها</span>
+            <span class="rail-btn cat"><svg class="ic l"><use href="#i-grid"/></svg><i>برنامه</i></span>
+            <span class="rail-btn cat"><svg class="ic l"><use href="#i-timer"/></svg><i>تمرکز</i></span>
+            <span class="rail-btn cat"><svg class="ic l"><use href="#i-flame"/></svg><i>رشد</i></span>
+            <span class="rail-btn cat on"><svg class="ic l"><use href="#i-bars"/></svg><i>پیگیری</i></span>
+            <span class="rail-btn cat"><svg class="ic l"><use href="#i-layers"/></svg><i>پنل‌ها</i></span>
+            <span class="rail-spacer"></span>
+            <span class="rail-sep"></span>
+            <span class="rail-btn"><svg class="ic l"><use href="#i-refresh"/></svg></span>
+            <span class="rail-btn"><svg class="ic l"><use href="#i-bell"/></svg><span class="rail-badge"></span></span>
+            <span class="rail-btn"><svg class="ic l"><use href="#i-sliders"/></svg></span>
+            <span class="rail-btn"><svg class="ic l"><use href="#i-help"/></svg></span>
+            <span class="avatar rail-av">س</span>
+          </div>
+
+          <div class="pad-home"></div>
+        </div>
+      </div>
+
+      <div class="mini mini2">
+        <figure>
+          <div class="frame"><div class="scr"></div><div class="mrail"></div></div>
+          <figcaption>ریل تنها — محتوا تمام‌عرض</figcaption>
+        </figure>
+        <figure>
+          <div class="frame"><div class="scr"></div><div class="mscrim"></div><div class="mfly"></div><div class="mrail"></div></div>
+          <figcaption>گروه باز — پنل ۲۰۶px</figcaption>
+        </figure>
+      </div>
+
+      <div class="dv-notes">
+        <span>ریل آیکونی ۶۶px — همیشه در دسترس</span>
+        <span>لمس یک گروه ⇒ پنل برچسب‌دار ۲۰۶px</span>
+        <span>محتوا زیر پنل دیده می‌شود، نه فشرده</span>
+      </div>
+    </section>
+
+    <!-- ------------------------------------------------ PHONE -->
+    <section class="device">
+      <div class="dv-head">
+        <div class="dv-id"><span class="dv-num">۳</span><span class="dv-name">آیفون — موبایل</span></div>
+        <span class="dv-size">390 × 844</span>
+      </div>
+
+      <div class="phone">
+        <div class="ph-screen">
+          <div class="ph-island"></div>
+          <div class="ph-status">
+            <span>۹:۴۱</span>
+            <span class="sig"><i style="height:5px"></i><i style="height:7px"></i><i style="height:9px"></i><i style="height:11px"></i></span>
+          </div>
+
+          <!-- dashboard behind -->
+          <div class="ph-content">
+            <div class="ph-title">
+              <span class="avatar ph-av">س</span>
+              <div class="who"><b>چهارشنبه</b><span> · ۸ مهر</span></div>
+              <span class="pill">۰ از ۴</span>
+            </div>
+            <div class="ph-grid">
+              <div class="ph-stat"><p class="lab">پیشرفت امروز</p><p class="num">۰ / ۴</p></div>
+              <div class="ph-stat"><p class="lab">تمرکز امروز</p><p class="num">۰ دقیقه</p></div>
+              <div class="ph-stat"><p class="lab">عادت‌ها</p><p class="num">۴ فعال</p></div>
+              <div class="ph-stat"><p class="lab">موعد امروز</p><p class="num">۰</p></div>
+            </div>
+            <div class="ph-card">
+              <div class="trow"><span class="box"></span><span class="tt">مرور فصل ۳ زیست</span><span class="meta"><span class="tagm">۰۹:۳۰</span></span></div>
+              <div class="trow"><span class="box"></span><span class="tt">نوشتن برنامهٔ هفته</span><span class="meta"><span class="tagm">۱۱:۰۰</span></span></div>
+            </div>
+          </div>
+
+          <div class="ph-dim"></div>
+
+          <!-- draggable navigation sheet -->
+          <div class="ph-sheet">
+            <div class="sh-grab"><i></i></div>
+            <div class="sh-head">
+              <div>
+                <h3>امکانات</h3>
+                <p>همهٔ پنل شخصی، در یک نگاه</p>
+              </div>
+              <span class="state"><svg class="ic s"><use href="#i-chev"/></svg>بکشید</span>
+            </div>
+
+            <div class="sh-body">
+              <div class="sh-grp">
+                <p>برنامه<em></em></p>
+                <div class="tiles">
+                  <span class="tile on"><svg class="ic s"><use href="#i-sun"/></svg>امروز</span>
+                  <span class="tile"><svg class="ic s"><use href="#i-cal"/></svg>تقویم</span>
+                  <span class="tile"><svg class="ic s"><use href="#i-check"/></svg>کارها<span class="tail"><span class="tagm">۴</span></span></span>
+                  <span class="tile"><svg class="ic s"><use href="#i-grid"/></svg>ماتریس</span>
+                </div>
+              </div>
+
+              <div class="sh-grp">
+                <p>تمرکز و رشد<em></em></p>
+                <div class="tiles">
+                  <span class="tile"><svg class="ic s"><use href="#i-timer"/></svg>تمرکز</span>
+                  <span class="tile"><svg class="ic s"><use href="#i-flame"/></svg>عادت‌ها</span>
+                  <span class="tile"><svg class="ic s"><use href="#i-target"/></svg>هدف‌ها</span>
+                </div>
+              </div>
+
+              <div class="sh-grp">
+                <p>پیگیری<em></em></p>
+                <div class="tiles">
+                  <span class="tile"><svg class="ic s"><use href="#i-note"/></svg>یادداشت‌ها</span>
+                  <span class="tile"><svg class="ic s"><use href="#i-file"/></svg>برنامه‌ها</span>
+                  <span class="tile"><svg class="ic s"><use href="#i-bars"/></svg>بینش‌ها</span>
+                  <span class="tile violet"><svg class="ic s"><use href="#i-spark"/></svg>مربی AI</span>
+                </div>
+              </div>
+
+              <div class="sh-grp">
+                <p>پنل‌ها · فضای کاری<em></em></p>
+                <div class="tiles">
+                  <span class="tile ws"><svg class="ic s"><use href="#i-book"/></svg>دانشجو</span>
+                  <span class="tile ws"><svg class="ic s"><use href="#i-heart"/></svg>والدین</span>
+                  <span class="tile ws wide"><svg class="ic s"><use href="#i-layout"/></svg>همهٔ پنل‌ها<span class="tail"><svg class="ic s"><use href="#i-chev"/></svg></span></span>
+                </div>
+              </div>
+
+            </div>
+
+            <div class="sh-foot">
+              <p>سیستم و ابزارها<em></em></p>
+              <div class="frow">
+                <span class="fitem"><svg class="ic s"><use href="#i-bell"/></svg>اعلان‌ها<span class="tail"><span class="tagm wine">۲</span></span></span>
+                <span class="fitem"><svg class="ic s"><use href="#i-sliders"/></svg>تنظیمات</span>
+                <span class="fitem"><svg class="ic s"><use href="#i-refresh"/></svg>مرور هفتگی</span>
+                <span class="fitem"><svg class="ic s"><use href="#i-help"/></svg>راهنما</span>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- persistent bottom navigation -->
+          <nav class="ph-tabbar">
+            <span class="tab on"><svg class="ic l"><use href="#i-sun"/></svg>امروز<span class="ind"></span></span>
+            <span class="tab"><svg class="ic l"><use href="#i-check"/></svg>کارها</span>
+            <span class="tab"><svg class="ic l"><use href="#i-cal"/></svg>تقویم</span>
+            <span class="tab"><svg class="ic l"><use href="#i-timer"/></svg>تمرکز</span>
+            <span class="tab"><svg class="ic l"><use href="#i-dots"/></svg>بیشتر</span>
+          </nav>
+        </div>
+      </div>
+
+      <div class="mini">
+        <figure>
+          <div class="frame"><div class="scr"></div><div class="sheet" style="height:20px"><div class="grab"></div></div><div class="tb"></div></div>
+          <figcaption>بسته</figcaption>
+        </figure>
+        <figure>
+          <div class="frame"><div class="scr"></div><div class="sheet" style="height:58px"><div class="grab"></div></div><div class="tb"></div></div>
+          <figcaption>نیمه‌باز</figcaption>
+        </figure>
+        <figure>
+          <div class="frame"><div class="scr"></div><div class="sheet" style="height:96px"><div class="grab"></div></div><div class="tb"></div></div>
+          <figcaption>کامل</figcaption>
+        </figure>
+      </div>
+
+      <div class="dv-notes">
+        <span>نوار پایین ۵ موردی · هدف‌های پرکاربرد</span>
+        <span>«بیشتر» ⇒ شیت کشیدنی ۷۹٪ (بسته ۱۸٪ · نیمه‌باز ۴۸٪)</span>
+        <span>هر ۱۹ مقصد داخل شیت — بدون اسکرول</span>
+        <span>حساب کاربری در سربرگ صفحه، مثل بقیهٔ اپ‌های موبایل</span>
+        <span>کاشی‌ها ≈۴۳px واقعی · هدف لمسی درست</span>
+      </div>
+    </section>
+
+  </div>
+  </div>
+
+  <!-- ======================= BOTTOM BAND ======================= -->
+  <section class="band">
+
+    <div class="panel">
+      <h3><svg class="ic"><use href="#i-layers"/></svg>معماری ناوبری واکنش‌گرا</h3>
+      <p class="sub">ساختار اطلاعاتی یکسان — سه نمایش.</p>
+      <ul class="tree">
+        <li>
+          <span class="nd"><span class="dm root"></span><b>پنل شخصی</b><small>Personal Panel</small></span>
+          <ul>
+            <li><span class="nd"><span class="dm"></span><b>برنامه</b></span>
+              <ul>
+                <li><span class="nd"><span class="dm g"></span>امروز</span></li>
+                <li><span class="nd"><span class="dm g"></span>تقویم</span></li>
+                <li><span class="nd"><span class="dm g"></span>کارها</span></li>
+                <li><span class="nd"><span class="dm g"></span>ماتریس</span></li>
+              </ul>
+            </li>
+            <li><span class="nd"><span class="dm f"></span><b>تمرکز</b></span>
+              <ul><li><span class="nd"><span class="dm g"></span>تمرکز</span></li></ul>
+            </li>
+            <li><span class="nd"><span class="dm"></span><b>رشد</b></span>
+              <ul>
+                <li><span class="nd"><span class="dm g"></span>عادت‌ها</span></li>
+                <li><span class="nd"><span class="dm g"></span>هدف‌ها</span></li>
+              </ul>
+            </li>
+            <li><span class="nd"><span class="dm t"></span><b>پیگیری</b></span>
+              <ul>
+                <li><span class="nd"><span class="dm g"></span>یادداشت‌ها</span></li>
+                <li><span class="nd"><span class="dm g"></span>برنامه‌ها</span></li>
+                <li><span class="nd"><span class="dm g"></span>بینش‌ها</span></li>
+                <li><span class="nd"><span class="dm g"></span>مربی هوش مصنوعی</span></li>
+              </ul>
+            </li>
+            <li><span class="nd"><span class="dm p"></span><b>پنل‌ها</b><small>فضای کاری جدا</small></span>
+              <ul>
+                <li><span class="nd"><span class="dm g"></span>دانشجو</span></li>
+                <li><span class="nd"><span class="dm g"></span>والدین</span></li>
+                <li><span class="nd"><span class="dm g"></span>همهٔ پنل‌ها</span></li>
+              </ul>
+            </li>
+            <li><span class="nd"><span class="dm s"></span><b>سیستم</b></span>
+              <ul>
+                <li><span class="nd"><span class="dm g"></span>اعلان‌ها</span></li>
+                <li><span class="nd"><span class="dm g"></span>تنظیمات</span></li>
+                <li><span class="nd"><span class="dm g"></span>راهنما</span></li>
+                <li><span class="nd"><span class="dm g"></span>حساب کاربری</span></li>
+                <li><span class="nd"><span class="dm g"></span>مرور هفتگی <span class="pill">ابزار</span></span></li>
+              </ul>
+            </li>
+          </ul>
+        </li>
+      </ul>
+      <p class="leaf-note"><b>یادداشت:</b> «مرور هفتگی» در ساختار درخواستی جای مشخصی نداشت؛ چون ابزاری هفتگی و فرابخشی است، در خوشهٔ <b>سیستم</b> قرار گرفت تا از هر سه اندازه با فاصلهٔ یک لمس در دسترس باشد و گروه‌های چهارگانهٔ پیگیری دست‌نخورده بمانند.</p>
+    </div>
+
+    <div class="panel">
+      <h3><svg class="ic"><use href="#i-check"/></svg>پوشش کامل مقصدها در هر سه اندازه</h3>
+      <p class="sub">هیچ مقصدی حذف نشده است؛ ستون آخر می‌گوید در موبایل از کجا باز می‌شود. ردیف آخر افزودنی است: جست‌وجو/افزودن سریع، نه یک صفحه.</p>
+      <div class="mx">
+        <table class="cover">
+          <thead><tr><th>مقصد</th><th class="c">دسکتاپ</th><th class="c">تبلت</th><th class="c">موبایل</th><th>مسیر موبایل</th></tr></thead>
+          <tbody>
+            <tr><td class="n">امروز</td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="r">نوار پایین</td></tr>
+            <tr><td class="n">تقویم</td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="r">نوار پایین</td></tr>
+            <tr><td class="n">کارها</td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="r">نوار پایین</td></tr>
+            <tr><td class="n">ماتریس</td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="r">شیت › برنامه</td></tr>
+            <tr><td class="n">تمرکز</td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="r">نوار پایین</td></tr>
+            <tr><td class="n">عادت‌ها</td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="r">شیت › تمرکز و رشد</td></tr>
+            <tr><td class="n">هدف‌ها</td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="r">شیت › تمرکز و رشد</td></tr>
+            <tr><td class="n">یادداشت‌ها</td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="r">شیت › پیگیری</td></tr>
+            <tr><td class="n">برنامه‌ها</td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="r">شیت › پیگیری</td></tr>
+            <tr><td class="n">بینش‌ها</td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="r">شیت › پیگیری</td></tr>
+          </tbody>
+        </table>
+        <table class="cover">
+          <thead><tr><th>مقصد</th><th class="c">دسکتاپ</th><th class="c">تبلت</th><th class="c">موبایل</th><th>مسیر موبایل</th></tr></thead>
+          <tbody>
+            <tr><td class="n">مربی هوش مصنوعی</td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="r">شیت › پیگیری</td></tr>
+            <tr><td class="n">پنل دانشجو</td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="r">شیت › پنل‌ها</td></tr>
+            <tr><td class="n">پنل والدین</td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="r">شیت › پنل‌ها</td></tr>
+            <tr><td class="n">همهٔ پنل‌ها</td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="r">شیت › پنل‌ها</td></tr>
+            <tr><td class="n">مرور هفتگی</td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="r">شیت › ابزارها</td></tr>
+            <tr><td class="n">اعلان‌ها</td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="r">شیت › ابزارها</td></tr>
+            <tr><td class="n">تنظیمات</td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="r">شیت › ابزارها</td></tr>
+            <tr><td class="n">راهنما</td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="r">شیت › ابزارها</td></tr>
+            <tr><td class="n">حساب کاربری</td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="r">سربرگ › آواتار</td></tr>
+            <tr><td class="n">جست‌وجو / افزودن سریع</td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="c"><svg class="ic"><use href="#i-check"/></svg></td><td class="r">نوار پایین + شیت</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3><svg class="ic"><use href="#i-spark"/></svg>زبان بصری و توکن‌ها</h3>
+      <p class="sub">برگرفته از هویت فعلی محصول — فقط تم تیره.</p>
+      <div class="sw">
+        <div><i style="background:#171410"></i>#171410</div>
+        <div><i style="background:#1f1b15"></i>#1f1b15</div>
+        <div><i style="background:#2a2420"></i>#2a2420</div>
+        <div><i style="background:#7dab8c"></i>#7dab8c</div>
+        <div><i style="background:#a496d2"></i>#a496d2</div>
+        <div><i style="background:#c1838f"></i>#c1838f</div>
+        <div><i style="background:#d3a06e"></i>#d3a06e</div>
+        <div><i style="background:#ece5d6"></i>#ece5d6</div>
+      </div>
+      <div class="kv"><span>پس‌زمینه / سطح / بژ فضای کاری</span><code>#171410 · #1f1b15 · #2a2420</code></div>
+      <div class="kv"><span>اکسنت اصلی (ساژ)</span><code>#7dab8c</code></div>
+      <div class="kv"><span>هوش مصنوعی (بنفش نرم)</span><code>#a496d2</code></div>
+      <div class="kv"><span>زرشکی — فقط هشدار و موعد</span><code>#c1838f</code></div>
+      <div class="kv"><span>گردی گوشه</span><code>22 · 16 · 12 · 9</code></div>
+      <div class="kv"><span>اندازهٔ آیکون / ضخامت خط</span><code>14–18px · 1.7</code></div>
+      <ul class="principles">
+        <li><svg class="ic s"><use href="#i-check"/></svg>یک ساختار اطلاعاتی در هر سه اندازه؛ فقط الگوی نمایش عوض می‌شود.</li>
+        <li><svg class="ic s"><use href="#i-check"/></svg>پرکاربردترین‌ها یک لمس فاصله دارند: امروز، کارها، تقویم، تمرکز.</li>
+        <li><svg class="ic s"><use href="#i-check"/></svg>پنل‌ها هرگز با مقصدهای بهره‌وری قاطی نمی‌شوند: سطح بژ + برچسب «فضای کاری».</li>
+        <li><svg class="ic s"><use href="#i-check"/></svg>هوش مصنوعی همیشه بنفش، اکشن اصلی همیشه ساژ، زرشکی فقط برای هشدار.</li>
+        <li><svg class="ic s"><use href="#i-check"/></svg>هیچ منوی همبرگری تنها؛ همواره یک ناوبری پایدار و قابل‌دیدن روی صفحه هست.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="band band2">
+    <div class="panel">
+      <h3><svg class="ic"><use href="#i-chev"/></svg>قواعد رفتار ناوبری</h3>
+      <p class="sub">همان ساختار، سه نمایش — رفتار در هر اندازه یکی است تا کاربر هیچ‌وقت «جایش» را گم نکند.</p>
+      <ul class="rules">
+        <li><span class="n">۱</span><span><b>نشانگر جاری همیشه دیده می‌شود:</b> دسکتاپ ردیف روشن در سایدبار · تبلت نشانگر کنار ریل + آیتم فعال داخل پنل · موبایل تب فعال + کاشی روشن در شیت.</span></li>
+        <li><span class="n">۲</span><span><b>لایهٔ ناوبری جای کاربر را عوض نمی‌کند:</b> انتخاب یک برگ، لایه را می‌بندد (موبایل) یا پنل را باز نگه می‌دارد (تبلت)؛ محتوا در همان مقصد می‌ماند.</span></li>
+        <li><span class="n">۳</span><span><b>Esc یا کلیک بیرون = بستن لایه</b>، نه خروج از صفحه؛ دکمهٔ برگشت مرورگر به مقصد قبلی برمی‌گردد.</span></li>
+        <li><span class="n">۴</span><span><b>«امروز» هرگز پنهان نمی‌شود</b> — در تنظیمات ناوبری قفل است، حتی اگر همهٔ صفحه‌های دیگر خاموش شوند.</span></li>
+        <li><span class="n">۵</span><span><b>هویت کاربر همیشه یک لمس فاصله دارد:</b> پایین سایدبار در دسکتاپ، آواتار بالای ریل در تبلت، آواتار سربرگ در موبایل.</span></li>
+        <li><span class="n">۶</span><span><b>پنل‌ها پیش‌فرض خاموش‌اند</b> و وقتی روشن می‌شوند همیشه روی سطح بژ و با برچسب «فضای کاری» ظاهر می‌شوند — نه داخل گروه‌های بهره‌وری.</span></li>
+        <li><span class="n">۷</span><span><b>تغییر اندازهٔ پنجره یا چرخش دستگاه</b> فقط الگو را عوض می‌کند (سایدبار ↔ ریل ↔ شیت)؛ مسیر و اسکرول همان می‌ماند.</span></li>
+        <li><span class="n">۸</span><span><b>جست‌وجو/افزودن سریع در همهٔ اندازه‌ها یک لمس فاصله دارد:</b> <code>⌘K</code> در دسکتاپ، آیکون بالای ریل در تبلت، نوار پایین + شیت در موبایل.</span></li>
+      </ul>
+    </div>
+
+    <div class="panel">
+      <h3><svg class="ic"><use href="#i-user"/></svg>دسترسی‌پذیری و لمس</h3>
+      <p class="sub">همهٔ ۱۹ مقصد با لمس، کیبورد و صفحه‌خوان قابل رسیدن‌اند؛ اندازه‌ها از روی ماک محاسبه شده‌اند.</p>
+      <div class="kv"><span>هدف لمسی</span><b>کاشی شیت ≈۴۳px · تب‌ها ≥۴۴px · ردیف ریل ۴۰px (فاصله ۶px)</b></div>
+      <div class="kv"><span>کنتراست روی سطح <code>#1f1b15</code></span><b>متن <code>13.7:1</code> · ثانویه <code>9.1:1</code> · ساژ <code>6.6:1</code></b></div>
+      <div class="kv"><span>ممنوعیت رنگ کم‌کنتراست</span><b><code>--faint</code> (<code>3.7:1</code>) فقط تزئینی؛ هر متن معنادار با <code>--muted</code> یا روشن‌تر</b></div>
+      <div class="kv"><span>حالت فوکوس</span><b>حلقهٔ ۲px ساژ با offset ۲px · ترتیب فوکوس راست‌به‌چپ · نمونه: ردیف «هدف‌ها»</b></div>
+      <div class="kv"><span>کیبورد</span><b><code>⌘K</code> · <code>N</code> · <code>T</code> · <code>?</code> · <code>⌘Z</code> · <code>⌘⇧Z</code> · <code>Esc</code></b></div>
+      <div class="kv"><span>حرکت</span><b>احترام به <code>prefers-reduced-motion</code> · انیمیشن شیت ۲۲۰ms</b></div>
+      <div class="kv"><span>وضعیت‌ها فقط با رنگ</span><b>هرگز — نشان اعلان عدد دارد، مقصد جاری هم نشانگر دارد هم highlight</b></div>
+      <div class="kv"><span>راست‌به‌چپ</span><b>متن RTL با ارقام فارسی؛ فقط آیکون‌های جهت‌دار (فلش/بازگشت) آینه می‌شوند</b></div>
+    </div>
+  </section>
+
+  <footer class="board-foot">
+    <span><b>برنامه‌ریز</b> · طرح مفهومی ناوبری پنل شخصی · نسخهٔ ۲ — چهارشنبه ۸ مهر ۱۴۰۵</span>
+    <span>۱۹ مقصد · ۵ گروه · ۳ اندازهٔ نمایش · بدون حذف و بدون اسکرول افقی</span>
+    <span>قواعد رفتار + دسترسی‌پذیری + پوشش کامل</span>
+  </footer>
+</div>
+
+<script>
+/* مقیاس‌دهی خودکار بورد تا هر سه دستگاه در یک نگاه جا شوند */
+(function(){
+  var wrap=document.getElementById('stageWrap'), stage=document.getElementById('stage');
+  if(!wrap||!stage) return;
+  function fit(){
+    stage.style.transform='none';
+    var natural=stage.scrollWidth;
+    var avail=wrap.clientWidth-6;
+    var s=Math.min(1, Math.max(.5, avail/natural));
+    if(natural<=avail) s=1;
+    stage.style.transform='scale('+s+')';
+    wrap.style.height=Math.round(stage.offsetHeight*s)+'px';
+  }
+  window.addEventListener('resize',fit);
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(fit);
+  window.addEventListener('load',fit);
+  fit();
+})();
+</script>
+</body>
+</html>
