@@ -1719,4 +1719,8 @@ export const fa: Record<string, string> = {
   "Completion: {0} of {1} planned items": "تکمیل: {0} از {1} کار برنامه‌ریزی‌شده",
   "Share a weekly headline with guardians while keeping your reasons private.": "یک عنوان هفتگی با سرپرستان به‌اشتراک بگذارید و دلیل‌هایتان را خصوصی نگه دارید.",
   "See the student’s latest shared headline alongside their weekly totals.": "تازه‌ترین عنوان اشتراکی دانش‌آموز را کنار جمع هفتگی او ببینید.",
+  "Growth": "رشد",
+  "Focus & growth": "تمرکز و رشد",
+  "Panels · separate workspace": "پنل‌ها · فضای کاری جدا",
+  "System & tools": "سیستم و ابزارها",
 };
