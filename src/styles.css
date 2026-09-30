@@ -79,6 +79,111 @@
     overflow: hidden;
   }
 }
+/* ---------- Tablet: 66px icon rail + contextual flyout (design board) ---------- */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .app-shell {
+    display: grid;
+    grid-template-columns: var(--sidebar-rail, 66px) minmax(0, 1fr);
+  }
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    position: sticky;
+    top: 0;
+    height: 100dvh;
+    width: var(--sidebar-rail, 66px);
+    padding: 18px 8px 16px;
+    border-inline-end: 1px solid var(--line);
+    background: color-mix(in srgb, var(--surface) 88%, transparent);
+    backdrop-filter: blur(12px);
+    overflow: hidden;
+    align-items: center;
+    z-index: 20;
+  }
+  .sidebar .brand {
+    padding: 0 0 12px;
+    justify-content: center;
+  }
+  .sidebar .brand-text,
+  .sidebar .side-search span,
+  .sidebar .side-search .kbd,
+  .sidebar .nav-label,
+  .sidebar .nav-text,
+  .sidebar .side-tool span,
+  .sidebar .side-note,
+  .sidebar .side-account .account-meta,
+  .sidebar .side-account .side-signout span {
+    display: none;
+  }
+  .sidebar .side-search {
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+    justify-content: center;
+    padding: 0;
+    border-radius: 12px;
+  }
+  .sidebar .nav-link,
+  .sidebar .side-tool {
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+    justify-content: center;
+    padding: 0;
+    border-radius: 12px;
+  }
+  .sidebar .side-nav {
+    align-items: center;
+    gap: 4px;
+  }
+  .sidebar .side-foot {
+    align-items: center;
+    width: 100%;
+  }
+  .sidebar .side-history {
+    justify-content: center;
+    padding: 0 0 6px;
+  }
+  .sidebar .side-account {
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+  /* Flyout for tablet: on hover/focus of nav group, show labels beside rail */
+  .sidebar .nav-link:hover::after,
+  .sidebar .nav-link:focus-visible::after {
+    content: attr(title);
+    position: absolute;
+    inset-inline-start: calc(100% + 10px);
+    top: 50%;
+    transform: translateY(-50%);
+    background: var(--ink);
+    color: var(--bg);
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    white-space: nowrap;
+    z-index: 30;
+    pointer-events: none;
+    box-shadow: var(--shadow-lift);
+  }
+  /* Content stays visible behind scrim when flyout open */
+  .sidebar::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    inset-inline-start: var(--sidebar-rail, 66px);
+    background: rgba(0,0,0,0.12);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.22s var(--ease);
+  }
+  .sidebar:has(.nav-link:hover)::after,
+  .sidebar:has(.nav-link:focus-visible)::after {
+    opacity: 1;
+  }
+}
 .brand {
   display: flex;
   align-items: center;
@@ -4404,4 +4509,403 @@ body {
   font-size: 12.5px;
   color: var(--muted);
   text-align: end;
+}
+
+/* ============================================================
+   Design board implementation — responsive navigation for all devices
+   Desktop: full labelled sidebar, all destinations visible without scrolling
+   Tablet: 66px icon rail + contextual flyout + scrim
+   Mobile: 4-item bottom bar + More sheet (79%)
+   Website + app both fit device from 320px to ultrawide
+   ============================================================ */
+
+/* ---------- Desktop: compact, no-scroll sidebar (all destinations visible) ---------- */
+@media (min-width: 1024px) {
+  .side-nav-desktop {
+    display: flex !important;
+  }
+  .side-nav-rail {
+    display: none !important;
+  }
+  .sidebar {
+    gap: 4px;
+    padding: 16px 12px 12px;
+  }
+  .sidebar .brand {
+    padding: 6px 10px 12px;
+  }
+  .side-nav {
+    gap: 1px;
+  }
+  .nav-label {
+    margin: 10px 10px 4px;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+  }
+  .nav-link {
+    min-height: 32px;
+    height: 32px;
+    font-size: 13px;
+    padding: 0 10px;
+    gap: 9px;
+    border-radius: 10px;
+  }
+  .side-tool {
+    min-height: 34px;
+    height: 34px;
+    font-size: 13px;
+  }
+  .side-foot {
+    gap: 1px;
+    padding-top: 10px;
+  }
+  .side-note {
+    font-size: 11px;
+    padding: 4px 10px 0;
+  }
+  /* Panels on separate beige workspace surface */
+  .nav-label:last-of-type,
+  .side-nav-desktop .nav-label:nth-last-of-type(1) {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+  }
+  .side-nav-desktop .nav-label:nth-last-of-type(1) + .nav-link,
+  .side-nav-desktop .nav-label:nth-last-of-type(1) ~ .nav-link {
+    background: color-mix(in srgb, var(--cat-peach) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--cat-peach) 18%, transparent);
+  }
+}
+
+/* ---------- Tablet rail + flyout ---------- */
+.side-nav-rail {
+  display: none;
+}
+.tablet-flyout,
+.tablet-scrim {
+  display: none;
+}
+@media (min-width: 768px) and (max-width: 1023px) {
+  .side-nav-desktop {
+    display: none !important;
+  }
+  .side-nav-rail {
+    display: flex !important;
+    flex-direction: column;
+    gap: 12px;
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+  }
+  .rail-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    align-items: center;
+  }
+  .rail-btn {
+    position: relative;
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--ink-soft);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    font-size: 9px;
+    font-weight: 600;
+    transition: background 0.18s var(--ease), color 0.18s var(--ease), border-color 0.18s var(--ease), transform 0.18s var(--ease);
+    unicode-bidi:isolate;
+  }
+  .rail-btn .rail-cat {
+    font-style: normal;
+    font-size: 8.5px;
+    line-height: 1;
+    letter-spacing: 0.02em;
+    color: var(--muted);
+  }
+  .rail-btn:hover {
+    background: var(--surface-2);
+    color: var(--ink);
+    transform: translateY(-1px);
+  }
+  .rail-btn.on {
+    background: var(--accent-soft);
+    border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+    color: var(--accent-deep);
+  }
+  .rail-btn.active {
+    background: var(--accent-soft);
+    color: var(--accent-deep);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+  .rail-btn.active::before {
+    content: "";
+    position: absolute;
+    inset-inline-start: -8px;
+    top: 8px;
+    bottom: 8px;
+    width: 3px;
+    border-radius: 3px;
+    background: var(--accent);
+  }
+  [dir=\"rtl\"] .rail-btn.active::before {
+    inset-inline-start: auto;
+    inset-inline-end: -8px;
+  }
+  .rail-foot {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+    align-items: center;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+  }
+  .tablet-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    inset-inline-start: var(--sidebar-rail, 66px);
+    background: rgba(23, 20, 16, 0.18);
+    backdrop-filter: blur(2px);
+    z-index: 25;
+    animation: fade 0.22s var(--ease);
+  }
+  [data-theme=\"dark\"] .tablet-scrim {
+    background: rgba(0,0,0,0.32);
+  }
+  .tablet-flyout {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    position: fixed;
+    top: 0;
+    inset-inline-start: var(--sidebar-rail, 66px);
+    width: 240px;
+    height: 100dvh;
+    padding: 18px 14px 18px;
+    background: var(--surface);
+    border-inline-end: 1px solid var(--line);
+    box-shadow: var(--shadow-lift);
+    z-index: 26;
+    animation: flyout-in 0.28s var(--ease);
+    overflow-y: auto;
+  }
+  @keyframes flyout-in {
+    from { transform: translateX(-12px); opacity: 0; }
+    to { transform: none; opacity: 1; }
+  }
+  [dir=\"rtl\"] .tablet-flyout {
+    animation-name: flyout-in-rtl;
+  }
+  @keyframes flyout-in-rtl {
+    from { transform: translateX(12px); opacity: 0; }
+    to { transform: none; opacity: 1; }
+  }
+  .tablet-flyout-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 2px 4px 12px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 6px;
+  }
+  .tablet-flyout-head strong {
+    font-size: 15px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+  }
+  .tablet-flyout-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-height: 0;
+  }
+  .tablet-flyout-body .nav-link {
+    min-height: 40px;
+    height: auto;
+    padding: 8px 12px;
+  }
+}
+
+/* ---------- Mobile: 4-item bottom bar + More sheet (79%) ---------- */
+@media (max-width: 767px) {
+  .side-nav-desktop,
+  .side-nav-rail,
+  .tablet-flyout,
+  .tablet-scrim {
+    display: none !important;
+  }
+  .tabbar {
+    display: flex;
+    justify-content: space-around;
+    gap: 2px;
+    padding: 6px 8px calc(8px + env(safe-area-inset-bottom));
+    height: auto;
+    min-height: var(--tab-bar-height, 66px);
+  }
+  .tab {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: 80px;
+    min-height: 48px;
+    height: 48px;
+    padding: 4px 2px;
+    gap: 3px;
+    font-size: 10px;
+    line-height: 1.1;
+    border-radius: 12px;
+    unicode-bidi:isolate;
+  }
+  .tab-icon {
+    width: 22px;
+    height: 22px;
+  }
+  .tab-add {
+    flex: 0 0 56px;
+    max-width: 56px;
+  }
+  .tab-add-puck {
+    width: 44px;
+    height: 44px;
+    margin-top: -18px;
+  }
+  /* More sheet at 79% height, draggable */
+  .sheet {
+    max-height: 79dvh;
+    max-height: 79vh;
+    border-radius: 20px 20px 0 0;
+  }
+  .sheet-handle {
+    width: 36px;
+    height: 4px;
+    background: var(--line-strong);
+    border-radius: 999px;
+    margin: 8px auto 12px;
+    cursor: grab;
+  }
+  .more-list .more-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .more-list .more-tile {
+    min-height: 68px;
+    height: auto;
+    padding: 10px 6px;
+    font-size: 11.5px;
+    gap: 6px;
+    unicode-bidi:isolate;
+  }
+  .more-list .more-tile svg {
+    width: 20px;
+    height: 20px;
+  }
+  /* Ensure content visible behind More sheet */
+  .app-shell:has(.modal-overlay) .content {
+    filter: blur(0px);
+    opacity: 0.92;
+  }
+}
+
+/* ---------- Ultra-small: 320px floor ---------- */
+@media (max-width: 380px) {
+  .tabbar {
+    padding: 4px 4px calc(6px + env(safe-area-inset-bottom));
+    gap: 1px;
+  }
+  .tab {
+    font-size: 9px;
+    min-height: 44px;
+    height: 44px;
+    padding: 3px 1px;
+  }
+  .tab-icon svg {
+    width: 18px;
+    height: 18px;
+  }
+  .tab-add {
+    flex: 0 0 48px;
+    max-width: 48px;
+  }
+  .tab-add-puck {
+    width: 40px;
+    height: 40px;
+    margin-top: -14px;
+  }
+  .more-list .more-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .content {
+    width: min(100% - 20px, var(--content));
+  }
+}
+
+/* ---------- Bidi isolation fix for app (Chromium verified) ---------- */
+:where(.nav-text, .brand-text, .side-tool span, .tab, .more-tile span, .hub-tile, .chip, .kbd, .badge, .account-name, .account-sub){
+  unicode-bidi:isolate;
+}
+:where(.clock, .sync-code, .sync-dot, .kbd, .badge, .chip, .account-sub){
+  direction:ltr;
+  unicode-bidi:isolate;
+}
+
+/* ---------- Website + app both fit device ---------- */
+.app-shell, .workspace, .content, .view, .card, .hero, .page-head {
+  min-width: 0;
+  max-width: 100%;
+}
+img, video, canvas, svg {
+  max-width: 100%;
+}
+/* Prevent horizontal scroll from long Persian labels or URLs */
+:where(.item-title, .habit-name strong, .goal-head h3, .note-card h2, .view-title, .page-head h1){
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+/* Ensure buttons and tiles don't force overflow */
+:where(.btn, .filter, .seg, .chip, .more-tile, .hub-tile, .qa-tile){
+  max-width: 100%;
+  min-width: 0;
+  white-space: normal;
+  text-align: center;
+  line-height: 1.25;
+}
+/* Tile height explicit 35px where needed (design board) */
+:where(.more-tile){
+  height: var(--tile-height, 35px);
+  min-height: 68px; /* but grows for accessibility */
+}
+:where(.hub-tile){
+  min-height: 72px;
+}
+
+/* ---------- Safe-area for all devices ---------- */
+.app-shell, .workspace, .content, .mobile-bar, .tabbar, .sheet {
+  padding-left: max(0px, env(safe-area-inset-left));
+  padding-right: max(0px, env(safe-area-inset-right));
+}
+.mobile-bar {
+  padding-top: max(10px, env(safe-area-inset-top));
+}
+.tabbar {
+  padding-bottom: max(6px, env(safe-area-inset-bottom));
+}
+
+/* ---------- Reduced motion: keep layout, drop animation ---------- */
+@media (prefers-reduced-motion: reduce){
+  .tablet-flyout, .tablet-scrim, .tab-add-puck, .more-tile, .hub-tile, .nav-link, .rail-btn {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+  }
 }

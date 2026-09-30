@@ -663,6 +663,52 @@
   }
 }
 
+/* ---------- Device fit — website + app unified ---------- */
+/* Ensure marketing site fits every device from 320px to ultrawide */
+.mkt, .mkt-main, .mkt .wrap {
+  min-width: 0;
+  max-width: 100%;
+}
+.mkt img, .mkt video, .mkt svg {
+  max-width: 100%;
+  height: auto;
+}
+/* Bidi isolation for marketing site — same fix as app */
+.mkt :where(.brand-name, .nav-links button, .btn, .kicker, .pill, .hero-title, .hero-sub, .step h3, .role h3, .link-rail h3){
+  unicode-bidi:isolate;
+}
+.mkt [dir=\"rtl\"] :where(.kbd, .pill, .badge){
+  unicode-bidi:isolate;
+  direction:ltr;
+}
+/* Tile height consistency for marketing tiles */
+.mkt :where(.step, .role, .chart, .offline-card){
+  min-height: 0;
+}
+/* 320px floor: tighten gutters */
+@media (max-width: 380px){
+  .mkt .wrap { padding: 0 16px; }
+  .mkt .hero { padding: 48px 0 32px; }
+  .mkt .hero-title { font-size: clamp(28px, 9vw, 36px); }
+  .mkt .section { padding: 40px 0; }
+  .mkt .foot-grid { gap: 18px; }
+}
+/* Tablet: 768-1023 — hero and sections use rail-aware padding */
+@media (min-width: 768px) and (max-width: 1023px){
+  .mkt .wrap { max-width: 94%; }
+  .mkt .hero-inner { max-width: 640px; }
+  .mkt .split { gap: 28px; }
+}
+/* Safe-area for notched devices */
+.mkt .nav, .mkt .foot, .mkt .cta {
+  padding-left: max(0px, env(safe-area-inset-left));
+  padding-right: max(0px, env(safe-area-inset-right));
+}
+.mkt .nav-inner, .mkt .wrap {
+  padding-left: max(20px, env(safe-area-inset-left));
+  padding-right: max(20px, env(safe-area-inset-right));
+}
+
 /* ---------- Print ---------- */
 @media print {
   .mkt .nav,

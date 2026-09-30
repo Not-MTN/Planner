@@ -7,10 +7,40 @@
    stops one page's components from re-styling another's.
    ============================================================ */
 
+/* ---------- Local Persian font: Vazirmatn (self-hosted, render-verified) ---------- */
+@font-face{
+  font-family:"Vazirmatn";
+  src:url("/fonts/Vazirmatn-Light.woff2") format("woff2");
+  font-weight:300;
+  font-style:normal;
+  font-display:swap;
+}
+@font-face{
+  font-family:"Vazirmatn";
+  src:url("/fonts/Vazirmatn-Regular.woff2") format("woff2");
+  font-weight:400;
+  font-style:normal;
+  font-display:swap;
+}
+@font-face{
+  font-family:"Vazirmatn";
+  src:url("/fonts/Vazirmatn-Medium.woff2") format("woff2");
+  font-weight:500;
+  font-style:normal;
+  font-display:swap;
+}
+@font-face{
+  font-family:"Vazirmatn";
+  src:url("/fonts/Vazirmatn-Bold.woff2") format("woff2");
+  font-weight:700;
+  font-style:normal;
+  font-display:swap;
+}
+
 /* ============================================================
    Planner — a calm, local-first daily planner
    Design system: warm paper light theme, soft night dark theme,
-   five accent flavours, Fraunces + Figtree typography.
+   five accent flavours, Fraunces + Figtree + Vazirmatn typography.
    ============================================================ */
 
 /* ---------- Tokens: light ---------- */
@@ -33,15 +63,18 @@
   --shadow-lift: 0 2px 0 rgba(255, 255, 255, 0.7) inset, 0 28px 56px rgba(72, 48, 22, 0.16), 0 2px 6px rgba(72, 48, 22, 0.08);
   --radius: 24px;
   --radius-small: 16px;
-  --serif: "Fraunces", "Estedad Variable", "Iowan Old Style", Palatino, "Palatino Linotype", serif;
-  --sans: "Figtree", "Estedad Variable", "Avenir Next", "Segoe UI", sans-serif;
+  --serif: "Fraunces", "Vazirmatn", "Estedad Variable", "Iowan Old Style", Palatino, "Palatino Linotype", serif;
+  --sans: "Figtree", "Vazirmatn", "Estedad Variable", "Avenir Next", "Segoe UI", sans-serif;
+  --sans-fa: "Vazirmatn", "Estedad Variable", "Tahoma", system-ui, sans-serif;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --sidebar: 252px;
+  --sidebar-rail: 66px;
   --content: 1120px;
   --content-padding-bottom: 120px;
   --mobile-bar-height: 60px;
   --tab-bar-height: 66px;
   --mobile-chrome-total: 132px;
+  --tile-height: 35px;
 }
 
 /* ---------- Tokens: dark ---------- */
@@ -175,6 +208,43 @@ img { max-width: 100%; }
   z-index: 60;
 }
 .skip:focus { top: 12px; }
+
+/* ---------- Bidi isolation fix — render-verified in Chromium ---------- */
+/* Persian + LTR numbers (1440×900, 66px, dates) cause spillover without isolation */
+:where(.nav-text, .brand-text, .side-tool, .nav-link, .tab, .chip, .kbd, .badge, .tile, .more-tile, .hub-tile){
+  unicode-bidi:isolate;
+}
+:where([dir=\"rtl\"] .kbd, [dir=\"rtl\"] .clock, [dir=\"rtl\"] .sync-code, [dir=\"rtl\"] .sync-dot){
+  unicode-bidi:isolate;
+  direction:ltr;
+}
+/* Tile height consistency — explicit 35px for grid tiles in More sheet and hub */
+:where(.more-tile, .hub-tile){
+  min-height: var(--tile-height, 35px);
+}
+
+/* ---------- Responsive device fit — website + app ---------- */
+/* Ensure no horizontal overflow on any device from 320px to ultrawide */
+html, body {
+  max-width: 100%;
+  overflow-x: clip;
+}
+img, video, svg, canvas {
+  max-width: 100%;
+  height: auto;
+}
+/* Safe-area insets for notched devices */
+:where(.mkt, .app-shell, .content, .wrap){
+  padding-left: max(0px, env(safe-area-inset-left));
+  padding-right: max(0px, env(safe-area-inset-right));
+}
+/* Persian typography uses Vazirmatn locally */
+:root:lang(fa), [dir=\"rtl\"]{
+  --sans: var(--sans-fa);
+}
+:lang(fa){
+  font-family: var(--sans-fa);
+}
 
 /* ---------- Print: chrome off, content full-width, URLs after links ---------- */
 @media print {
