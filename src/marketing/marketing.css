@@ -376,6 +376,28 @@
   text-align: center;
 }
 
+/* On phones the hero sits under the nav — start-aligned instead of
+   centered. `start` follows the document direction, so Persian (RTL)
+   aligns right without a second rule. */
+@media (max-width: 1023px) {
+  .hero-inner {
+    text-align: start;
+  }
+
+  .hero-actions {
+    justify-content: flex-start;
+  }
+}
+
+/* Persian (RTL): the hero reads from the right on every width. */
+[dir="rtl"] .hero-inner {
+  text-align: start;
+}
+
+[dir="rtl"] .hero-actions {
+  justify-content: flex-start;
+}
+
 .hero-title {
   font-size: clamp(2.5rem, 6.4vw, 4.4rem);
   line-height: 1.04;
@@ -2194,9 +2216,10 @@
 }
 
 /* ============================================================
-   Responsive
+   Responsive — aligned with the app's 1024px mobile/tablet
+   threshold so the site and the planner switch layouts together.
    ============================================================ */
-@media (max-width: 1000px) {
+@media (max-width: 1024px) {
   .demo {
     grid-template-columns: 1fr;
     gap: 18px;
@@ -2260,7 +2283,7 @@
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
   .nav-burger {
     display: flex;
   }
@@ -2663,6 +2686,15 @@
 /* See the matching block in styles.css: iOS Safari before 16.2 drops these
    declarations, so the new sections get plain colours instead. */
 @supports not (color: color-mix(in srgb, red, blue)) {
+  /* The sticky nav must stay opaque or page content scrolls through it. */
+  .nav {
+    background: var(--bg);
+  }
+
+  .nav.is-scrolled {
+    background: var(--surface);
+  }
+
   .shot {
     border-color: var(--line);
     background: var(--surface);

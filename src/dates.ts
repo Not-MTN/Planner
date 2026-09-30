@@ -1,5 +1,5 @@
 import { MOTIVATION } from './constants';
-import { t } from './i18n';
+import { faDigits, faNum, t } from './i18n';
 
 export function toISODate(date: Date): string {
   const year = date.getFullYear();
@@ -113,7 +113,7 @@ export function addMinutes(time: string, amount: number): string {
 }
 
 export function formatClock(date: Date): string {
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  return faDigits(`${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`);
 }
 
 export function suggestTime(now = new Date()): string {
@@ -126,10 +126,10 @@ export function formatDuration(start: string, end: string | null): string | null
   if (!end || !isValidTime(start) || !isValidTime(end)) return null;
   const minutes = timeToMinutes(end) - timeToMinutes(start);
   if (minutes <= 0) return null;
-  if (minutes < 60) return `${minutes} min`;
+  if (minutes < 60) return t('{0} min', { 0: minutes });
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
-  return rest ? `${hours} h ${rest} min` : `${hours} h`;
+  return rest ? t('{0} h {1} min', { 0: hours, 1: rest }) : t('{0} h', { 0: hours });
 }
 
 export type DayPart = 'Early' | 'Morning' | 'Afternoon' | 'Evening' | 'Night';
@@ -238,7 +238,7 @@ export function formatJalaliLong(iso: string): string | null {
   }
   if (!jalaliFormatter) return null;
   try {
-    return jalaliFormatter.format(parseISODate(iso));
+    return faDigits(jalaliFormatter.format(parseISODate(iso)));
   } catch {
     return null;
   }
@@ -251,20 +251,23 @@ export function getTimeFormat(): TimeFormat {
 /** "14:05" → "14:05" or "2:05 pm", following the user's clock preference. */
 export function displayTime(value: string | null | undefined): string {
   if (!value || !isValidTime(value)) return value ?? '';
-  if (timeFormat === '24h') return value;
+  if (timeFormat === '24h') return faDigits(value);
   const [hours, minutes] = value.split(':').map(Number);
-  const suffix = hours < 12 ? 'am' : 'pm';
+  const suffix = hours < 12 ? t('am') : t('pm');
   const hour = hours % 12 === 0 ? 12 : hours % 12;
-  return minutes === 0 ? `${hour} ${suffix}` : `${hour}:${String(minutes).padStart(2, '0')} ${suffix}`;
+  const label = minutes === 0 ? `${hour} ${suffix}` : `${hour}:${String(minutes).padStart(2, '0')} ${suffix}`;
+  return faDigits(label);
 }
 
-const weekdayLong = { format: (date: Date) => fmt('wl', { weekday: 'long' }).format(date) };
-const weekdayShort = { format: (date: Date) => fmt('ws', { weekday: 'short' }).format(date) };
-const monthLong = { format: (date: Date) => fmt('ml', { month: 'long' }).format(date) };
-const monthShort = { format: (date: Date) => fmt('ms', { month: 'short' }).format(date) };
-const fullDate = { format: (date: Date) => fmt('fd', { weekday: 'long', day: 'numeric', month: 'long' }).format(date) };
-const monthYear = { format: (date: Date) => fmt('my', { month: 'long', year: 'numeric' }).format(date) };
-const editedDate = { format: (date: Date) => fmt('ed', { day: 'numeric', month: 'short' }).format(date) };
+/* Display formatting only: faDigits swaps in Eastern Arabic numerals when the
+   UI language is Persian; every other language is returned untouched. */
+const weekdayLong = { format: (date: Date) => faDigits(fmt('wl', { weekday: 'long' }).format(date)) };
+const weekdayShort = { format: (date: Date) => faDigits(fmt('ws', { weekday: 'short' }).format(date)) };
+const monthLong = { format: (date: Date) => faDigits(fmt('ml', { month: 'long' }).format(date)) };
+const monthShort = { format: (date: Date) => faDigits(fmt('ms', { month: 'short' }).format(date)) };
+const fullDate = { format: (date: Date) => faDigits(fmt('fd', { weekday: 'long', day: 'numeric', month: 'long' }).format(date)) };
+const monthYear = { format: (date: Date) => faDigits(fmt('my', { month: 'long', year: 'numeric' }).format(date)) };
+const editedDate = { format: (date: Date) => faDigits(fmt('ed', { day: 'numeric', month: 'short' }).format(date)) };
 
 export function formatWeekdayLong(iso: string): string {
   return weekdayLong.format(parseISODate(iso));
@@ -301,8 +304,9 @@ export function formatEdited(iso: string): string {
   return editedDate.format(date);
 }
 
-export function dayNumber(iso: string): number {
-  return parseISODate(iso).getDate();
+/** Day of month for display: Persian digits in fa, a plain number in English. */
+export function dayNumber(iso: string): number | string {
+  return faNum(parseISODate(iso).getDate());
 }
 
 export function isWeekend(iso: string): boolean {
@@ -329,14 +333,14 @@ export function formatWeekRange(iso: string): string {
   const startDate = parseISODate(start);
   const endDate = parseISODate(end);
   if (startDate.getMonth() === endDate.getMonth() && startDate.getFullYear() === endDate.getFullYear()) {
-    return `${startDate.getDate()}–${endDate.getDate()} ${formatMonthLong(end)} ${endDate.getFullYear()}`;
+    return faDigits(`${startDate.getDate()}–${endDate.getDate()} ${formatMonthLong(end)} ${endDate.getFullYear()}`);
   }
   const endYear = endDate.getFullYear();
   const startLabel =
     startDate.getFullYear() === endYear
       ? `${startDate.getDate()} ${formatMonthShort(start)}`
       : `${startDate.getDate()} ${formatMonthShort(start)} ${startDate.getFullYear()}`;
-  return `${startLabel} – ${endDate.getDate()} ${formatMonthShort(end)} ${endYear}`;
+  return faDigits(`${startLabel} – ${endDate.getDate()} ${formatMonthShort(end)} ${endYear}`);
 }
 
 export function motivationFor(iso: string): string {

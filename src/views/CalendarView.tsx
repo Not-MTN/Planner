@@ -242,7 +242,7 @@ function WeekBoard({ anchor, today }: { anchor: string; today: string }) {
                         }}
                       >
                         <time>{displayTime(item.startTime)}{item.endTime ? `–${displayTime(item.endTime)}` : ''}</time>
-                        <span>{item.title}</span>
+                        <span dir="auto">{item.title}</span>
                       </button>
                       {!fixed ? <ResizeHandle startTime={item.startTime} endTime={item.endTime} title={item.title} onResize={(end) => resizeEvent(item.id, end)} /> : null}
                       {item.fixedCommitmentId ? <span className="fixed-chip-tag">{t("Fixed")}</span> : item.seriesEventId ? <span className="fixed-chip-tag">{t("Repeats")}</span> : (
@@ -775,8 +775,8 @@ function DayCard({
                 </button>
               )}
               <time>{displayTime(event.startTime)}</time>
-              {event.fixedCommitmentId ? <span className="item-title">{event.title}</span> : (
-                <button type="button" className="item-title" onClick={() => openComposer({ mode: 'edit', type: 'event', id: event.seriesEventId ?? event.id })}>{event.title}</button>
+              {event.fixedCommitmentId ? <span className="item-title" dir="auto">{event.title}</span> : (
+                <button type="button" className="item-title" dir="auto" onClick={() => openComposer({ mode: 'edit', type: 'event', id: event.seriesEventId ?? event.id })}>{event.title}</button>
               )}
               {event.fixedCommitmentId ? <small className="fixed-plan-tag">{t("Fixed")}</small> : event.seriesEventId ? <small className="fixed-plan-tag">{t("Repeats")}</small> : null}
             </li>
@@ -793,19 +793,19 @@ function DayCard({
                 {task.completed ? <TickIcon size={12} /> : null}
               </button>
               <time>{task.dueTime ?? ''}</time>
-              <button type="button" className="item-title" onClick={() => openComposer({ mode: 'edit', type: 'task', id: task.id })}>{task.title}</button>
+              <button type="button" className="item-title" dir="auto" onClick={() => openComposer({ mode: 'edit', type: 'task', id: task.id })}>{task.title}</button>
             </li>
           ))}
           {day.notes.map((note) => (
             <li key={note.id} className="plan-line is-note">
               <span className="plan-kind">{t("Note")}</span>
-              <button type="button" className="item-title" onClick={() => openComposer({ mode: 'edit', type: 'note', id: note.id })}>{note.title}</button>
+              <button type="button" className="item-title" dir="auto" onClick={() => openComposer({ mode: 'edit', type: 'note', id: note.id })}>{note.title}</button>
             </li>
           ))}
           {day.deadlines.map((goal) => (
             <li key={goal.id} className="plan-line is-note">
               <span className="plan-kind">{t("Due")}</span>
-              <button type="button" className="item-title" onClick={onOpen}>{goal.title}</button>
+              <button type="button" className="item-title" dir="auto" onClick={onOpen}>{goal.title}</button>
             </li>
           ))}
         </ul>

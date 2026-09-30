@@ -128,7 +128,7 @@ export function NotesView() {
             const backlinks = noteBacklinks(state.notes, note);
             return (
               <article key={note.id} className={cx('card note-card', `accent-${meta.accent}`, note.kind === 'journal' && 'is-journal', note.pinned && 'is-pinned')}>
-                <div className="note-content">
+                <div className="note-content" dir="auto">
                   <span className={cx('chip-label', `accent-${meta.accent}`)}>{meta.label}</span>
                   <h2>{note.title}</h2>
                   {note.body ? (
