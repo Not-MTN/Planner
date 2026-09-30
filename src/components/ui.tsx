@@ -119,15 +119,17 @@ export function Empty({
   text,
   action,
   image,
+  compact = false,
 }: {
   title: string;
   text: string;
   action?: ReactNode;
   image?: string;
+  compact?: boolean;
 }) {
   return (
-    <div className="empty">
-      {image ? (
+    <div className={cx('empty', compact && 'empty-compact')}>
+      {image && !compact ? (
         <img className="spot" src={image} alt="" loading="lazy" />
       ) : (
         <span className="empty-mark" aria-hidden="true">

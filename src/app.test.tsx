@@ -656,6 +656,10 @@ describe('app smoke', () => {
     const moreBtn = [...document.querySelectorAll('.tabbar .tab')].find((b) => b.textContent?.includes('More')) as HTMLButtonElement;
     expect(moreBtn).toBeTruthy();
     act(() => moreBtn.click());
+    const toolsSummary = document.querySelector<HTMLElement>('.more-tools-summary');
+    expect(toolsSummary).toBeTruthy();
+    act(() => toolsSummary?.click());
+    expect(document.querySelector('.more-tools')?.hasAttribute('open')).toBe(true);
     const whyBtn = [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('Why Planner?')) as HTMLButtonElement;
     expect(whyBtn).toBeTruthy();
     act(() => whyBtn.click());
