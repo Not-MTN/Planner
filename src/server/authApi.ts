@@ -50,6 +50,7 @@ import {
   newToken,
   parseRecoveryWraps,
   safeEqual,
+  type AuthEventKind,
   type AuthStore,
   type LinkRow,
   type UserRow,
@@ -235,6 +236,48 @@ export function deviceLabel(request: Request): string {
   return browser || system || 'Unknown device';
 }
 
+/**
+ * Which network a request came from, as a hash salted with the account id.
+ *
+ * Never the address itself. We only ever need to answer one question — "is
+ * this somewhere this account has been before?" — and a salted hash answers
+ * it without the server holding a list of everywhere anybody has been. Salted
+ * per account, so the same address cannot be matched across two accounts.
+ */
+function clientNetwork(request: Request, userId: string): string | null {
+  const address =
+    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+    request.headers.get('x-real-ip')?.trim() ||
+    '';
+  if (!address) return null;
+  return createHash('sha256').update(`${userId}:${address}`).digest('base64url').slice(0, 22);
+}
+
+/**
+ * Adds a line to the account's history.
+ *
+ * Deliberately swallows its own failures: a history nobody is looking at is
+ * never a good reason to turn somebody away at the door. Sign-in has to keep
+ * working even when this table is unhappy.
+ */
+async function recordEvent(
+  store: AuthStore,
+  request: Request,
+  userId: string,
+  kind: AuthEventKind,
+): Promise<void> {
+  try {
+    await store.recordAuthEvent({
+      userId,
+      kind,
+      deviceLabel: deviceLabel(request),
+      network: clientNetwork(request, userId),
+    });
+  } catch {
+    // See above: the log is a passenger, not the engine.
+  }
+}
+
 function guard(request: Request, bucket: string, limit: number): Response | null {
   if (!isSameOriginRequest(request)) return error(403, 'Cross-origin requests are not allowed.');
   const limited = rateLimitResponse(request, bucket, limit, 60_000);
@@ -301,6 +344,7 @@ export async function handleSignup(request: Request, store: AuthStore | null): P
     const token = newToken();
     const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * DAY_MS);
     await store!.createSession(result.user.id, hashToken(token), deviceLabel(request), expiresAt);
+    await recordEvent(store!, request, result.user.id, 'created');
 
     return json(201, { user: toPublicUser(result.user) }, { 'Set-Cookie': sessionCookie(token, isHttps(request)) });
   } catch {
@@ -417,6 +461,10 @@ export async function handleRecoveryComplete(request: Request, store: AuthStore 
       wrappedRecovery,
     });
     if (!updated) return error(401, 'Wrong username or recovery key.', 'bad_credentials');
+    // Recovery is the loudest line in the log: somebody had the codes and
+    // took the account back. Say so, even if only to the account's owner.
+    const recovered = await store!.findAccount(login);
+    if (recovered) await recordEvent(store!, request, recovered.user.id, 'recovery');
     return json(200, { ok: true });
   } catch {
     return error(502, 'The accounts database could not be reached. Try again shortly.');
@@ -466,6 +514,9 @@ export async function handleRecoveryUpdate(request: Request, store: AuthStore | 
       wrappedRecovery,
     });
     if (!updated) return error(502, 'The accounts database could not be reached. Try again shortly.');
+    // A new password and a fresh set of codes: worth a line someone can find
+    // later, because it is the one line that explains a signed-out device.
+    await recordEvent(store!, request, found.user.id, 'password_changed');
     return json(200, { ok: true });
   } catch {
     return error(502, 'The accounts database could not be reached. Try again shortly.');
@@ -519,6 +570,7 @@ export async function handleLogin(request: Request, store: AuthStore | null): Pr
     const token = newToken();
     const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * DAY_MS);
     await store!.createSession(account.user.id, hashToken(token), deviceLabel(request), expiresAt);
+    await recordEvent(store!, request, account.user.id, 'password');
 
     const payload: LoginResponse = {
       user: toPublicUser(account.user),
@@ -578,6 +630,7 @@ export async function handleTotpLogin(request: Request, store: AuthStore | null)
     const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * DAY_MS);
     await store!.createSession(pending.user.id, hashToken(token), deviceLabel(request), expiresAt);
     await store!.deleteLoginChallenge(hashToken(challenge));
+    await recordEvent(store!, request, pending.user.id, 'password_totp');
 
     // The salt travels again so the client can re-derive the key here the
     // same way it does on an ordinary sign-in.
@@ -664,6 +717,7 @@ export async function handleTotpConfirm(request: Request, store: AuthStore | nul
     const checked = verifyTotp(totp.secret, code);
     if (!checked.ok) return error(401, 'That code is not right, or has already been used. Wait for the next one.', 'bad_credentials');
     await store!.confirmTotp(found.user.id);
+    await recordEvent(store!, request, found.user.id, 'totp_on');
     return json(200, { ok: true });
   } catch {
     return error(502, 'The accounts database could not be reached. Try again shortly.');
@@ -696,6 +750,7 @@ export async function handleTotpDisable(request: Request, store: AuthStore | nul
     const checked = verifyTotp(totp.secret, code);
     if (!checked.ok) return error(401, 'That code is not right, or has already been used. Wait for the next one.', 'bad_credentials');
     await store!.setTotpSecret(found.user.id, null);
+    await recordEvent(store!, request, found.user.id, 'totp_off');
     return json(200, { ok: true });
   } catch {
     return error(502, 'The accounts database could not be reached. Try again shortly.');
@@ -984,6 +1039,7 @@ export async function handlePasskeyLoginVerify(request: Request, store: AuthStor
     const token = newToken();
     const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * DAY_MS);
     await store!.createSession(user.id, hashToken(token), `${deviceLabel(request)} · passkey`.slice(0, 60), expiresAt);
+    await recordEvent(store!, request, user.id, 'passkey');
 
     const payload: PasskeyLoginResponse = {
       user: toPublicUser(user),
@@ -1108,10 +1164,35 @@ export async function handleSessions(request: Request, store: AuthStore | null):
           ? 1
           : 0;
       if (removed === 0) return error(404, 'That session has already ended.', 'not_found');
+      if (all && removed > 0) await recordEvent(store!, request, found.user.id, 'signed_out');
       return json(200, { ok: true, removed });
     }
 
     return error(405, 'Method not allowed.', undefined);
+  } catch {
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
+}
+
+/**
+ * The account's own history, newest first.
+ *
+ * Nothing here is needed to authenticate anybody — it exists so the owner can
+ * glance at it and notice the line that is not theirs.
+ */
+export async function handleAuthEvents(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'auth-events', 60) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'GET' && request.method !== 'HEAD') return error(405, 'Method not allowed.', undefined);
+
+  const token = readSessionToken(request);
+  if (!token) return error(401, 'Sign in first.', 'unauthenticated');
+
+  try {
+    const found = await store!.findSession(hashToken(token));
+    if (!found) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+    const events = await store!.listAuthEvents(found.user.id);
+    return json(200, { events });
   } catch {
     return error(502, 'The accounts database could not be reached. Try again shortly.');
   }

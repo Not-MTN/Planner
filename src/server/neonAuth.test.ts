@@ -25,6 +25,7 @@ const {
   handleRecoveryStart,
   handleSession,
   handleSessions,
+  handleAuthEvents,
   handleSignup,
 } = await import('./authApi');
 const { resetRateLimits } = await import('./security');
@@ -154,6 +155,33 @@ describe('accounts on the real database path', () => {
     expect(cleared.status).toBe(200);
     expect((await cleared.json() as { removed: number }).removed).toBe(1);
     expect(db.tables.planner_sessions).toHaveLength(1);
+  });
+
+  it('writes the account’s history through the real SQL path, and trims it there', async () => {
+    const store = await createNeonAuthStore(DB_URL);
+    const signup = await handleSignup(post('/api/auth/signup', ACCOUNT), store);
+    const cookie = cookieFrom(signup);
+    await handleLogin(post('/api/auth/login', { username: 'sara', authToken: ACCOUNT.authToken }), store);
+
+    const listed = await handleAuthEvents(get('/api/auth/events', cookie), store);
+    expect(listed.status).toBe(200);
+    const body = (await listed.json()) as { events: { kind: string; deviceLabel: string; at: string }[] };
+    expect(body.events.map((event) => event.kind)).toEqual(['password', 'created']);
+    expect(body.events.every((event) => event.deviceLabel.length > 0)).toBe(true);
+    // Dates come back as ISO strings, not whatever the driver hands over.
+    expect(body.events.every((event) => !Number.isNaN(new Date(event.at).getTime()))).toBe(true);
+    // The rows really are in the table the schema created.
+    expect(db.tables.planner_auth_events).toHaveLength(2);
+
+    // The trim is SQL, so it has to be exercised through SQL: 90 lines in,
+    // 60 come back, and the table holds no more than that.
+    const id = 'user-trim';
+    for (let index = 0; index < 90; index += 1) {
+      await store!.recordAuthEvent({ userId: id, kind: 'password' });
+    }
+    const kept = await store!.listAuthEvents(id, 200);
+    expect(kept).toHaveLength(60);
+    expect(db.tables.planner_auth_events.filter((row) => row.user_id === id)).toHaveLength(60);
   });
 
   it('rejects the wrong password and an unknown account the same way', async () => {

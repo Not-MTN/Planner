@@ -42,6 +42,7 @@ export function createFakeNeon(): FakeDb {
     planner_passkeys: [],
     planner_sync: [],
     planner_login_challenges: [],
+    planner_auth_events: [],
   };
 
   const now = () => new Date().toISOString();
@@ -224,6 +225,69 @@ export function createFakeNeon(): FakeDb {
       tables.planner_login_challenges = tables.planner_login_challenges.filter(
         (row) => row.user_id !== values[0] && new Date(String(row.expires_at)).getTime() > Date.now(),
       );
+      return [];
+    }
+
+    if (/^INSERT INTO planner_auth_events /i.test(q)) {
+      const [id, user_id, kind, device_label, network, new_network] = values;
+      tables.planner_auth_events.push({
+        id,
+        user_id,
+        kind,
+        device_label,
+        network,
+        new_network,
+        created_at: now(),
+      });
+      // Same trim as the real statement, so a test can watch the list stay
+      // bounded rather than assume it does.
+      const mine = tables.planner_auth_events
+        .filter((row) => row.user_id === user_id)
+        .sort((a, b) => new Date(String(b.created_at)).getTime() - new Date(String(a.created_at)).getTime());
+      const keep = new Set(mine.slice(0, 60).map((row) => row.id));
+      const cutoff = Date.now() - 180 * 86_400_000;
+      tables.planner_auth_events = tables.planner_auth_events.filter(
+        (row) => keep.has(row.id) && new Date(String(row.created_at)).getTime() >= cutoff,
+      );
+      return [];
+    }
+
+    if (/^SELECT id, kind, device_label AS/i.test(q)) {
+      const take = values[values.length - 1];
+      return tables.planner_auth_events
+        .filter((row) => row.user_id === values[0])
+        .sort((a, b) => new Date(String(b.created_at)).getTime() - new Date(String(a.created_at)).getTime())
+        .slice(0, Number(take))
+        // Aliased the way the statement names them: the store reads `at`, not
+        // `created_at`. Getting this wrong is how a missing alias ships.
+        .map((row) => ({
+          id: row.id,
+          kind: row.kind,
+          deviceLabel: row.device_label,
+          at: row.created_at,
+          network: row.network,
+          newNetwork: row.new_network,
+        }));
+    }
+
+    // Both trims in one shape: the row-count trim and the age trim differ only
+    // in their WHERE clause.
+    if (/^DELETE FROM planner_auth_events\s+WHERE user_id = /i.test(q)) {
+      const user_id = values[0];
+      if (/id NOT IN/i.test(q)) {
+        const mine = tables.planner_auth_events
+          .filter((row) => row.user_id === user_id)
+          .sort((a, b) => new Date(String(b.created_at)).getTime() - new Date(String(a.created_at)).getTime());
+        const limit = Number(values[values.length - 1]);
+        const keep = new Set(mine.slice(0, limit).map((row) => row.id));
+        tables.planner_auth_events = tables.planner_auth_events.filter((row) => keep.has(row.id));
+      } else {
+        const days = Number(values[1]);
+        const cutoff = Date.now() - days * 86_400_000;
+        tables.planner_auth_events = tables.planner_auth_events.filter(
+          (row) => new Date(String(row.created_at)).getTime() >= cutoff,
+        );
+      }
       return [];
     }
 

@@ -18,11 +18,13 @@ import {
   disableTotp,
   fetchTotpStatus,
   getActiveSession,
+  listAuthEvents,
   listDeviceSessions,
   regenerateRecoveryCodes,
   revokeDeviceSession,
   revokeOtherDeviceSessions,
   startTotpSetup,
+  type AuthEvent,
   type DeviceSession,
   type TotpSetup,
 } from '../auth/session';
@@ -1047,6 +1049,101 @@ function TwoFactorSection() {
   );
 }
 
+/**
+ * How the account has been used lately, so its owner can read it back.
+ *
+ * The point is the line that is not yours. So the two things worth flagging
+ * are called out: a place this account has not been seen from before, and
+ * getting back in with a recovery code — which is exactly what somebody who
+ * is not you would have to do.
+ *
+ * This is a convenience, not an audit trail: it is trimmed to the last couple
+ * of months, and it is written on a best-effort basis.
+ */
+function activityLine(kind: AuthEvent['kind']): string {
+  // Written as a switch, not a lookup object, so each sentence sits literally
+  // inside t() where the translation scan can see it. A Record of plain
+  // strings would silently ship untranslated.
+  switch (kind) {
+    case 'created':
+      return t("You made this account");
+    case 'password':
+      return t("Signed in with your password");
+    case 'password_totp':
+      return t("Signed in with your password and a code from your app");
+    case 'passkey':
+      return t("Signed in with a passkey");
+    case 'passkey_totp':
+      return t("Signed in with a passkey and a code from your app");
+    case 'recovery':
+      return t("Got back in with a recovery code");
+    case 'password_changed':
+      return t("Changed your password");
+    case 'signed_out':
+      return t("Signed every other device out");
+    case 'totp_on':
+      return t("Turned two-step sign-in on");
+    case 'totp_off':
+      return t("Turned two-step sign-in off");
+    default:
+      return t("Signed in");
+  }
+}
+
+function ActivitySection() {
+  const [events, setEvents] = useState<AuthEvent[] | null>(null);
+  const lang = getLang();
+
+  useEffect(() => {
+    let live = true;
+    void listAuthEvents()
+      .then((rows) => { if (live) setEvents(rows); })
+      .catch(() => { if (live) setEvents([]); });
+    return () => { live = false; };
+  }, []);
+
+  return (
+    <section className="set-section">
+      <h3 className="kicker">{t("Recent activity")}</h3>
+
+      {events === null ? (
+        <p className="set-hint">{t("Loading your recent activity…")}</p>
+      ) : events.length === 0 ? (
+        <p className="set-hint">{t("Nothing here yet. Signing in, changing your password and turning two-step sign-in on or off will all leave a line here.")}</p>
+      ) : (
+        <>
+          <ul className="activity-list">
+            {events.map((event) => {
+              const alarming = event.kind === 'recovery';
+              return (
+                <li key={event.id} className={alarming ? 'set-row activity-row is-alarming' : 'set-row activity-row'}>
+                  <div>
+                    <p className="set-label">
+                      {activityLine(event.kind)}
+                      {event.newNetwork ? <span className="device-badge is-alert">{t("New place")}</span> : null}
+                    </p>
+                    <p className="set-hint">
+                      {event.deviceLabel || t("Unknown device")}
+                      {' · '}
+                      {seenAgo(event.at, lang)}
+                      {' · '}
+                      {new Date(event.at).toLocaleString(lang === 'fa' ? 'fa-IR' : undefined, {
+                        dateStyle: 'medium',
+                        timeStyle: 'short',
+                      })}
+                    </p>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          <p className="set-hint">{t("This is the last couple of months. A line marked “New place” came from a network this account had not used before. If you do not recognise one, change your password and sign your other devices out.")}</p>
+        </>
+      )}
+    </section>
+  );
+}
+
 export function SettingsSheet() {
   const planner = usePlanner();
   const {
@@ -1070,6 +1167,7 @@ export function SettingsSheet() {
       <AccountSection />
       <DevicesSection />
       <TwoFactorSection />
+      <ActivitySection />
       <section className="set-section">
         <h3 className="kicker">{t("Appearance")}</h3>
         <div className="set-row">

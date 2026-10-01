@@ -9,7 +9,7 @@
  */
 import { scrypt as scryptCallback, randomBytes, timingSafeEqual, randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
-import type { AccountRole } from '../shared/authContract.js';
+import type { AccountRole, AuthEvent, AuthEventKind } from '../shared/authContract.js';
 import type { NeonQueryFunction } from '@neondatabase/serverless';
 
 const scrypt = promisify(scryptCallback) as (
@@ -88,6 +88,21 @@ CREATE TABLE IF NOT EXISTS planner_login_challenges (
 );
 
 CREATE INDEX IF NOT EXISTS planner_login_challenges_user_idx ON planner_login_challenges (user_id);
+
+--- What this account has been up to, so its owner can read it back. No
+--- address is kept: network is a hash of the address salted with the user
+--- id, which is enough to group by place and not enough to find one.
+CREATE TABLE IF NOT EXISTS planner_auth_events (
+  id           text PRIMARY KEY,
+  user_id      text NOT NULL REFERENCES planner_users(id) ON DELETE CASCADE,
+  kind         text NOT NULL,
+  device_label text NOT NULL DEFAULT '',
+  network      text,
+  new_network  boolean NOT NULL DEFAULT false,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS planner_auth_events_user_idx ON planner_auth_events (user_id, created_at DESC);
 
 -- A guardian's request to follow a student. code_hash is all the server ever
 -- sees of the pairing code; wrapped_share is the results key sealed by a key
@@ -267,6 +282,32 @@ export interface SessionInfo {
   expiresAt: string;
 }
 
+export type { AuthEvent, AuthEventKind } from '../shared/authContract.js';
+
+export interface NewAuthEvent {
+  userId: string;
+  kind: AuthEventKind;
+  deviceLabel?: string | null;
+  network?: string | null;
+}
+
+/** How much history one account keeps, and for how long. */
+const AUTH_EVENT_LIMIT = 60;
+const AUTH_EVENT_DAYS = 180;
+
+const AUTH_EVENT_KINDS: ReadonlySet<string> = new Set([
+  'created', 'password', 'password_totp', 'passkey', 'passkey_totp',
+  'recovery', 'password_changed', 'signed_out', 'totp_on', 'totp_off',
+]);
+
+/**
+ * The kinds the log will accept. Written into the column as text, so a bad
+ * value from anywhere upstream cannot smuggle in a row the UI will choke on.
+ */
+export function cleanAuthEventKind(value: unknown): AuthEventKind | null {
+  return typeof value === 'string' && AUTH_EVENT_KINDS.has(value) ? (value as AuthEventKind) : null;
+}
+
 export interface LinkRow {
   id: string;
   guardian_id: string;
@@ -363,6 +404,13 @@ export interface AuthStore {
   deleteSessionForUser(id: string, userId: string): Promise<boolean>;
   /** Ends every session but the given one, for "sign out everywhere else". */
   deleteOtherSessions(userId: string, keepId: string): Promise<number>;
+  /**
+   * Adds a line to the account's history, and drops what is no longer worth
+   * keeping. Best-effort: a failed log line must never block a sign-in.
+   */
+  recordAuthEvent(event: NewAuthEvent): Promise<void>;
+  /** Newest first. */
+  listAuthEvents(userId: string, limit?: number): Promise<AuthEvent[]>;
   /** Permanently remove an account and all account-owned data. */
   deleteAccount?(userId: string): Promise<boolean>;
   /** Guardian: ask a student to be followed. Returns null when already asked. */
@@ -558,6 +606,10 @@ export function createMemoryAuthStore(): AuthStore {
   const vaults = new Map<string, VaultRow>();
   const sessions = new Map<string, SessionRow & { label: string; createdAt: string; lastSeenAt: string }>();
   const loginChallenges = new Map<string, { userId: string; expiresAt: string }>();
+  const authEvents = new Map<
+    string,
+    Array<{ id: string; kind: AuthEventKind; deviceLabel: string; at: string; network: string | null; newNetwork: boolean }>
+  >();
   const links: LinkRow[] = [];
   const passkeys: PasskeyRow[] = [];
 
@@ -815,6 +867,28 @@ export function createMemoryAuthStore(): AuthStore {
       }
       return removed;
     },
+    async recordAuthEvent(event) {
+      const list = authEvents.get(event.userId) ?? [];
+      const network = event.network ?? null;
+      const newNetwork = network !== null && !list.some((row) => row.network === network);
+      list.push({
+        id: newId(),
+        kind: event.kind,
+        deviceLabel: event.deviceLabel ?? '',
+        at: new Date().toISOString(),
+        network,
+        newNetwork,
+      });
+      const cutoff = Date.now() - AUTH_EVENT_DAYS * 86_400_000;
+      const kept = list.filter((row) => new Date(row.at).getTime() >= cutoff).slice(-AUTH_EVENT_LIMIT);
+      authEvents.set(event.userId, kept);
+    },
+    async listAuthEvents(userId, limit = AUTH_EVENT_LIMIT) {
+      return (authEvents.get(userId) ?? [])
+        .slice()
+        .sort((a, b) => b.at.localeCompare(a.at))
+        .slice(0, Math.max(1, Math.min(limit, AUTH_EVENT_LIMIT)));
+    },
     async deleteAccount(userId) {
       if (!users.has(userId)) return false;
       users.delete(userId);
@@ -826,6 +900,7 @@ export function createMemoryAuthStore(): AuthStore {
       for (const [hash, session] of sessions) {
         if (session.user_id === userId) sessions.delete(hash);
       }
+      authEvents.delete(userId);
       for (let index = links.length - 1; index >= 0; index -= 1) {
         if (links[index]?.guardian_id === userId || links[index]?.student_id === userId) links.splice(index, 1);
       }
@@ -1405,6 +1480,53 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
         DELETE FROM planner_sessions WHERE user_id = ${userId} AND id <> ${keepId} RETURNING id
       `) as { id: string }[];
       return rows.length;
+    },
+
+    async recordAuthEvent(event) {
+      await ensure();
+      const network = event.network ?? null;
+      // "Have we seen this place before?" is answered inside the insert, so
+      // two sign-ins at once cannot both read "no" and both claim to be new.
+      await sql`INSERT INTO planner_auth_events (id, user_id, kind, device_label, network, new_network)
+        VALUES (
+          ${newId()}, ${event.userId}, ${event.kind}, ${event.deviceLabel ?? ''}, ${network},
+          ${network} IS NOT NULL
+            AND NOT EXISTS (
+              SELECT 1 FROM planner_auth_events
+              WHERE user_id = ${event.userId} AND network = ${network}
+            )
+        )`;
+      // Bounded without a cron job: the log is for reading, not for hoarding.
+      await sql`DELETE FROM planner_auth_events
+        WHERE user_id = ${event.userId}
+          AND id NOT IN (
+            SELECT id FROM planner_auth_events
+            WHERE user_id = ${event.userId}
+            ORDER BY created_at DESC
+            LIMIT ${AUTH_EVENT_LIMIT}
+          )`;
+      await sql`DELETE FROM planner_auth_events
+        WHERE user_id = ${event.userId} AND created_at < now() - make_interval(days => ${AUTH_EVENT_DAYS})`;
+    },
+
+    async listAuthEvents(userId, limit = AUTH_EVENT_LIMIT) {
+      await ensure();
+      const take = Math.max(1, Math.min(limit, AUTH_EVENT_LIMIT));
+      const rows = (await sql`
+        SELECT id, kind, device_label AS "deviceLabel", created_at AS "at", network, new_network AS "newNetwork"
+        FROM planner_auth_events
+        WHERE user_id = ${userId}
+        ORDER BY created_at DESC
+        LIMIT ${take}
+      `) as { id: string; kind: string; deviceLabel: string | null; at: string | Date; network: string | null; newNetwork: boolean | null }[];
+      return rows.map((row) => ({
+        id: row.id,
+        kind: cleanAuthEventKind(row.kind) ?? 'password',
+        deviceLabel: row.deviceLabel ?? '',
+        at: row.at instanceof Date ? row.at.toISOString() : new Date(row.at).toISOString(),
+        network: row.network ?? null,
+        newNetwork: Boolean(row.newNetwork),
+      }));
     },
 
     async deleteAccount(userId) {

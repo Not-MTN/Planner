@@ -69,6 +69,38 @@ export interface SecondFactorResponse {
   secondFactor: 'totp';
 }
 
+/** What happened, in the account's own history. */
+export type AuthEventKind =
+  | 'created'
+  | 'password'
+  | 'password_totp'
+  | 'passkey'
+  | 'passkey_totp'
+  | 'recovery'
+  | 'password_changed'
+  | 'signed_out'
+  | 'totp_on'
+  | 'totp_off';
+
+export interface AuthEvent {
+  id: string;
+  kind: AuthEventKind;
+  /** A short description captured at the time, e.g. "Chrome on Mac". */
+  deviceLabel: string;
+  at: string;
+  /**
+   * A salted hash of the network the request came from — never the address.
+   * Enough to tell "the same place" from "somewhere new", and no more.
+   */
+  network: string | null;
+  /** True the first time this account was seen from that network. */
+  newNetwork: boolean;
+}
+
+export interface AuthEventsResponse {
+  events: AuthEvent[];
+}
+
 /** An authenticator app being set up, or already set up. */
 export interface TotpSetupResponse {
   /** Base32 secret, grouped in fours for reading aloud or typing. */

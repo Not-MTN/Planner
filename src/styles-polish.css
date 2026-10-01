@@ -1184,3 +1184,29 @@
   letter-spacing: 0.4em;
   text-align: center;
 }
+
+/* --- Recent activity (Settings → Recent activity) --------------------- */
+.activity-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Most lines are just a record. The ones that matter are the ones somebody
+   else would have caused, so those get a visible edge rather than a red
+   background that would shout at every visit. */
+.activity-row {
+  border-inline-start: 2px solid transparent;
+  padding-inline-start: 10px;
+}
+
+.activity-row.is-alarming {
+  border-inline-start-color: var(--danger, #b42318);
+}
+
+.device-badge.is-alert {
+  background: var(--danger-soft, #fee4e2);
+  color: var(--danger-deep, #912018);
+}

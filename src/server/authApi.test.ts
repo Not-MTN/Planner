@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   handleAccountDelete,
   handleAccountVault,
+  handleAuthEvents,
   handleLogin,
   handleLogout,
   handleRecoveryComplete,
@@ -22,14 +23,15 @@ import {
 import { currentTotpCode } from './totp';
 import { createMemoryAuthStore } from './authStore';
 import { resetRateLimits } from './security';
-import type { LoginResponse, PublicUser } from '../shared/authContract';
+import type { AuthEvent, LoginResponse, PublicUser } from '../shared/authContract';
+import type { AuthStore } from './authStore';
 
 const STORE = () => createMemoryAuthStore();
 
-function post(path: string, body: unknown, cookie?: string): Request {
+function post(path: string, body: unknown, cookie?: string, headers: Record<string, string> = {}): Request {
   return new Request(`https://planner.test${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
+    headers: { 'Content-Type': 'application/json', ...headers, ...(cookie ? { Cookie: cookie } : {}) },
     body: JSON.stringify(body),
   });
 }
@@ -50,9 +52,9 @@ function del(path: string, body: unknown, cookie?: string): Request {
   });
 }
 
-function get(path: string, cookie?: string): Request {
+function get(path: string, cookie?: string, headers: Record<string, string> = {}): Request {
   return new Request(`https://planner.test${path}`, {
-    headers: cookie ? { Cookie: cookie } : undefined,
+    headers: { ...headers, ...(cookie ? { Cookie: cookie } : {}) },
   });
 }
 
@@ -80,6 +82,21 @@ const ACCOUNT = {
 function cookieFrom(response: Response): string {
   const raw = response.headers.get('set-cookie') ?? '';
   return raw.split(';')[0] ?? '';
+}
+
+/** The seeded account's id, so a test can read its log directly. */
+async function userOf(store: AuthStore, login = 'sara'): Promise<string> {
+  const found = await store.findAccount(login);
+  if (!found) throw new Error(`no such account: ${login}`);
+  return found.user.id;
+}
+
+/** The log as the account itself would read it. */
+async function listEvents(store: AuthStore, cookie: string): Promise<AuthEvent[]> {
+  resetRateLimits();
+  const response = await handleAuthEvents(get('/api/auth/events', cookie), store);
+  expect(response.status).toBe(200);
+  return ((await response.json()) as { events: AuthEvent[] }).events;
 }
 
 describe('device label', () => {
@@ -597,6 +614,154 @@ describe('account API', () => {
     const plain = await handleLogin(post('/api/auth/login', { username: 'sara', authToken: ACCOUNT.authToken }), store);
     expect(plain.status).toBe(200);
     expect('wrappedDek' in (await plain.json() as object)).toBe(true);
+  });
+
+  it('leaves a line every time the account is opened, and flags a place it has not seen before', async () => {
+    resetRateLimits();
+    const store = STORE();
+    const made = await handleSignup(post('/api/auth/signup', ACCOUNT), store);
+    const cookie = cookieFrom(made);
+
+    // Signing in from an address this account has never used.
+    resetRateLimits();
+    const first = await handleLogin(
+      post('/api/auth/login', { username: 'sara', authToken: ACCOUNT.authToken }, undefined, {
+        'X-Forwarded-For': '203.0.113.9',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/126.0 Safari/537.36',
+      }),
+      store,
+    );
+    expect(first.status).toBe(200);
+
+    // Same address again: familiar now.
+    resetRateLimits();
+    await handleLogin(
+      post('/api/auth/login', { username: 'sara', authToken: ACCOUNT.authToken }, undefined, {
+        'X-Forwarded-For': '203.0.113.9',
+      }),
+      store,
+    );
+
+    // And somewhere else entirely.
+    resetRateLimits();
+    await handleLogin(
+      post('/api/auth/login', { username: 'sara', authToken: ACCOUNT.authToken }, undefined, {
+        'X-Forwarded-For': '198.51.100.4',
+      }),
+      store,
+    );
+
+    resetRateLimits();
+    const events = await listEvents(store, cookie);
+    expect(events.map((event) => event.kind)).toEqual(['password', 'password', 'password', 'created']);
+
+    const newest = events[0]!;
+    const familiar = events[1]!;
+    // Newest first: the third sign-in was the new place.
+    expect(newest.newNetwork).toBe(true);
+    expect(familiar.newNetwork).toBe(false);
+    // Same address twice → same marker; a different address → a different one.
+    expect(newest.network).not.toBe(familiar.network);
+    expect(events[2]!.network).toBe(familiar.network);
+
+    // The device is named so the line means something to a person.
+    expect(events[3]!.deviceLabel).toBeTruthy();
+  });
+
+  it('keeps no address in the log, only enough to tell places apart', async () => {
+    resetRateLimits();
+    const store = STORE();
+    await handleSignup(post('/api/auth/signup', ACCOUNT), store);
+
+    resetRateLimits();
+    await handleLogin(
+      post('/api/auth/login', { username: 'sara', authToken: ACCOUNT.authToken }, undefined, {
+        'X-Forwarded-For': '203.0.113.9',
+      }),
+      store,
+    );
+
+    const events = await store.listAuthEvents(await userOf(store));
+    expect(events.length).toBeGreaterThan(0);
+    for (const event of events) {
+      // The whole promise of the log: it can group by place without the
+      // server ever holding a list of everywhere anybody has been.
+      expect(event.network).not.toBe('203.0.113.9');
+      expect(event.network === null || event.network.length <= 22).toBe(true);
+    }
+
+    // Salted per account, so the same address is not linkable across accounts.
+    resetRateLimits();
+    const other = STORE();
+    await handleSignup(
+      post('/api/auth/signup', { ...ACCOUNT, username: 'ali', email: 'ali@example.com' }),
+      other,
+    );
+    const ali = await other.listAuthEvents(await userOf(other, 'ali'));
+    expect(ali[0]!.network).toBeNull();
+  });
+
+  it('does not let a broken log turn anybody away', async () => {
+    resetRateLimits();
+    const store = STORE();
+    await handleSignup(post('/api/auth/signup', ACCOUNT), store);
+
+    const flaky = Object.create(store) as AuthStore;
+    flaky.recordAuthEvent = async () => {
+      throw new Error('the activity table is down');
+    };
+
+    // A history nobody is reading is never a reason to refuse a sign-in.
+    resetRateLimits();
+    const response = await handleLogin(
+      post('/api/auth/login', { username: 'sara', authToken: ACCOUNT.authToken }),
+      flaky,
+    );
+    expect(response.status).toBe(200);
+    expect(await store.listAuthEvents(await userOf(store))).toHaveLength(1);
+  });
+
+  it('keeps the log short enough to read, and throws away what is too old', async () => {
+    const store = STORE();
+    const id = 'user-x';
+    for (let index = 0; index < 90; index += 1) {
+      await store.recordAuthEvent({ userId: id, kind: 'password' });
+    }
+    const kept = await store.listAuthEvents(id);
+    // Bounded without a cron job, newest first.
+    expect(kept.length).toBe(60);
+    expect(new Date(kept[0]!.at).getTime()).toBeGreaterThanOrEqual(new Date(kept[59]!.at).getTime());
+
+    // A limit below the cap is honoured, and never inflated.
+    expect(await store.listAuthEvents(id, 5)).toHaveLength(5);
+    expect(await store.listAuthEvents(id, 0)).toHaveLength(1);
+  });
+
+  it('only shows the log to the account it belongs to', async () => {
+    resetRateLimits();
+    const store = STORE();
+    const cookie = cookieFrom(await handleSignup(post('/api/auth/signup', ACCOUNT), store));
+
+    resetRateLimits();
+    expect((await handleAuthEvents(get('/api/auth/events'), store)).status).toBe(401);
+
+    resetRateLimits();
+    const response = await handleAuthEvents(get('/api/auth/events', cookie), store);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { events: AuthEvent[] };
+    expect(body.events.length).toBeGreaterThan(0);
+
+    // Another account sees its own lines and nothing of this one's.
+    resetRateLimits();
+    const other = STORE();
+    const otherCookie = cookieFrom(
+      await handleSignup(post('/api/auth/signup', { ...ACCOUNT, username: 'ali', email: 'ali@example.com' }), other),
+    );
+    resetRateLimits();
+    const otherBody = (await (await handleAuthEvents(get('/api/auth/events', otherCookie), other)).json()) as {
+      events: AuthEvent[];
+    };
+    expect(otherBody.events.map((event) => event.kind)).toEqual(['created']);
   });
 
   it('reports 503 when no database is configured', async () => {

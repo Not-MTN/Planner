@@ -38,6 +38,7 @@ import {
   handleSalt,
   handleSession,
   handleSessions,
+  handleAuthEvents,
   handleShare,
   handleTotpConfirm,
   handleTotpDisable,
@@ -144,6 +145,8 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
       return (request) => authStore(env.DATABASE_URL).then((store) => handleSession(request, store));
     case '/api/auth/sessions':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleSessions(request, store));
+    case '/api/auth/events':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleAuthEvents(request, store));
     case '/api/auth/share':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleShare(request, store));
     case '/api/auth/signup':

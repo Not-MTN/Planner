@@ -3,7 +3,7 @@
  * never in storage — so a reload simply asks for the password again until the
  * trusted-device flow (phase 2) is built.
  */
-import type { LoginResponse, PublicUser, SessionResponse, VaultResponse } from '../shared/authContract';
+import type { AuthEvent, AuthEventsResponse, LoginResponse, PublicUser, SessionResponse, VaultResponse } from '../shared/authContract';
 import {
   createVaultKeys,
   decryptState,
@@ -565,6 +565,24 @@ export async function fetchSession(): Promise<PublicUser | null> {
 }
 
 /** One signed-in device, as the account holder sees it. */
+export type { AuthEvent };
+
+/**
+ * A line from the account's history, newest first.
+ *
+ * An empty list means "offline" or "nothing recorded yet", never "nothing
+ * happened" — the log is a convenience, not an audit trail.
+ */
+export async function listAuthEvents(): Promise<AuthEvent[]> {
+  try {
+    const result = await request<AuthEventsResponse>('/api/auth/events');
+    return result.events ?? [];
+  } catch (error) {
+    if (error instanceof AuthError && error.code === 'unauthenticated') return [];
+    throw error;
+  }
+}
+
 export interface DeviceSession {
   id: string;
   /** A short description captured at sign-in, e.g. "Chrome on Mac". */
