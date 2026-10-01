@@ -3,6 +3,7 @@ import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { useImportFile } from '../hooks';
 import { DownloadIcon, ExitIcon, SparklesIcon, UploadIcon, UserIcon } from '../icons';
+import { Rich } from './Rich';
 import { Modal } from './ui';
 import { useEffect, useState } from 'react';
 import { FeedsSection, SecuritySection, SharedSpaceSection, TaskImportSection, TemplatesSection, WeatherSection } from './SettingsExtras';
@@ -69,7 +70,10 @@ function SyncSection() {
       <h3 className="kicker">{t("Sync across devices")}</h3>
       {syncAvailable === false ? (
         <p className="set-hint">
-          {t("Sync needs a database. Add")} <code>{t("DATABASE_URL")}</code> {t("(your Neon connection string) under Vercel → Environment Variables, or in")} <code>{t(".env.local")}</code>{t(", then restart.")}
+          <Rich
+            text={t("Sync needs a database. Add {name} (your Neon connection string) under Vercel → Environment Variables, or in {file}, then restart.")}
+            values={{ name: <code>{t("DATABASE_URL")}</code>, file: <code>{t(".env.local")}</code> }}
+          />
         </p>
       ) : null}
       {sync.code ? (
@@ -325,7 +329,12 @@ function CalendarSection() {
       return;
     }
     importCalendar(result);
-    flash(t("Imported {0} events and {1} all-day items{2}.", { 0: result.events.length, 1: result.tasks.length, 2: result.skipped ? t(" ({0} skipped)", { 0: result.skipped }) : '' }), { label: t("Undo"), run: undo });
+    flash(
+      result.skipped
+        ? t("Imported {0} events and {1} all-day items, skipping {2}.", { 0: result.events.length, 1: result.tasks.length, 2: result.skipped })
+        : t("Imported {0} events and {1} all-day items.", { 0: result.events.length, 1: result.tasks.length }),
+      { label: t("Undo"), run: undo },
+    );
   });
   return (
     <section className="set-section">
@@ -642,9 +651,24 @@ export function SettingsSheet() {
         <h3 className="kicker">{t("AI coach · Groq")}</h3>
         <p className="set-hint">{t("The planner uses a server-side proxy for Groq. Your API key stays out of the browser and planner backups.")}</p>
         <pre className="env-code"><code>{t("GROQ_API_KEY=your_groq_api_key")}</code></pre>
-        <p className="set-hint"><strong>{t("On Vercel:")}</strong> {t("Project Settings → Environment Variables → add")} <code>{t("GROQ_API_KEY")}</code> {t("with your key as the value, then redeploy. Vercel Functions in")} <code>{t("api/groq")}</code> {t("handle the requests.")}</p>
-        <p className="set-hint"><strong>{t("Locally:")}</strong> {t("put that line in")} <code>{t(".env.local")}</code> {t("at the project root, then restart the dev server.")}</p>
-        <p className="ai-privacy-note">{t("Never use a")} <code>{t("VITE_")}</code> {t("prefix for the key. The AI sends your prompt, saved AI memory, and relevant schedule/check-in details to Groq; planner notes are not included. Forget memory from the AI coach at any time.")}</p>
+        <p className="set-hint">
+          <Rich
+            text={t("On Vercel: Project Settings → Environment Variables → add {name} with your key as the value, then redeploy. Vercel Functions in {path} handle the requests.")}
+            values={{ name: <code>{t("GROQ_API_KEY")}</code>, path: <code>{t("api/groq")}</code> }}
+          />
+        </p>
+        <p className="set-hint">
+          <Rich
+            text={t("Locally: put that line in {file} at the project root, then restart the dev server.")}
+            values={{ file: <code>{t(".env.local")}</code> }}
+          />
+        </p>
+        <p className="ai-privacy-note">
+          <Rich
+            text={t("Never use a {prefix} prefix for the key. The AI sends your prompt, saved AI memory, and relevant schedule/check-in details to Groq; planner notes are not included. Forget memory from the AI coach at any time.")}
+            values={{ prefix: <code>{t("VITE_")}</code> }}
+          />
+        </p>
       </section>
 
       <section className="set-section">

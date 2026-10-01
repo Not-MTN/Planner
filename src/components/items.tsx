@@ -91,9 +91,11 @@ export function EventRow({ event, onDropSwap }: { event: PlannerEvent; onDropSwa
         </button>
         <p className="meta">
           <i className={cx('dot-inline', `accent-${accent}`)} aria-hidden="true" />
-          {categoryById(event.category).label}
-          {duration ? ` · ${duration}` : ''}
-          {event.important ? t(" · Important") : ''}
+          {t("{category}{duration}{important}", {
+            category: categoryById(event.category).label,
+            duration: duration ? ` · ${duration}` : '',
+            important: event.important ? ` · ${t("Important")}` : '',
+          })}
           {event.repeat || series ? <span className="repeat-chip">↻ {repeatLabel(event.repeat)}</span> : null}
         </p>
       </div>

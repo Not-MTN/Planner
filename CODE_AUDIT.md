@@ -359,7 +359,7 @@ Every finding above (H1–H3, M1–M10, L1–L9) has been fixed on
 | `tsc --noEmit` | 0 errors | **0 errors** |
 | `eslint .` | not installed | **0 errors, 0 warnings** |
 | `vite build` | pass | **pass** |
-| `vitest run` | 434 passed, 1 skipped | **442 passed, 1 skipped** (48 files) — 8 new regression tests |
+| `vitest run` | 434 passed, 1 skipped | **453 passed, 1 skipped** (49 files) — 19 new tests |
 
 ### What changed
 
@@ -405,6 +405,62 @@ hiding. All fixed:
 - `src/components/Palette.tsx` listed `toggleTask`/`toggleHabit` as dependencies of a memo that never used them; both bindings are gone.
 - `vite.config.ts` imported three push handlers it never used (push is routed through `src/server/pushVite`). Import removed.
 - Three `no-var` disable comments on ambient `declare global` blocks were inert; removed. `prefer-const` and an unused `catch` binding in `public/theme-init.js` fixed.
+
+## 8b. Two defects found during the audit but left out of the report
+
+Both were left out of §2–§4 on purpose, then fixed after being raised
+explicitly.
+
+### X1 — SSRF gaps in the calendar feed proxy
+**`src/server/icsProxy.ts`**
+
+The original `isForbiddenHost()` missed several ways to name an internal
+address. Measured against the Node/WHATWG URL parser, which already folds most
+exotic IPv4 into dotted quad:
+
+| Vector | Before | After |
+|---|---|---|
+| `http://localhost./` (FQDN root dot) | **allowed** | refused |
+| `http://[::ffff:127.0.0.1]/` (parser rewrites to `[::ffff:7f00:1]`) | **allowed** | refused |
+| `http://[fd00::1]/`, `http://[fe80::1]/` | **allowed** | refused |
+| Hostname that resolves to a private IP (`internal.example.com` → `10.0.0.5`) | **allowed** | refused |
+| A public host 302-ing to `169.254.169.254` (cloud metadata) | **allowed** — `redirect: 'follow'` | refused |
+| `http://2130706433/`, `0177.0.0.1`, `0x7f.0.0.1`, `127.1` | refused (parser folded them) | refused (checked directly as well) |
+
+The guard now: parses every IPv4 spelling itself (decimal, octal, hex, the bare
+32-bit form and the shortened `a.b` / `a.b.c` forms), expands IPv6 properly and
+checks the IPv4 smuggled inside IPv4-mapped, IPv4-compatible, NAT64 and 6to4
+forms, strips the FQDN root dot before the suffix tests, resolves the hostname
+with `dns.lookup` and refuses it if *any* answer is internal, and follows
+redirects by hand (max 3) so every hop is re-checked. Body, timeout and size
+caps are unchanged. Covered by 10 tests in `src/server/icsProxy.test.ts`.
+
+### X2 — Sentences spliced from translated fragments
+
+Where a sentence emphasised a value, the sentence was built from separate `t()`
+calls around the markup — `{t("You finish the most around")} <strong>{hour}</strong>
+{t(". Try protecting that hour…")}`. Each fragment translated, but no translator
+could reorder them, so Persian rendered English word order around a Persian
+word.
+
+Fixed by making **one translatable unit per sentence**:
+
+- New `src/components/Rich.tsx` splits the *translated* string around its
+  placeholders and renders a node for each, so one key covers the whole
+  sentence and the translator decides where the value sits.
+- Whole-sentence keys replaced fragments in `RhythmCard` (2), `SettingsSheet`
+  (4), `ShortcutsSheet`, `HabitsView` (2), `InsightsView` (2), `DayView`,
+  `CalendarView` (2), `FocusTimer`, `AIView` (2), `items.tsx`, `logic.ts`,
+  `insights.ts` (2), `PlansView` (2), `SettingsExtras`.
+- Singular/plural fragments nested inside another `t()` call — `t("days have")`
+  inside `t("{0} {1} something in the next {2}.")` — became `tn()` pairs, so
+  each variant is a whole sentence: `tn(planned, "{count} day has …", "{count}
+  days have …")`.
+- 39 Persian translations added; 49 fragment entries removed from `fa.ts`.
+- `src/i18n.test.ts` gained a guard: no `t()` key may open with punctuation or
+  whitespace, which is the one unambiguous signature of a fragment.
+
+---
 
 ---
 

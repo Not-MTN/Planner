@@ -131,8 +131,13 @@ export function HabitsView() {
                     <div>
                       <h2>{habit.name}</h2>
                       <p className="meta">
-                        {frequencyLabel(habit)}
-                        {habit.unit ? t(" · {0} {1} a day", { 0: habit.unit.target, 1: habit.unit.label }) : ''}
+                        {habit.unit
+                          ? t("{frequency} · {target} {unit} a day", {
+                              frequency: frequencyLabel(habit),
+                              target: habit.unit.target,
+                              unit: habit.unit.label,
+                            })
+                          : frequencyLabel(habit)}
                       </p>
                       {habit.essential ? (
                         <p className="essential-tag">
@@ -210,7 +215,12 @@ export function HabitsView() {
                     </div>
                   </div>
                   <p className="visually-hidden">
-                    {t("This week,")} {weekStats.done} {t('of')} {weekStats.expected || week.length} {t("kept. Streak:")} {streaks.current}{t(", best")} {streaks.best}.
+                    {t("This week, {done} of {expected} kept. Streak: {current}, best {best}.", {
+                      done: weekStats.done,
+                      expected: weekStats.expected || week.length,
+                      current: streaks.current,
+                      best: streaks.best,
+                    })}
                   </p>
                   <div className="row-actions">
                     <button type="button" className="btn btn-tiny" onClick={() => openComposer({ mode: 'edit', type: 'habit', id: habit.id })}>

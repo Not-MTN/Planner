@@ -308,10 +308,16 @@ export function weekNarrative(state: PlannerState, today: string): string {
         : done === total
           ? t("Everything scheduled so far this week is done.")
           : t("{0} of {1} scheduled things are done so far this week.", { 0: done, 1: total });
-  const habitLine =
-    habitDone === 0 ? '' : t(" {0} {1} kept this week.", { 0: habitDone, 1: habitDone === 1 ? t("habit was") : t("habits were") });
-  const goalLine = moving === 0 ? '' : t(" {0} {1} still in motion.", { 0: moving, 1: moving === 1 ? t("goal is") : t("goals are") });
-  return `${head}${habitLine}${goalLine}`.replace(/\s+/g, ' ').trim();
+  // Whole sentences, not leading-space fragments: the clause has to be
+  // translatable on its own, with its own plural agreement.
+  // Whole sentences joined by a space — not leading-space fragments glued on
+  // and then trimmed, which is untranslatable in a right-to-left language.
+  const parts = [head];
+  if (habitDone === 1) parts.push(t("{0} habit was kept this week.", { 0: habitDone }));
+  else if (habitDone > 1) parts.push(t("{0} habits were kept this week.", { 0: habitDone }));
+  if (moving === 1) parts.push(t("{0} goal is still in motion.", { 0: moving }));
+  else if (moving > 1) parts.push(t("{0} goals are still in motion.", { 0: moving }));
+  return parts.join(' ');
 }
 
 export interface AgendaDay {

@@ -32,3 +32,28 @@ describe('i18n', () => {
     expect(t('Not a key')).toBe('Not a key');
   });
 });
+
+/**
+ * A sentence must not be built from translated fragments around markup: the
+ * fragments translate one by one, but nobody can reorder them, so Persian ends
+ * up reading as spliced English. If a sentence needs a value inside it, that
+ * value belongs in a placeholder on one whole-sentence key (components/Rich.tsx).
+ *
+ * Only the one unambiguous signature is checked: a string that *opens* with
+ * punctuation or whitespace. Such a fragment can only ever be the tail of a
+ * sentence spliced in JSX — ". Try protecting that hour.", ", you finish",
+ * "(your Neon connection string) …". Ordinary lowercase labels ("min", "vs",
+ * "Delete saved view") are legitimate on their own and stay allowed.
+ */
+describe('translated sentences stay whole', () => {
+  it('has no t() fragment that opens mid-sentence', () => {
+    // Punctuation and whitespace at the *start* mean "this is the tail of a
+    // sentence". Curly quotes are excluded — “{0}” legitimately opens one.
+    const FRAGMENT = /^[\s.,;:!?·)\]}—–-]/;
+    // Markdown report lines ("- [x] {0}") and file names (".env.local") are
+    // syntax, not prose. A real sentence never starts with "- " or ".x".
+    const NOT_PROSE = /^- |^\.\w/;
+    const offenders = [...sourceKeys('src')].filter((key) => FRAGMENT.test(key) && !NOT_PROSE.test(key));
+    expect(offenders).toEqual([]);
+  });
+});

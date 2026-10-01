@@ -38,7 +38,7 @@ import {
 import { Meter } from '../components/ui';
 import type { CalendarTab } from '../route';
 import type { PlannerEvent } from '../types';
-import { t } from '../i18n';
+import { t, tn } from '../i18n';
 
 const TABS: Array<{ id: CalendarTab; label: string }> = [
   { id: 'week', label: t("Week") },
@@ -385,7 +385,7 @@ function ResizeHandle({ startTime, endTime, title, onResize }: { startTime: stri
         if (next !== base) onResize(clockFrom(next));
       }}
     >
-      {preview !== null ? <em>{t('until')} {displayTime(clockFrom(preview))}</em> : null}
+      {preview !== null ? <em>{t('until {0}', { 0: displayTime(clockFrom(preview)) })}</em> : null}
     </span>
   );
 }
@@ -599,7 +599,7 @@ function AgendaBoard({ today }: { today: string }) {
         <p className="quiet-hint">
           {planned === 0
             ? t("The next {0} days are open. Add only what you want to keep.", { 0: horizon })
-            : t("{0} {1} something in the next {2}.", { 0: planned, 1: planned === 1 ? t("day has") : t("days have"), 2: horizon })}
+            : tn(planned, "{count} day has something in the next {horizon}.", "{count} days have something in the next {horizon}.", { horizon })}
         </p>
         <div className="pager">
           {HORIZONS.map((daysAhead) => (
@@ -717,7 +717,7 @@ function AgendaBoard({ today }: { today: string }) {
               <li key={goal.id} className="plain">
                 <button type="button" onClick={() => openComposer({ mode: 'edit', type: 'goal', id: goal.id })}>
                   <time>{goal.date.slice(5)}</time>
-                  <span>{goal.title} {t("· due")}</span>
+                  <span>{t("{title} · due", { title: goal.title })}</span>
                 </button>
               </li>
             ))}

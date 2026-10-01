@@ -2,9 +2,10 @@ import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { formatWeekdayShort } from '../dates';
 import { focusSummary, habitLinks, hourLabel, productiveHours, weeklyReport } from '../insights';
+import { Rich } from '../components/Rich';
 import { downloadBlob } from '../download';
 import { DownloadIcon } from '../icons';
-import { t } from '../i18n';
+import { t, tn } from '../i18n';
 
 function formatMinutes(total: number): string {
   if (total < 60) return t("{0} min", { 0: total });
@@ -55,8 +56,14 @@ export function RhythmCard({ today }: { today: string }) {
               ))}
             </div>
             <p className="meta">
-              {focus.sessions} {focus.sessions === 1 ? t("session") : t("sessions")}
-              {focus.topTasks.length ? t(" · most on “{0}” ({1})", { 0: focus.topTasks[0].title, 1: formatMinutes(focus.topTasks[0].minutes) }) : ''}
+              {focus.topTasks.length
+                ? tn(
+                    focus.sessions,
+                    "{count} session · most on “{title}” ({time})",
+                    "{count} sessions · most on “{title}” ({time})",
+                    { title: focus.topTasks[0].title, time: formatMinutes(focus.topTasks[0].minutes) },
+                  )
+                : tn(focus.sessions, "{count} session", "{count} sessions")}
             </p>
           </>
         )}
@@ -79,7 +86,12 @@ export function RhythmCard({ today }: { today: string }) {
               ))}
             </div>
             <div className="hour-axis" aria-hidden="true"><span>6</span><span>12</span><span>18</span><span>24</span></div>
-            <p className="meta">{t("You finish the most around")} <strong>{hourLabel(profile.bestHour)}</strong>{t(". Try protecting that hour for your hardest task.")}</p>
+            <p className="meta">
+              <Rich
+                text={t("You finish the most around {hour}. Try protecting that hour for your hardest task.")}
+                values={{ hour: <strong>{hourLabel(profile.bestHour)}</strong> }}
+              />
+            </p>
           </>
         )}
         {links.length ? (
@@ -87,7 +99,15 @@ export function RhythmCard({ today }: { today: string }) {
             {links.map((link) => (
               <li key={link.habitId}>
                 <span className={cx('link-lift', link.lift > 0 ? 'up' : 'down')}>{link.lift > 0 ? '↑' : '↓'} {Math.round(Math.abs(link.lift) * 100)}%</span>
-                {t("On days you do")} <strong>{link.name}</strong>{t(", you finish")} {link.lift > 0 ? t("more") : t("fewer")} {t("tasks (")}{link.withHabit.toFixed(1)} {t('vs')} {link.without.toFixed(1)}).
+                <Rich
+                  text={t("On days you do {habit}, you finish {direction} tasks ({with} vs {without}).")}
+                  values={{
+                    habit: <strong>{link.name}</strong>,
+                    direction: link.lift > 0 ? t("more") : t("fewer"),
+                    with: link.withHabit.toFixed(1),
+                    without: link.without.toFixed(1),
+                  }}
+                />
               </li>
             ))}
           </ul>

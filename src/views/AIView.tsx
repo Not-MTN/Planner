@@ -490,7 +490,10 @@ export function AIView() {
                 </label>
               ) : null}
             </div>
-            <p className="ai-range-note">{formatFullDate(planRange.startDate)} — {formatFullDate(planEnd)}{t(". Fixed weekly times and existing events are treated as busy, protected slots.")}</p>
+            <p className="ai-range-note">{t("{start} — {end}. Fixed weekly times and existing events are treated as busy, protected slots.", {
+              start: formatFullDate(planRange.startDate),
+              end: formatFullDate(planEnd),
+            })}</p>
             {pendingScheduleConflict ? (
               <div className="ai-schedule-conflict" role="alert">
                 <strong>{t("I spotted a schedule conflict")}</strong>
@@ -638,7 +641,11 @@ export function AIView() {
                     <span className={cx('fixed-list-dot', `accent-${categoryById(block.category).accent}`)} />
                     <div className="fixed-list-copy">
                       <strong>{block.title}</strong>
-                      <span>{WEEKDAYS.find((day) => day.value === block.weekday)?.label} · {displayTime(block.startTime)}–{displayTime(block.endTime)} {t("· Protected every week")}</span>
+                      <span>{t("{day} · {start}–{end} · Protected every week", {
+                        day: WEEKDAYS.find((day) => day.value === block.weekday)?.label ?? '',
+                        start: displayTime(block.startTime),
+                        end: displayTime(block.endTime),
+                      })}</span>
                     </div>
                     <button type="button" className="text-btn" onClick={() => editBlock(block.id)}>{t("Edit")}</button>
                     <button type="button" className="icon-btn" aria-label={t("Remove {0}", { 0: block.title })} onClick={() => { deleteFixedCommitment(block.id); if (editingBlockId === block.id) { setEditingBlockId(null); setBlockTitle(''); } }}>×</button>

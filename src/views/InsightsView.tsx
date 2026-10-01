@@ -61,7 +61,12 @@ export function InsightsView() {
           <p>{sentence}</p>
           {trend !== 0 && doneThisWeek + doneLastWeek > 0 ? (
             <p className="meta trend">
-              {trend > 0 ? '↑' : '↓'} {Math.abs(trend)} {Math.abs(trend) === 1 ? t("thing") : t("things")} {trend > 0 ? t("more") : t("fewer")} {t("finished than last week.")}
+              {trend > 0 ? '↑' : '↓'}{' '}
+              {t("{count} {unit} {direction} finished than last week.", {
+                count: Math.abs(trend),
+                unit: Math.abs(trend) === 1 ? t("thing") : t("things"),
+                direction: trend > 0 ? t("more") : t("fewer"),
+              })}
             </p>
           ) : null}
         </div>
@@ -343,7 +348,7 @@ function TrendChart({
             {plotted.length > 1 ? <polyline className="trend-line" points={points} /> : null}
             {plotted.map((item) => (
               <circle key={`point-${item.date}`} className="trend-point" cx={x(item.index)} cy={y(item.score.ratio ?? 0)} r="4.5">
-                <title>{formatFullWeekday(item.date)}: {item.score.done} {t('of')} {item.score.total} {t('completed')}</title>
+                <title>{t("{day}: {done} of {total} completed", { day: formatFullWeekday(item.date), done: item.score.done, total: item.score.total })}</title>
               </circle>
             ))}
             {data.map((item, index) => index % labelEvery === 0 || index === data.length - 1 ? (

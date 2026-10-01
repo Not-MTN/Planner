@@ -118,7 +118,11 @@ export function weeklyReport(state: PlannerState, today: string): string {
     done += score.done;
     total += score.total;
   }
-  lines.push(t("**Completed:** {0} of {1} planned items{2}", { 0: done, 1: total, 2: total ? t(" ({0})", { 0: formatPercent(done / total) }) : '' }));
+  lines.push(
+    total
+      ? t("**Completed:** {0} of {1} planned items ({2})", { 0: done, 1: total, 2: formatPercent(done / total) })
+      : t("**Completed:** {0} of {1} planned items", { 0: done, 1: total }),
+  );
   const focus = focusSummary(state, today, days.length || 1);
   if (focus.totalMinutes) lines.push(t("**Focus:** {0} h across {1} sessions", { 0: Math.round(focus.totalMinutes / 6) / 10, 1: focus.sessions }));
   const finished = state.tasks.filter((task) => {
@@ -140,7 +144,11 @@ export function weeklyReport(state: PlannerState, today: string): string {
     for (const habit of habits) {
       const count = state.completions.filter((item) => item.habitId === habit.id && days.includes(item.date)).length;
       const streak = habitStreaks(state, habit, today).current;
-      lines.push(t("- {0}: {1}/{2} days{3}", { 0: habit.name, 1: count, 2: days.length, 3: streak >= 2 ? t(" · {0}-day streak", { 0: streak }) : '' }));
+      lines.push(
+        streak >= 2
+          ? t("- {0}: {1}/{2} days · {3}-day streak", { 0: habit.name, 1: count, 2: days.length, 3: streak })
+          : t("- {0}: {1}/{2} days", { 0: habit.name, 1: count, 2: days.length }),
+      );
     }
   }
   return lines.join('\n') + '\n';

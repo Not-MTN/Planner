@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { CheckIcon, CloseIcon, StopwatchIcon } from '../icons';
-import { t } from '../i18n';
+import { t, tn } from '../i18n';
 
 const DURATIONS = [15, 25, 45, 60];
 
@@ -88,7 +88,7 @@ function FocusOverlay({ sessionId, title, initialMinutes }: { sessionId: string 
       const spent = Math.floor((total - remaining) / 60);
       if (spent >= 1) {
         logFocus({ taskId: sessionId, title: task?.title ?? title, minutes: spent });
-        flash(t("{0} focused {1} saved to Insights.", { 0: spent, 1: spent === 1 ? t("minute") : t("minutes") }));
+        flash(tn(spent, "{count} focused minute saved to Insights.", "{count} focused minutes saved to Insights."));
       }
     }
     stopFocus();
@@ -170,7 +170,14 @@ function FocusOverlay({ sessionId, title, initialMinutes }: { sessionId: string 
         </button>
         <p className="kicker">
           {mode === 'break' ? (phase === 'done' ? t("Break over") : t("Break")) : phase === 'done' ? t("Session complete") : t("Focus")}
-          {rounds > 0 ? t(" · round {0}{1}", { 0: rounds, 1: mode === 'focus' && phase !== 'done' ? t(" → {0}", { 0: rounds + 1 }) : '' }) : ''}
+          {rounds > 0 ? (
+            <span className="focus-round">
+              {' · '}
+              {mode === 'focus' && phase !== 'done'
+                ? t("round {0} → {1}", { 0: rounds, 1: rounds + 1 })
+                : t("round {0}", { 0: rounds })}
+            </span>
+          ) : null}
         </p>
         <div className="focus-ring-wrap">
           <svg className="focus-ring" viewBox="0 0 280 280" aria-hidden="true">
@@ -244,7 +251,7 @@ function FocusOverlay({ sessionId, title, initialMinutes }: { sessionId: string 
         ) : mode === 'break' ? (
           <div className="focus-actions">
             <button type="button" className="btn btn-primary" onClick={start}>
-              <StopwatchIcon size={16} /> {t("Next round ·")} {minutes} {t('min')}
+              <StopwatchIcon size={16} /> {t("Next round · {0} min", { 0: minutes })}
             </button>
             <button type="button" className="btn btn-ghost" onClick={stopFocus}>{t("Close")}</button>
           </div>

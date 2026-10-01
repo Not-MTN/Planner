@@ -5,7 +5,7 @@ import { analyzeDraft, checkGroqConfiguration, filterDraftAgainstState, friendly
 import { cx } from '../cx';
 import { DraftRefine } from '../components/DraftRefine';
 import { CalendarIcon, CheckIcon, CloseIcon, LeafIcon, MicIcon, SparklesIcon } from '../icons';
-import { t } from '../i18n';
+import { t, tn } from '../i18n';
 import type { SavedAIPlan } from '../types';
 
 /** A saved plan back into the AIDraft shape the AI works with. */
@@ -102,7 +102,7 @@ export function PlansView() {
         </div>
         <div className="plans-head-actions">
           {plans.length > 0 ? (
-            <span className="chip">{drafts} {drafts === 1 ? t("draft waiting") : t("drafts waiting")}</span>
+            <span className="chip">{tn(drafts, "{count} draft waiting", "{count} drafts waiting")}</span>
           ) : null}
           <button type="button" className="btn btn-soft btn-small" onClick={() => navigate({ name: 'ai', tab: 'plan' })}>
             <SparklesIcon size={15} /> {t("Make a new plan")}
@@ -158,7 +158,7 @@ export function PlansView() {
                 {plan.summary ? <p className="plan-card-summary" dir="auto">{plan.summary}</p> : null}
                 <div className="plan-card-foot">
                   <button type="button" className="text-btn" aria-expanded={open} onClick={() => setOpenId(open ? null : plan.id)}>
-                    {open ? t("Hide details") : t("Show {0} {1}", { 0: total, 1: total === 1 ? t("item") : t("items") })}
+                    {open ? t("Hide details") : tn(total, "Show {count} item", "Show {count} items")}
                   </button>
                   {plan.suggestions.length > 0 && !open ? (
                     <span className="plan-card-wellbeing"><LeafIcon size={13} /> {plan.suggestions[0]}</span>
