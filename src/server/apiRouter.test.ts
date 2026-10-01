@@ -58,12 +58,12 @@ describe('apiRoute table', () => {
       '/api/ics',
       '/api/sync',
       '/api/sync/status',
-      '/api/groq/chat/completions',
-      '/api/groq/status',
+      '/api/ai/chat/completions',
+      '/api/ai/status',
     ];
     for (const path of paths) expect(apiRoute(path, NO_ENV), path).not.toBeNull();
 
-    for (const path of ['/api', '/api/auth', '/api/auth/nope', '/api/sync/nope', '/api/groq', '/api/not-a-route']) {
+    for (const path of ['/api', '/api/auth', '/api/auth/nope', '/api/sync/nope', '/api/ai', '/api/not-a-route']) {
       expect(apiRoute(path, NO_ENV), path).toBeNull();
     }
   });
@@ -85,12 +85,16 @@ describe('handleApiRequest', () => {
     await expect(response.json()).resolves.toEqual({ configured: false, storage: 'temporary' });
   });
 
-  it('serves /api/groq/status with and without a key', async () => {
-    const without = await handleApiRequest(request('/api/groq/status'), NO_ENV);
-    await expect(without.json()).resolves.toEqual({ configured: false });
+  it('serves /api/ai/status with and without a key', async () => {
+    const without = await handleApiRequest(request('/api/ai/status'), NO_ENV);
+    await expect(without.json()).resolves.toEqual({ configured: false, providers: [] });
 
-    const withKey = await handleApiRequest(request('/api/groq/status'), { GROQ_API_KEY: 'k' });
-    await expect(withKey.json()).resolves.toEqual({ configured: true });
+    const withKey = await handleApiRequest(request('/api/ai/status'), { GROQ_API_KEY: 'k' });
+    await expect(withKey.json()).resolves.toEqual({
+      configured: true,
+      // Names and capabilities only — never a key or an upstream URL.
+      providers: [{ id: 'groq', label: 'Groq', vision: true }],
+    });
   });
 
   it('lets handlers reject wrong methods with 405', async () => {
@@ -100,7 +104,7 @@ describe('handleApiRequest', () => {
     const ics = await handleApiRequest(request('/api/ics', { method: 'POST' }), NO_ENV);
     expect(ics.status).toBe(405);
 
-    const completions = await handleApiRequest(request('/api/groq/chat/completions'), NO_ENV);
+    const completions = await handleApiRequest(request('/api/ai/chat/completions'), NO_ENV);
     expect(completions.status).toBe(405);
   });
 

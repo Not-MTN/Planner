@@ -172,3 +172,98 @@ describe('Groq planning assistant', () => {
     expect(result.carryForward[0]).toMatchObject({ taskId: 'task-real', date: '2026-09-28' });
   });
 });
+
+/**
+ * A rate limit is measured per minute, so waiting is the one fix left after the
+ * server has already tried every configured provider. These tests use fake
+ * timers: the point is *how many* attempts happen, not how long they take.
+ */
+describe('AI request retries', () => {
+  function plan(): Promise<unknown> {
+    return generateAIPlan({
+      prompt: 'Plan a calm day.',
+      range: { startDate: '2026-09-27', days: 1 },
+      state: createEmptyState(),
+    });
+  }
+
+  function respondWith(responses: { status: number; body?: unknown; headers?: Record<string, string> }[]) {
+    let call = 0;
+    const fetchMock = vi.fn(async () => {
+      const next = responses[Math.min(call, responses.length - 1)];
+      call += 1;
+      return new Response(JSON.stringify(next.body ?? { error: { message: 'nope' } }), {
+        status: next.status,
+        headers: { 'Content-Type': 'application/json', ...(next.headers ?? {}) },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('gives up on a rate limit only after waiting it out', async () => {
+    vi.useFakeTimers();
+    const fetchMock = respondWith([
+      { status: 429, body: { error: { message: 'Rate limit reached', code: 'rate_limited' } } },
+      { status: 200, body: { choices: [{ message: { content: '{"summary":"Second time lucky.","tasks":[],"events":[],"habits":[],"wellbeing":[]}' } }] } },
+    ]);
+    const pending = plan();
+    // Let the retry timer fire without actually waiting seconds in the test.
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(pending).resolves.toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry a response the user is meant to read', async () => {
+    vi.useFakeTimers();
+    const fetchMock = respondWith([{ status: 400, body: { error: { message: 'The token limit is invalid.' } } }]);
+    await expect(plan()).rejects.toThrow(/token limit/i);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops after four attempts so a dead service cannot hang the UI', async () => {
+    vi.useFakeTimers();
+    const fetchMock = respondWith([{ status: 503, body: { error: { message: 'Service unavailable' } } }]);
+    // Attach the expectation before running the timers: a rejection left
+    // unattended across a timer advance is reported as an unhandled error.
+    const pending = expect(plan()).rejects.toThrow();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await pending;
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it('retries a dropped connection the same way', async () => {
+    vi.useFakeTimers();
+    let call = 0;
+    const fetchMock = vi.fn(async () => {
+      call += 1;
+      if (call === 1) throw new Error('network down');
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"summary":"Back online.","tasks":[],"events":[],"habits":[],"wellbeing":[]}' } }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const pending = plan();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(pending).resolves.toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('never waits past an abort', async () => {
+    const controller = new AbortController();
+    respondWith([{ status: 500, body: { error: { message: 'down' } } }]);
+    const pending = generateAIPlan({
+      prompt: 'Plan a calm day.',
+      range: { startDate: '2026-09-27', days: 1 },
+      state: createEmptyState(),
+      signal: controller.signal,
+    });
+    controller.abort();
+    await expect(pending).rejects.toThrow();
+  });
+});

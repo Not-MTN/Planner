@@ -166,7 +166,7 @@ describe('optional panels', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-        if (url.includes('/api/groq/chat/completions')) {
+        if (url.includes('/api/ai/chat/completions')) {
           sent.push(String(init?.body ?? ''));
           const content = JSON.stringify({
             summary: 'A steady week.',

@@ -4,7 +4,7 @@
  * we hear about the crash. Both halves are tested here.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { StrictMode, act } from 'react';
+import { StrictMode, act, type ReactElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { ErrorBoundary } from './ErrorBoundary';
 import { enableReportingInTests, resetReportCounters, setReportTransport, setReportingEnabled } from '../reporting';
@@ -16,7 +16,7 @@ function text(): string {
   return document.body.textContent ?? '';
 }
 
-function render(node: React.ReactNode): void {
+function render(node: ReactNode): void {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -25,7 +25,7 @@ function render(node: React.ReactNode): void {
   });
 }
 
-function Boom(): JSX.Element {
+function Boom(): ReactElement {
   throw new Error('Calendar exploded');
 }
 

@@ -308,10 +308,10 @@ describe('app smoke', () => {
     let completionCalls = 0;
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes('/api/groq/status')) {
+      if (url.includes('/api/ai/status')) {
         return new Response(JSON.stringify({ configured: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
-      if (url.includes('/api/groq/chat/completions')) {
+      if (url.includes('/api/ai/chat/completions')) {
         completionCalls += 1;
         return new Response(JSON.stringify({
           choices: [{ message: { content: JSON.stringify({
@@ -398,7 +398,7 @@ describe('app smoke', () => {
     (window as unknown as { SpeechRecognition: unknown }).SpeechRecognition = DenyingRecognition;
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (input: RequestInfo | URL) => {
-      if (String(input).includes('/api/groq/status')) {
+      if (String(input).includes('/api/ai/status')) {
         return new Response(JSON.stringify({ configured: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
       throw new Error('should never reach the AI');
@@ -438,10 +438,10 @@ describe('app smoke', () => {
     let attempts = 0;
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes('/api/groq/status')) {
+      if (url.includes('/api/ai/status')) {
         return new Response(JSON.stringify({ configured: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
-      if (url.includes('/api/groq/chat/completions')) {
+      if (url.includes('/api/ai/chat/completions')) {
         attempts += 1;
         if (attempts === 1) return new Response('boom', { status: 500 });
         return new Response(JSON.stringify({

@@ -41,6 +41,7 @@ import {
 } from './authApi.js';
 import { authStore } from './authStore.js';
 import { handleReport } from './reportApi.js';
+import { resolveProviders } from './aiProviders.js';
 import { handleICS } from './icsProxy.js';
 import { handleSync, handleSyncStatus, neonStore } from './sync.js';
 import { handleGroqChatCompletions, handleGroqStatus } from './groqProxy.js';
@@ -54,6 +55,12 @@ export interface ApiEnv {
   GROQ_VISION_MODEL?: string;
   /** Optional: forwards each crash report somewhere you actually read. */
   ERROR_REPORT_WEBHOOK?: string;
+  /**
+   * Every AI provider variable, passed through as read. The proxy resolves
+   * providers from this rather than from a fixed list, so adding a key means
+   * setting an environment variable and nothing else.
+   */
+  AI_ENV?: Record<string, string | undefined>;
   VAPID_PUBLIC_KEY?: string;
   VAPID_PRIVATE_KEY?: string;
   VAPID_SUBJECT?: string;
@@ -61,6 +68,21 @@ export interface ApiEnv {
 }
 
 type Handler = (request: Request) => Response | Promise<Response>;
+
+/**
+ * The AI variables the proxy resolves providers from.
+ *
+ * The typed `env` fields win where they are set, because a `.env.local` value
+ * read by the Vite dev server never reaches `process.env`.
+ */
+function aiEnv(env: ApiEnv): Record<string, string | undefined> {
+  const merged: Record<string, string | undefined> = { ...(env.AI_ENV ?? {}) };
+  for (const key of ['GROQ_API_KEY', 'GROQ_MODEL', 'GROQ_VISION_MODEL'] as const) {
+    const value = env[key];
+    if (value !== undefined) merged[key] = value;
+  }
+  return merged;
+}
 
 /** The one 404 every unrouted /api path gets, in dev and in production alike. */
 export function notFoundResponse(): Response {
@@ -126,10 +148,12 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
       return (request) => neonStore(env.DATABASE_URL).then((store) => handleSync(request, store));
     case '/api/sync/status':
       return (request) => handleSyncStatus(request, env.DATABASE_URL);
+    case '/api/ai/chat/completions':
     case '/api/groq/chat/completions':
-      return (request) => handleGroqChatCompletions(request, env.GROQ_API_KEY, { model: env.GROQ_MODEL, visionModel: env.GROQ_VISION_MODEL });
+      return (request) => handleGroqChatCompletions(request, env.GROQ_API_KEY, { env: aiEnv(env) });
+    case '/api/ai/status':
     case '/api/groq/status':
-      return (request) => handleGroqStatus(request, env.GROQ_API_KEY);
+      return (request) => handleGroqStatus(request, env.GROQ_API_KEY, resolveProviders(aiEnv(env)));
     case '/api/push/config':
       return (request) => handlePushConfig(request, env.VAPID_PUBLIC_KEY, env.VAPID_PRIVATE_KEY, env.DATABASE_URL, env.CRON_SECRET);
     case '/api/push/subscription':

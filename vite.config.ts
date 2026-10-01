@@ -288,6 +288,7 @@ export default defineConfig(({ mode }) => {
     VAPID_SUBJECT: env.VAPID_SUBJECT || fileEnv.VAPID_SUBJECT,
     CRON_SECRET: env.CRON_SECRET || fileEnv.CRON_SECRET,
     ERROR_REPORT_WEBHOOK: env.ERROR_REPORT_WEBHOOK || fileEnv.ERROR_REPORT_WEBHOOK,
+    AI_ENV: { ...env, ...fileEnv } as Record<string, string | undefined>,
   };
   return {
     plugins: [react(), groqProxyPlugin(apiKey, model, visionModel), syncApi(databaseUrl), authApi(databaseUrl), icsApi(), pushApi(pushEnv), apiFallback()],

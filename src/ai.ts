@@ -16,8 +16,13 @@ import type {
   WeekResults,
 } from './types';
 
-export const GROQ_CHAT_URL = '/api/groq/chat/completions';
-export const GROQ_STATUS_URL = '/api/groq/status';
+/**
+ * The browser calls the provider-neutral route. `/api/groq/*` stays wired as an
+ * alias so an already-installed PWA running a cached bundle keeps working after
+ * a deploy — see the route table in src/server/apiRouter.ts.
+ */
+export const GROQ_CHAT_URL = '/api/ai/chat/completions';
+export const GROQ_STATUS_URL = '/api/ai/status';
 export const GROQ_TEXT_MODEL = 'openai/gpt-oss-120b';
 /**
  * Groq's text models reject array content outright, so image requests go to a
@@ -47,7 +52,112 @@ export const GROQ_KEY_MISSING_MESSAGE = 'GROQ_API_KEY is not configured on the s
  * the browser must never import the server-only proxy module.
  */
 export const GROQ_BILLING_MESSAGE =
-  'Your Groq key is working — the account has just run out of free allowance. Add a payment method at https://console.groq.com/settings/billing, or wait for the per-day free allowance to reset, then try again. No redeploy needed.';
+  'Your AI provider key is working — the account has just run out of free allowance. Add a payment method with the provider, or wait for the free allowance to reset, then try again. No redeploy needed.';
+
+/**
+ * Waiting between attempts.
+ *
+ * The server tries every configured provider before answering, so by the time
+ * the browser sees a 429 or a 5xx there is nothing left to switch to — but a
+ * rate limit is measured per minute, so *waiting* is still a real fix. These
+ * are the delays for the second, third and fourth attempt; a jitter keeps a
+ * hundred tabs from retrying in lockstep.
+ */
+const AI_RETRY_DELAYS_MS = [800, 2_000, 4_500];
+
+/** A 429 or a 5xx is worth another attempt; anything else is a final answer. */
+function isTransientStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+/**
+ * Failures waiting cannot fix. The server has already tried every provider by
+ * the time the browser sees this, so a rejected key, an unknown model or an
+ * empty balance is a final answer — retrying would only delay the message that
+ * tells the operator what to change.
+ */
+const PERMANENT_AI_CODES = new Set(['billing', 'upstream_auth', 'upstream_forbidden', 'model_not_found']);
+
+/**
+ * Whether another attempt could succeed.
+ *
+ * The status alone is not enough: an exhausted allowance and a one-minute rate
+ * limit both arrive as 429, and only one of them is fixed by waiting. A body we
+ * cannot read is treated as final rather than retried blindly.
+ */
+async function isWorthRetrying(response: Response): Promise<boolean> {
+  if (!isTransientStatus(response.status)) return false;
+  try {
+    const text = await response.clone().text();
+    const error = (JSON.parse(text) as { error?: unknown }).error;
+    const code = error && typeof error === 'object' ? String((error as { code?: unknown }).code ?? '') : '';
+    if (!code) return true;
+    return !PERMANENT_AI_CODES.has(code);
+  } catch {
+    return false;
+  }
+}
+
+/** Read `Retry-After`, tolerating a stubbed Response that has no headers. */
+function retryAfterSeconds(response: Response | null): number {
+  try {
+    const header = response?.headers.get('retry-after');
+    return header ? Number(header) : Number.NaN;
+  } catch {
+    return Number.NaN;
+  }
+}
+
+function retryDelayMs(attempt: number, response: Response | null): number {
+  const seconds = retryAfterSeconds(response);
+  // Cap a server-ordered wait: "Retry-After: 3600" is not a retry, it is a no.
+  if (Number.isFinite(seconds) && seconds >= 0 && seconds <= 30) return seconds * 1000;
+  const base = AI_RETRY_DELAYS_MS[Math.min(attempt, AI_RETRY_DELAYS_MS.length - 1)];
+  return base + Math.random() * base * 0.3;
+}
+
+function wait(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/**
+ * POST to the AI proxy, retrying the failures that time or a second attempt can
+ * fix. Never retries an abort, and never retries a response the server meant
+ * the user to read (a bad request, a rejected key, an exhausted allowance).
+ */
+async function postAI(body: string, signal?: AbortSignal): Promise<Response> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const response = await fetch(GROQ_CHAT_URL, {
+        method: 'POST',
+        signal: signal ?? null,
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+      if (response.ok || attempt >= AI_RETRY_DELAYS_MS.length) return response;
+      if (!(await isWorthRetrying(response))) return response;
+      await wait(retryDelayMs(attempt, response), signal);
+    } catch (cause) {
+      if (cause instanceof Error && cause.name === 'AbortError') throw cause;
+      if (attempt >= AI_RETRY_DELAYS_MS.length) throw cause;
+      await wait(retryDelayMs(attempt, null), signal);
+    }
+  }
+}
 
 export interface PlanRange {
   startDate: string;
@@ -282,7 +392,7 @@ function parseFrequency(value: unknown): HabitFrequency {
 
 function normalizePlan(rawValue: unknown, state: PlannerState, range: PlanRange): AIDraft {
   const raw = asRecord(rawValue);
-  if (!raw) throw new Error(t("Groq returned a plan in an unexpected format. Try again."));
+  if (!raw) throw new Error(t("The AI returned a plan in an unexpected format. Try again."));
   const tasks: TaskInput[] = [];
   const existingTaskKeys = new Set(
     state.tasks.map((task) => `${task.dueDate ?? ''}|${task.title.toLowerCase().trim()}`),
@@ -390,7 +500,7 @@ function extractContent(payload: unknown): string {
       return typeof text === 'string' ? [text] : [];
     }).join('\n');
   }
-  throw new Error(t("Groq did not return a response. Check the server configuration and try again."));
+  throw new Error(t("The AI did not return a response. Check the server configuration and try again."));
 }
 
 function parseJson(text: string): unknown {
@@ -429,13 +539,10 @@ async function groqJsonCall(system: string, user: string, imageDataUrl?: string,
     : user;
   let response: Response;
   try {
-    response = await fetch(GROQ_CHAT_URL, {
-      method: 'POST',
-      signal: signal ?? null,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    response = await postAI(
+      JSON.stringify({
         model: imageDataUrl ? GROQ_VISION_MODEL : GROQ_TEXT_MODEL,
-        // Groq documents 0.5-0.7 for its reasoning models; lower values make
+        // 0.5-0.7 is the range reasoning models recommend; lower values make
         // GPT-OSS repetitive, and JSON output is already pinned by response_format.
         temperature: AI_TEMPERATURE,
         max_completion_tokens: maxTokens,
@@ -445,10 +552,11 @@ async function groqJsonCall(system: string, user: string, imageDataUrl?: string,
           { role: 'user', content },
         ],
       }),
-    });
+      signal,
+    );
   } catch (cause) {
     if (cause instanceof Error && cause.name === 'AbortError') throw cause;
-    throw new Error(t("Could not reach the Groq proxy. Check the server and try again."));
+    throw new Error(t("Could not reach the AI service. Check your connection and try again."));
   }
   // Read the body once: prefer text (so a non-JSON error can be reported), and
   // fall back to json() for callers that only provide that.
@@ -469,20 +577,20 @@ async function groqJsonCall(system: string, user: string, imageDataUrl?: string,
         throw new Error(message || t(GROQ_BILLING_MESSAGE));
       }
       if (code === 'upstream_auth' || response.status === 401) {
-        throw new Error(message || t("Groq rejected GROQ_API_KEY. Check the server environment variable."));
+        throw new Error(message || t("The AI service rejected the API key. Check the server environment variables."));
       }
       if (code === 'upstream_forbidden' || response.status === 403) {
-        throw new Error(message || t("Groq rejected GROQ_API_KEY. Check the server environment variable."));
+        throw new Error(message || t("The AI service rejected the API key. Check the server environment variables."));
       }
-      if (code === 'model_not_found' || code === 'rate_limited') throw new Error(message || t("Groq request failed ({0}). Please try again.", { 0: response.status }));
+      if (code === 'model_not_found' || code === 'rate_limited') throw new Error(message || t("The AI request failed ({0}). Please try again.", { 0: response.status }));
       if (response.status === 503) throw new Error(message || GROQ_KEY_MISSING_MESSAGE);
       if (response.status === 413) throw new Error(message || t("The image or plan is too large for one request. Use a smaller image (up to 3 MB)."));
-      if (response.status === 504) throw new Error(message || t("The Groq request timed out. Please try again."));
-      throw new Error(message || t("Groq request failed ({0}). Please try again.", { 0: response.status }));
+      if (response.status === 504) throw new Error(message || t("The AI request timed out. Please try again."));
+      throw new Error(message || t("The AI request failed ({0}). Please try again.", { 0: response.status }));
     }
 
     // No JSON at all: something in front of the app answered, not our proxy.
-    if (response.status === 404) throw new Error(t("The Groq proxy was not found on this deployment. Redeploy with the api/ functions included."));
+    if (response.status === 404) throw new Error(t("The AI proxy was not found on this deployment. Redeploy with the api/ functions included."));
     throw new Error(
       t("The server returned an unexpected response ({0}) instead of JSON. If this deployment has password protection or Vercel Authentication enabled, turn it off, or check that the api/ functions were deployed.", {
         0: response.status,
@@ -688,14 +796,16 @@ export async function generateAIPlan(options: {
   range: PlanRange;
   state: PlannerState;
   imageDataUrl?: string;
+  /** Lets the caller cancel: an AI draft can take a minute to arrive. */
+  signal?: AbortSignal;
 }): Promise<AIDraft> {
-  const { prompt, range, state, imageDataUrl } = options;
+  const { prompt, range, state, imageDataUrl, signal } = options;
   if (!isValidISODate(range.startDate) || range.days < 1 || range.days > MAX_PLAN_DAYS) throw new Error(t("Choose a valid planning date range."));
   if (!prompt.trim() && !imageDataUrl) throw new Error(t("Tell the AI what you want to do, or upload a plan image."));
   const currentPlans = buildPlanningContext(state, range);
   const system = `You are a supportive, practical planning assistant inside a personal planner. Create a realistic plan, not a packed schedule. ${planSafetyRules(range)} ${spanGuidance(range.days)} ${PLAN_JSON_SHAPE}. Tasks must have a date inside the range. Use events only when a time is useful. Habits should be repeatable and few; do not add a habit that already exists. Avoid duplicating the user's current tasks and events. If the user uploaded a handwritten or printed plan, transcribe what is clear, preserve dates/times, and put unclear details in the summary rather than guessing.`;
   const user = `Planning request: ${prompt.trim() || 'Read the uploaded image and turn the plan into planner tasks, timed events, and a few repeatable habits where appropriate.'}\n\nCurrent schedule and constraints (do not add over existing times):\n${JSON.stringify(currentPlans)}`;
-  const raw = await groqJsonInternal(system, user, imageDataUrl, undefined, range.days > 30 ? LONG_RANGE_MAX_TOKENS : DEFAULT_MAX_TOKENS);
+  const raw = await groqJsonInternal(system, user, imageDataUrl, signal, range.days > 30 ? LONG_RANGE_MAX_TOKENS : DEFAULT_MAX_TOKENS);
   return normalizePlan(raw, state, range);
 }
 
@@ -868,7 +978,7 @@ export async function generateAIReview(options: {
   };
   const system = `You are a kind, honest planning coach. Review the planner data for ${range.startDate} through ${lastDate}. Be specific, balanced, and non-judgmental; never shame the user or equate productivity with self-worth. Point out concrete wins and one or two realistic improvements. Always include one gentle, broadly safe wellbeing idea without diagnosing or prescribing. The memory section contains facts and preferences the user explicitly chose to save; use it only when relevant, do not infer sensitive facts, and never invent or change memories. Learned patterns are weak activity signals, not certain truths. Return ONLY JSON: {"summary":"2-4 sentences","wins":["..."],"improvements":["..."],"wellness":"one optional, gentle wellbeing idea","carryForward":[{"taskId":"an exact supplied task id","date":"YYYY-MM-DD after ${today} and within the next 30 days","reason":"short reason"}]}. Carry forward each unfinished task only if it still appears useful, use only supplied IDs, and choose practical future dates that leave space. Never invent, delete, or mark tasks complete. This is reflective coaching, not medical advice.`;
   const raw = asRecord(await groqJsonInternal(system, `Here is the user's logged activity. Do not treat empty days as failures.\n${JSON.stringify(payload)}`));
-  if (!raw) throw new Error(t("Groq returned a review in an unexpected format. Try again."));
+  if (!raw) throw new Error(t("The AI returned a review in an unexpected format. Try again."));
   return {
     summary: cleanText(raw.summary, 700) || t("You showed up for some of the things that mattered. Let’s make the next plan a little easier to keep."),
     wins: stringList(raw.wins, 5),

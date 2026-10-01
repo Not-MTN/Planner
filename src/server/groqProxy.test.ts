@@ -65,7 +65,7 @@ describe('Vercel function discovery', () => {
     // Functions; the API has 16 routes, so they all share the one catch-all.
     expect(functions.map((file) => relative(apiRoot, file).split(sep).join('/'))).toEqual(['[...path].ts']);
     expect(typeof vercelFunction).toBe('function');
-    expect(await (await vercelFunction(request(GROQ_STATUS_URL))).json()).toEqual({ configured: false });
+    expect(await (await vercelFunction(request(GROQ_STATUS_URL))).json()).toEqual({ configured: false, providers: [] });
   });
 });
 
@@ -76,14 +76,19 @@ describe('status route', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('cache-control')).toBe('no-store');
     const text = await response.text();
-    expect(JSON.parse(text)).toEqual({ configured: true });
+    expect(JSON.parse(text)).toEqual({
+      configured: true,
+      // Names and capabilities only — no key, no base URL, nothing useful to
+      // anyone reading the response.
+      providers: [{ id: 'groq', label: 'Groq', vision: true }],
+    });
     expect(text).not.toContain(FAKE_KEY);
   });
 
   it('reports configured:false when the variable is missing or blank', async () => {
     vi.stubEnv('GROQ_API_KEY', '   ');
-    expect(await (await vercelFunction(request(GROQ_STATUS_URL))).json()).toEqual({ configured: false });
-    expect(await handleGroqStatus(request('/api/groq/status'), undefined).json()).toEqual({ configured: false });
+    expect(await (await vercelFunction(request(GROQ_STATUS_URL))).json()).toEqual({ configured: false, providers: [] });
+    expect(await handleGroqStatus(request('/api/groq/status'), undefined).json()).toEqual({ configured: false, providers: [] });
   });
 
   it('rejects cross-origin browser requests', () => {
@@ -454,5 +459,95 @@ describe('what actually reaches Groq', () => {
     const parsed = (await response.json()) as { error: { message: string } };
     expect(parsed.error.message).toContain('GROQ_VISION_MODEL');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * One provider is one single point of failure. When Groq is throttling, out of
+ * credit, or simply down, a second configured provider should answer — and the
+ * user should never have to know it happened.
+ */
+describe('provider fallback', () => {
+  const GROQ_FIRST = [
+    { id: 'groq', label: 'Groq', url: 'https://api.groq.com/openai/v1/chat/completions', key: FAKE_KEY, textModel: GROQ_DEFAULT_TEXT_MODEL, visionModel: GROQ_DEFAULT_VISION_MODEL, reasoning: {}, keyEnv: 'GROQ_API_KEY', billingUrl: 'https://console.groq.com/settings/billing' },
+    { id: 'openai', label: 'OpenAI', url: 'https://api.openai.com/v1/chat/completions', key: 'sk-test', textModel: 'gpt-4o-mini', visionModel: 'gpt-4o-mini', reasoning: {}, keyEnv: 'OPENAI_API_KEY' },
+  ];
+
+  function postChat(options: Record<string, unknown> = {}, body = chatBody()) {
+    return handleGroqChatCompletions(
+      request('/api/ai/chat/completions', { method: 'POST', body }),
+      FAKE_KEY,
+      options as never,
+    );
+  }
+
+  it('answers from the next provider when the first is rate-limiting', async () => {
+    resetRateLimits();
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(_input);
+      if (url.includes('groq')) return new Response(JSON.stringify({ error: { message: 'Rate limit reached' } }), { status: 429 });
+      const sent = JSON.parse(String(init?.body)) as { model: string };
+      // The fallback gets its own model, not Groq's id.
+      return new Response(JSON.stringify({ choices: [{ message: { content: `{"model":"${sent.model}"}` } }] }), { status: 200 });
+    });
+    const response = await postChat({ providers: GROQ_FIRST, fetchImpl: fetchMock });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-ai-provider')).toBe('openai');
+    expect((await response.json() as { choices: { message: { content: string } }[] }).choices[0].message.content).toContain('gpt-4o-mini');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps trying past a provider that cannot be reached at all', async () => {
+    resetRateLimits();
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => {
+      if (String(_input).includes('groq')) throw new Error('network down');
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{}' } }] }), { status: 200 });
+    });
+    const response = await postChat({ providers: GROQ_FIRST, fetchImpl: fetchMock });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-ai-provider')).toBe('openai');
+  });
+
+  it('sends images only to a provider that can read them', async () => {
+    resetRateLimits();
+    const textOnly = [{ ...GROQ_FIRST[0], visionModel: '' }, GROQ_FIRST[1]];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response(JSON.stringify({ choices: [{ message: { content: '{}' } }] }), { status: 200 }));
+    const response = await postChat({ providers: textOnly, fetchImpl: fetchMock }, imageChatBody(GROQ_DEFAULT_VISION_MODEL));
+    expect(response.status).toBe(200);
+    // The text-only provider was never asked.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('openai');
+  });
+
+  it('does not waste a second provider on a request both would refuse', async () => {
+    resetRateLimits();
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: { message: 'The token limit is invalid.' } }), { status: 400 }));
+    const response = await postChat({ providers: GROQ_FIRST, fetchImpl: fetchMock });
+    expect(response.status).toBe(400);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('names the provider it failed on, so a log can say whose key to fix', async () => {
+    resetRateLimits();
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: { message: 'Incorrect API key provided' } }), { status: 401 }));
+    const response = await postChat({ providers: GROQ_FIRST, fetchImpl: fetchMock });
+    const parsed = (await response.json()) as { error: { provider: string; message: string } };
+    // Both failed; the first is the operator's primary, so it is the one named.
+    expect(parsed.error.provider).toBe('groq');
+    expect(parsed.error.message).toBe('Incorrect API key provided');
+    // Every attempt is recorded, so a log can see the fallback happened.
+    expect(response.headers.get('x-ai-attempts')).toContain('openai');
+  });
+
+  it('explains a second provider the same way it explains the first', async () => {
+    resetRateLimits();
+    // No message from the provider: the advice is what the user gets.
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 401 }));
+    const openaiOnly = [GROQ_FIRST[1]];
+    const response = await postChat({ providers: openaiOnly, fetchImpl: fetchMock });
+    const parsed = (await response.json()) as { error: { message: string; provider: string } };
+    // Not "re-copy it from console.groq.com" — that is the wrong console.
+    expect(parsed.error.message).toContain('OPENAI_API_KEY');
+    expect(parsed.error.provider).toBe('openai');
   });
 });
