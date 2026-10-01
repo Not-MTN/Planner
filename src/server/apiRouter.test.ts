@@ -49,6 +49,7 @@ describe('apiRoute table', () => {
       '/api/auth/note',
       '/api/auth/recovery/start',
       '/api/auth/recovery/complete',
+      '/api/auth/recovery/update',
       '/api/auth/salt',
       '/api/auth/session',
       '/api/auth/share',
@@ -125,9 +126,15 @@ describe('handleApiRequest', () => {
       role: 'student' as const,
       kdfSalt: 'c2FsdHNhbHRzYWx0c2E=',
       authToken: 'YXV0aFRva2VuYXV0aFRva2VuYXV0aFRva2VuMTI=',
-      recoveryHash: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+      recoveryHashes: [
+        'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+        'AgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+      ],
       wrappedDek: 'd3JhcHBlZERla3dyYXBwZWREZWt3cmFwcGVkRGVrMTI=',
-      wrappedRecovery: 'd3JhcHBlZFJlY292ZXJ5d3JhcHBlZFJlY292ZXJ5MTI=',
+      wrappedRecovery: [
+        'd3JhcHBlZFJlY292ZXJ5d3JhcHBlZFJlY292ZXJ5MTI=',
+        'd3JhcHBlZFJlY292ZXJ5d3JhcHBlZFJlY292ZXJ5MzQ=',
+      ],
       ciphertext: 'dmF1bHRjaXBoZXJ0ZXh0',
     };
     const response = await handleApiRequest(jsonRequest('POST', '/api/auth/signup', account), NO_ENV);
@@ -147,5 +154,9 @@ describe('handleApiRequest', () => {
       kdfSalt: account.kdfSalt,
       wrappedRecovery: account.wrappedRecovery,
     });
+
+    // Rotating codes needs a session, and the route is reachable in production.
+    const rotate = await handleApiRequest(jsonRequest('POST', '/api/auth/recovery/update', { newRecoveryHashes: [] }), NO_ENV);
+    expect(rotate.status).toBe(401);
   });
 });

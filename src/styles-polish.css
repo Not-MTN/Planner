@@ -1045,3 +1045,80 @@
 .notification-snooze { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 0 14px 10px 60px; color: var(--muted); }
 .notification-snooze svg { flex: none; opacity: 0.7; }
 .notification-snooze .btn { padding: 2px 8px; min-height: 26px; font-size: 11px; }
+
+/* --- Recovery codes: the numbered list shown once, at account creation,
+   after a password reset, or when the codes are replaced in Settings. --- */
+/* The codes read as a numbered list, two columns wide enough to stay legible
+   at any width; each row is selectable on its own so one code can be copied
+   without taking the whole set. */
+.recovery-codes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recovery-codes li {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  min-width: 0;
+}
+
+.recovery-codes code {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font-size: clamp(12px, 1.6vw, 14px);
+  letter-spacing: 0.05em;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.recovery-code-num {
+  flex: none;
+  min-width: 1.4em;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.recovery-ok {
+  margin: 8px 0 0;
+  color: var(--accent);
+  font-size: 12px;
+  line-height: 1.6;
+}
+/* --- Recovery codes: the numbered list shown once, at account creation,
+   after a password reset, or when the codes are replaced in Settings. --- */
+.recovery {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-small);
+  background: var(--surface-2);
+}
+
+.recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.recovery-actions .btn {
+  flex: 1 1 130px;
+}
+
+.recovery-warn {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.6;
+}

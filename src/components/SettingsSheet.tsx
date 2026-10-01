@@ -5,12 +5,13 @@ import { useImportFile } from '../hooks';
 import { DownloadIcon, ExitIcon, SparklesIcon, UploadIcon, UserIcon } from '../icons';
 import { Rich } from './Rich';
 import { Modal } from './ui';
+import { RecoveryCodes } from './RecoveryCodes';
 import { useEffect, useState } from 'react';
 import { FeedsSection, SecuritySection, SharedSpaceSection, TaskImportSection, TemplatesSection, WeatherSection } from './SettingsExtras';
 import { isReportingEnabled, setReportingEnabled } from '../reporting';
 import { useSignOut } from './useSignOut';
 import { accountUser, forgetAccountUser } from '../auth/vault';
-import { deleteAccount, getActiveSession } from '../auth/session';
+import { deleteAccount, getActiveSession, regenerateRecoveryCodes } from '../auth/session';
 import { DATE_LANGUAGES, todayISO, type DateLanguage } from '../dates';
 import { downloadBusyICS, downloadICS, parseICS } from '../ics';
 import { canInstall, isInstalled, onInstallChange, promptInstall } from '../pwa';
@@ -503,6 +504,27 @@ function AccountSection() {
   const [confirmation, setConfirmation] = useState('');
   const [deleteError, setDeleteError] = useState('');
   const [deleted, setDeleted] = useState(false);
+  const [rotating, setRotating] = useState(false);
+  const [rotationPassword, setRotationPassword] = useState('');
+  const [rotationBusy, setRotationBusy] = useState(false);
+  const [rotationError, setRotationError] = useState('');
+  const [newCodes, setNewCodes] = useState<string[] | null>(null);
+  const [codesConfirmed, setCodesConfirmed] = useState(false);
+
+  const requestRotation = () => {
+    if (rotationBusy || !rotationPassword) return;
+    setRotationBusy(true);
+    setRotationError('');
+    void regenerateRecoveryCodes(rotationPassword)
+      .then((codes) => {
+        setNewCodes(codes);
+        setCodesConfirmed(false);
+        setRotating(false);
+        setRotationPassword('');
+      })
+      .catch((error: unknown) => setRotationError(error instanceof Error ? error.message : t("The recovery codes could not be replaced.")))
+      .finally(() => setRotationBusy(false));
+  };
 
   const requestDelete = () => {
     if (busy || confirmation.trim().toUpperCase() !== 'DELETE' || !password) return;
@@ -546,6 +568,38 @@ function AccountSection() {
             </button>
           </div>
           {getActiveSession() ? (
+            <div className="set-actions account-recovery-actions">
+              {!rotating ? (
+                <button type="button" className="btn btn-soft" onClick={() => { setRotating(true); setRotationError(''); }}>
+                  {t("Replace recovery codes")}
+                </button>
+              ) : (
+                <div className="account-recovery-form">
+                  <p className="set-hint">{t("If a code has been lost, used, or seen by someone else, replace the whole set. Your old codes stop working straight away.")}</p>
+                  <label className="field">
+                    <span>{t("Current password")}</span>
+                    <input
+                      className="input"
+                      type="password"
+                      autoComplete="current-password"
+                      value={rotationPassword}
+                      onChange={(event) => setRotationPassword(event.target.value)}
+                    />
+                  </label>
+                  {rotationError ? <p className="set-hint is-error" role="alert">{rotationError}</p> : null}
+                  <div className="set-actions">
+                    <button type="button" className="btn btn-ghost" disabled={rotationBusy} onClick={() => { setRotating(false); setRotationPassword(''); }}>
+                      {t("Cancel")}
+                    </button>
+                    <button type="button" className="btn btn-soft" disabled={rotationBusy || !rotationPassword} onClick={requestRotation}>
+                      {rotationBusy ? t("Replacing…") : t("Replace recovery codes")}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
+          {getActiveSession() ? (
             <div className="set-actions account-delete-actions">
               {!deleting ? (
                 <button type="button" className="btn btn-danger" onClick={() => { setDeleting(true); setDeleteError(''); }}>
@@ -581,6 +635,47 @@ function AccountSection() {
           {t("No account on this device. Your planner is saved in this browser only; an account keeps it in an encrypted vault you can open anywhere.")}
         </p>
       )}
+      {newCodes ? (
+        <Modal
+          title={t("Your new recovery codes")}
+          className="modal-recovery"
+          onClose={() => {
+            if (!codesConfirmed) return;
+            setNewCodes(null);
+            flash(t("Recovery codes replaced. The old set no longer works."));
+          }}
+        >
+          <p className="set-hint">{t("Save these now. They are shown only once, and the codes you had before no longer open your account.")}</p>
+          <RecoveryCodes
+            codes={newCodes}
+            copy={{
+              authRecoverySub: t("Each code opens your encrypted planner on its own."),
+              authRecoveryCopy: t("Copy all codes"),
+              authRecoveryCopied: t("Copied"),
+              authRecoveryDownload: t("Download codes"),
+              authRecoveryPrint: t("Print codes"),
+              authRecoveryWarn: t("Each code unlocks your encrypted planner by itself. Anyone who finds one can open your planner."),
+              authRecoveryConfirmLabel: t("Type code {n} to confirm you have saved it"),
+              authRecoveryConfirmHint: t("Look at the list above and type the code numbered {n}. We ask because these codes cannot be shown again."),
+              authRecoveryConfirmOk: t("That matches. You are ready to continue."),
+              authRecoveryConfirmBad: t("That is not code {n}. Check the number above and try again."),
+            }}
+            idPrefix="settings"
+            animationDelay={0}
+            onConfirmedChange={setCodesConfirmed}
+          />
+          <div className="set-actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={!codesConfirmed}
+              onClick={() => { setNewCodes(null); flash(t("Recovery codes replaced. The old set no longer works.")); }}
+            >
+              {t("Done")}
+            </button>
+          </div>
+        </Modal>
+      ) : null}
     </section>
   );
 }

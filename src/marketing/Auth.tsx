@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { COPY, type Lang } from './copy';
 import { AuthError, fetchApiStatus, resetPasswordWithRecovery, signIn, signUp, type AuthErrorCode } from '../auth/session';
 import { PasskeyError, passkeySignIn, passkeysSupported, registerPasskey } from '../auth/passkey';
+import { RecoveryCodes } from '../components/RecoveryCodes';
 import { EMAIL_PATTERN, USERNAME_PATTERN } from '../shared/authContract';
 import { loadFrom } from '../storage';
 
@@ -415,8 +416,7 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
   ];
   const [agreed, setAgreed] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [recoveryKey, setRecoveryKey] = useState('');
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
@@ -503,7 +503,7 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
         // Signed up on this device, so trust it by default; Settings can forget it.
         initialState: { ...state, panels },
       });
-      setRecoveryKey(created.recoveryKey);
+      setRecoveryCodes(created.recoveryCodes);
       setBusy(false);
       setStep('recovery');
     } catch (caught) {
@@ -513,28 +513,7 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
     }
   };
 
-  const key = recoveryKey;
   const meter = strength(password, lang);
-
-  const download = () => {
-    const blob = new Blob([`Planner recovery key\n\n${key}\n\n${c.authRecoverySub}\n`], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'planner-recovery-key.txt';
-    link.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(key);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2200);
-    } catch {
-      setCopied(false);
-    }
-  };
 
   return (
     <div className="auth">
@@ -807,23 +786,7 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
                 <p>{c.authRecoverySub}</p>
               </header>
 
-              <div className="recovery reveal-in" style={{ animationDelay: '60ms' }}>
-                <code>{key}</code>
-                <div className="recovery-actions">
-                  <button type="button" className="btn btn-outline" onClick={copy}>
-                    {copied ? c.authRecoveryCopied : c.authRecoveryCopy}
-                  </button>
-                  <button type="button" className="btn btn-outline" onClick={download}>
-                    {c.authRecoveryDownload}
-                  </button>
-                </div>
-                <p className="recovery-warn">{c.authRecoveryWarn}</p>
-              </div>
-
-              <label className="check reveal-in" style={{ animationDelay: '110ms' }}>
-                <input type="checkbox" checked={saved} onChange={(event) => setSaved(event.target.checked)} />
-                <span>{c.authRecoverySaved}</span>
-              </label>
+              <RecoveryCodes codes={recoveryCodes} copy={c} idPrefix="signup" onConfirmedChange={setSaved} />
 
               {passkeysSupported() ? (
                 <>
@@ -888,9 +851,8 @@ function Recover({ lang, navigate }: { lang: Lang; navigate: Nav }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
-  const [nextRecoveryKey, setNextRecoveryKey] = useState<string | null>(null);
+  const [nextRecoveryCodes, setNextRecoveryCodes] = useState<string[] | null>(null);
   const [saved, setSaved] = useState(false);
-  const [copied, setCopied] = useState(false);
   const meter = strength(password, lang);
   const server = useServerNotice(c, lang);
 
@@ -930,7 +892,7 @@ function Recover({ lang, navigate }: { lang: Lang; navigate: Nav }) {
     setBusy(true);
     try {
       const generated = await resetPasswordWithRecovery(identifier, key, password);
-      setNextRecoveryKey(generated);
+      setNextRecoveryCodes(generated);
       setSaved(false);
     } catch (caught) {
       if (caught instanceof AuthError && caught.code === 'bad_credentials') {
@@ -944,55 +906,18 @@ function Recover({ lang, navigate }: { lang: Lang; navigate: Nav }) {
     }
   };
 
-  const download = () => {
-    if (!nextRecoveryKey) return;
-    const blob = new Blob([`Planner recovery key\n\n${nextRecoveryKey}\n\n${c.authRecoverySub}\n`], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'planner-recovery-key.txt';
-    link.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const copy = async () => {
-    if (!nextRecoveryKey) return;
-    try {
-      await navigator.clipboard.writeText(nextRecoveryKey);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2200);
-    } catch {
-      setCopied(false);
-    }
-  };
-
   return (
     <div className="auth">
       <Aside lang={lang} />
       <section className="auth-panel">
         <div className="auth-form">
-          {nextRecoveryKey ? (
+          {nextRecoveryCodes ? (
             <>
               <header className="auth-head reveal-in">
                 <h1>{c.authRecoveryCompleteTitle}</h1>
                 <p>{c.authRecoveryCompleteSub}</p>
               </header>
-              <div className="recovery reveal-in" style={{ animationDelay: '60ms' }}>
-                <code dir="ltr">{nextRecoveryKey}</code>
-                <div className="recovery-actions">
-                  <button type="button" className="btn btn-outline" onClick={() => void copy()}>
-                    {copied ? c.authRecoveryCopied : c.authRecoveryCopy}
-                  </button>
-                  <button type="button" className="btn btn-outline" onClick={download}>
-                    {c.authRecoveryDownload}
-                  </button>
-                </div>
-                <p className="recovery-warn">{c.authRecoveryWarn}</p>
-              </div>
-              <label className="check reveal-in" style={{ animationDelay: '100ms' }}>
-                <input type="checkbox" checked={saved} onChange={(event) => setSaved(event.target.checked)} />
-                <span>{c.authRecoverySaved}</span>
-              </label>
+              <RecoveryCodes codes={nextRecoveryCodes} copy={c} idPrefix="recover" onConfirmedChange={setSaved} />
               <footer className="auth-foot reveal-in" style={{ animationDelay: '130ms' }}>
                 <button type="button" className="btn btn-primary btn-block" disabled={!saved} onClick={() => navigate('/login')}>
                   {c.authRecoveryComplete}

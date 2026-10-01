@@ -247,7 +247,7 @@ async function createAccountThroughForm(username: string) {
   setChecked(inputs[4]!, true);
   await click(container.querySelector('form.auth-fields button[type="submit"]'));
   await click(buttonStartingWith('Continue'));
-  await waitFor(() => container.textContent.includes('Save your recovery key'));
+  await waitFor(() => container.textContent.includes('Save your recovery codes'));
 }
 
 describe('passkey journey', () => {

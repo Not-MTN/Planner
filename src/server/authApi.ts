@@ -45,6 +45,7 @@ import {
   hashToken,
   newId as newStoreId,
   newToken,
+  parseRecoveryWraps,
   safeEqual,
   type AuthStore,
   type LinkRow,
@@ -141,6 +142,26 @@ async function readJsonBody(request: Request, maxBytes: number = MAX_AUTH_BODY_B
   }
 }
 
+/**
+ * A bounded list of base64 strings.
+ *
+ * Recovery codes arrive as a set, so the server accepts many — but never an
+ * unbounded number: a huge list would be a cheap way to make it store and hash
+ * whatever it is sent.
+ */
+const MAX_RECOVERY_CODES = 16;
+
+function isBase64List(
+  value: unknown,
+  itemMin: number,
+  itemMax: number,
+  minCount: number,
+  maxCount: number,
+): value is string[] {
+  if (!Array.isArray(value) || value.length < minCount || value.length > maxCount) return false;
+  return value.every((entry) => isBase64(entry, itemMin, itemMax));
+}
+
 function guard(request: Request, bucket: string, limit: number): Response | null {
   if (!isSameOriginRequest(request)) return error(403, 'Cross-origin requests are not allowed.');
   const limited = rateLimitResponse(request, bucket, limit, 60_000);
@@ -165,7 +186,7 @@ export async function handleSignup(request: Request, store: AuthStore | null): P
   const email = cleanEmail(body.email);
   const kdfSalt = body.kdfSalt;
   const authToken = body.authToken;
-  const recoveryHash = body.recoveryHash;
+  const recoveryHashes = body.recoveryHashes;
   const wrappedDek = body.wrappedDek;
   const wrappedRecovery = body.wrappedRecovery;
   const ciphertext = body.ciphertext;
@@ -176,9 +197,13 @@ export async function handleSignup(request: Request, store: AuthStore | null): P
   if (email === undefined) return error(400, 'That email address does not look right.');
   if (!isBase64(kdfSalt, 16, 64)) return error(400, 'Missing or invalid KDF salt.');
   if (!isBase64(authToken, 32, 64)) return error(400, 'Missing or invalid auth token.');
-  if (!isBase64(recoveryHash, 43, 44)) return error(400, 'Missing or invalid recovery verifier.');
+  if (!isBase64List(recoveryHashes, 43, 44, 1, MAX_RECOVERY_CODES)) return error(400, 'Missing or invalid recovery verifiers.');
   if (!isBase64(wrappedDek, 32, 256)) return error(400, 'Missing or invalid wrapped key.');
-  if (!isBase64(wrappedRecovery, 32, 256)) return error(400, 'Missing or invalid recovery key.');
+  // One wrapped copy per code: the sets must line up, or a code would open
+  // nothing and quietly be useless.
+  if (!isBase64List(wrappedRecovery, 32, 256, 1, MAX_RECOVERY_CODES) || wrappedRecovery.length !== recoveryHashes.length) {
+    return error(400, 'Missing or invalid recovery keys.');
+  }
   if (typeof ciphertext !== 'string' || !ciphertext || ciphertext.length > MAX_VAULT_BYTES * 2) {
     return error(400, 'Missing or invalid vault.');
   }
@@ -191,9 +216,9 @@ export async function handleSignup(request: Request, store: AuthStore | null): P
       role,
       kdfSalt,
       authToken,
-      recoveryHash: recoveryHash as string,
+      recoveryHashes: recoveryHashes as string[],
       wrappedDek,
-      wrappedRecovery,
+      wrappedRecovery: wrappedRecovery as string[],
       ciphertext,
     });
     if (!result.ok) {
@@ -278,7 +303,7 @@ export async function handleRecoveryStart(request: Request, store: AuthStore | n
     const vault = account ? await store!.getVault(account.user.id) : null;
     return json(200, {
       kdfSalt: account?.kdfSalt ?? decoySalt(login),
-      wrappedRecovery: vault?.wrappedRecovery ?? decoyRecoveryWrap(login),
+      wrappedRecovery: account ? parseRecoveryWraps(vault?.wrappedRecovery) : [decoyRecoveryWrap(login)],
     });
   } catch {
     return error(502, 'The accounts database could not be reached. Try again shortly.');
@@ -294,29 +319,80 @@ export async function handleRecoveryComplete(request: Request, store: AuthStore 
   const body = await readJsonBody(request);
   const login = typeof body?.username === 'string' ? body.username.trim() : '';
   const recoveryHash = body?.recoveryHash;
-  const newRecoveryHash = body?.newRecoveryHash;
+  const newRecoveryHashes = body?.newRecoveryHashes;
   const kdfSalt = body?.kdfSalt;
   const authToken = body?.authToken;
   const wrappedDek = body?.wrappedDek;
   const wrappedRecovery = body?.wrappedRecovery;
   if (
     !login || login.length > 200 ||
-    !isBase64(recoveryHash, 43, 44) || !isBase64(newRecoveryHash, 43, 44) ||
+    !isBase64(recoveryHash, 43, 44) || !isBase64List(newRecoveryHashes, 43, 44, 1, MAX_RECOVERY_CODES) ||
     !isBase64(kdfSalt, 16, 64) || !isBase64(authToken, 32, 64) ||
-    !isBase64(wrappedDek, 32, 256) || !isBase64(wrappedRecovery, 32, 256)
+    !isBase64(wrappedDek, 32, 256) ||
+    !isBase64List(wrappedRecovery, 32, 256, 1, MAX_RECOVERY_CODES) ||
+    wrappedRecovery.length !== newRecoveryHashes.length
   ) {
     return error(400, 'Missing or invalid recovery details.');
   }
 
   try {
     const updated = await store!.recoverAccount(login, recoveryHash, {
-      newRecoveryHash,
+      newRecoveryHashes,
       kdfSalt,
       authToken,
       wrappedDek,
       wrappedRecovery,
     });
     if (!updated) return error(401, 'Wrong username or recovery key.', 'bad_credentials');
+    return json(200, { ok: true });
+  } catch {
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
+}
+
+/**
+ * Replace the recovery codes of an account that is already signed in.
+ *
+ * The caller proved who it is with its password — there is no verifier to
+ * check here — so all this does is swap one set of opaque verifiers and wrapped
+ * keys for another.
+ */
+export async function handleRecoveryUpdate(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'auth-recovery-update', 8) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'POST') return error(405, 'Method not allowed.', undefined);
+
+  const token = readSessionToken(request);
+  if (!token) return error(401, 'Sign in first.', 'unauthenticated');
+
+  const body = await readJsonBody(request);
+  const newRecoveryHashes = body?.newRecoveryHashes;
+  const kdfSalt = body?.kdfSalt;
+  const authToken = body?.authToken;
+  const wrappedDek = body?.wrappedDek;
+  const wrappedRecovery = body?.wrappedRecovery;
+  if (
+    !isBase64List(newRecoveryHashes, 43, 44, 1, MAX_RECOVERY_CODES) ||
+    !isBase64(kdfSalt, 16, 64) || !isBase64(authToken, 32, 64) ||
+    !isBase64(wrappedDek, 32, 256) ||
+    !isBase64List(wrappedRecovery, 32, 256, 1, MAX_RECOVERY_CODES) ||
+    wrappedRecovery.length !== newRecoveryHashes.length
+  ) {
+    return error(400, 'Missing or invalid recovery details.');
+  }
+
+  try {
+    const found = await store!.findSession(hashToken(token));
+    if (!found) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+    if (!store!.updateRecovery) return error(501, 'This server cannot rotate recovery codes yet.');
+    const updated = await store!.updateRecovery(found.user.id, {
+      newRecoveryHashes,
+      kdfSalt,
+      authToken,
+      wrappedDek,
+      wrappedRecovery,
+    });
+    if (!updated) return error(502, 'The accounts database could not be reached. Try again shortly.');
     return json(200, { ok: true });
   } catch {
     return error(502, 'The accounts database could not be reached. Try again shortly.');

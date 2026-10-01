@@ -73,8 +73,17 @@ export function createFakeNeon(): FakeDb {
     }
 
     if (/^INSERT INTO planner_credentials /i.test(q)) {
-      const [user_id, kdf_salt, auth_hash, hash_salt, recovery_hash, recovery_hash_salt] = values;
-      tables.planner_credentials.push({ user_id, kdf_salt, auth_hash, hash_salt, recovery_hash, recovery_hash_salt, updated_at: now() });
+      const [user_id, kdf_salt, auth_hash, hash_salt, recovery_hash, recovery_hash_salt, recovery_verifiers] = values;
+      tables.planner_credentials.push({
+        user_id,
+        kdf_salt,
+        auth_hash,
+        hash_salt,
+        recovery_hash,
+        recovery_hash_salt,
+        recovery_verifiers,
+        updated_at: now(),
+      });
       return [];
     }
 
@@ -91,7 +100,12 @@ export function createFakeNeon(): FakeDb {
       if (!user || !tables.planner_vaults.some((row) => row.user_id === user.id)) return [];
       const credential = tables.planner_credentials.find((row) => row.user_id === user.id);
       return credential
-        ? [{ id: user.id, recovery_hash: credential.recovery_hash ?? null, recovery_hash_salt: credential.recovery_hash_salt ?? null }]
+        ? [{
+            id: user.id,
+            recovery_hash: credential.recovery_hash ?? null,
+            recovery_hash_salt: credential.recovery_hash_salt ?? null,
+            recovery_verifiers: credential.recovery_verifiers ?? null,
+          }]
         : [];
     }
 
@@ -107,21 +121,42 @@ export function createFakeNeon(): FakeDb {
     }
 
     if (/^WITH credential_update AS /i.test(q)) {
-      const [kdf_salt, auth_hash, hash_salt, recovery_hash, recovery_hash_salt, user_id, proof, proof_salt, wrapped_dek, wrapped_recovery] = values;
+      // Two statements share this shape: resetting a password with a recovery
+      // code (proved by the verifier array read a moment ago), and rotating the
+      // codes of an account that is already signed in.
+      if (/SET kdf_salt = /i.test(q)) {
+        const [kdf_salt, auth_hash, hash_salt, recovery_hash, recovery_hash_salt, recovery_verifiers, user_id, proof, wrapped_dek, wrapped_recovery] = values;
+        const credential = tables.planner_credentials.find((row) => row.user_id === user_id);
+        if (!credential) return [];
+        // IS NOT DISTINCT FROM: null matches null.
+        if ((credential.recovery_verifiers ?? null) !== (proof ?? null)) return [];
+        const vault = tables.planner_vaults.find((row) => row.user_id === user_id);
+        if (!vault) return [];
+        credential.kdf_salt = kdf_salt;
+        credential.auth_hash = auth_hash;
+        credential.hash_salt = hash_salt;
+        credential.recovery_hash = recovery_hash;
+        credential.recovery_hash_salt = recovery_hash_salt;
+        credential.recovery_verifiers = recovery_verifiers;
+        credential.updated_at = now();
+        vault.wrapped_dek = wrapped_dek;
+        vault.wrapped_recovery = wrapped_recovery;
+        vault.updated_at = now();
+        tables.planner_sessions = tables.planner_sessions.filter((row) => row.user_id !== user_id);
+        return [{ user_id }];
+      }
+      const [recovery_hash, recovery_hash_salt, recovery_verifiers, user_id, wrapped_dek, wrapped_recovery] = values;
       const credential = tables.planner_credentials.find((row) => row.user_id === user_id);
-      if (!credential || credential.recovery_hash !== proof || credential.recovery_hash_salt !== proof_salt) return [];
+      if (!credential) return [];
       const vault = tables.planner_vaults.find((row) => row.user_id === user_id);
       if (!vault) return [];
-      credential.kdf_salt = kdf_salt;
-      credential.auth_hash = auth_hash;
-      credential.hash_salt = hash_salt;
       credential.recovery_hash = recovery_hash;
       credential.recovery_hash_salt = recovery_hash_salt;
+      credential.recovery_verifiers = recovery_verifiers;
       credential.updated_at = now();
       vault.wrapped_dek = wrapped_dek;
       vault.wrapped_recovery = wrapped_recovery;
       vault.updated_at = now();
-      tables.planner_sessions = tables.planner_sessions.filter((row) => row.user_id !== user_id);
       return [{ user_id }];
     }
 

@@ -9,8 +9,10 @@ import {
   decryptState,
   deriveFromPassword,
   encryptState,
-  formatRecoveryKey,
+  formatRecoveryCodes,
+  hashRecoveryCodes,
   hashRecoveryKey,
+  unwrapWithRecoveryCode,
   importDek,
   keyFromRecovery,
   newSalt,
@@ -305,10 +307,10 @@ export interface SignUpInput {
   remember?: boolean;
 }
 
-export async function signUp(input: SignUpInput): Promise<{ recoveryKey: string; session: ActiveSession }> {
-  const recoveryKey = formatRecoveryKey();
-  const recoveryHash = hashRecoveryKey(recoveryKey);
-  const { salt, authToken, dek, dekRaw, wrappedDek, wrappedRecovery } = await createVaultKeys(input.password, recoveryKey);
+export async function signUp(input: SignUpInput): Promise<{ recoveryCodes: string[]; session: ActiveSession }> {
+  const recoveryCodes = formatRecoveryCodes();
+  const recoveryHashes = hashRecoveryCodes(recoveryCodes);
+  const { salt, authToken, dek, dekRaw, wrappedDek, wrappedRecovery } = await createVaultKeys(input.password, recoveryCodes);
   const ciphertext = await encryptState(input.initialState, dek);
 
   const result = await request<{ user: PublicUser }>('/api/auth/signup', {
@@ -320,7 +322,7 @@ export async function signUp(input: SignUpInput): Promise<{ recoveryKey: string;
       role: input.role,
       kdfSalt: salt,
       authToken,
-      recoveryHash,
+      recoveryHashes,
       wrappedDek,
       wrappedRecovery,
       ciphertext,
@@ -331,7 +333,7 @@ export async function signUp(input: SignUpInput): Promise<{ recoveryKey: string;
   // This is the device they signed up on, so open straight into the planner.
   if (input.remember !== false) await rememberOnDevice(result.user.id, dekRaw);
   persistAuth(result.user.id);
-  return { recoveryKey, session: active };
+  return { recoveryCodes, session: active };
 }
 
 export async function signIn(identifier: string, password: string, remember = true): Promise<ActiveSession> {
@@ -367,60 +369,138 @@ export async function signIn(identifier: string, password: string, remember = tr
 }
 
 /**
- * Change a forgotten password using the recovery key. The vault key is unwrapped
- * and re-wrapped in this browser; only its encrypted copies and one-way recovery
- * verifier are sent to the server.
+ * Re-wrap the vault key for a new set of recovery codes.
+ *
+ * Every code is a separate lock on the vault, so a fresh set means a fresh
+ * wrapped copy per code. The old set stops working the moment the server
+ * accepts these.
+ */
+async function rotateRecoveryCodes(
+  raw: Uint8Array<ArrayBuffer>,
+  request: {
+    salt: string;
+    authToken: string;
+    wrappedDek: string;
+    extra?: Record<string, unknown>;
+  },
+): Promise<{ recoveryCodes: string[]; body: Record<string, unknown> }> {
+  const recoveryCodes = formatRecoveryCodes();
+  const wrappedRecovery: string[] = [];
+  for (const code of recoveryCodes) {
+    const kek = await keyFromRecovery(code, request.salt);
+    wrappedRecovery.push(await wrapRawKey(raw, kek));
+  }
+  return {
+    recoveryCodes,
+    body: {
+      ...request.extra,
+      newRecoveryHashes: hashRecoveryCodes(recoveryCodes),
+      kdfSalt: request.salt,
+      authToken: request.authToken,
+      wrappedDek: request.wrappedDek,
+      wrappedRecovery,
+    },
+  };
+}
+
+/**
+ * Change a forgotten password using one of the account's recovery codes. The
+ * vault key is unwrapped and re-wrapped in this browser; only its encrypted
+ * copies and one-way recovery verifiers are sent to the server.
+ *
+ * Recovery issues a whole new set of codes. The one just used is spent, and
+ * there is no way to know which of the others may have leaked along with the
+ * forgotten password, so all of them are replaced.
  */
 export async function resetPasswordWithRecovery(
   identifier: string,
-  recoveryKeyInput: string,
+  recoveryCodeInput: string,
   newPassword: string,
-): Promise<string> {
+): Promise<string[]> {
   const identifierValue = identifier.trim();
-  const recoveryKey = normalizeRecoveryKey(recoveryKeyInput);
-  if (!identifierValue || !recoveryKey) {
+  const recoveryCode = normalizeRecoveryKey(recoveryCodeInput);
+  if (!identifierValue || !recoveryCode) {
     throw new AuthError('bad_credentials', 'Wrong username or recovery key.');
   }
 
-  const { kdfSalt: oldSalt, wrappedRecovery: oldWrappedRecovery } = await request<{ kdfSalt: string; wrappedRecovery: string }>(
-    '/api/auth/recovery/start',
-    { method: 'POST', body: JSON.stringify({ username: identifierValue }) },
-  );
+  const { kdfSalt: oldSalt, wrappedRecovery: oldWrapped } = await request<{
+    kdfSalt: string;
+    wrappedRecovery: string | string[];
+  }>('/api/auth/recovery/start', { method: 'POST', body: JSON.stringify({ username: identifierValue }) });
+  // Accounts created before codes came in sets still hold a single wrapped
+  // copy; old and new shapes are treated the same from here on.
+  const oldWrappedRecovery = Array.isArray(oldWrapped) ? oldWrapped : [oldWrapped];
 
   let raw: Uint8Array<ArrayBuffer> | null = null;
   try {
-    const oldRecoveryKek = await keyFromRecovery(recoveryKey, oldSalt);
-    try {
-      raw = await unwrapKeyRaw(oldWrappedRecovery, oldRecoveryKek);
-    } catch {
+    // Any one of the codes opens the vault. The server cannot tell which, so
+    // each wrapped copy is tried in turn.
+    const opened = await unwrapWithRecoveryCode(recoveryCode, oldWrappedRecovery, oldSalt);
+    if (!opened) {
       // The endpoint deliberately returns a decoy for unknown accounts. Keep
-      // the same message for an unknown identifier and a wrong recovery key.
+      // the same message for an unknown identifier and a wrong recovery code.
       throw new AuthError('bad_credentials', 'Wrong username or recovery key.');
     }
+    raw = opened.raw;
 
     const salt = newSalt();
     const { authToken, kek } = await deriveFromPassword(newPassword, salt);
-    const nextRecoveryKey = formatRecoveryKey();
-    const recoveryHash = hashRecoveryKey(recoveryKey);
-    const nextRecoveryHash = hashRecoveryKey(nextRecoveryKey);
     const wrappedDek = await wrapRawKey(raw, kek);
-    const nextRecoveryKek = await keyFromRecovery(nextRecoveryKey, salt);
-    const wrappedRecovery = await wrapRawKey(raw, nextRecoveryKek);
+    const recoveryHash = hashRecoveryKey(recoveryCode);
+    const { recoveryCodes, body } = await rotateRecoveryCodes(raw, {
+      salt,
+      authToken,
+      wrappedDek,
+      extra: { username: identifierValue, recoveryHash },
+    });
 
     await request<{ ok: true }>('/api/auth/recovery/complete', {
       method: 'POST',
-      body: JSON.stringify({
-        username: identifierValue,
-        recoveryHash,
-        newRecoveryHash: nextRecoveryHash,
-        kdfSalt: salt,
-        authToken,
-        wrappedDek,
-        wrappedRecovery,
-      }),
+      body: JSON.stringify(body),
     });
     endSession();
-    return nextRecoveryKey;
+    return recoveryCodes;
+  } finally {
+    raw?.fill(0);
+  }
+}
+
+/**
+ * Replace the signed-in account's recovery codes with a fresh set.
+ *
+ * The password is required: it is the only proof of identity that also unlocks
+ * the vault, and the server holds nothing that could re-wrap the key itself.
+ * Codes are replaced wholesale, because one leaked code is indistinguishable
+ * from a leaked set.
+ */
+export async function regenerateRecoveryCodes(password: string): Promise<string[]> {
+  const current = active;
+  if (!current) throw new AuthError('unauthenticated', 'Unlock your account to continue.');
+  if (!password) throw new AuthError('bad_credentials', 'Enter your password to continue.');
+
+  const { kdfSalt } = await request<{ kdfSalt: string }>('/api/auth/salt', {
+    method: 'POST',
+    body: JSON.stringify({ username: current.user.username }),
+  });
+  const { authToken, kek } = await deriveFromPassword(password, kdfSalt);
+  const login = await request<LoginResponse>('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username: current.user.username, authToken }),
+  });
+
+  let raw: Uint8Array<ArrayBuffer> | null = null;
+  try {
+    raw = await unwrapKeyRaw(login.wrappedDek, kek);
+    const { recoveryCodes, body } = await rotateRecoveryCodes(raw, {
+      salt: kdfSalt,
+      authToken,
+      wrappedDek: login.wrappedDek,
+    });
+    await request<{ ok: true }>('/api/auth/recovery/update', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    return recoveryCodes;
   } finally {
     raw?.fill(0);
   }

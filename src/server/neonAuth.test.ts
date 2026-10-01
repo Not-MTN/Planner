@@ -45,9 +45,9 @@ const ACCOUNT = {
   role: 'student' as const,
   kdfSalt: 'c2FsdHNhbHRzYWx0c2E=',
   authToken: 'YXV0aFRva2VuYXV0aFRva2VuYXV0aFRva2VuMTI=',
-  recoveryHash: HASH,
+  recoveryHashes: [HASH],
   wrappedDek: 'd3JhcHBlZERla3dyYXBwZWREZWt3cmFwcGVkRGVrMTI=',
-  wrappedRecovery: 'd3JhcHBlZFJlY292ZXJ5d3JhcHBlZFJlY292ZXJ5MTI=',
+  wrappedRecovery: ['d3JhcHBlZFJlY292ZXJ5d3JhcHBlZFJlY292ZXJ5MTI='],
   ciphertext: 'dmF1bHRjaXBoZXJ0ZXh0',
 };
 
@@ -88,7 +88,7 @@ describe('accounts on the real database path', () => {
     // One row per table: a missing credential or vault would break sign-in.
     expect(db.tables.planner_users).toHaveLength(1);
     expect(db.tables.planner_credentials).toHaveLength(1);
-    expect(db.tables.planner_credentials[0]?.recovery_hash).not.toBe(ACCOUNT.recoveryHash);
+    expect(db.tables.planner_credentials[0]?.recovery_hash).not.toBe(ACCOUNT.recoveryHashes[0]);
     expect(db.tables.planner_credentials[0]?.recovery_hash_salt).toBeTruthy();
     expect(db.tables.planner_vaults).toHaveLength(1);
     expect(db.tables.planner_sessions).toHaveLength(1);
@@ -206,13 +206,13 @@ describe('accounts on the real database path', () => {
     const update = {
       username: 'sara',
       recoveryHash: HASH,
-      newRecoveryHash: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+      newRecoveryHashes: ['AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='],
       kdfSalt: 'bmV3LXNhbHQtMDEyMzQ1Ng==',
       authToken: 'bm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm4=',
       wrappedDek: 'eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4',
-      wrappedRecovery: 'eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5',
+      wrappedRecovery: ['eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5'],
     };
-    const wrong = await handleRecoveryComplete(post('/api/auth/recovery/complete', { ...update, recoveryHash: update.newRecoveryHash }), store);
+    const wrong = await handleRecoveryComplete(post('/api/auth/recovery/complete', { ...update, recoveryHash: update.newRecoveryHashes[0] }), store);
     expect(wrong.status).toBe(401);
 
     const recovered = await handleRecoveryComplete(post('/api/auth/recovery/complete', update), store);
@@ -223,8 +223,8 @@ describe('accounts on the real database path', () => {
     expect(newLogin.status).toBe(200);
     expect((await handleLogin(post('/api/auth/login', { username: 'sara', authToken: ACCOUNT.authToken }), store)).status).toBe(401);
     expect(db.tables.planner_vaults[0]?.wrapped_dek).toBe(update.wrappedDek);
-    expect(db.tables.planner_vaults[0]?.wrapped_recovery).toBe(update.wrappedRecovery);
-    expect(db.tables.planner_credentials[0]?.recovery_hash).not.toBe(update.newRecoveryHash);
+    expect(db.tables.planner_vaults[0]?.wrapped_recovery).toBe(JSON.stringify(update.wrappedRecovery));
+    expect(db.tables.planner_credentials[0]?.recovery_hash).not.toBe(update.newRecoveryHashes[0]);
     expect(db.tables.planner_credentials[0]?.recovery_hash_salt).toBeTruthy();
   });
 

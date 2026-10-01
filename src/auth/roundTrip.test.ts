@@ -120,8 +120,11 @@ describe('accounts end to end', () => {
     const { signUp, signIn, endSession, decryptVault } = await import('./session');
     const original = sampleState();
 
-    const { recoveryKey } = await signUp({ ...USER, role: 'student', password: PASSWORD, initialState: original, remember: false });
-    expect(recoveryKey).toMatch(/^plnr-/);
+    const { recoveryCodes } = await signUp({ ...USER, role: 'student', password: PASSWORD, initialState: original, remember: false });
+    // A set, not a single key: losing one code must not lose the vault.
+    expect(recoveryCodes.length).toBeGreaterThan(1);
+    expect(new Set(recoveryCodes).size).toBe(recoveryCodes.length);
+    expect(recoveryCodes[0]).toMatch(/^plnr(-[A-Z2-9]{4}){5}$/);
 
     // The session cookie is the only thing the next page load keeps.
     endSession();
@@ -142,7 +145,7 @@ describe('accounts end to end', () => {
     const { signUp, signIn, endSession, decryptVault, resetPasswordWithRecovery, AuthError } = await import('./session');
     const original = sampleState();
     const recoveryUser = { ...USER, username: 'recover1', email: 'recover1@example.com' };
-    const { recoveryKey } = await signUp({ ...recoveryUser, role: 'student', password: PASSWORD, initialState: original, remember: false });
+    const { recoveryCodes } = await signUp({ ...recoveryUser, role: 'student', password: PASSWORD, initialState: original, remember: false });
     endSession();
 
     await expect(
@@ -150,8 +153,10 @@ describe('accounts end to end', () => {
     ).rejects.toBeInstanceOf(AuthError);
 
     const replacementPassword = 'a-different-long-password';
-    const replacementRecoveryKey = await resetPasswordWithRecovery(recoveryUser.username, recoveryKey, replacementPassword);
-    expect(replacementRecoveryKey).toMatch(/^plnr(-[A-Z2-9]{4}){5}$/);
+    // Any code in the set works, and recovery hands back a whole fresh set.
+    const replacementCodes = await resetPasswordWithRecovery(recoveryUser.username, recoveryCodes[2], replacementPassword);
+    expect(replacementCodes.length).toBe(recoveryCodes.length);
+    replacementCodes.forEach((code) => expect(code).toMatch(/^plnr(-[A-Z2-9]{4}){5}$/));
 
     await expect(signIn(recoveryUser.username, PASSWORD, false)).rejects.toBeInstanceOf(AuthError);
     const session = await signIn(recoveryUser.username, replacementPassword, false);

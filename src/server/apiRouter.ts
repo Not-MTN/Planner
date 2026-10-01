@@ -34,6 +34,7 @@ import {
   handlePasskeyRegisterVerify,
   handleRecoveryComplete,
   handleRecoveryStart,
+  handleRecoveryUpdate,
   handleSalt,
   handleSession,
   handleShare,
@@ -130,6 +131,8 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
       return (request) => authStore(env.DATABASE_URL).then((store) => handleRecoveryStart(request, store));
     case '/api/auth/recovery/complete':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleRecoveryComplete(request, store));
+    case '/api/auth/recovery/update':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleRecoveryUpdate(request, store));
     case '/api/auth/salt':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleSalt(request, store));
     case '/api/auth/session':

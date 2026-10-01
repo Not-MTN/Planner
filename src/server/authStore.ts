@@ -44,6 +44,12 @@ CREATE TABLE IF NOT EXISTS planner_credentials (
 ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS recovery_hash text;
 ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS recovery_hash_salt text;
 
+-- An account can hold several recovery codes, and each one is a separate lock
+-- on the vault: all the server ever keeps is one opaque verifier per code, so a
+-- leaked row is useless on its own. The old single pair of columns is kept for
+-- accounts that predate sets, and is honoured while this array is empty.
+ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS recovery_verifiers text;
+
 CREATE TABLE IF NOT EXISTS planner_vaults (
   user_id          text PRIMARY KEY REFERENCES planner_users(id) ON DELETE CASCADE,
   version          integer NOT NULL CHECK (version > 0),
@@ -131,8 +137,59 @@ export interface VaultRow {
   version: number;
   ciphertext: string;
   wrappedDek: string;
-  wrappedRecovery: string;
+  /**
+   * One wrapped copy of the vault key per recovery code. Accounts created
+   * before codes came in sets hold a single plain string.
+   */
+  wrappedRecovery: string | string[];
   updated_at: string | Date;
+}
+
+/** One-way verifier for a single recovery code. */
+export interface RecoveryVerifier {
+  hash: string;
+  salt: string;
+}
+
+/** Parse the stored verifier array, falling back to the legacy single pair. */
+export function parseRecoveryVerifiers(
+  stored: string | null | undefined,
+  legacyHash?: string | null,
+  legacySalt?: string | null,
+): RecoveryVerifier[] {
+  if (stored) {
+    try {
+      const parsed: unknown = JSON.parse(stored);
+      if (Array.isArray(parsed)) {
+        const rows = parsed.filter(
+          (entry): entry is RecoveryVerifier =>
+            !!entry && typeof entry === 'object' && typeof (entry as RecoveryVerifier).hash === 'string' && typeof (entry as RecoveryVerifier).salt === 'string',
+        );
+        if (rows.length > 0) return rows;
+      }
+    } catch {
+      // Not JSON, or not the shape we wrote: fall through to the legacy pair.
+    }
+  }
+  if (legacyHash && legacySalt) return [{ hash: legacyHash, salt: legacySalt }];
+  return [];
+}
+
+/** Read a wrapped-DEK list that may still be a single legacy copy. */
+export function parseRecoveryWraps(stored: string | string[] | null | undefined): string[] {
+  if (Array.isArray(stored)) return stored;
+  if (typeof stored === 'string' && stored.length > 0) {
+    if (stored.startsWith('[')) {
+      try {
+        const parsed: unknown = JSON.parse(stored);
+        if (Array.isArray(parsed)) return parsed.filter((entry): entry is string => typeof entry === 'string');
+      } catch {
+        // Fall through: treat it as one opaque blob.
+      }
+    }
+    return [stored];
+  }
+  return [];
 }
 
 export interface NewAccount {
@@ -142,20 +199,23 @@ export interface NewAccount {
   role: AccountRole;
   kdfSalt: string;
   authToken: string;
-  recoveryHash: string;
+  /** One verifier per recovery code, in the same order as the wrapped copies. */
+  recoveryHashes: string[];
   wrappedDek: string;
-  wrappedRecovery: string;
+  wrappedRecovery: string[];
   ciphertext: string;
 }
 
 export type CreateResult = { ok: true; user: UserRow } | { ok: false; reason: 'username_taken' | 'email_taken' };
 
 export interface RecoveryUpdate {
-  newRecoveryHash: string;
+  /** Verifiers for the replacement set of codes. */
+  newRecoveryHashes: string[];
   kdfSalt: string;
   authToken: string;
   wrappedDek: string;
-  wrappedRecovery: string;
+  /** One wrapped copy per new code, in the same order as the verifiers. */
+  wrappedRecovery: string[];
 }
 
 export interface SessionRow {
@@ -217,8 +277,13 @@ export interface NewPasskey {
 export interface AuthStore {
   createAccount(input: NewAccount): Promise<CreateResult>;
   findAccount(login: string): Promise<AccountRow | null>;
-  /** Verify a recovery-key verifier, rotate the password wraps, and revoke sessions. */
+  /** Verify one of the account's recovery verifiers, rotate the password wraps, and revoke sessions. */
   recoverAccount(login: string, recoveryHash: string, update: RecoveryUpdate): Promise<boolean>;
+  /**
+   * Rotate the recovery codes of a signed-in, already-authenticated account.
+   * The caller proved who it is with its password, so no verifier is checked.
+   */
+  updateRecovery?(userId: string, update: Omit<RecoveryUpdate, 'authToken'> & { authToken: string }): Promise<boolean>;
   findUserById(id: string): Promise<UserRow | null>;
   getVault(userId: string): Promise<VaultRow | null>;
   putVault(userId: string, baseVersion: number, ciphertext: string): Promise<VaultRow | null>;
@@ -293,6 +358,14 @@ export async function hashRecoveryVerifier(recoveryHash: string): Promise<{ reco
     recoveryHash: await hashAuthToken(recoveryHash, recoveryHashSalt),
     recoveryHashSalt,
   };
+}
+
+/** One verifier per recovery code, each with its own server-side salt. */
+export async function hashRecoveryVerifiers(recoveryHashes: string[]): Promise<RecoveryVerifier[]> {
+  return Promise.all(recoveryHashes.map(async (hash) => {
+    const salt = newSalt();
+    return { hash: await hashAuthToken(hash, salt), salt };
+  }));
 }
 
 export function newSalt(): string {
@@ -404,6 +477,8 @@ export function createMemoryAuthStore(): AuthStore {
     authHash: string;
     recoveryHash: string | null;
     recoveryHashSalt: string | null;
+    /** One verifier per recovery code; the legacy pair above is kept in sync. */
+    recoveryVerifiers: RecoveryVerifier[];
   }>();
   const vaults = new Map<string, VaultRow>();
   const sessions = new Map<string, SessionRow>();
@@ -432,8 +507,15 @@ export function createMemoryAuthStore(): AuthStore {
       };
       users.set(user.id, user);
       const credential = await hashCredential(input.authToken);
-      const recoveryVerifier = await hashRecoveryVerifier(input.recoveryHash);
-      credentials.set(user.id, { kdfSalt: input.kdfSalt, ...credential, ...recoveryVerifier });
+      const verifiers = await hashRecoveryVerifiers(input.recoveryHashes);
+      const first = verifiers[0];
+      credentials.set(user.id, {
+        kdfSalt: input.kdfSalt,
+        ...credential,
+        recoveryHash: first?.hash ?? null,
+        recoveryHashSalt: first?.salt ?? null,
+        recoveryVerifiers: verifiers,
+      });
       vaults.set(user.id, {
         version: 1,
         ciphertext: input.ciphertext,
@@ -463,19 +545,24 @@ export function createMemoryAuthStore(): AuthStore {
       }
       const current = credentials.get(user.id);
       const vault = vaults.get(user.id);
-      if (!current?.recoveryHash || !current.recoveryHashSalt || !vault) {
+      const verifiers = current?.recoveryVerifiers ?? [];
+      if (!current || verifiers.length === 0 || !vault) {
         await spendRecoveryFailureWork(recoveryHash);
         return false;
       }
-      const candidate = await hashAuthToken(recoveryHash, current.recoveryHashSalt);
-      if (!safeEqual(current.recoveryHash, candidate)) return false;
+      // Any code in the set works; the server never learns which one was used.
+      const matches = await Promise.all(verifiers.map((v) => hashAuthToken(recoveryHash, v.salt)));
+      if (!verifiers.some((v, index) => safeEqual(v.hash, matches[index]))) return false;
 
       const credential = await hashCredential(update.authToken);
-      const recoveryVerifier = await hashRecoveryVerifier(update.newRecoveryHash);
+      const nextVerifiers = await hashRecoveryVerifiers(update.newRecoveryHashes);
+      const nextFirst = nextVerifiers[0];
       credentials.set(user.id, {
         kdfSalt: update.kdfSalt,
         ...credential,
-        ...recoveryVerifier,
+        recoveryHash: nextFirst?.hash ?? null,
+        recoveryHashSalt: nextFirst?.salt ?? null,
+        recoveryVerifiers: nextVerifiers,
       });
       vaults.set(user.id, {
         ...vault,
@@ -509,8 +596,29 @@ export function createMemoryAuthStore(): AuthStore {
         kdfSalt,
         recoveryHash: prior?.recoveryHash ?? null,
         recoveryHashSalt: prior?.recoveryHashSalt ?? null,
+        recoveryVerifiers: prior?.recoveryVerifiers ?? [],
         ...(await hashCredential(authToken)),
       });
+    },
+    async updateRecovery(userId, update) {
+      const current = credentials.get(userId);
+      const vault = vaults.get(userId);
+      if (!current || !vault) return false;
+      const verifiers = await hashRecoveryVerifiers(update.newRecoveryHashes);
+      const first = verifiers[0];
+      credentials.set(userId, {
+        ...current,
+        recoveryHash: first?.hash ?? null,
+        recoveryHashSalt: first?.salt ?? null,
+        recoveryVerifiers: verifiers,
+      });
+      vaults.set(userId, {
+        ...vault,
+        wrappedDek: update.wrappedDek,
+        wrappedRecovery: update.wrappedRecovery,
+        updated_at: new Date().toISOString(),
+      });
+      return true;
     },
     async createSession(userId, tokenHash, _label, expiresAt) {
       sessions.set(tokenHash, { id: newId(), user_id: userId, expires_at: expiresAt.toISOString() });
@@ -808,24 +916,25 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
         return { ok: false, reason: 'email_taken' };
       }
 
-      const [credential, recoveryVerifier] = await Promise.all([
+      const [credential, verifiers] = await Promise.all([
         hashCredential(input.authToken),
-        hashRecoveryVerifier(input.recoveryHash),
+        hashRecoveryVerifiers(input.recoveryHashes),
       ]);
+      const first = verifiers[0];
       try {
         // Credentials and vault land together: an account with one but not the
         // other could never sign in, and the name would be gone for good.
         await sql.transaction([
           sql`
             INSERT INTO planner_credentials
-              (user_id, kdf_salt, auth_hash, hash_salt, recovery_hash, recovery_hash_salt)
+              (user_id, kdf_salt, auth_hash, hash_salt, recovery_hash, recovery_hash_salt, recovery_verifiers)
             VALUES
               (${id}, ${input.kdfSalt}, ${credential.authHash}, ${credential.hashSalt},
-               ${recoveryVerifier.recoveryHash}, ${recoveryVerifier.recoveryHashSalt})
+               ${first?.hash ?? null}, ${first?.salt ?? null}, ${JSON.stringify(verifiers)})
           `,
           sql`
             INSERT INTO planner_vaults (user_id, version, ciphertext, wrapped_dek, wrapped_recovery)
-            VALUES (${id}, 1, ${input.ciphertext}, ${input.wrappedDek}, ${input.wrappedRecovery})
+            VALUES (${id}, 1, ${input.ciphertext}, ${input.wrappedDek}, ${JSON.stringify(input.wrappedRecovery)})
           `,
         ]);
       } catch (error) {
@@ -856,36 +965,45 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
       await ensure();
       const needle = login.trim().toLowerCase();
       const rows = (await sql`
-        SELECT u.id, c.recovery_hash, c.recovery_hash_salt
+        SELECT u.id, c.recovery_hash, c.recovery_hash_salt, c.recovery_verifiers
         FROM planner_users u
         JOIN planner_credentials c ON c.user_id = u.id
         JOIN planner_vaults v ON v.user_id = u.id
         WHERE u.username_lower = ${needle} OR u.email_lower = ${needle}
         LIMIT 1
-      `) as { id: string; recovery_hash: string | null; recovery_hash_salt: string | null }[];
+      `) as {
+        id: string;
+        recovery_hash: string | null;
+        recovery_hash_salt: string | null;
+        recovery_verifiers: string | null;
+      }[];
       const row = rows[0];
-      if (!row?.recovery_hash || !row.recovery_hash_salt) {
+      const verifiers = row ? parseRecoveryVerifiers(row.recovery_verifiers, row.recovery_hash, row.recovery_hash_salt) : [];
+      if (verifiers.length === 0) {
         await spendRecoveryFailureWork(recoveryHash);
         return false;
       }
-      const candidate = await hashAuthToken(recoveryHash, row.recovery_hash_salt);
-      if (!safeEqual(row.recovery_hash, candidate)) return false;
+      // Any code in the set works, and the server cannot tell which one it was.
+      const candidates = await Promise.all(verifiers.map((v) => hashAuthToken(recoveryHash, v.salt)));
+      if (!verifiers.some((v, index) => safeEqual(v.hash, candidates[index]))) return false;
 
       const credential = await hashCredential(update.authToken);
-      const recoveryVerifier = await hashRecoveryVerifier(update.newRecoveryHash);
+      const nextVerifiers = await hashRecoveryVerifiers(update.newRecoveryHashes);
+      const nextFirst = nextVerifiers[0];
       const updated = (await sql`
         WITH credential_update AS (
           UPDATE planner_credentials
           SET kdf_salt = ${update.kdfSalt}, auth_hash = ${credential.authHash},
-              hash_salt = ${credential.hashSalt}, recovery_hash = ${recoveryVerifier.recoveryHash},
-              recovery_hash_salt = ${recoveryVerifier.recoveryHashSalt}, updated_at = now()
-          WHERE user_id = ${row.id} AND recovery_hash = ${row.recovery_hash}
-            AND recovery_hash_salt = ${row.recovery_hash_salt}
+              hash_salt = ${credential.hashSalt}, recovery_hash = ${nextFirst?.hash ?? null},
+              recovery_hash_salt = ${nextFirst?.salt ?? null},
+              recovery_verifiers = ${JSON.stringify(nextVerifiers)}, updated_at = now()
+          WHERE user_id = ${row.id}
+            AND recovery_verifiers IS NOT DISTINCT FROM ${row.recovery_verifiers}
           RETURNING user_id
         ),
         vault_update AS (
           UPDATE planner_vaults
-          SET wrapped_dek = ${update.wrappedDek}, wrapped_recovery = ${update.wrappedRecovery}, updated_at = now()
+          SET wrapped_dek = ${update.wrappedDek}, wrapped_recovery = ${JSON.stringify(update.wrappedRecovery)}, updated_at = now()
           WHERE user_id IN (SELECT user_id FROM credential_update)
           RETURNING user_id
         ),
@@ -904,6 +1022,29 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
       return rows[0] ?? null;
     },
 
+    async updateRecovery(userId, update) {
+      await ensure();
+      const nextVerifiers = await hashRecoveryVerifiers(update.newRecoveryHashes);
+      const first = nextVerifiers[0];
+      const rows = (await sql`
+        WITH credential_update AS (
+          UPDATE planner_credentials
+          SET recovery_hash = ${first?.hash ?? null}, recovery_hash_salt = ${first?.salt ?? null},
+              recovery_verifiers = ${JSON.stringify(nextVerifiers)}, updated_at = now()
+          WHERE user_id = ${userId}
+          RETURNING user_id
+        ),
+        vault_update AS (
+          UPDATE planner_vaults
+          SET wrapped_dek = ${update.wrappedDek}, wrapped_recovery = ${JSON.stringify(update.wrappedRecovery)}, updated_at = now()
+          WHERE user_id IN (SELECT user_id FROM credential_update)
+          RETURNING user_id
+        )
+        SELECT user_id FROM credential_update
+      `) as { user_id: string }[];
+      return rows.length > 0;
+    },
+
     async getVault(userId) {
       await ensure();
       // Aliased: the rest of the code reads camelCase names.
@@ -911,7 +1052,11 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
         SELECT version, ciphertext, wrapped_dek AS "wrappedDek", wrapped_recovery AS "wrappedRecovery", updated_at
         FROM planner_vaults WHERE user_id = ${userId}
       `) as VaultRow[];
-      return rows[0] ?? null;
+      const row = rows[0];
+      if (!row) return null;
+      // Rows written before codes came in sets hold one plain wrapped copy;
+      // callers always get a list.
+      return { ...row, wrappedRecovery: parseRecoveryWraps(row.wrappedRecovery) };
     },
 
     async putVault(userId, baseVersion, ciphertext) {

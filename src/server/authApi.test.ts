@@ -6,6 +6,7 @@ import {
   handleLogout,
   handleRecoveryComplete,
   handleRecoveryStart,
+  handleRecoveryUpdate,
   handleSalt,
   handleSession,
   handleSignup,
@@ -54,9 +55,17 @@ const ACCOUNT = {
   role: 'student' as const,
   kdfSalt: 'c2FsdHNhbHRzYWx0c2E=',
   authToken: 'YXV0aFRva2VuYXV0aFRva2VuYXV0aFRva2VuMTI=',
-  recoveryHash: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+  recoveryHashes: [
+    'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+    'AgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+    'AwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+  ],
   wrappedDek: 'd3JhcHBlZERla3dyYXBwZWREZWt3cmFwcGVkRGVrMTI=',
-  wrappedRecovery: 'eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5',
+  wrappedRecovery: [
+    'eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5',
+    'enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6',
+    'MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=',
+  ],
   ciphertext: 'dmF1bHRjaXBoZXJ0ZXh0',
 };
 
@@ -263,13 +272,18 @@ describe('account API', () => {
     const unknown = await handleRecoveryStart(post('/api/auth/recovery/start', { username: 'nobody' }), store);
     expect(known.status).toBe(200);
     expect(unknown.status).toBe(200);
-    const knownBody = (await known.json()) as { kdfSalt: string; wrappedRecovery: string };
-    const unknownBody = (await unknown.json()) as { kdfSalt: string; wrappedRecovery: string };
+    const knownBody = (await known.json()) as { kdfSalt: string; wrappedRecovery: string[] };
+    const unknownBody = (await unknown.json()) as { kdfSalt: string; wrappedRecovery: string[] };
     expect(Object.keys(unknownBody).sort()).toEqual(Object.keys(knownBody).sort());
     expect(knownBody.kdfSalt).toBe(ACCOUNT.kdfSalt);
-    expect(knownBody.wrappedRecovery).toBe(ACCOUNT.wrappedRecovery);
+    // Every wrapped copy comes back, so the browser can try each one.
+    expect(knownBody.wrappedRecovery).toEqual(ACCOUNT.wrappedRecovery);
     expect(unknownBody.kdfSalt).not.toBe(knownBody.kdfSalt);
-    expect(unknownBody.wrappedRecovery).toHaveLength(knownBody.wrappedRecovery.length);
+    // The decoy is the same shape as a real answer — a list of opaque blobs —
+    // so an unknown name cannot be picked out of the response.
+    expect(Array.isArray(unknownBody.wrappedRecovery)).toBe(true);
+    expect(unknownBody.wrappedRecovery.length).toBeGreaterThan(0);
+    expect(unknownBody.wrappedRecovery[0]).toMatch(/^[A-Za-z0-9+/=]+$/);
   });
 
   it('rotates credentials and wrapped keys only with the recovery verifier, then revokes sessions', async () => {
@@ -277,20 +291,41 @@ describe('account API', () => {
     const store = STORE();
     const signup = await handleSignup(post('/api/auth/signup', ACCOUNT), store);
     const oldCookie = cookieFrom(signup);
-    const newRecoveryHash = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=';
+    const newRecoveryHashes = [
+      'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=',
+      'AgECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=',
+      'AwECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=',
+    ];
     const update = {
       username: 'sara',
-      recoveryHash: ACCOUNT.recoveryHash,
-      newRecoveryHash,
+      // Any code in the set opens the account, not just the first one.
+      recoveryHash: ACCOUNT.recoveryHashes[2],
+      newRecoveryHashes,
       kdfSalt: 'bmV3LXNhbHQtMDEyMzQ1Ng==',
       authToken: 'bm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm4=',
       wrappedDek: 'eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4',
-      wrappedRecovery: 'eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5',
+      wrappedRecovery: [
+        'eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5',
+        'enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6',
+        'MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=',
+      ],
     };
 
-    const wrong = await handleRecoveryComplete(post('/api/auth/recovery/complete', { ...update, recoveryHash: newRecoveryHash }), store);
+    const wrong = await handleRecoveryComplete(
+      post('/api/auth/recovery/complete', { ...update, recoveryHash: newRecoveryHashes[0] }),
+      store,
+    );
     expect(wrong.status).toBe(401);
 
+    // A set that does not line up with its verifiers is refused outright.
+    resetRateLimits();
+    const mismatched = await handleRecoveryComplete(
+      post('/api/auth/recovery/complete', { ...update, wrappedRecovery: update.wrappedRecovery.slice(0, 2) }),
+      store,
+    );
+    expect(mismatched.status).toBe(400);
+
+    resetRateLimits();
     const completed = await handleRecoveryComplete(post('/api/auth/recovery/complete', update), store);
     expect(completed.status).toBe(200);
     expect(await completed.json()).toEqual({ ok: true });
@@ -306,6 +341,63 @@ describe('account API', () => {
 
     const oldLogin = await handleLogin(post('/api/auth/login', { username: 'sara', authToken: ACCOUNT.authToken }), store);
     expect(oldLogin.status).toBe(401);
+  });
+
+  it('replaces the recovery codes of a signed-in account, and only of that account', async () => {
+    resetRateLimits();
+    const store = STORE();
+    const signup = await handleSignup(post('/api/auth/signup', ACCOUNT), store);
+    const cookie = cookieFrom(signup);
+
+    const next = {
+      newRecoveryHashes: ['BAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiM=', 'BQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4fICEiIyQ='],
+      kdfSalt: ACCOUNT.kdfSalt,
+      authToken: ACCOUNT.authToken,
+      wrappedDek: ACCOUNT.wrappedDek,
+      wrappedRecovery: [
+        'eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5',
+        'enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6',
+      ],
+    };
+
+    // Without a session there is nothing to rotate.
+    const anon = await handleRecoveryUpdate(post('/api/auth/recovery/update', next), store);
+    expect(anon.status).toBe(401);
+
+    const updated = await handleRecoveryUpdate(post('/api/auth/recovery/update', next, cookie), store);
+    expect(updated.status).toBe(200);
+
+    // The old codes are gone: recovery with one of them must now fail.
+    resetRateLimits();
+    const stale = await handleRecoveryComplete(
+      post('/api/auth/recovery/complete', {
+        username: 'sara',
+        recoveryHash: ACCOUNT.recoveryHashes[0],
+        newRecoveryHashes: next.newRecoveryHashes,
+        kdfSalt: next.kdfSalt,
+        authToken: next.authToken,
+        wrappedDek: next.wrappedDek,
+        wrappedRecovery: next.wrappedRecovery,
+      }),
+      store,
+    );
+    expect(stale.status).toBe(401);
+
+    // And the new set works, from any one of its codes.
+    resetRateLimits();
+    const fresh = await handleRecoveryComplete(
+      post('/api/auth/recovery/complete', {
+        username: 'sara',
+        recoveryHash: next.newRecoveryHashes[1],
+        newRecoveryHashes: next.newRecoveryHashes,
+        kdfSalt: next.kdfSalt,
+        authToken: next.authToken,
+        wrappedDek: next.wrappedDek,
+        wrappedRecovery: next.wrappedRecovery,
+      }),
+      store,
+    );
+    expect(fresh.status).toBe(200);
   });
 
   it('reports 503 when no database is configured', async () => {
