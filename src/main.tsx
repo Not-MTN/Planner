@@ -1,6 +1,8 @@
 import { StrictMode, Suspense, lazy } from 'react';
 import { createRoot } from 'react-dom/client';
 import { registerPWA } from './pwa';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { installGlobalErrorHandlers } from './reporting';
 import '@fontsource-variable/estedad';
 // Tokens and base resets only. styles.css holds the planner's components and
 // is imported by the gate, so the public site never inherits them (and the two
@@ -48,6 +50,9 @@ const target = bootTarget();
 // the marketing site never needs.
 if (target === 'app') void import('./i18n').then((module) => module.applyDocumentLang());
 registerPWA();
+// Catches what React cannot: throws in handlers and timers, and promises
+// nobody awaited. Without it a crash in the browser is invisible to us.
+installGlobalErrorHandlers();
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Root element missing');
@@ -65,7 +70,9 @@ createRoot(root).render(
         </div>
       }
     >
-      {target === 'app' ? <AccountGate /> : <Site />}
+      <ErrorBoundary area={target}>
+        {target === 'app' ? <AccountGate /> : <Site />}
+      </ErrorBoundary>
     </Suspense>
   </StrictMode>,
 );

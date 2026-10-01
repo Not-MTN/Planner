@@ -32,6 +32,7 @@ function currentEnv(): ApiEnv {
     GROQ_API_KEY: process.env.GROQ_API_KEY,
     GROQ_MODEL: process.env.GROQ_MODEL,
     GROQ_VISION_MODEL: process.env.GROQ_VISION_MODEL,
+    ERROR_REPORT_WEBHOOK: process.env.ERROR_REPORT_WEBHOOK,
     VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY,
     VAPID_PRIVATE_KEY: process.env.VAPID_PRIVATE_KEY,
     VAPID_SUBJECT: process.env.VAPID_SUBJECT,

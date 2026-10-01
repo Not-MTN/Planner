@@ -40,6 +40,7 @@ import {
   handleSignup,
 } from './authApi.js';
 import { authStore } from './authStore.js';
+import { handleReport } from './reportApi.js';
 import { handleICS } from './icsProxy.js';
 import { handleSync, handleSyncStatus, neonStore } from './sync.js';
 import { handleGroqChatCompletions, handleGroqStatus } from './groqProxy.js';
@@ -51,6 +52,8 @@ export interface ApiEnv {
   GROQ_API_KEY?: string;
   GROQ_MODEL?: string;
   GROQ_VISION_MODEL?: string;
+  /** Optional: forwards each crash report somewhere you actually read. */
+  ERROR_REPORT_WEBHOOK?: string;
   VAPID_PUBLIC_KEY?: string;
   VAPID_PRIVATE_KEY?: string;
   VAPID_SUBJECT?: string;
@@ -133,6 +136,8 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
       return (request) => handlePushSubscription(request, env);
     case '/api/push/dispatch':
       return (request) => handlePushDispatch(request, env);
+    case '/api/report':
+      return (request) => handleReport(request, env.ERROR_REPORT_WEBHOOK);
     default:
       return null;
   }

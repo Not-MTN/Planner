@@ -7,6 +7,7 @@ import { Rich } from './Rich';
 import { Modal } from './ui';
 import { useEffect, useState } from 'react';
 import { FeedsSection, SecuritySection, SharedSpaceSection, TaskImportSection, TemplatesSection, WeatherSection } from './SettingsExtras';
+import { isReportingEnabled, setReportingEnabled } from '../reporting';
 import { useSignOut } from './useSignOut';
 import { accountUser, forgetAccountUser } from '../auth/vault';
 import { deleteAccount, getActiveSession } from '../auth/session';
@@ -239,6 +240,38 @@ function RemindersSection() {
           </div>
         </>
       ) : null}
+    </section>
+  );
+}
+
+/**
+ * The one place a user decides whether crash reports leave the device.
+ *
+ * On by default because a report carries no planner content — the server
+ * cannot decrypt the vault even in principle — but it is a real choice and it
+ * lives with the privacy settings, not buried in a config file.
+ */
+function PrivacySection() {
+  const { flash } = usePlanner();
+  const [reports, setReports] = useState(() => isReportingEnabled());
+  const toggle = () => {
+    const next = !reports;
+    setReportingEnabled(next);
+    setReports(next);
+    flash(next ? t("Crash reports turned on.") : t("Crash reports turned off."));
+  };
+  return (
+    <section className="set-section">
+      <h3 className="kicker">{t("Crash reports")}</h3>
+      <div className="set-row">
+        <div>
+          <p className="set-label">{t("Tell me when Planner breaks")}</p>
+          <p className="set-hint">{t("When something stops working, send a short report with the error, the screen you were on, and the last few things you did. It never includes your tasks, events, or notes — nobody outside this device can read them.")}</p>
+        </div>
+        <button type="button" className={cx('btn', reports ? 'btn-soft' : 'btn-primary')} onClick={toggle}>
+          {reports ? t("Turn off") : t("Turn on")}
+        </button>
+      </div>
     </section>
   );
 }
@@ -629,6 +662,7 @@ export function SettingsSheet() {
       <TemplatesSection />
       <InstallSection />
       <SecuritySection />
+      <PrivacySection />
       <section className="set-section">
         <h3 className="kicker">{t("New here?")}</h3>
         <div className="set-row">

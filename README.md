@@ -297,6 +297,27 @@ lists, or set it to an empty string to turn image input off.
 
 Old links keep working: `#/daily/…`, `#/weekly/…`, `#/month/…`, `#/future`, and `#/progress` all map to their new homes.
 
+## Crash reports
+
+When something in the app breaks, Planner can tell us about it. Without this, a crash in somebody's browser is invisible: the vault is zero-knowledge, so there is no server-side data to inspect and no way to know a screen failed to render.
+
+A report carries only what is needed to reproduce a crash:
+
+- the error message and its stack (with paths shortened to the file that threw),
+- the screen you were on (`/app#/calendar`) and which bundle (`app` or `site`),
+- the last 30 things the app did — navigation, AI calls, sync — as breadcrumbs,
+- a random per-page id, quoted on the crash screen so it can be pasted into a bug report.
+
+Every string is passed through a redactor before it leaves the device: e-mail addresses, tokens, long opaque blobs, ids and URL query strings are replaced with placeholders. **No task, event, note, title or sync code is ever included** — the report could not contain planner content even by accident, because the server cannot decrypt the vault. The endpoint re-redacts on the way in rather than trusting the client.
+
+Turn it off any time under **Settings → Crash reports**; the choice is remembered on that device. Anyone whose browser sends `Do-Not-Track` is opted out by default.
+
+| Endpoint | Method | Purpose |
+| --- | --- | --- |
+| `/api/report` | POST | Accepts one crash report, logs it, answers `204` with no body |
+
+Logs are the sink that always exists: each report is one structured `[planner:report]` line, which Vercel (or any host) captures and forwards to log drains. To also get them somewhere you read, set `ERROR_REPORT_WEBHOOK` to a URL that accepts a JSON POST — on Vercel under **Project → Settings → Environment Variables**, locally in `.env.local`. A webhook that is down never fails report intake.
+
 ## Notes
 
 - Data lives in this browser only. Export before switching devices or clearing site data.

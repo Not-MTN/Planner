@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { addBreadcrumb, reportCaught } from './reporting';
 import { parseHash, toHash, type Route } from './route';
 import { downloadState, loadFrom, parseBackup, sanitizeState, saveTo, serialize, STORAGE_FULL, STORAGE_KEY } from './storage';
 import { flushVaultPush, scheduleVaultPush } from './auth/vault';
@@ -633,6 +634,7 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     }
     syncBusy.current = true;
     setSyncStatus('syncing');
+    addBreadcrumb('sync', 'started');
     let arrived = 0;
     try {
       const before = stateRef.current;
@@ -670,6 +672,11 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
       if (arrived > 0) flash(t("{0} new {1} merged from your other devices.", { 0: arrived, 1: arrived === 1 ? t("item") : t("items") }));
     } catch (caught) {
       const failure = caught instanceof SyncError ? caught : null;
+      addBreadcrumb('sync', `failed: ${failure?.code ?? 'unknown'}`);
+      // The user already sees a message; this is how we hear about it too. A
+      // failed sync is invisible otherwise, and a vault that stopped syncing
+      // is the kind of thing people only notice after they lose a device.
+      if (failure?.code !== 'network') reportCaught(caught, { area: 'sync', action: 'sync-once' });
       setSyncStatus(failure?.code === 'network' ? 'offline' : 'error');
       setSyncMessage(
         failure?.message ??

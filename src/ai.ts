@@ -1,4 +1,5 @@
 import { getLang, t } from './i18n';
+import { addBreadcrumb, reportCaught } from './reporting';
 import { CATEGORIES, HABIT_ICONS, PRIORITIES, categoryById } from './constants';
 import type { Priority } from './constants';
 import { MAX_PLAN_DAYS, normalizeDigits } from './duration';
@@ -402,6 +403,22 @@ function parseJson(text: string): unknown {
 }
 
 async function groqJsonInternal(system: string, user: string, imageDataUrl?: string, signal?: AbortSignal, maxTokens = DEFAULT_MAX_TOKENS): Promise<unknown> {
+  // Every AI feature funnels through here, so this is where an AI outage shows
+  // up. The breadcrumb records that a call was attempted; the report carries
+  // the failure without any of the prompt (the message is a fixed string or a
+  // provider error, and it is redacted on the way out regardless).
+  addBreadcrumb('ai', imageDataUrl ? 'request with image' : 'request');
+  try {
+    return await groqJsonCall(system, user, imageDataUrl, signal, maxTokens);
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') throw error;
+    addBreadcrumb('ai', 'request failed');
+    reportCaught(error, { area: 'ai', action: imageDataUrl ? 'vision' : 'chat' });
+    throw error;
+  }
+}
+
+async function groqJsonCall(system: string, user: string, imageDataUrl?: string, signal?: AbortSignal, maxTokens = DEFAULT_MAX_TOKENS): Promise<unknown> {
   // No `detail` hint: Groq does not document the field and charges a flat 2048
   // input tokens per image regardless, so it would only risk a strict 400.
   const content = imageDataUrl
