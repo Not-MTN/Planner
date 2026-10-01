@@ -24,6 +24,7 @@ const {
   handleRecoveryComplete,
   handleRecoveryStart,
   handleSession,
+  handleSessions,
   handleSignup,
 } = await import('./authApi');
 const { resetRateLimits } = await import('./security');
@@ -69,6 +70,14 @@ function post(path: string, body: unknown, cookie?: string): Request {
 
 function get(path: string, cookie?: string): Request {
   return new Request(`https://planner.test${path}`, { headers: cookie ? { Cookie: cookie } : undefined });
+}
+
+function del(path: string, body: unknown, cookie?: string): Request {
+  return new Request(`https://planner.test${path}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
+    body: JSON.stringify(body),
+  });
 }
 
 function cookieFrom(response: Response): string {
@@ -117,6 +126,34 @@ describe('accounts on the real database path', () => {
     expect(body.vault.ciphertext).toBe(ACCOUNT.ciphertext);
     expect(body.vault.version).toBe(1);
     expect(body.kdfSalt).toBe(salt);
+  });
+
+  it('lists devices through the database path and revokes only the account’s own sessions', async () => {
+    const store = await createNeonAuthStore(DB_URL);
+    const signup = await handleSignup(post('/api/auth/signup', ACCOUNT), store);
+    const cookie = cookieFrom(signup);
+    await handleLogin(post('/api/auth/login', { username: 'sara', authToken: ACCOUNT.authToken }), store);
+
+    const listed = await handleSessions(get('/api/auth/sessions', cookie), store);
+    expect(listed.status).toBe(200);
+    const body = (await listed.json()) as { current: string; sessions: { id: string; label: string }[] };
+    expect(body.sessions).toHaveLength(2);
+    expect(db.tables.planner_sessions).toHaveLength(2);
+    // The label captured at sign-in travelled through the real SQL path.
+    expect(body.sessions.every((session) => session.label.length > 0)).toBe(true);
+
+    const other = body.sessions.find((session) => session.id !== body.current)!;
+    const revoked = await handleSessions(del('/api/auth/sessions', { id: other.id }, cookie), store);
+    expect(revoked.status).toBe(200);
+    expect(db.tables.planner_sessions).toHaveLength(1);
+    expect(db.tables.planner_sessions[0]!.id).toBe(body.current);
+
+    // Signing out everywhere else keeps the caller's own session.
+    await handleLogin(post('/api/auth/login', { username: 'sara', authToken: ACCOUNT.authToken }), store);
+    const cleared = await handleSessions(del('/api/auth/sessions', { others: true }, cookie), store);
+    expect(cleared.status).toBe(200);
+    expect((await cleared.json() as { removed: number }).removed).toBe(1);
+    expect(db.tables.planner_sessions).toHaveLength(1);
   });
 
   it('rejects the wrong password and an unknown account the same way', async () => {

@@ -28,6 +28,7 @@ import {
   handleRecoveryUpdate,
   handleSalt,
   handleSession,
+  handleSessions,
   handleShare,
   handleSignup,
 } from './src/server/authApi';
@@ -187,6 +188,8 @@ function authHandler(databaseUrl: string | undefined): NextHandleFunction {
               ? (webRequest) => authStore(databaseUrl).then((store) => handleSession(webRequest, store))
               : pathname === '/logout'
                 ? (webRequest) => authStore(databaseUrl).then((store) => handleLogout(webRequest, store))
+              : pathname === '/sessions'
+                ? (webRequest) => authStore(databaseUrl).then((store) => handleSessions(webRequest, store))
           : pathname === '/vault'
             ? (webRequest) => authStore(databaseUrl).then((store) => handleAccountVault(webRequest, store))
           : pathname === '/passkey/register/options'

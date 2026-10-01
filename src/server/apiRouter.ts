@@ -37,6 +37,7 @@ import {
   handleRecoveryUpdate,
   handleSalt,
   handleSession,
+  handleSessions,
   handleShare,
   handleSignup,
 } from './authApi.js';
@@ -137,6 +138,8 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
       return (request) => authStore(env.DATABASE_URL).then((store) => handleSalt(request, store));
     case '/api/auth/session':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleSession(request, store));
+    case '/api/auth/sessions':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleSessions(request, store));
     case '/api/auth/share':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleShare(request, store));
     case '/api/auth/signup':

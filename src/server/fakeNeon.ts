@@ -338,6 +338,41 @@ export function createFakeNeon(): FakeDb {
       return [{ ...rest, ...session, u_id: user.id }];
     }
 
+    if (/^SELECT id, label, created_at AS "createdAt"/i.test(q)) {
+      const userId = values[0];
+      return tables.planner_sessions
+        .filter((row) => row.user_id === userId && new Date(String(row.expires_at)).getTime() > Date.now())
+        .sort((a, b) => String(b.last_seen_at).localeCompare(String(a.last_seen_at)))
+        .map((row) => ({
+          id: row.id,
+          label: row.label,
+          createdAt: row.created_at,
+          lastSeenAt: row.last_seen_at,
+          expiresAt: row.expires_at,
+        }));
+    }
+
+    if (/^UPDATE planner_sessions SET last_seen_at = now\(\) WHERE id = /i.test(q)) {
+      const row = tables.planner_sessions.find((item) => item.id === values[0]);
+      if (row) row.last_seen_at = now();
+      return [];
+    }
+
+    if (/^DELETE FROM planner_sessions WHERE id = .* AND user_id = /i.test(q)) {
+      const [id, user_id] = values;
+      const kept = tables.planner_sessions.filter((row) => !(row.id === id && row.user_id === user_id));
+      const removed = kept.length !== tables.planner_sessions.length;
+      tables.planner_sessions = kept;
+      return removed ? [{ id }] : [];
+    }
+
+    if (/^DELETE FROM planner_sessions WHERE user_id = .* AND id <> /i.test(q)) {
+      const [user_id, keepId] = values;
+      const gone = tables.planner_sessions.filter((row) => row.user_id === user_id && row.id !== keepId);
+      tables.planner_sessions = tables.planner_sessions.filter((row) => !(row.user_id === user_id && row.id !== keepId));
+      return gone.map((row) => ({ id: row.id }));
+    }
+
     if (/^DELETE FROM planner_sessions WHERE id = /i.test(q)) {
       tables.planner_sessions = tables.planner_sessions.filter((row) => row.id !== values[0]);
       return [];

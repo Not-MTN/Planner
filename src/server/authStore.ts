@@ -224,6 +224,21 @@ export interface SessionRow {
   expires_at: string | Date;
 }
 
+/**
+ * A signed-in device, as the signed-in user may see it.
+ *
+ * The token hash never leaves the server, so a stolen list is useless: the
+ * most it allows is ending a session, which its owner could do anyway.
+ */
+export interface SessionInfo {
+  id: string;
+  /** A short description captured at sign-in, e.g. "Chrome on Mac". */
+  label: string;
+  createdAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+}
+
 export interface LinkRow {
   id: string;
   guardian_id: string;
@@ -291,6 +306,12 @@ export interface AuthStore {
   createSession(userId: string, tokenHash: string, label: string, expiresAt: Date): Promise<void>;
   findSession(tokenHash: string): Promise<{ session: SessionRow; user: UserRow } | null>;
   deleteSession(id: string): Promise<void>;
+  /** Every live session for this account, most recently used first. */
+  listSessions(userId: string): Promise<SessionInfo[]>;
+  /** Ends one of this account's own sessions. Other accounts are untouched. */
+  deleteSessionForUser(id: string, userId: string): Promise<boolean>;
+  /** Ends every session but the given one, for "sign out everywhere else". */
+  deleteOtherSessions(userId: string, keepId: string): Promise<number>;
   /** Permanently remove an account and all account-owned data. */
   deleteAccount?(userId: string): Promise<boolean>;
   /** Guardian: ask a student to be followed. Returns null when already asked. */
@@ -481,7 +502,7 @@ export function createMemoryAuthStore(): AuthStore {
     recoveryVerifiers: RecoveryVerifier[];
   }>();
   const vaults = new Map<string, VaultRow>();
-  const sessions = new Map<string, SessionRow>();
+  const sessions = new Map<string, SessionRow & { label: string; createdAt: string; lastSeenAt: string }>();
   const links: LinkRow[] = [];
   const passkeys: PasskeyRow[] = [];
 
@@ -620,8 +641,16 @@ export function createMemoryAuthStore(): AuthStore {
       });
       return true;
     },
-    async createSession(userId, tokenHash, _label, expiresAt) {
-      sessions.set(tokenHash, { id: newId(), user_id: userId, expires_at: expiresAt.toISOString() });
+    async createSession(userId, tokenHash, label, expiresAt) {
+      const stamp = new Date().toISOString();
+      sessions.set(tokenHash, {
+        id: newId(),
+        user_id: userId,
+        expires_at: expiresAt.toISOString(),
+        label,
+        createdAt: stamp,
+        lastSeenAt: stamp,
+      });
     },
     async findSession(tokenHash) {
       const session = sessions.get(tokenHash);
@@ -630,6 +659,8 @@ export function createMemoryAuthStore(): AuthStore {
         sessions.delete(tokenHash);
         return null;
       }
+      // Seen just now. Throttled in SQL; harmless to do every time here.
+      session.lastSeenAt = new Date().toISOString();
       const user = users.get(session.user_id);
       return user ? { session, user } : null;
     },
@@ -637,6 +668,38 @@ export function createMemoryAuthStore(): AuthStore {
       for (const [hash, session] of sessions) {
         if (session.id === id) sessions.delete(hash);
       }
+    },
+    async listSessions(userId) {
+      const now = Date.now();
+      return [...sessions.values()]
+        .filter((session) => session.user_id === userId && new Date(session.expires_at).getTime() > now)
+        .sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt))
+        .map((session) => ({
+          id: session.id,
+          label: session.label,
+          createdAt: session.createdAt,
+          lastSeenAt: session.lastSeenAt,
+          expiresAt: new Date(session.expires_at).toISOString(),
+        }));
+    },
+    async deleteSessionForUser(id, userId) {
+      for (const [hash, session] of sessions) {
+        if (session.id === id && session.user_id === userId) {
+          sessions.delete(hash);
+          return true;
+        }
+      }
+      return false;
+    },
+    async deleteOtherSessions(userId, keepId) {
+      let removed = 0;
+      for (const [hash, session] of sessions) {
+        if (session.user_id === userId && session.id !== keepId) {
+          sessions.delete(hash);
+          removed += 1;
+        }
+      }
+      return removed;
     },
     async deleteAccount(userId) {
       if (!users.has(userId)) return false;
@@ -1092,15 +1155,21 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
     async findSession(tokenHash) {
       await ensure();
       const rows = (await sql`
-        SELECT s.id, s.user_id, s.expires_at, u.id AS u_id, u.username, u.username_lower, u.email_lower,
+        SELECT s.id, s.user_id, s.expires_at, s.last_seen_at, u.id AS u_id, u.username, u.username_lower, u.email_lower,
                u.display_name, u.role, u.created_at
         FROM planner_sessions s
         JOIN planner_users u ON u.id = s.user_id
         WHERE s.token_hash = ${tokenHash} AND s.expires_at > now()
         LIMIT 1
-      `) as (SessionRow & { u_id: string; username: string; username_lower: string; email_lower: string | null; display_name: string; role: AccountRole; created_at: string })[];
+      `) as (SessionRow & { u_id: string; username: string; username_lower: string; email_lower: string | null; display_name: string; role: AccountRole; created_at: string; last_seen_at: string | Date })[];
       const row = rows[0];
       if (!row) return null;
+      // "Last seen" is only worth a write about once a minute: it is a hint for
+      // the devices list, not an audit log, and this runs on every request.
+      const seen = new Date(row.last_seen_at).getTime();
+      if (!Number.isFinite(seen) || Date.now() - seen > 60_000) {
+        await sql`UPDATE planner_sessions SET last_seen_at = now() WHERE id = ${row.id}`;
+      }
       return {
         session: { id: row.id, user_id: row.user_id, expires_at: row.expires_at },
         user: {
@@ -1118,6 +1187,40 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
     async deleteSession(id) {
       await ensure();
       await sql`DELETE FROM planner_sessions WHERE id = ${id}`;
+    },
+
+    async listSessions(userId) {
+      await ensure();
+      const rows = (await sql`
+        SELECT id, label, created_at AS "createdAt", last_seen_at AS "lastSeenAt", expires_at AS "expiresAt"
+        FROM planner_sessions
+        WHERE user_id = ${userId} AND expires_at > now()
+        ORDER BY last_seen_at DESC
+      `) as { id: string; label: string; createdAt: string | Date; lastSeenAt: string | Date; expiresAt: string | Date }[];
+      const iso = (value: string | Date) => (value instanceof Date ? value.toISOString() : new Date(value).toISOString());
+      return rows.map((row) => ({
+        id: row.id,
+        label: row.label,
+        createdAt: iso(row.createdAt),
+        lastSeenAt: iso(row.lastSeenAt),
+        expiresAt: iso(row.expiresAt),
+      }));
+    },
+
+    async deleteSessionForUser(id, userId) {
+      await ensure();
+      const rows = (await sql`
+        DELETE FROM planner_sessions WHERE id = ${id} AND user_id = ${userId} RETURNING id
+      `) as { id: string }[];
+      return rows.length > 0;
+    },
+
+    async deleteOtherSessions(userId, keepId) {
+      await ensure();
+      const rows = (await sql`
+        DELETE FROM planner_sessions WHERE user_id = ${userId} AND id <> ${keepId} RETURNING id
+      `) as { id: string }[];
+      return rows.length;
     },
 
     async deleteAccount(userId) {

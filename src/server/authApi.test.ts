@@ -9,7 +9,9 @@ import {
   handleRecoveryUpdate,
   handleSalt,
   handleSession,
+  handleSessions,
   handleSignup,
+  deviceLabel,
   readSessionToken,
 } from './authApi';
 import { createMemoryAuthStore } from './authStore';
@@ -73,6 +75,27 @@ function cookieFrom(response: Response): string {
   const raw = response.headers.get('set-cookie') ?? '';
   return raw.split(';')[0] ?? '';
 }
+
+describe('device label', () => {
+  const label = (agent: string | null) =>
+    deviceLabel(new Request('https://planner.test/api/auth/login', { headers: agent ? { 'User-Agent': agent } : {} }));
+
+  it('names the browser and the system without fingerprinting them', () => {
+    expect(label('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36')).toBe('Chrome on Mac');
+    expect(label('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 Edg/126.0')).toBe('Edge on Windows');
+    expect(label('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1')).toBe('Safari on iPhone');
+    expect(label('Mozilla/5.0 (X11; Linux x86_64; rv:127.0) Gecko/20100101 Firefox/127.0')).toBe('Firefox on Linux');
+    // Chrome is checked before Safari: a Chromium agent mentions both.
+    expect(label('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36')).not.toContain('Safari');
+  });
+
+  it('falls back to something readable instead of failing', () => {
+    expect(label('')).toBe('Unknown device');
+    expect(label(null)).toBe('Unknown device');
+    expect(label('curl/8.4.0')).toBe('Unknown device');
+    expect(label('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)')).toBe('Mac');
+  });
+});
 
 describe('account API', () => {
   it('creates an account, a session cookie and a vault', async () => {
@@ -398,6 +421,84 @@ describe('account API', () => {
       store,
     );
     expect(fresh.status).toBe(200);
+  });
+
+  it('lists the account’s devices, marks the current one, and revokes by id only for its owner', async () => {
+    resetRateLimits();
+    const store = STORE();
+    const signup = await handleSignup(post('/api/auth/signup', ACCOUNT), store);
+    const cookie = cookieFrom(signup);
+
+    // A second sign-in from a different browser is a second device.
+    resetRateLimits();
+    const second = await handleLogin(post('/api/auth/login', { username: 'sara', authToken: ACCOUNT.authToken }), store);
+    const secondCookie = cookieFrom(second);
+
+    const anon = await handleSessions(get('/api/auth/sessions'), store);
+    expect(anon.status).toBe(401);
+
+    const listed = await handleSessions(get('/api/auth/sessions', cookie), store);
+    expect(listed.status).toBe(200);
+    const body = (await listed.json()) as {
+      current: string;
+      sessions: { id: string; label: string; current?: boolean }[];
+    };
+    expect(body.sessions).toHaveLength(2);
+    // The token hash is never sent: a stolen list must not be a sign-in.
+    expect(JSON.stringify(body)).not.toContain('token');
+    expect(body.sessions.some((session) => session.id === body.current)).toBe(true);
+
+    const other = body.sessions.find((session) => session.id !== body.current)!;
+    const revoked = await handleSessions(del('/api/auth/sessions', { id: other.id }, cookie), store);
+    expect(revoked.status).toBe(200);
+    expect((await revoked.json() as { removed: number }).removed).toBe(1);
+
+    // That session is really gone: its cookie no longer opens the account.
+    resetRateLimits();
+    expect((await handleSession(get('/api/auth/session', secondCookie), store)).status).toBe(401);
+
+    // Already gone is a plain 404, not a success.
+    resetRateLimits();
+    expect((await handleSessions(del('/api/auth/sessions', { id: other.id }, cookie), store)).status).toBe(404);
+
+    const after = (await (await handleSessions(get('/api/auth/sessions', cookie), store)).json()) as {
+      sessions: { id: string }[];
+    };
+    expect(after.sessions).toHaveLength(1);
+  });
+
+  it('signs out every other device but keeps the one being used', async () => {
+    resetRateLimits();
+    const store = STORE();
+    const signup = await handleSignup(post('/api/auth/signup', ACCOUNT), store);
+    const cookie = cookieFrom(signup);
+
+    resetRateLimits();
+    await handleLogin(post('/api/auth/login', { username: 'sara', authToken: ACCOUNT.authToken }), store);
+    resetRateLimits();
+    await handleLogin(post('/api/auth/login', { username: 'sara', authToken: ACCOUNT.authToken }), store);
+
+    const before = (await (await handleSessions(get('/api/auth/sessions', cookie), store)).json()) as {
+      sessions: { id: string }[];
+      current: string;
+    };
+    expect(before.sessions).toHaveLength(3);
+
+    resetRateLimits();
+    const cleared = await handleSessions(del('/api/auth/sessions', { others: true }, cookie), store);
+    expect(cleared.status).toBe(200);
+    expect((await cleared.json() as { removed: number }).removed).toBe(2);
+
+    const after = (await (await handleSessions(get('/api/auth/sessions', cookie), store)).json()) as {
+      sessions: { id: string }[];
+      current: string;
+    };
+    expect(after.sessions).toHaveLength(1);
+    expect(after.sessions[0]!.id).toBe(before.current);
+
+    // A malformed id is refused before it reaches the database.
+    resetRateLimits();
+    expect((await handleSessions(del('/api/auth/sessions', { id: 'not-a-uuid' }, cookie), store)).status).toBe(400);
   });
 
   it('reports 503 when no database is configured', async () => {

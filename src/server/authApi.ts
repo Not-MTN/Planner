@@ -162,6 +162,46 @@ function isBase64List(
   return value.every((entry) => isBase64(entry, itemMin, itemMax));
 }
 
+/**
+ * A short, readable name for the device that just signed in.
+ *
+ * Enough to tell "the laptop I use every day" from "a phone I signed into once
+ * at a library" — which is the whole point of a devices list. Deliberately
+ * coarse: a precise user-agent string is a fingerprint, and none of this is
+ * needed to authenticate anybody.
+ */
+export function deviceLabel(request: Request): string {
+  const agent = request.headers.get('user-agent') ?? '';
+  const system = /iPhone/i.test(agent)
+    ? 'iPhone'
+    : /iPad|Macintosh/i.test(agent) && /Mac OS X/i.test(agent) && !/iPhone|iPad/i.test(agent)
+      ? 'Mac'
+      : /iPad/i.test(agent)
+        ? 'iPad'
+        : /Android/i.test(agent)
+          ? 'Android'
+          : /Windows/i.test(agent)
+            ? 'Windows'
+            : /Macintosh|Mac OS X/i.test(agent)
+              ? 'Mac'
+              : /Linux/i.test(agent)
+                ? 'Linux'
+                : '';
+  const browser = /Edg\//i.test(agent)
+    ? 'Edge'
+    : /OPR\/|Opera/i.test(agent)
+      ? 'Opera'
+      : /Firefox\//i.test(agent)
+        ? 'Firefox'
+        : /Chrome\//i.test(agent)
+          ? 'Chrome'
+          : /Safari\//i.test(agent)
+            ? 'Safari'
+            : '';
+  if (browser && system) return `${browser} on ${system}`;
+  return browser || system || 'Unknown device';
+}
+
 function guard(request: Request, bucket: string, limit: number): Response | null {
   if (!isSameOriginRequest(request)) return error(403, 'Cross-origin requests are not allowed.');
   const limited = rateLimitResponse(request, bucket, limit, 60_000);
@@ -227,7 +267,7 @@ export async function handleSignup(request: Request, store: AuthStore | null): P
 
     const token = newToken();
     const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * DAY_MS);
-    await store!.createSession(result.user.id, hashToken(token), 'This device', expiresAt);
+    await store!.createSession(result.user.id, hashToken(token), deviceLabel(request), expiresAt);
 
     return json(201, { user: toPublicUser(result.user) }, { 'Set-Cookie': sessionCookie(token, isHttps(request)) });
   } catch {
@@ -431,7 +471,7 @@ export async function handleLogin(request: Request, store: AuthStore | null): Pr
 
     const token = newToken();
     const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * DAY_MS);
-    await store!.createSession(account.user.id, hashToken(token), 'This device', expiresAt);
+    await store!.createSession(account.user.id, hashToken(token), deviceLabel(request), expiresAt);
 
     const payload: LoginResponse = {
       user: toPublicUser(account.user),
@@ -712,7 +752,7 @@ export async function handlePasskeyLoginVerify(request: Request, store: AuthStor
     const token = newToken();
     const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * DAY_MS);
     await Promise.all([
-      store!.createSession(user.id, hashToken(token), 'Passkey', expiresAt),
+      store!.createSession(user.id, hashToken(token), `${deviceLabel(request)} · passkey`.slice(0, 60), expiresAt),
       store!.touchPasskey(id, signCount),
     ]);
 
@@ -795,6 +835,54 @@ export async function handlePasskeyDelete(request: Request, store: AuthStore | n
     const removed = await session.store.deletePasskey(session.user.id, credentialId);
     if (!removed) return error(404, 'That passkey is no longer here.', 'not_found');
     return json(200, { ok: true });
+  } catch {
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
+}
+
+/* ---------------------------------------------------------------- sessions */
+
+/**
+ * The devices signed into this account, and the way to end them.
+ *
+ * In a zero-knowledge app the server cannot lock a stolen vault, but it can
+ * stop handing out the encrypted vault to a session that should no longer have
+ * it — which is exactly what signing a device out means here.
+ */
+export async function handleSessions(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'auth-sessions', 60) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+
+  const token = readSessionToken(request);
+  if (!token) return error(401, 'Sign in first.', 'unauthenticated');
+
+  try {
+    const found = await store!.findSession(hashToken(token));
+    if (!found) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+
+    if (request.method === 'GET') {
+      const sessions = await store!.listSessions(found.user.id);
+      return json(200, { sessions, current: found.session.id });
+    }
+
+    if (request.method === 'DELETE') {
+      const body = await readJsonBody(request);
+      const id = typeof body?.id === 'string' && /^[a-f0-9-]{36}$/.test(body.id) ? body.id : null;
+      const all = body?.others === true;
+      if (!id && !all) return error(400, 'Expected { id } or { others: true }.');
+      // Ending every other session keeps this one: the caller is still using
+      // it, and locking yourself out is never what "sign out my other devices"
+      // means.
+      const removed = all
+        ? await store!.deleteOtherSessions(found.user.id, found.session.id)
+        : (await store!.deleteSessionForUser(id as string, found.user.id))
+          ? 1
+          : 0;
+      if (removed === 0) return error(404, 'That session has already ended.', 'not_found');
+      return json(200, { ok: true, removed });
+    }
+
+    return error(405, 'Method not allowed.', undefined);
   } catch {
     return error(502, 'The accounts database could not be reached. Try again shortly.');
   }

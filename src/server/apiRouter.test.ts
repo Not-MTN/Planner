@@ -52,6 +52,7 @@ describe('apiRoute table', () => {
       '/api/auth/recovery/update',
       '/api/auth/salt',
       '/api/auth/session',
+      '/api/auth/sessions',
       '/api/auth/share',
       '/api/auth/signup',
       '/api/auth/status',

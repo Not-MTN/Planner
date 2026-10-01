@@ -535,6 +535,53 @@ export async function fetchSession(): Promise<PublicUser | null> {
   }
 }
 
+/** One signed-in device, as the account holder sees it. */
+export interface DeviceSession {
+  id: string;
+  /** A short description captured at sign-in, e.g. "Chrome on Mac". */
+  label: string;
+  createdAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+  /** True for the session this browser is using right now. */
+  current: boolean;
+}
+
+/**
+ * Every device signed into this account, newest first.
+ *
+ * The list is only available while signed in, and an expired session simply
+ * disappears from it — so a missing list means "offline", not "no devices".
+ */
+export async function listDeviceSessions(): Promise<DeviceSession[]> {
+  try {
+    const result = await request<{ sessions: DeviceSession[]; current: string }>('/api/auth/sessions');
+    const current = result.current;
+    return (result.sessions ?? []).map((session) => ({ ...session, current: session.id === current }));
+  } catch (error) {
+    if (error instanceof AuthError && error.code === 'unauthenticated') return [];
+    throw error;
+  }
+}
+
+/**
+ * Sign one device out. The vault stays encrypted and untouched; the revoked
+ * session simply stops being able to fetch it, and has to ask for the password
+ * again.
+ */
+export async function revokeDeviceSession(id: string): Promise<void> {
+  await request<{ ok: true }>('/api/auth/sessions', { method: 'DELETE', body: JSON.stringify({ id }) });
+}
+
+/** Sign every other device out, keeping this one. */
+export async function revokeOtherDeviceSessions(): Promise<number> {
+  const result = await request<{ ok: true; removed: number }>('/api/auth/sessions', {
+    method: 'DELETE',
+    body: JSON.stringify({ others: true }),
+  });
+  return result.removed;
+}
+
 export interface ApiStatus {
   /** The server can see a database. */
   configured: boolean;

@@ -6,12 +6,21 @@ import { DownloadIcon, ExitIcon, SparklesIcon, UploadIcon, UserIcon } from '../i
 import { Rich } from './Rich';
 import { Modal } from './ui';
 import { RecoveryCodes } from './RecoveryCodes';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { FeedsSection, SecuritySection, SharedSpaceSection, TaskImportSection, TemplatesSection, WeatherSection } from './SettingsExtras';
 import { isReportingEnabled, setReportingEnabled } from '../reporting';
 import { useSignOut } from './useSignOut';
 import { accountUser, forgetAccountUser } from '../auth/vault';
-import { deleteAccount, getActiveSession, regenerateRecoveryCodes } from '../auth/session';
+import { deviceCacheSupported, forgetDevice, listTrustedUserIds } from '../auth/device';
+import {
+  deleteAccount,
+  getActiveSession,
+  listDeviceSessions,
+  regenerateRecoveryCodes,
+  revokeDeviceSession,
+  revokeOtherDeviceSessions,
+  type DeviceSession,
+} from '../auth/session';
 import { DATE_LANGUAGES, todayISO, type DateLanguage } from '../dates';
 import { downloadBusyICS, downloadICS, parseICS } from '../ics';
 import { canInstall, isInstalled, onInstallChange, promptInstall } from '../pwa';
@@ -19,7 +28,7 @@ import { requestTour } from '../tour';
 import { requestAbout } from '../about';
 import { LEAD_CHOICES } from '../reminders';
 import { loadSpeechLocaleId, saveSpeechLocaleId, speechAvailable, SPEECH_LOCALES } from '../speech';
-import { t, getLang, setLang, LANGUAGES, type Lang } from '../i18n';
+import { t, tn, getLang, setLang, LANGUAGES, type Lang } from '../i18n';
 import { loadNavigationPages, NAVIGATION_PAGES, saveNavigationPages, type NavigationPage } from '../navigationPrefs';
 import { backgroundPushEnabled, configureBackgroundPush, refreshBackgroundPushSchedule } from '../push';
 
@@ -680,6 +689,184 @@ function AccountSection() {
   );
 }
 
+/** "3 minutes ago", in the user's own language. */
+function seenAgo(iso: string, lang: Lang): string {
+  const elapsed = Date.now() - new Date(iso).getTime();
+  const minutes = Math.round(elapsed / 60_000);
+  if (!Number.isFinite(minutes) || minutes < 1) return t("just now");
+  const relative = new Intl.RelativeTimeFormat(lang === 'fa' ? 'fa-IR' : 'en', { numeric: 'auto' });
+  if (minutes < 60) return relative.format(-minutes, 'minute');
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return relative.format(-hours, 'hour');
+  const days = Math.round(hours / 24);
+  if (days < 30) return relative.format(-days, 'day');
+  return relative.format(-Math.round(days / 30), 'month');
+}
+
+/**
+ * This browser's own shortcut past the password.
+ *
+ * A trusted device keeps a wrapped copy of the vault key so the planner opens
+ * without typing the password. Ending sessions does not clear it — the copy is
+ * here, not on the server — so it needs its own way out.
+ */
+function TrustedDeviceRow() {
+  const { flash } = usePlanner();
+  const [remembered, setRemembered] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    const user = accountUser();
+    if (!user) return;
+    void listTrustedUserIds()
+      .then((ids) => { if (live) setRemembered(ids.includes(user.id)); })
+      .catch(() => undefined);
+    return () => { live = false; };
+  }, []);
+
+  if (!deviceCacheSupported() || !remembered) return null;
+
+  return (
+    <div className="set-row">
+      <div>
+        <p className="set-label">{t("This device opens without your password")}</p>
+        <p className="set-hint">{t("A wrapped copy of your key is stored in this browser so the planner opens straight away. Forgetting it means typing your password next time — nothing else changes.")}</p>
+      </div>
+      <button
+        type="button"
+        className="btn btn-ghost"
+        onClick={() => {
+          const user = accountUser();
+          if (!user) return;
+          void forgetDevice(user.id)
+            .then(() => { setRemembered(false); flash(t("This device forgotten. You will need your password next time.")); })
+            .catch(() => undefined);
+        }}
+      >
+        {t("Forget this device")}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The devices signed into this account, each with its own way out.
+ *
+ * Planner cannot lock a vault it cannot read, so "signing a device out" here
+ * means ending its session: it stops being able to fetch the encrypted vault
+ * and has to ask for the password again. Anything already decrypted on that
+ * device stays there — which is why the trusted-device note below matters.
+ */
+function DevicesSection() {
+  const { flash, requestConfirm } = usePlanner();
+  const requestSignOut = useSignOut();
+  const [devices, setDevices] = useState<DeviceSession[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const load = useCallback(() => {
+    let live = true;
+    void listDeviceSessions()
+      .then((rows) => { if (live) setDevices(rows); })
+      .catch(() => { if (live) setDevices([]); });
+    return () => { live = false; };
+  }, []);
+
+  useEffect(() => load(), [load]);
+
+  const revoke = (device: DeviceSession) => {
+    if (device.current) {
+      // Ending the session you are using is a sign-out, so it goes through the
+      // same path as the sign-out button: flush, leave, go home.
+      requestSignOut();
+      return;
+    }
+    requestConfirm({
+      title: t("Sign that device out?"),
+      body: t("That device stops syncing and asks for the password again. Your planner is untouched, and the copy already on it stays until it is signed in and wiped."),
+      confirmLabel: t("Sign that device out"),
+      onConfirm: () => {
+        setBusy(true);
+        setError('');
+        void revokeDeviceSession(device.id)
+          .then(() => { setDevices((rows) => (rows ?? []).filter((row) => row.id !== device.id)); flash(t("That device has been signed out.")); })
+          .catch(() => setError(t("That device could not be signed out. Try again.")))
+          .finally(() => setBusy(false));
+      },
+    });
+  };
+
+  const revokeOthers = () => {
+    const others = (devices ?? []).filter((device) => !device.current).length;
+    if (others === 0) return;
+    requestConfirm({
+      title: t("Sign out every other device?"),
+      body: t("Every device but this one stops syncing and asks for the password again. Your planner is untouched."),
+      confirmLabel: t("Sign out other devices"),
+      onConfirm: () => {
+        setBusy(true);
+        setError('');
+        void revokeOtherDeviceSessions()
+          .then((removed) => {
+            setDevices((rows) => (rows ?? []).filter((device) => device.current));
+            flash(tn(removed, "Signed {count} device out.", "Signed {count} devices out."));
+          })
+          .catch(() => setError(t("The other devices could not be signed out. Try again.")))
+          .finally(() => setBusy(false));
+      },
+    });
+  };
+
+  const others = (devices ?? []).filter((device) => !device.current).length;
+  const lang = getLang();
+
+  return (
+    <section className="set-section">
+      <h3 className="kicker">{t("Devices")}</h3>
+      <TrustedDeviceRow />
+      {devices === null ? (
+        <p className="set-hint">{t("Loading your devices…")}</p>
+      ) : devices.length === 0 ? (
+        <p className="set-hint">{t("No other device is signed in. Sign in on a phone or another computer and it will appear here.")}</p>
+      ) : (
+        <>
+          <ul className="device-list">
+            {devices.map((device) => (
+              <li key={device.id} className="set-row device-row">
+                <div>
+                  <p className="set-label">
+                    {device.label || t("Unknown device")}
+                    {device.current ? <span className="device-badge">{t("This device")}</span> : null}
+                  </p>
+                  <p className="set-hint">
+                    {device.current
+                      ? t("In use now")
+                      : t("Last seen {0}", { 0: seenAgo(device.lastSeenAt, lang) })}
+                    {' · '}
+                    {t("Signed in {0}", { 0: new Date(device.createdAt).toLocaleDateString(lang === 'fa' ? 'fa-IR' : undefined) })}
+                  </p>
+                </div>
+                <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => revoke(device)}>
+                  {t("Sign out")}
+                </button>
+              </li>
+            ))}
+          </ul>
+          {error ? <p className="set-hint is-error" role="alert">{error}</p> : null}
+          {others > 0 ? (
+            <div className="set-actions">
+              <button type="button" className="btn btn-soft" disabled={busy} onClick={revokeOthers}>
+                {t("Sign out every other device")}
+              </button>
+            </div>
+          ) : null}
+          <p className="set-hint">{t("Signing a device out ends its session. A planner already open on it stays there until it is signed in again, so forget the device as well if the device itself is lost.")}</p>
+        </>
+      )}
+    </section>
+  );
+}
+
 export function SettingsSheet() {
   const planner = usePlanner();
   const {
@@ -701,6 +888,7 @@ export function SettingsSheet() {
   return (
     <Modal title={t("Settings")} onClose={closeSettings} className="sheet-settings">
       <AccountSection />
+      <DevicesSection />
       <section className="set-section">
         <h3 className="kicker">{t("Appearance")}</h3>
         <div className="set-row">
