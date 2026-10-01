@@ -51,6 +51,20 @@ export const GROQ_KEY_MISSING_MESSAGE = 'GROQ_API_KEY is not configured on the s
  * mirrors `billingErrorMessage` in the server proxy; it is repeated here because
  * the browser must never import the server-only proxy module.
  */
+/**
+ * True when the browser says there is no connection at all.
+ *
+ * Worth asking separately from "the request failed": the two feel the same to
+ * the code and completely different to the person waiting. One is "try again
+ * in a minute", the other is "you are on a train".
+ */
+export function isOffline(): boolean {
+  return typeof navigator !== 'undefined' && navigator.onLine === false;
+}
+
+export const AI_OFFLINE_MESSAGE =
+  "You're offline, so the AI cannot be reached. Nothing is lost — your planner is saved on this device and works without a connection. Try this again when you are back online.";
+
 export const GROQ_BILLING_MESSAGE =
   'Your AI provider key is working — the account has just run out of free allowance. Add a payment method with the provider, or wait for the free allowance to reset, then try again. No redeploy needed.';
 
@@ -518,6 +532,12 @@ async function groqJsonInternal(system: string, user: string, imageDataUrl?: str
   // the failure without any of the prompt (the message is a fixed string or a
   // provider error, and it is redacted on the way out regardless).
   addBreadcrumb('ai', imageDataUrl ? 'request with image' : 'request');
+  // Asked before spending a timeout on it. Offline is not a mystery to solve
+  // later: it is the answer, and it is the one the person already knows.
+  if (isOffline()) {
+    addBreadcrumb('ai', 'offline');
+    throw new Error(t(AI_OFFLINE_MESSAGE));
+  }
   try {
     return await groqJsonCall(system, user, imageDataUrl, signal, maxTokens);
   } catch (error) {
@@ -556,6 +576,8 @@ async function groqJsonCall(system: string, user: string, imageDataUrl?: string,
     );
   } catch (cause) {
     if (cause instanceof Error && cause.name === 'AbortError') throw cause;
+    // The connection may have dropped between the check above and here.
+    if (isOffline()) throw new Error(t(AI_OFFLINE_MESSAGE));
     throw new Error(t("Could not reach the AI service. Check your connection and try again."));
   }
   // Read the body once: prefer text (so a non-JSON error can be reported), and

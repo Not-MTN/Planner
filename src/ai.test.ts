@@ -267,3 +267,61 @@ describe('AI request retries', () => {
     await expect(pending).rejects.toThrow();
   });
 });
+
+describe('when the AI cannot be reached', () => {
+  afterEach(() => {
+    // navigator.onLine is a getter in jsdom; put it back however we set it.
+    Object.defineProperty(navigator, 'onLine', { value: true, configurable: true });
+  });
+
+  function goOffline() {
+    Object.defineProperty(navigator, 'onLine', { value: false, configurable: true });
+  }
+
+  it('says you are offline rather than asking you to check a connection you know is gone', async () => {
+    goOffline();
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const state = addTask(createEmptyState(), {
+      title: 'Ship the project', priority: 'high', dueDate: '2026-09-27', dueTime: null,
+      category: 'work', note: '', goalId: null,
+    }, 'task-1', '2026-09-27T08:00:00.000Z');
+
+    await expect(
+      generateAIPlan({ prompt: 'plan my week', state, range: { startDate: '2026-09-27', days: 7 } }),
+    ).rejects.toThrow(/offline/i);
+
+    // The point of asking first: no request is spent discovering it.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('reassures rather than only reporting a failure', async () => {
+    goOffline();
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) })));
+
+    const state = createEmptyState();
+    await expect(
+      generateAIPlan({ prompt: 'plan my week', state, range: { startDate: '2026-09-27', days: 7 } }),
+    ).rejects.toThrow(/saved on this device/);
+  });
+
+  it('keeps the ordinary failure message when there is a connection', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new Error('network down');
+    }));
+    // The retry backoff is real seconds long (0.8 + 2 + 4.5). Skip the waiting,
+    // not the retries: this test is about the message that survives all of them.
+    vi.useFakeTimers();
+    try {
+      const state = createEmptyState();
+      const rejected = expect(
+        generateAIPlan({ prompt: 'plan my week', state, range: { startDate: '2026-09-27', days: 7 } }),
+      ).rejects.toThrow(/Could not reach the AI service/);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await rejected;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

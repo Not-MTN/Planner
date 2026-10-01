@@ -1812,4 +1812,5 @@ export const fa: Record<string, string> = {
   "Signed in": "وارد شدید",
   "New place": "مکان جدید",
   "This is the last couple of months. A line marked “New place” came from a network this account had not used before. If you do not recognise one, change your password and sign your other devices out.": "این دو ماه گذشته است. ردیفی که با «مکان جدید» مشخص شده از شبکه‌ای آمده که این حساب پیش‌تر از آن استفاده نکرده بود. اگر ردیفی را نمی‌شناسید، رمز عبور خود را عوض کنید و دستگاه‌های دیگر را خارج کنید.",
+  "You're offline, so the AI cannot be reached. Nothing is lost — your planner is saved on this device and works without a connection. Try this again when you are back online.": "شما آفلاین هستید، بنابراین دسترسی به هوش مصنوعی ممکن نیست. چیزی از دست نرفته — برنامهٔ شما روی این دستگاه ذخیره شده و بدون اتصال هم کار می‌کند. وقتی دوباره آنلاین شدید این را امتحان کنید.",
 };
