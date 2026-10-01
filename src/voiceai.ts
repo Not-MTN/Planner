@@ -13,12 +13,13 @@ import {
   draftForModel,
   groqChatJson,
   normalizeDraftPlan,
+  type AIProgress,
   type AIDraft,
   type PlanRange,
 } from './ai';
 import { addDays, todayISO } from './dates';
 import { parsePlanDuration } from './duration';
-import { getLang, t } from './i18n';
+import { getLang, t, type Lang } from './i18n';
 import type { PlannerState } from './types';
 
 export interface VoiceTurn {
@@ -155,7 +156,18 @@ export interface VoiceCurrentDraft {
  * When a draft is already on screen (`currentDraft`), the model can revise it
  * in place: "make Tuesday lighter" edits the plan instead of starting over.
  */
-export async function voiceTurn(options: { utterance: string; history: VoiceTurn[]; state: PlannerState; currentDraft?: VoiceCurrentDraft | null }): Promise<VoiceReply> {
+export interface VoiceTurnOptions {
+  utterance: string;
+  history: VoiceTurn[];
+  state: PlannerState;
+  currentDraft?: VoiceCurrentDraft | null;
+  /** Lets the screen give up on an answer the person has stopped waiting for. */
+  signal?: AbortSignal;
+  /** Called with the answer as it grows, so the screen can show it has started. */
+  onProgress?: AIProgress;
+}
+
+export async function voiceTurn(options: VoiceTurnOptions): Promise<VoiceReply> {
   const utterance = options.utterance.replace(/\s+/g, ' ').trim().slice(0, MAX_UTTERANCE_LEN);
   if (!utterance) throw new Error(t("I couldn't hear anything — try again?"));
   const today = todayISO();
@@ -183,6 +195,9 @@ export async function voiceTurn(options: { utterance: string; history: VoiceTurn
   };
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const timer = setTimeout(() => controller?.abort(), VOICE_TURN_TIMEOUT_MS);
+  // An outside cancel and our own ceiling are the same thing to the request.
+  const onOutsideAbort = () => controller?.abort();
+  options.signal?.addEventListener('abort', onOutsideAbort, { once: true });
   try {
     // A spoken "plan my next month" carries a whole draft inside the reply, so
     // the budget has to follow the horizon exactly as the typed builder's does —
@@ -192,14 +207,17 @@ export async function voiceTurn(options: { utterance: string; history: VoiceTurn
       JSON.stringify(payload),
       controller?.signal,
       range.days > 30 ? LONG_RANGE_MAX_TOKENS : DEFAULT_MAX_TOKENS,
+      options.onProgress,
     );
     return normalizeVoiceReply(raw, options.state, range);
   } catch (cause) {
     if (cause instanceof Error && cause.name === 'AbortError') {
-      throw new Error(t("That took too long — try once more?"));
+      // Stopped on purpose is not the same as too slow: the person asked.
+      throw new Error(options.signal?.aborted ? t("Stopped.") : t("That took too long — try once more?"));
     }
     throw cause;
   } finally {
+    options.signal?.removeEventListener('abort', onOutsideAbort);
     clearTimeout(timer);
   }
 }
@@ -234,10 +252,13 @@ function synthesis(): SpeechSynthesisLike | null {
   return window.speechSynthesis as unknown as SpeechSynthesisLike;
 }
 
+/** The speech tags that can actually speak a language, in order of preference. */
+const SPEECH_TAGS: Record<Lang, string[]> = { en: ['en'], fi: ['fi', 'fin'], fa: ['fa', 'pes', 'per'] };
+
 /** Best voice for a language: exact tag first, then base language, then any. */
-export function pickVoice(voices: SpeechSynthesisVoiceLike[], lang: 'en' | 'fa'): SpeechSynthesisVoiceLike | null {
+export function pickVoice(voices: SpeechSynthesisVoiceLike[], lang: Lang): SpeechSynthesisVoiceLike | null {
   if (voices.length === 0) return null;
-  const prefer = lang === 'fa' ? ['fa', 'pes', 'per'] : ['en'];
+  const prefer = SPEECH_TAGS[lang];
   const norm = (tag: string) => tag.toLowerCase().replace(/_/g, '-');
   for (const tag of prefer.map(norm)) {
     const exact = voices.find((voice) => norm(voice.lang) === tag);
@@ -245,15 +266,11 @@ export function pickVoice(voices: SpeechSynthesisVoiceLike[], lang: 'en' | 'fa')
     const partial = voices.find((voice) => norm(voice.lang).startsWith(tag) || norm(voice.lang).startsWith(`${tag}-`));
     if (partial) return partial;
   }
-  // Never read Persian text with an English voice (gibberish): only fall back for English.
-  if (lang === 'fa') return null;
+  // Never read one language's words with another language's voice (gibberish):
+  // only English falls back to whatever is installed.
+  if (lang !== 'en') return null;
   return voices.find((voice) => voice.default) ?? voices[0] ?? null;
 }
-
-export function ttsAvailable(): boolean {
-  return synthesis() !== null;
-}
-
 /**
  * Which language a reply is actually written in. TTS must follow the TEXT,
  * not the app language: a Persian answer to a Persian question needs a
@@ -281,7 +298,7 @@ function clearSettle(): void {
 }
 
 /** Speak a short reply aloud. Returns false when speech synthesis can't start. */
-export function speakText(text: string, options: { lang?: 'en' | 'fa'; onend?: () => void } = {}): boolean {
+export function speakText(text: string, options: { lang?: Lang; onend?: () => void } = {}): boolean {
   const synth = synthesis();
   const clean = text.trim().slice(0, 400);
   if (!synth || !clean) return false;
@@ -290,8 +307,8 @@ export function speakText(text: string, options: { lang?: 'en' | 'fa'; onend?: (
     const utteranceLang = options.lang ?? getLang();
     const voices = synth.getVoices();
     const voice = pickVoice(voices, utteranceLang);
-    if (utteranceLang === 'fa' && !voice) return false; // no Persian voice installed — stay silent
-    const langTag = voice?.lang ?? (utteranceLang === 'fa' ? 'fa-IR' : 'en-US');
+    if (utteranceLang !== 'en' && !voice) return false; // no voice for that language — stay silent
+    const langTag = voice?.lang ?? (utteranceLang === 'fa' ? 'fa-IR' : utteranceLang === 'fi' ? 'fi-FI' : 'en-US');
     // Defer: some engines fire onend synchronously on a broken queue; the UI
     // must never receive "finished" before it knows it started.
     const finish = () => {

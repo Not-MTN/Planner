@@ -1,7 +1,7 @@
 import { addDays, isValidISODate, isValidTime, timeToMinutes, todayISO, weekDates } from './dates';
 import { nextDueAfterCompletion, REPEAT_SET } from './recurrence';
 import { MAX_PLAN_DAYS } from './duration';
-import { AI_PLAN_LIMIT } from './types';
+import { AI_DECLINED_LIMIT, AI_DECLINED_MAX_AGE_DAYS, AI_PLAN_LIMIT, GOAL_STEPS_MAX } from './types';
 import { t } from './i18n';
 import type {
   AIMemoryCategory,
@@ -21,6 +21,8 @@ import type {
   SavedAIPlanInput,
   Task,
   TaskInput,
+  AIDeclined,
+  AIDeclinedKind,
 } from './types';
 
 export function uid(): string {
@@ -337,6 +339,72 @@ export function deleteAIMemory(state: PlannerState, id: string): PlannerState {
 
 export function clearAIMemory(state: PlannerState): PlannerState {
   return state.aiMemory.length === 0 ? state : { ...state, aiMemory: [] };
+}
+
+// ── Declined AI suggestions ───────────────────────────────────────────
+
+/**
+ * Remember the suggestions this user did not keep, so they stop coming back.
+ *
+ * Two things keep this honest. It is capped and it expires: the record is
+ * meant to prevent an idea being proposed twice in a row, not to build a
+ * permanent file. And every entry is visible in Memory, where it can be
+ * forgotten individually — a preference learned silently and then acted on
+ * invisibly is a guess the user has no way to correct.
+ */
+export function recordDeclined(
+  state: PlannerState,
+  items: Array<{ title: string; kind: AIDeclinedKind }>,
+  now = nowIso(),
+): PlannerState {
+  const incoming = items
+    .map((item) => ({ title: clean(item.title, 140).trim(), kind: item.kind }))
+    .filter((item) => item.title.length > 0);
+  if (incoming.length === 0) return state;
+
+  const cutoff = new Date(Date.now() - AI_DECLINED_MAX_AGE_DAYS * 86_400_000).toISOString();
+  const byKey = new Map<string, AIDeclined>();
+  for (const entry of state.aiDeclined ?? []) {
+    // Expired entries are dropped rather than carried: an old "no" is not
+    // evidence about today.
+    if (entry.updatedAt < cutoff) continue;
+    byKey.set(entry.title.toLowerCase(), entry);
+  }
+  let changed = false;
+  for (const item of incoming) {
+    const key = item.title.toLowerCase();
+    const existing = byKey.get(key);
+    if (existing) {
+      if (existing.kind === item.kind) {
+        // Said no again: that is the strongest signal there is, so refresh it.
+        if (existing.updatedAt !== now) {
+          byKey.set(key, { ...existing, updatedAt: now });
+          changed = true;
+        }
+        continue;
+      }
+      byKey.set(key, { ...existing, kind: item.kind, updatedAt: now });
+      changed = true;
+      continue;
+    }
+    byKey.set(key, { id: uid(), title: item.title, kind: item.kind, createdAt: now, updatedAt: now });
+    changed = true;
+  }
+  if (!changed) return state;
+
+  const next = [...byKey.values()]
+    .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
+    .slice(-AI_DECLINED_LIMIT);
+  return { ...state, aiDeclined: next };
+}
+
+export function forgetDeclined(state: PlannerState, id: string): PlannerState {
+  const next = (state.aiDeclined ?? []).filter((item) => item.id !== id);
+  return next.length === (state.aiDeclined ?? []).length ? state : { ...state, aiDeclined: next };
+}
+
+export function clearDeclined(state: PlannerState): PlannerState {
+  return (state.aiDeclined ?? []).length === 0 ? state : { ...state, aiDeclined: [] };
 }
 
 // ── Saved AI plans (the Plans page) ───────────────────────────────────
@@ -701,7 +769,16 @@ export function skipHabit(state: PlannerState, habitId: string, date: string): P
 export function addGoal(state: PlannerState, input: GoalInput, id = uid(), milestoneId = uid(), now = nowIso()): PlannerState {
   const title = clean(input.title, 140);
   if (!title) return state;
-  const milestone = clean(input.milestone, 140);
+  const milestone = clean(input.milestone ?? '', 140);
+  // Several steps at once when a goal arrives with them; otherwise the single
+  // line someone typed. The second id onwards has to differ, so a step can be
+  // ticked on its own.
+  const steps = (input.milestones ?? []).map((step, index) => ({
+    id: index === 0 ? milestoneId : `${milestoneId}-${index}`,
+    title: clean(step.title, 140),
+    completed: false,
+    dueDate: step.dueDate && isValidISODate(step.dueDate) ? step.dueDate : null,
+  })).filter((step) => step.title).slice(0, GOAL_STEPS_MAX);
   return {
     ...state,
     goals: [
@@ -712,9 +789,13 @@ export function addGoal(state: PlannerState, input: GoalInput, id = uid(), miles
         description: input.description.trim().slice(0, 2000),
         horizon: input.horizon,
         deadline: input.deadline && isValidISODate(input.deadline) ? input.deadline : null,
-        milestones: milestone
-          ? [{ id: milestoneId, title: milestone, completed: false, dueDate: input.milestoneDue && isValidISODate(input.milestoneDue) ? input.milestoneDue : null }]
-          : [],
+        milestones:
+          steps.length > 0
+            ? steps
+            : milestone
+              ? [{ id: milestoneId, title: milestone, completed: false, dueDate: input.milestoneDue && isValidISODate(input.milestoneDue) ? input.milestoneDue : null }]
+              : [],
+        ...(input.fromSuggestion ? { fromSuggestion: input.fromSuggestion } : {}),
         createdAt: now,
         updatedAt: now,
       },
@@ -725,7 +806,8 @@ export function addGoal(state: PlannerState, input: GoalInput, id = uid(), miles
 export function updateGoal(
   state: PlannerState,
   id: string,
-  patch: Partial<Omit<GoalInput, 'milestone'>>,
+  // Steps and provenance are set when a goal is made, not edited afterwards.
+  patch: Partial<Omit<GoalInput, 'milestone' | 'milestones' | 'fromSuggestion'>>,
   now = nowIso(),
 ): PlannerState {
   return {

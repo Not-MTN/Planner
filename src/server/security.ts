@@ -99,4 +99,68 @@ export function rateLimitResponse(
 /** Test hook; it has no effect on application data. */
 export function resetRateLimits(): void {
   buckets.clear();
+  aiQuota.clear();
+}
+
+/**
+ * How many AI requests one signed-in account may make in a day.
+ *
+ * Not a product limit — a guard rail. The API key belongs to whoever deployed
+ * this, and one runaway account (a loop, a script, a very enthusiastic week)
+ * can exhaust it for everybody. Set `AI_DAILY_REQUESTS` to change it; zero
+ * turns the check off.
+ */
+export const AI_DAILY_REQUESTS_DEFAULT = 60;
+
+const AI_QUOTA_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** Bounded like `buckets`: a map that grows forever is its own outage. */
+const MAX_QUOTA_ENTRIES = 20_000;
+const aiQuota = new Map<string, RateBucket>();
+
+/**
+ * A per-account daily allowance for AI calls, on top of the per-client limiter.
+ *
+ * Only signed-in accounts are counted. The planner is meant to work without an
+ * account, and someone using it locally is not spending a shared key any
+ * differently than they would be from any other tab — refusing them would make
+ * the app worse without protecting anything.
+ *
+ * Best-effort, for the same reason the limiter above is: state lives in one
+ * serverless instance, so a deployment running several will allow several
+ * times the number. Enough to stop one account spoiling it for everyone, and
+ * deliberately not a billing system.
+ */
+export function aiQuotaResponse(
+  accountId: string,
+  limit = AI_DAILY_REQUESTS_DEFAULT,
+  now = Date.now(),
+): Response | null {
+  if (limit <= 0) return null;
+  if (aiQuota.size >= MAX_QUOTA_ENTRIES && !aiQuota.has(accountId)) aiQuota.clear();
+  const current = aiQuota.get(accountId);
+  if (!current || current.resetAt <= now) {
+    aiQuota.set(accountId, { count: 1, resetAt: now + AI_QUOTA_WINDOW_MS });
+    return null;
+  }
+  current.count += 1;
+  if (current.count <= limit) return null;
+  const retryAfter = Math.max(1, Math.ceil((current.resetAt - now) / 1000));
+  const hours = Math.max(1, Math.round(retryAfter / 3600));
+  return new Response(
+    JSON.stringify({
+      error: {
+        message: `This account has used its ${limit} AI requests for today. It resets in about ${hours} ${hours === 1 ? 'hour' : 'hours'}.`,
+        code: 'quota_exceeded',
+      },
+    }),
+    {
+      status: 429,
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Retry-After': String(retryAfter),
+        ...API_SECURITY_HEADERS,
+      },
+    },
+  );
 }

@@ -1,6 +1,26 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { handleICS } from './icsProxy';
 
+/*
+ * The proxy resolves a host before it will fetch from it, because a name is
+ * not an address: `internal.example.com` can point at 127.0.0.1, and a
+ * hostname check would wave it through. Resolving is the network, though, and
+ * a test that reaches the network is a test that fails in a tunnel, on a
+ * plane, or behind a resolver that is having a slow afternoon — which is
+ * exactly how these tests behaved before, adding five seconds to each one.
+ * So DNS is answered here: every name is public unless a test says otherwise.
+ */
+const dns = vi.hoisted(() => ({
+  addresses: ['93.184.216.34'] as string[],
+  fails: false,
+}));
+vi.mock('node:dns/promises', () => ({
+  lookup: async () => {
+    if (dns.fails) throw Object.assign(new Error('ENOTFOUND'), { code: 'ENOTFOUND' });
+    return dns.addresses.map((address) => ({ address, family: address.includes(':') ? 6 : 4 }));
+  },
+}));
+
 const ICS = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'BEGIN:VEVENT', 'UID:1', 'DTSTART:20260928T090000Z', 'SUMMARY:Standup', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
 
 function feedRequest(feedUrl: string): Request {
@@ -49,6 +69,32 @@ describe('calendar feed proxy', () => {
     for (const url of blocked) {
       const response = await handleICS(feedRequest(url));
       expect(response.status, `${url} should be refused`).toBe(400);
+    }
+  });
+
+  it('refuses a public-looking name that resolves somewhere private', async () => {
+    // The reason the proxy resolves names at all: a hostname check would pass
+    // this, and the fetch would then walk straight into the private network.
+    const mock = mockFetch([new Response(ICS, { status: 200 })]);
+    dns.addresses = ['127.0.0.1'];
+    try {
+      const response = await handleICS(feedRequest('https://internal.example.com/feed.ics'));
+      expect(response.status).toBe(400);
+      expect(mock).not.toHaveBeenCalled();
+    } finally {
+      dns.addresses = ['93.184.216.34'];
+    }
+  });
+
+  it('lets a name through when it cannot be resolved', async () => {
+    // Unresolvable is not "private" — it is a typo, and the fetch should say
+    // so in its own words rather than being refused as an attack.
+    mockFetch([new Response(ICS, { status: 200 })]);
+    dns.fails = true;
+    try {
+      expect((await handleICS(feedRequest('https://nope.example.com/feed.ics'))).status).toBe(200);
+    } finally {
+      dns.fails = false;
     }
   });
 

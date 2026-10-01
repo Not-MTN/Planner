@@ -92,11 +92,6 @@ export function idbWriteBlob(key: string, blob: Blob): Promise<boolean> {
   queue = next;
   return next;
 }
-
-export function idbDelete(key: string): Promise<boolean> {
-  return idbClear(key);
-}
-
 /** exportedAt of a serialized copy, for picking the newer of two. */
 export function savedAt(serialized: string | null): string {
   if (!serialized) return '';

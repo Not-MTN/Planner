@@ -8,7 +8,7 @@
  * this module.
  */
 
-import { API_SECURITY_HEADERS, BodyTooLargeError, rateLimitResponse, readLimitedBody } from './security.js';
+import { AI_DAILY_REQUESTS_DEFAULT, API_SECURITY_HEADERS, BodyTooLargeError, aiQuotaResponse, rateLimitResponse, readLimitedBody } from './security.js';
 import {
   describeProviders,
   isRetryableStatus,
@@ -38,6 +38,19 @@ export const GROQ_DEFAULT_TEXT_MODEL = 'openai/gpt-oss-120b';
  * `GROQ_VISION_MODEL`; set that to an empty string to disable image input.
  */
 export const GROQ_DEFAULT_VISION_MODEL = 'qwen/qwen3.8-27b';
+/**
+ * The model id the browser sends when it is editing a plan it already made.
+ *
+ * Revising a draft is not the same job as writing one: the shape, the dates
+ * and the reasoning are all on the page already, and the model is being asked
+ * to move a few things. Paying the largest model to do that is waste, and the
+ * wait is longer than it needs to be.
+ *
+ * Mapped onto `GROQ_LIGHT_MODEL`. If no deployment sets one, the request falls
+ * back to the ordinary text model — cheaper models are an opt-in, never a
+ * silent downgrade of somebody's plan.
+ */
+export const GROQ_DEFAULT_LIGHT_MODEL = 'openai/gpt-oss-20b';
 
 /**
  * Reasoning tokens count against `max_completion_tokens`, so leaving the effort
@@ -62,9 +75,14 @@ const REASONING_EFFORT_BY_MODEL: Record<string, string> = {
  * charges a flat 2048 input tokens per image whatever it says, so forwarding it
  * buys nothing and risks a 400 from a provider that validates strictly.
  */
-export function finalizeUpstreamBody(value: unknown, model: string, reasoningEffort?: string): string {
+export function finalizeUpstreamBody(value: unknown, model: string, reasoningEffort?: string, stream = false): string {
   const record: Record<string, unknown> = isRecord(value) ? { ...value } : {};
   record.model = model;
+  // Only ever forwarded when the caller asked for it: a streamed answer is a
+  // different content type end to end, and a client expecting one JSON object
+  // must never be silently handed a series of events instead.
+  if (stream) record.stream = true;
+  else delete record.stream;
   if (reasoningEffort) record.reasoning_effort = reasoningEffort;
   else delete record.reasoning_effort;
   if (Array.isArray(record.messages)) {
@@ -114,6 +132,14 @@ export interface ChatProxyOptions {
   providers?: ResolvedProvider[];
   /** The operator's AI_* variables, resolved here when no list is passed. */
   env?: Record<string, string | undefined>;
+  /**
+   * The signed-in account making this call, when there is one.
+   *
+   * Resolved by the router so this file stays free of session and database
+   * concerns. Null for a local-only planner, which is then covered by the
+   * per-client limiter alone.
+   */
+  accountId?: string | null;
 }
 
 /**
@@ -135,6 +161,7 @@ const DEFAULT_PROVIDER: ResolvedProvider = {
   url: GROQ_UPSTREAM_CHAT_COMPLETIONS,
   key: '',
   textModel: GROQ_DEFAULT_TEXT_MODEL,
+  lightModel: '',
   visionModel: GROQ_DEFAULT_VISION_MODEL,
   reasoning: REASONING_EFFORT_BY_MODEL,
   billingUrl: 'https://console.groq.com/settings/billing',
@@ -306,7 +333,7 @@ const MAX_MESSAGE_TEXT_BYTES = 80_000;
  * still accepts. Both stay allowed so a browser running a cached older bundle
  * is not rejected by a newly deployed proxy.
  */
-const ALLOWED_CHAT_KEYS = new Set(['model', 'messages', 'temperature', 'max_tokens', 'max_completion_tokens', 'response_format']);
+const ALLOWED_CHAT_KEYS = new Set(['model', 'messages', 'temperature', 'max_tokens', 'max_completion_tokens', 'response_format', 'stream']);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -373,7 +400,43 @@ export function validateChatPayload(
   if (value.response_format !== undefined && (!isRecord(value.response_format) || value.response_format.type !== 'json_object')) {
     return 'The response format is invalid.';
   }
+  if (value.stream !== undefined && typeof value.stream !== 'boolean') return 'The stream flag is invalid.';
   return null;
+}
+
+/**
+ * The upstream body, delivered as it arrives.
+ *
+ * A streamed answer is not buffered whole: it is passed through as it is
+ * produced, which is the entire point of asking for it. The size ceiling still
+ * applies — only now it counts what has gone past rather than what came in.
+ */
+function streamLimitedResponse(response: Response, maxBytes: number, headers: HeadersInit): Response {
+  if (!response.body) {
+    return new Response(null, { status: response.status, headers });
+  }
+  const reader = response.body.getReader();
+  let sent = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const { done, value } = await reader.read();
+      if (done) {
+        controller.close();
+        return;
+      }
+      sent += value.byteLength;
+      if (sent > maxBytes) {
+        controller.error(new BodyTooLargeError());
+        await reader.cancel().catch(() => undefined);
+        return;
+      }
+      controller.enqueue(value);
+    },
+    cancel(reason) {
+      void reader.cancel(reason).catch(() => undefined);
+    },
+  });
+  return new Response(stream, { status: response.status, headers });
 }
 
 async function readLimitedResponse(response: Response, maxBytes: number): Promise<string> {
@@ -419,6 +482,16 @@ export async function handleGroqChatCompletions(
   const limited = rateLimitResponse(request, 'groq-chat', 20, 60_000);
   if (limited) return limited;
 
+  // A daily allowance per account, on top of the per-client brake. Without it
+  // one signed-in account can spend the whole deployment's key. Only counted
+  // when there is an account: the planner is meant to work without one.
+  if (options.accountId) {
+    const configured = Number(options.env?.AI_DAILY_REQUESTS);
+    const daily = configured >= 0 ? configured : AI_DAILY_REQUESTS_DEFAULT;
+    const overQuota = aiQuotaResponse(options.accountId, daily);
+    if (overQuota) return overQuota;
+  }
+
   let body: string;
   try {
     body = await readLimitedBody(request, options.maxBodyBytes ?? MAX_PROXY_BODY_BYTES);
@@ -454,17 +527,33 @@ export async function handleGroqChatCompletions(
       'Image input is turned off on this deployment. Set GROQ_VISION_MODEL to a multimodal model such as qwen/qwen3.8-27b, or send the request without an image.',
     );
   }
-  const isTextRequest = requested === GROQ_DEFAULT_TEXT_MODEL || providers.some((item) => item.textModel === requested);
+  // A light request names the cheap model, or any provider's configured light
+  // model. It counts as a text request for validation: otherwise it would look
+  // like an unknown model, be passed through verbatim, and reach the provider
+  // as a name this deployment never chose.
+  const isLightRequest = requested === GROQ_DEFAULT_LIGHT_MODEL || providers.some((item) => item.lightModel === requested);
+  const isTextRequest =
+    requested === GROQ_DEFAULT_TEXT_MODEL ||
+    isLightRequest ||
+    providers.some((item) => item.textModel === requested);
   // A request that names neither role nor a configured model is passed through
   // unchanged, which is what the single-provider path always did.
   const passthroughModel = !isVisionRequest && !isTextRequest ? requested : '';
   const allowedModels = [
-    ...new Set([GROQ_DEFAULT_TEXT_MODEL, ...providers.map((item) => item.textModel), ...visionIds, ...(passthroughModel ? [passthroughModel] : [])]),
+    ...new Set([
+      GROQ_DEFAULT_TEXT_MODEL,
+      GROQ_DEFAULT_LIGHT_MODEL,
+      ...providers.map((item) => item.textModel),
+      ...providers.map((item) => item.lightModel).filter(Boolean),
+      ...visionIds,
+      ...(passthroughModel ? [passthroughModel] : []),
+    ]),
   ];
   const validationError = validateChatPayload(parsed, allowedModels, visionIds);
   if (validationError) return errorResponse(400, validationError);
 
   const fetchImpl = options.fetchImpl ?? fetch;
+  const wantsStream = isRecord(parsed) && parsed.stream === true;
   const attempts: string[] = [];
   /**
    * The failure worth reporting when every provider is tried.
@@ -488,35 +577,51 @@ export async function handleGroqChatCompletions(
   for (const provider of providers) {
     // Skip a provider that cannot do what this request needs: a text-only
     // provider asked to read an image would only return a confusing 400.
-    const model = isVisionRequest ? provider.visionModel : passthroughModel || provider.textModel;
+    const model = isVisionRequest
+      ? provider.visionModel
+      : passthroughModel ||
+        (isLightRequest && provider.lightModel ? provider.lightModel : provider.textModel);
     if (!model) continue;
-    const outgoingBody = finalizeUpstreamBody(parsed, model, provider.reasoning[model]);
+    const outgoingBody = finalizeUpstreamBody(parsed, model, provider.reasoning[model], wantsStream);
     attempts.push(`${provider.id}:${model}`);
     try {
-      const upstream = await fetchImpl(provider.url, {
-        method: 'POST',
-        headers: {
-          // A keyless provider (a local Ollama) gets no Authorization header.
-          ...(provider.key ? { Authorization: `Bearer ${provider.key}` } : {}),
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: outgoingBody,
-        signal: AbortSignal.timeout(options.timeoutMs ?? UPSTREAM_TIMEOUT_MS),
-      });
-      const responseBody = await readLimitedResponse(upstream, MAX_UPSTREAM_RESPONSE_BYTES);
-      if (upstream.ok) {
-        return new Response(responseBody, {
-          status: upstream.status,
+      const timeoutMs = options.timeoutMs ?? UPSTREAM_TIMEOUT_MS;
+      // A streamed answer cannot be measured with one timer: the wait that
+      // matters is the wait for the first byte, and once the model has started
+      // writing, cutting it off at an arbitrary second would only lose work.
+      // So the deadline covers the headers, and the stream then runs until it
+      // finishes, the size ceiling stops it, or the browser hangs up.
+      const controller = wantsStream ? new AbortController() : null;
+      const deadline = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+      let upstream: Response;
+      try {
+        upstream = await fetchImpl(provider.url, {
+          method: 'POST',
           headers: {
-            'Content-Type': 'application/json; charset=utf-8',
-            'Cache-Control': 'no-store',
-            // Which provider answered: the one clue worth having in a log.
-            'X-AI-Provider': provider.id,
-            ...API_SECURITY_HEADERS,
+            // A keyless provider (a local Ollama) gets no Authorization header.
+            ...(provider.key ? { Authorization: `Bearer ${provider.key}` } : {}),
+            'Content-Type': 'application/json',
+            Accept: wantsStream ? 'text/event-stream' : 'application/json',
           },
+          body: outgoingBody,
+          signal: controller ? controller.signal : AbortSignal.timeout(timeoutMs),
         });
+      } finally {
+        if (deadline) clearTimeout(deadline);
       }
+      const headers = {
+        'Content-Type': wantsStream ? 'text/event-stream; charset=utf-8' : 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+        // Which provider answered: the one clue worth having in a log.
+        'X-AI-Provider': provider.id,
+        ...API_SECURITY_HEADERS,
+      };
+      if (upstream.ok) {
+        if (wantsStream) return streamLimitedResponse(upstream, MAX_UPSTREAM_RESPONSE_BYTES, headers);
+        const responseBody = await readLimitedResponse(upstream, MAX_UPSTREAM_RESPONSE_BYTES);
+        return new Response(responseBody, { status: upstream.status, headers });
+      }
+      const responseBody = await readLimitedResponse(upstream, MAX_UPSTREAM_RESPONSE_BYTES);
       const failure = upstreamErrorResponse(upstream.status, responseBody, provider);
       remember(failure, rankOf(upstream.status, responseBody));
       // A 400 is a bad request: every provider would reject it the same way,

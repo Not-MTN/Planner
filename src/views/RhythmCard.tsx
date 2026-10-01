@@ -1,10 +1,12 @@
 import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { formatWeekdayShort } from '../dates';
-import { focusSummary, habitLinks, hourLabel, productiveHours, weeklyReport } from '../insights';
+import { focusSummary, habitLinks, hourLabel, productiveHours } from '../insights';
+import { buildWeeklyReport, weeklyReport, weeklyReportHtml } from '../weeklyReport';
+import { printDocument } from '../printDocument';
 import { Rich } from '../components/Rich';
 import { downloadBlob } from '../download';
-import { DownloadIcon } from '../icons';
+import { DownloadIcon, PrinterIcon } from '../icons';
 import { t, tn } from '../i18n';
 
 function formatMinutes(total: number): string {
@@ -31,6 +33,19 @@ export function RhythmCard({ today }: { today: string }) {
       downloadBlob(new Blob([text], { type: 'text/markdown' }), `week-${today}.md`);
       flash(t("Weekly report downloaded."));
     }
+  };
+
+  // The same week, on paper. If the print window is blocked the report is
+  // handed over as a file instead, so the button never silently does nothing.
+  const printReport = () => {
+    const html = weeklyReportHtml(buildWeeklyReport(state, today), {
+      madeOn: today,
+      dir: document.documentElement.dir || 'ltr',
+      lang: document.documentElement.lang || 'en',
+    });
+    if (printDocument(html)) return;
+    downloadBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), `week-${today}.html`);
+    flash(t("Pop-ups are blocked, so the report was downloaded. Open it to print it."));
   };
 
   return (
@@ -72,9 +87,14 @@ export function RhythmCard({ today }: { today: string }) {
       <section className="card chart-card">
         <header className="card-head">
           <div><p className="kicker">{t("Your rhythm")}</p><h2 className="card-title">{t("When you get things done")}</h2></div>
-          <button type="button" className="btn btn-tiny" onClick={() => void copyReport()}>
-            <DownloadIcon size={14} /> {t("Weekly report")}
-          </button>
+          <div className="rhythm-actions">
+            <button type="button" className="btn btn-tiny" onClick={() => void copyReport()}>
+              <DownloadIcon size={14} /> {t("Weekly report")}
+            </button>
+            <button type="button" className="btn btn-tiny" onClick={printReport}>
+              <PrinterIcon size={14} /> {t("Print")}
+            </button>
+          </div>
         </header>
         {profile.bestHour === null ? (
           <p className="meta">{t("Complete a few more tasks and your most productive hours will show up here.")}</p>

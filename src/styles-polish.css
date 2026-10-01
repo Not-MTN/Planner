@@ -1210,3 +1210,96 @@
   background: var(--danger-soft, #fee4e2);
   color: var(--danger-deep, #912018);
 }
+
+/* --- Choosing which AI suggestions to keep ---------------------------- */
+/* The old row was a three-column grid of spans; the row is now one label so
+   the whole line is clickable, not just the box. */
+.draft-group .draft-item {
+  display: block;
+}
+
+.draft-check {
+  display: grid;
+  grid-template-columns: auto 66px minmax(0, 1fr) minmax(130px, auto);
+  gap: 10px;
+  align-items: center;
+  cursor: pointer;
+}
+
+.draft-check input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent, #4f46e5);
+}
+
+.draft-check small {
+  text-align: end;
+}
+
+.draft-item-title {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+/* Left out, not deleted: dimmed and struck through so it still reads — and
+   stays reachable, because changing your mind has to stay possible. */
+.draft-item.is-declined .draft-item-title {
+  text-decoration: line-through;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+/* --- Suggestions you turned down (AI memory) -------------------------- */
+.ai-declined {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.ai-declined-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ai-declined .meta {
+  margin: 4px 0 0;
+}
+
+/* --- Reading a timetable from a picture ------------------------------- */
+.ai-timetable-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.ai-timetable-card .draft-group {
+  margin-top: 14px;
+}
+
+/* --- Why here? (the AI's reason for a placement) --------------------- */
+.draft-item-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* Quiet, and plain rather than italicised: this is a claim to be argued
+   with, not an aside. Kept small so a draft still reads at a glance. */
+.draft-item-reason {
+  text-align: start;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+.draft-item.is-declined .draft-item-reason {
+  opacity: 0.6;
+}
+
+.draft-item-when {
+  white-space: nowrap;
+}

@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { displayTime, formatMonthLong, monthGrid, setDisplayPrefs, setWeekStart, startOfWeek, weekdayHeaders } from './dates';
 import { parseICS, toBusyICS, toICS } from './ics';
-import { focusSummary, habitLinks, productiveHours, weeklyReport } from './insights';
+import { focusSummary, habitLinks, productiveHours } from './insights';
+import { weeklyReport } from './weeklyReport';
 import { extractTags } from './components/Markdown';
 import { addAIMemory, addEvent, addFixedCommitment, addHabit, addNote, addTask, clearAIMemory, deleteAIMemory, logFocus, resizeEvent, toggleHabit, toggleSubtask, toggleTask, updateAIMemory, updateNote, updateTask } from './mutate';
 import { parseQuickAdd } from './quickAdd';

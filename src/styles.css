@@ -1196,6 +1196,49 @@ h1, .page-head h1 {
 .more-list button:hover, .more-list button.on { background: var(--accent-soft); color: var(--accent-deep); }
 
 /* ---------- Settings ---------- */
+.set-nav {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  gap: 6px;
+  /* Spans the sheet's own padding so settings scroll *under* the strip
+     rather than beside it. */
+  margin: 0 -22px 2px;
+  padding: 8px 22px 10px;
+  background: var(--surface);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.set-nav::-webkit-scrollbar { display: none; }
+.set-nav-item {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 6px 13px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s var(--ease), color 0.15s var(--ease);
+}
+.set-nav-item:hover { color: var(--ink); border-color: var(--line-strong); }
+.set-nav-item.on {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--accent-contrast);
+}
+/* A chip row is scrolled with a thumb, not a mouse, so give it room. */
+@media (pointer: coarse) {
+  .set-nav-item { min-height: 42px; padding: 9px 15px; }
+}
+.set-panels { scroll-margin-top: 60px; }
 .set-section { padding: 16px 0; border-bottom: 1px solid var(--line); }
 .set-section:last-of-type { border-bottom: 0; }
 .set-row {
@@ -2537,6 +2580,8 @@ h1, .page-head h1 {
 .rhythm { margin-top: 0; }
 .rhythm-total { font-family: var(--serif); font-size: 1.5rem; font-weight: 500; }
 .rhythm-empty { display: grid; gap: 12px; justify-items: start; padding: 8px 0; }
+/* Copy the week out, or put it on paper. */
+.rhythm-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .hour-strip { display: grid; grid-template-columns: repeat(18, 1fr); gap: 3px; margin: 14px 0 4px; }
 .hour-strip span { height: 34px; border-radius: 6px; background: var(--accent); }
 .hour-strip span.is-best { box-shadow: 0 0 0 2px var(--accent-deep); }
@@ -2596,6 +2641,21 @@ h1, .page-head h1 {
 .sync-link input { flex: 1 1 240px; font-family: ui-monospace, monospace; letter-spacing: 0.06em; text-transform: uppercase; }
 .set-hint.is-error { color: var(--danger); }
 .sync-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--cat-sage); }
+
+/* Two devices, two versions of the same thing. */
+.sync-conflicts {
+  margin: 4px 0 14px; padding: 12px 14px; border-radius: var(--radius-small);
+  border: 1px dashed color-mix(in srgb, var(--accent) 40%, var(--line));
+  background: var(--accent-soft);
+}
+.sync-conflict-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+.sync-conflict {
+  display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between;
+  padding: 9px 11px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line);
+}
+.sync-conflict-title { margin: 0; font-size: 13.5px; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.sync-conflict-when { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+.sync-conflict-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .sync-dot.syncing { background: var(--cat-blue); animation: pulse 1s infinite alternate; }
 .sync-dot.error, .sync-dot.offline { background: var(--danger); }
 @keyframes pulse { to { opacity: 0.35; } }
@@ -2887,8 +2947,13 @@ body::before {
 /* ── Service-worker update bar ─────────────────────────── */
 .update-toast { z-index: 60; }
 .update-toast + .toast { bottom: 72px; }
-@media (max-width: 720px) {
-  .update-toast + .toast { bottom: 132px; }
+/* On a phone the tab bar owns the bottom of the screen — fixed, about 64px
+   tall, 12px up. A toast pinned to the bottom is drawn over it, covering the
+   very tab you were reaching for. Lift every toast above the bar, and the
+   second one above that, clear of the home indicator on a buttonless phone. */
+@media (max-width: 1023px) {
+  .toast { bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
+  .update-toast + .toast { bottom: calc(144px + env(safe-area-inset-bottom, 0px)); }
 }
 
 /* Notes: card content + link pills as real buttons */
@@ -2999,6 +3064,10 @@ body::before {
 
 /* 2. Kill the grey tap flash on iOS/Android and the 300ms double-tap delay. */
 html { -webkit-tap-highlight-color: transparent; }
+/* On Windows a scrollbar takes up layout width, and any open sheet sets
+   body{overflow:hidden} — so opening something shifted the whole app sideways
+   by exactly that width. Reserve the gutter and it never moves. */
+html { scrollbar-gutter: stable; }
 button, a, [role='button'], .seg, .chip, .dot-btn, .heat-cell { touch-action: manipulation; }
 
 /* 3. Momentum scrolling in the sheet/dialog on iOS. */
@@ -3228,6 +3297,8 @@ img { -webkit-user-drag: none; }
 }
 .voice-retry:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); transform: translateY(-1px); }
 .voice-controls { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 8px 0 4px; }
+/* Waiting should always be a choice. */
+.voice-stop { margin-top: 2px; }
 .voice-orb {
   width: 62px; height: 62px; border-radius: 50%; position: relative;
   display: inline-flex; align-items: center; justify-content: center;
@@ -3607,6 +3678,24 @@ html, body { overflow-x: clip; }
 }
 .invite-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .invite-card .hint { display: block; margin-top: 10px; font-size: 12.5px; line-height: 1.6; color: var(--muted); }
+
+/* A code handed over by camera rather than by typing. */
+.qr-block {
+  margin-top: 14px; padding: 14px; border-radius: 12px;
+  border: 1px solid var(--line-strong); background: var(--surface);
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+}
+.qr-block .hint { margin: 0; text-align: center; font-size: 12.5px; line-height: 1.6; color: var(--muted); }
+.qr-block .invite-actions { margin-top: 0; justify-content: center; }
+.qr {
+  width: 190px; max-width: 100%; height: auto; display: block;
+  border-radius: 8px; padding: 0; background: #fff;
+}
+.qr-link {
+  margin: 0; max-width: 100%; font-size: 11.5px; line-height: 1.5;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  color: var(--muted); text-align: center; overflow-wrap: anywhere; user-select: all;
+}
 
 .spinner {
   display: inline-block; width: 13px; height: 13px; margin-right: 8px; vertical-align: -1px;

@@ -1,4 +1,4 @@
-import { categoryById, noteKindById } from './constants';
+import { noteKindById } from './constants';
 import {
   addDays,
   isValidISODate,
@@ -198,11 +198,6 @@ export function overdueTasks(state: PlannerState, today: string): Task[] {
     .filter((task) => !task.completed && !task.waiting && task.dueDate !== null && task.dueDate < today)
     .sort(compareTasks);
 }
-
-export function waitingTasks(state: PlannerState): Task[] {
-  return state.tasks.filter((task) => !task.completed && Boolean(task.waiting)).sort(compareTasks);
-}
-
 export function weekLeftovers(state: PlannerState, today: string): Task[] {
   const days = new Set(weekDates(today).filter((date) => date <= today));
   return state.tasks
@@ -320,11 +315,6 @@ export function matchesQuery(values: Array<string | null | undefined>, query: st
   if (!needle) return true;
   return values.some((value) => (value ?? '').toLowerCase().includes(needle));
 }
-
-export function categoryLabel(id: string): string {
-  return categoryById(id).label;
-}
-
 export function weekNarrative(state: PlannerState, today: string): string {
   const days = new Set(weekDates(today).filter((date) => date <= today));
   const tasks = state.tasks.filter((task) => task.dueDate !== null && days.has(task.dueDate));

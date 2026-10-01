@@ -8,6 +8,9 @@ import { idbRead, idbWrite, savedAt } from './idb';
 import {
   addAIMemory as addAIMemoryTo,
   clearAIMemory as clearAIMemoryIn,
+  recordDeclined as recordDeclinedIn,
+  forgetDeclined as forgetDeclinedIn,
+  clearDeclined as clearDeclinedIn,
   deleteAIMemory as deleteAIMemoryFrom,
   updateAIMemory as updateAIMemoryIn,
   saveAIPlan as saveAIPlanTo,
@@ -78,7 +81,7 @@ import {
 import { appendNotifications } from './notificationCenter';
 import { backgroundPushEnabled, refreshBackgroundPushSchedule } from './push';
 import { buildSampleState } from './sample';
-import { deleteRemote, EMPTY_SYNC, generateCode, loadSyncSettings, mergeStates, normalizeCode, saveSyncSettings, SyncError, syncConfigured, syncOnce, type SyncSettings } from './sync';
+import { CONFLICT_LIMIT, EMPTY_SYNC, type MergeConflict, SyncError, type SyncSettings, deleteRemote, generateCode, loadSyncSettings, mergeStates, normalizeCode, restoreConflict, saveSyncSettings, syncConfigured, syncOnce } from './sync';
 import {
   EMPTY_SHARED,
   isSharedNote,
@@ -97,7 +100,7 @@ import { fetchFeedEvents, loadFeeds, mergeFeedEvents, saveFeeds, type CalendarFe
 import { loadWeatherSettings, saveWeatherSettings, type WeatherSettings } from './weather';
 import { applyTheme, loadAccent, loadThemeMode, resolvedMode, type ThemeMode } from './theme';
 import type { Accent } from './constants';
-import { createEmptyState, type AIMemoryInput, type AttachmentRef, type ComposerState, type EventInput, type FixedCommitmentInput, type GoalInput, type HabitInput, type MoodValue, type NoteInput, type Panels, type PlannerState, type SavedAIPlanInput, type StudentSubject, type TaskInput } from './types';
+import { createEmptyState, type AIDeclinedKind, type AIMemoryInput, type AttachmentRef, type ComposerState, type EventInput, type FixedCommitmentInput, type GoalInput, type HabitInput, type MoodValue, type NoteInput, type Panels, type PlannerState, type SavedAIPlanInput, type StudentSubject, type TaskInput } from './types';
 import { t } from './i18n';
 import { saveStudentSubject as saveStudentSubjectIn } from './panelFeatures';
 import { isTestEnv } from './env';
@@ -182,6 +185,12 @@ interface PlannerContextValue {
   sync: SyncSettings;
   syncStatus: SyncStatus;
   syncMessage: string | null;
+  /** Versions that lost a merge, waiting to be looked at. */
+  syncConflicts: MergeConflict[];
+  /** Put the version that lost back, and send it to the other devices. */
+  keepConflictVersion: (conflict: MergeConflict) => void;
+  dismissConflict: (conflict: MergeConflict) => void;
+  dismissAllConflicts: () => void;
   syncAvailable: boolean | null;
   startSync: (code?: string) => string | null;
   stopSync: () => void;
@@ -227,7 +236,18 @@ interface PlannerContextValue {
   updateAIMemory: (id: string, patch: Partial<AIMemoryInput>) => void;
   deleteAIMemory: (id: string) => void;
   clearAIMemory: () => void;
-  applyAIPlan: (draft: { tasks: TaskInput[]; events: EventInput[]; habits: HabitInput[] }, planId?: string) => void;
+  /**
+   * Add an AI draft to the planner.
+   *
+   * `declined` carries the suggestions that were *not* kept, and is recorded
+   * in the same undoable step: undoing the plan should undo the lesson too,
+   * otherwise a mis-click would quietly teach the AI the wrong thing forever.
+   */
+  applyAIPlan: (draft: { tasks: TaskInput[]; events: EventInput[]; habits: HabitInput[] }, planId?: string, declined?: Array<{ title: string; kind: AIDeclinedKind }>) => void;
+  /** Remember suggestions the user turned down, with nothing added. */
+  declineSuggestions: (items: Array<{ title: string; kind: AIDeclinedKind }>) => void;
+  forgetDeclined: (id: string) => void;
+  clearDeclined: () => void;
   /** Save an AI draft to the Plans page; returns the stored plan id. */
   saveAIPlan: (input: SavedAIPlanInput) => string;
   deleteAIPlan: (id: string) => void;
@@ -251,7 +271,11 @@ interface PlannerContextValue {
   toggleHabit: (habitId: string, date: string) => void;
   setHabitValue: (habitId: string, date: string, value: number) => void;
   skipHabit: (habitId: string, date: string) => void;
-  addGoal: (input: GoalInput) => void;
+  /**
+   * `id` is set when a goal is being made from a guardian's suggestion: the
+   * suggestion's id becomes the goal's, so answering twice cannot make two.
+   */
+  addGoal: (input: GoalInput, id?: string) => void;
   updateGoal: (id: string, patch: Partial<Omit<GoalInput, 'milestone'>>) => void;
   deleteGoal: (id: string) => void;
   addMilestone: (goalId: string, title: string, dueDate?: string | null) => void;
@@ -296,6 +320,11 @@ const PRAISES = [
   () => t("You did the thing. ⭐"),
 ];
 
+/** Two conflicts are the same disagreement: the same thing, edited at the same moment. */
+function keyOfConflict(conflict: MergeConflict): string {
+  return `${conflict.kind}:${conflict.item.id}:${conflict.lostAt}`;
+}
+
 export function PlannerProvider({ children, initialState }: { children: ReactNode; initialState?: PlannerState | null }) {
   // `initialState` wins when the planner was opened from an encrypted vault.
   const [boot] = useState(() =>
@@ -320,6 +349,9 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
   const [sync, setSyncState] = useState<SyncSettings>(() => loadSyncSettings());
   const [syncStatus, setSyncStatus] = useState<SyncStatus>(() => (loadSyncSettings().code ? 'idle' : 'off'));
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  // Versions that lost a merge. Shown rather than thrown away: sync that
+  // silently discards an edit is sync people turn off.
+  const [syncConflicts, setSyncConflicts] = useState<MergeConflict[]>([]);
   const [syncAvailable, setSyncAvailable] = useState<boolean | null>(null);
   const [display, setDisplayState] = useState(() => loadDisplayPrefs());
   const [weekStart, setWeekStartState] = useState<WeekStart>(() => loadWeekStart());
@@ -534,7 +566,9 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
       let panels = current.panels;
       try {
         if (current.panels.student.enabled && panels.student.guardians.length > 0) {
-          const inbox = await syncStudentInbox(panels);
+          // Goals go along so a goal taken on from a suggestion can report how
+          // far it has got — counts only, never the steps the guardian wrote.
+          const inbox = await syncStudentInbox(panels, current.goals);
           panels = inbox.panels;
           // Anything new from a guardian is an in-app notification: it lands in
           // the bell whether or not the panel page is open.
@@ -679,6 +713,12 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
       updateSync(settings);
       setSyncStatus('idle');
       setSyncMessage(null);
+      if (outcome.conflicts.length) {
+        setSyncConflicts((current) => {
+          const seen = new Set(current.map(keyOfConflict));
+          return [...current, ...outcome.conflicts.filter((item) => !seen.has(keyOfConflict(item)))].slice(-CONFLICT_LIMIT);
+        });
+      }
       if (arrived > 0) flash(t("{0} new {1} merged from your other devices.", { 0: arrived, 1: arrived === 1 ? t("item") : t("items") }));
     } catch (caught) {
       const failure = caught instanceof SyncError ? caught : null;
@@ -708,6 +748,25 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     if (syncTimer.current) window.clearTimeout(syncTimer.current);
     syncTimer.current = window.setTimeout(() => void runSync(), delay);
   }, [runSync]);
+
+  /** Put back the version that lost a merge, and send it to the other devices. */
+  const keepConflictVersion = useCallback(
+    (conflict: MergeConflict) => {
+      commit((current) => restoreConflict(current, conflict));
+      setSyncConflicts((current) => current.filter((item) => keyOfConflict(item) !== keyOfConflict(conflict)));
+      updateSync({ ...syncRef.current, dirty: true });
+      flash(t("Kept the other version of “{0}”.", { 0: conflict.title }));
+      scheduleSync(400);
+    },
+    [commit, updateSync, flash, scheduleSync],
+  );
+
+  const dismissConflict = useCallback((conflict: MergeConflict) => {
+    setSyncConflicts((current) => current.filter((item) => keyOfConflict(item) !== keyOfConflict(conflict)));
+  }, []);
+
+  const dismissAllConflicts = useCallback(() => setSyncConflicts([]), []);
+
 
   // ── Shared space (second encrypted room for "Shared" category items) ────────
   const sharedRef = useRef(shared);
@@ -1143,6 +1202,10 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     sync,
     syncStatus,
     syncMessage,
+    syncConflicts,
+    keepConflictVersion,
+    dismissConflict,
+    dismissAllConflicts,
     syncAvailable,
     startSync,
     stopSync,
@@ -1221,12 +1284,16 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     updateAIMemory: (id, patch) => commit((current) => updateAIMemoryIn(current, id, patch)),
     deleteAIMemory: (id) => commit((current) => deleteAIMemoryFrom(current, id)),
     clearAIMemory: () => commit(clearAIMemoryIn),
-    applyAIPlan: (draft, planId) => commit((current) => {
+    declineSuggestions: (items) => commit((current) => recordDeclinedIn(current, items)),
+    forgetDeclined: (id) => commit((current) => forgetDeclinedIn(current, id)),
+    clearDeclined: () => commit(clearDeclinedIn),
+    applyAIPlan: (draft, planId, declined) => commit((current) => {
       let next = current;
       for (const input of draft.tasks) next = addTaskTo(next, input);
       for (const input of draft.events) next = addEventTo(next, input);
       for (const input of draft.habits) next = addHabitTo(next, input);
       if (planId) next = markAIPlanAddedIn(next, planId);
+      if (declined && declined.length > 0) next = recordDeclinedIn(next, declined);
       return next;
     }),
     saveAIPlan: (input) => {
@@ -1258,7 +1325,7 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     toggleHabit: (habitId, date) => commit((current) => toggleHabitIn(current, habitId, date)),
     setHabitValue: (habitId, date, value) => commit((current) => setHabitValueIn(current, habitId, date, value)),
     skipHabit: (habitId, date) => commit((current) => skipHabitIn(current, habitId, date)),
-    addGoal: (input) => commit((current) => addGoalTo(current, input)),
+    addGoal: (input, id) => commit((current) => addGoalTo(current, input, id ?? uid())),
     updateGoal: (id, patch) => commit((current) => updateGoalIn(current, id, patch)),
     deleteGoal: (id) => commit((current) => deleteGoalFrom(current, id)),
     addMilestone: (goalId, title, dueDate) => commit((current) => addMilestoneTo(current, goalId, title, undefined, undefined, dueDate ?? null)),
@@ -1300,7 +1367,7 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     },
     setIntention: (date, text) => commit((current) => setIntentionIn(current, date, text)),
     logMood: (date, value, taskId) => commit((current) => setMoodIn(current, date, value, taskId)),
-  }), [state, ready, error, notice, saveBlocked, route, navigate, composer, confirm, startFresh, exportData, importText, loadSample, flash, dismissNotice, praise, undo, redo, canUndo, canRedo, themeMode, accent, paletteOpen, settingsOpen, focus, confettiSeed, celebrate, clearCompletedTasks, commit, reminders, setReminders, weekStart, setWeekStart, display, setDisplay, sync, syncStatus, syncMessage, syncAvailable, startSync, stopSync, runSync, deleteCloudCopy, shared, sharedStatus, sharedMessage, startShared, stopShared, runSharedSync, feeds, addFeed, removeFeed, refreshFeeds, weather, setWeather, recordTombstone, updatePanels, setPanelEnabled]);
+  }), [state, ready, error, notice, saveBlocked, route, navigate, composer, confirm, startFresh, exportData, importText, loadSample, flash, dismissNotice, praise, undo, redo, canUndo, canRedo, themeMode, accent, paletteOpen, settingsOpen, focus, confettiSeed, celebrate, clearCompletedTasks, commit, reminders, setReminders, weekStart, setWeekStart, display, setDisplay, sync, syncStatus, syncMessage, syncConflicts, keepConflictVersion, dismissConflict, dismissAllConflicts, syncAvailable, startSync, stopSync, runSync, deleteCloudCopy, shared, sharedStatus, sharedMessage, startShared, stopShared, runSharedSync, feeds, addFeed, removeFeed, refreshFeeds, weather, setWeather, recordTombstone, updatePanels, setPanelEnabled]);
 
   return <PlannerContext.Provider value={value}>{children}</PlannerContext.Provider>;
 }

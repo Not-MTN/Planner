@@ -303,11 +303,14 @@ export function createFakeNeon(): FakeDb {
     }
 
     if (/^INSERT INTO planner_links /i.test(q)) {
-      const [id, guardian_id, student_username_lower, code_hash, wrapped_share] = values;
+      // values: id, guardian, student, code hash, wrapped share, days until the
+      // invitation expires. Real Postgres computes it with make_interval.
+      const [id, guardian_id, student_username_lower, code_hash, wrapped_share, ttlDays] = values;
       const clash = tables.planner_links.some(
         (row) => row.guardian_id === guardian_id && row.student_username_lower === student_username_lower,
       );
       if (clash) return [];
+      const days = typeof ttlDays === 'number' ? ttlDays : Number(ttlDays);
       const row: Row = {
         id,
         guardian_id,
@@ -315,6 +318,7 @@ export function createFakeNeon(): FakeDb {
         student_username_lower,
         code_hash,
         wrapped_share,
+        code_expires_at: Number.isFinite(days) ? new Date(Date.now() + days * 86_400_000).toISOString() : null,
         share_ciphertext: null,
         share_week: null,
         share_updated_at: null,
@@ -332,12 +336,30 @@ export function createFakeNeon(): FakeDb {
         .map((row) => ({ ...row }));
     }
 
+    // Asked before accepting: is this code right but too old?
+    if (/^SELECT id FROM planner_links WHERE code_hash = /i.test(q)) {
+      const [code_hash, student_username_lower] = values;
+      return tables.planner_links
+        .filter(
+          (row) =>
+            row.code_hash === code_hash &&
+            row.student_username_lower === student_username_lower &&
+            row.status === 'pending' &&
+            row.code_expires_at != null &&
+            new Date(String(row.code_expires_at)).getTime() <= Date.now(),
+        )
+        .map((row) => ({ id: row.id }));
+    }
+
     if (/^SELECT l\.\*, u\.username AS guardian_username/i.test(q)) {
       const [usernameLower, userId] = values;
       return tables.planner_links
         .filter(
           (row) =>
-            (row.student_username_lower === usernameLower && row.status === 'pending') ||
+            (row.student_username_lower === usernameLower &&
+              row.status === 'pending' &&
+              (row.code_expires_at == null ||
+                new Date(String(row.code_expires_at)).getTime() > Date.now())) ||
             (row.student_id === userId && row.status === 'linked'),
         )
         .map((row) => {
@@ -357,6 +379,7 @@ export function createFakeNeon(): FakeDb {
       if (!row) return [];
       row.student_id = student_id;
       row.status = 'linked';
+      row.code_expires_at = null;
       row.updated_at = now();
       return [{ ...row }];
     }

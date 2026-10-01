@@ -76,6 +76,90 @@ export function WeekBars({ weeks, height = 150 }: BarsProps) {
   );
 }
 
+/**
+ * Focused minutes per subject, across the weeks on record.
+ *
+ * The per-week split only says where last week's time went. This says whether
+ * a subject is being looked after or quietly dropped — which is the question
+ * behind "how is she doing in maths, really?". A single week cannot answer it,
+ * because one bad week is noise and three in a row is a signal.
+ */
+export function SubjectTrend({ weeks, height = 34 }: BarsProps & { height?: number }) {
+  if (weeks.length === 0) return null;
+  const ordered = [...weeks].sort((a, b) => a.weekOf.localeCompare(b.weekOf));
+  // Subjects that took real time at some point, most time first. Anything that
+  // never got a minute is not a trend worth charting.
+  const totals = new Map<string, number>();
+  for (const week of ordered) {
+    for (const subject of week.subjects) {
+      totals.set(subject.name, (totals.get(subject.name) ?? 0) + subject.minutes);
+    }
+  }
+  const names = [...totals.entries()]
+    .filter(([, minutes]) => minutes > 0)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 5)
+    .map(([name]) => name);
+  if (names.length === 0) return null;
+
+  const width = 110;
+  const max = Math.max(1, ...names.map((name) => Math.max(
+    ...ordered.map((week) => week.subjects.find((item) => item.name === name)?.minutes ?? 0),
+  )));
+  const step = ordered.length > 1 ? width / (ordered.length - 1) : 0;
+  const x = (index: number) => (ordered.length > 1 ? index * step : width / 2);
+  const y = (minutes: number) => height - 2 - (minutes / max) * (height - 6);
+
+  return (
+    <ul className="subject-trend">
+      {names.map((name, nameIndex) => {
+        const minutes = ordered.map((week) => week.subjects.find((item) => item.name === name)?.minutes ?? 0);
+        const line = minutes.map((value, index) => `${x(index)},${y(value)}`).join(' ');
+        const last = minutes[minutes.length - 1] ?? 0;
+        const before = minutes[minutes.length - 2] ?? null;
+        // Direction over the whole stretch, not the last wobble: one quiet
+        // week is a blip, and saying "down" about it would be alarm, not news.
+        const firstHalf = minutes.slice(0, Math.floor(minutes.length / 2) || 1);
+        const secondHalf = minutes.slice(Math.floor(minutes.length / 2) || 1);
+        const average = (list: number[]) => (list.length ? list.reduce((sum, item) => sum + item, 0) / list.length : 0);
+        const rising = average(secondHalf) > average(firstHalf) * 1.15;
+        const falling = average(secondHalf) < average(firstHalf) * 0.85;
+        return (
+          <li key={name}>
+            <div className="subject-trend-head">
+              <span className="subject-trend-name">{name}</span>
+              <span className="subject-trend-value">
+                {minutesLabel(last)}
+                {before !== null && last !== before ? (
+                  <em className={rising ? 'subject-trend-up' : falling ? 'subject-trend-down' : undefined}>
+                    {last > before ? '▲' : '▼'}
+                  </em>
+                ) : null}
+              </span>
+            </div>
+            <svg
+              className="subject-trend-svg"
+              viewBox={`0 0 ${width} ${height}`}
+              role="img"
+              preserveAspectRatio="none"
+              aria-label={t('{0}: {1} this week, across the last {2} weeks', { 0: name, 1: minutesLabel(last), 2: ordered.length })}
+            >
+              {minutes.length > 1 ? (
+                <polyline className={`subject-trend-line subject-trend-line-${nameIndex % 4}`} points={line} />
+              ) : null}
+              {minutes.map((value, index) => (
+                <circle key={index} className={`subject-trend-dot subject-trend-line-${nameIndex % 4}`} cx={x(index)} cy={y(value)} r="2.6">
+                  <title>{`${shortWeek(ordered[index]!.weekOf)}: ${minutesLabel(value)}`}</title>
+                </circle>
+              ))}
+            </svg>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 /** Focused minutes per week, as a line. The trend matters more than the exact values. */
 export function FocusTrend({ weeks, height = 130 }: BarsProps) {
   if (weeks.length === 0) return null;

@@ -368,7 +368,7 @@ export function TaskImportSection() {
         {t("Import a CSV export from Todoist or TickTick, or any CSV with a task-title column. Done items are skipped, dates and priorities come along.")}
       </p>
       <div className="set-actions">
-        <button type="button" className={cx('btn', 'btn-soft', busy && 'is-disabled')} disabled={busy} onClick={() => fileRef.current?.click()}>
+        <button type="button" className="btn btn-soft" disabled={busy} onClick={() => fileRef.current?.click()}>
           <UploadIcon size={16} /> {busy ? t("Importing…") : t("Choose a .csv file")}
         </button>
       </div>

@@ -190,6 +190,12 @@ export interface OutgoingLink {
   /** Week of the results waiting to be read, if any. */
   weekOf: string | null;
   updatedAt: string | null;
+  /**
+   * When a pending invitation stops working. Null once it is accepted. Shown
+   * to the guardian so a code they sent last month and forgot about reads as
+   * dead rather than as an unanswered request.
+   */
+  expiresAt: string | null;
 }
 
 /** What a student sees: a guardian asking to follow them. */

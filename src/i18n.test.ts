@@ -1,8 +1,9 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { missingKeys, t } from './i18n';
+import { COMPLETE_LANGS, missingKeys, t, LANGUAGES } from './i18n';
 import { fa } from './locales/fa';
+import { fi } from './locales/fi';
 
 function sourceKeys(dir: string, out = new Set<string>()): Set<string> {
   for (const name of readdirSync(dir)) {
@@ -18,14 +19,22 @@ function sourceKeys(dir: string, out = new Set<string>()): Set<string> {
 }
 
 describe('i18n', () => {
-  it('has a Persian translation for every UI string', () => {
-    expect(missingKeys([...sourceKeys('src')], 'fa')).toEqual([]);
-  });
-  it('keeps placeholders intact in Persian', () => {
-    for (const [key, value] of Object.entries(fa)) {
-      const names = (s: string) => (s.match(/\{\w+\}/g) ?? []).sort().join();
-      expect(names(value), key).toBe(names(key));
+  const dictionaries = { fa, fi };
+  it('has a translation for every UI string, in every language that claims to be finished', () => {
+    for (const lang of COMPLETE_LANGS) {
+      expect(missingKeys([...sourceKeys('src')], lang), lang).toEqual([]);
     }
+  });
+  it('keeps placeholders intact in every language', () => {
+    for (const [name, dictionary] of Object.entries(dictionaries)) {
+      for (const [key, value] of Object.entries(dictionary)) {
+        const names = (s: string) => (s.match(/\{\w+\}/g) ?? []).sort().join();
+        expect(names(value), `${name}: ${key}`).toBe(names(key));
+      }
+    }
+  });
+  it('only offers languages it has a direction for', () => {
+    for (const language of LANGUAGES) expect(['ltr', 'rtl']).toContain(language.dir);
   });
   it('interpolates and falls back to English', () => {
     expect(t('Task “{0}” added.', { 0: 'Run' })).toBe('Task “Run” added.');

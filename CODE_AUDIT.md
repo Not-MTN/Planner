@@ -475,3 +475,99 @@ Fixed by making **one translatable unit per sentence**:
 5. **M8, M10, L1** — correctness/polish.
 6. Consider adding ESLint (or removing the 9 inert disable comments) so the dependency
    arrays in `context.tsx` get checked mechanically.
+
+---
+
+# Second pass — 2 October 2026
+
+A second walk over the whole app, after everything in the first pass was fixed.
+The questions this time were narrower and harder: *is the settings screen
+findable, does it survive every device, and is there anything left in the code
+that nobody uses?*
+
+## A. Settings had outgrown its screen
+
+Settings had grown to twenty sections in one scrolling column. The structure
+was sound — each group was already its own component — but the only way to
+find anything was to scroll past everything, and the account screens were
+asking the server about devices and sign-in history for everyone who only
+came to change the theme.
+
+It is now seven groups behind a tab strip:
+
+| Group | What lives there |
+| --- | --- |
+| Account | profile, password, two-factor, devices, recent activity |
+| Appearance | theme, accent, which sections show in the sidebar |
+| Language & time | week start, clock, language, date language, Jalali dates, voice accent |
+| Reminders | reminders, background notifications |
+| Sync & backup | sync code, shared space, export, import, start fresh |
+| Connections | calendar exchange, feeds, task import, weather, templates |
+| App | install, crash reports, tour, shortcuts, the AI coach key |
+
+Three decisions worth recording:
+
+- **Only the open group is mounted.** The account tabs talk to the server when
+  they appear; there is no reason to ask about someone's devices because they
+  opened Settings to change a colour. It also means content can never be left
+  hidden-but-focusable, which is the usual way tabbed screens break a keyboard.
+- **The strip is a horizontal scrolling row, not a side rail.** A rail is nicer
+  on a laptop and worse on a phone, and this way one layout — and one correct
+  `aria-orientation` — covers every width.
+- **The calendar exchange moved out of "Calendar, dates & time".** Exporting an
+  `.ics` has nothing to do with which language the week starts in; it is a
+  connection to another calendar, and it sits with the feeds and imports now.
+
+## B. Devices: what was already right, and the two things that were not
+
+The app was in better shape here than expected. Already correct and now locked
+down by `src/device.test.ts` so a tidy-up cannot delete them: `viewport-fit=cover`
+for notches, `env(safe-area-inset-*)` at the bottom edge, dynamic viewport units
+with an `@supports` fallback for iOS 15, 16px text fields so Safari does not
+zoom on focus, `touch-action: manipulation` rather than the 300 ms delay,
+thumb-sized targets on coarse pointers, and a manifest with a maskable icon and
+a `start_url` that a rewrite actually serves.
+
+Two real bugs found and fixed:
+
+1. **Every toast sat on top of the phone tab bar.** Toasts are fixed at
+   `bottom: 24px`; the tab bar is fixed at the bottom too, about 64px tall. The
+   toast won, so a message covered the tab you were reaching for — and the
+   "new version" toast, which is the one that always shows at the bottom, was
+   hidden behind the bar on every phone. Toasts now clear the bar and the home
+   indicator, and a second toast stacks above the first.
+2. **Opening anything shifted the whole app sideways on Windows.** A sheet sets
+   `body { overflow: hidden }` while it is open. On Windows the scrollbar takes
+   up layout width, so removing it widened the page — and every sheet, palette
+   and dialog jumped the app by exactly that width. `html` now reserves the
+   gutter.
+
+## C. Polish: what was left over
+
+- **22 exports nothing called.** Found by walking every export against every
+  import in the repo, including `api/`, `e2e/` and `vite.config.ts`. Removed:
+  `CategoryId`, `habitIconById`, `getWeekStart`, `DAY_PARTS`, `dayPart`,
+  `dayPartLabel`, `getTimeFormat`, `deleteAttachmentBlobs`, `idbDelete`,
+  `isRTL`, `waitingTasks`, `categoryLabel`, `updateAvailable`,
+  `isReportingInstalled`, `ttsAvailable`, `unlockedUser`, `isUnlocked`,
+  `usesVault`, `awaitingSecondFactor`, `abandonSecondFactor`.
+  Three were deliberately kept even though nothing imports them today:
+  `AUTH_SCHEMA_SQL` and `hashRecoveryVerifier` describe the database contract,
+  and `SignupRequest` is part of the shared request/response contract.
+- **One class with no styles behind it.** `is-disabled` was applied to a button
+  that already had `disabled`, and `button:disabled` is styled globally — so the
+  class did nothing. Removed.
+- **No debug left behind.** Zero `console.*` calls outside deliberate server-side
+  error logging, and zero `TODO`/`FIXME`/`HACK` markers.
+- **A test that was quietly using the network.** The calendar proxy resolves a
+  host before fetching it — which is the point of the SSRF guard — but the tests
+  only stubbed `fetch`, so every public-host case did a real DNS lookup. That
+  added five seconds per test and made three of them fail whenever the resolver
+  was slow. DNS is now stubbed, and the file runs in about a second. Stubbing it
+  exposed a gap worth closing: **nothing proved the DNS half of the guard
+  worked.** A name that resolves to `127.0.0.1` is now tested, along with a name
+  that does not resolve at all.
+
+## D. Where it stands
+
+675 tests, 1 skipped. TypeScript and ESLint clean.

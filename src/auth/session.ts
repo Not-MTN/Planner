@@ -97,6 +97,8 @@ export type AuthErrorCode =
   | 'api_missing'
   /** The password was accepted, and a code from the authenticator app is owed. */
   | 'totp_required'
+  /** An invitation code was right, but sat unused until it stopped working. */
+  | 'invite_expired'
   /** A code typed during set-up or removal did not match. */
   | 'totp_invalid'
   | 'unknown';
@@ -347,17 +349,6 @@ export async function signUp(input: SignUpInput): Promise<{ recoveryCodes: strin
  * arrives, and is dropped the moment it is used or the attempt is abandoned.
  */
 let pendingSecondFactor: { kek: CryptoKey | null; remember: boolean } | null = null;
-
-/** True while a sign-in is waiting on a code from the authenticator app. */
-export function awaitingSecondFactor(): boolean {
-  return pendingSecondFactor !== null;
-}
-
-/** Abandons a half-finished sign-in, dropping the key derived from the password. */
-export function abandonSecondFactor(): void {
-  pendingSecondFactor = null;
-}
-
 export async function signIn(identifier: string, password: string, remember = true): Promise<ActiveSession> {
   // The salt is stored with the account, so fetch it before stretching. Unknown
   // accounts receive a decoy salt and simply fail the next step.

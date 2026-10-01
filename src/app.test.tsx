@@ -581,6 +581,7 @@ describe('app smoke', () => {
     await waitForText('Make a plan that fits.');
     const settings = [...document.querySelectorAll<HTMLButtonElement>('.ai-head-actions button')].find((button) => button.textContent?.includes('AI settings'));
     act(() => settings?.click());
+    await openSettingsTab('App');
     expect(text()).toContain('AI coach · Groq');
     expect(text()).toContain('GROQ_API_KEY=your_groq_api_key');
     expect(text()).toContain('.env.local');
@@ -608,13 +609,8 @@ describe('app smoke', () => {
 
   it('shows shared space, feeds, weather, import and templates in settings', async () => {
     mountApp();
-    click(document.querySelector('[aria-label="Settings"]') ?? buttonByText('Settings'));
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    });
-    for (const label of ['Shared space', 'Calendar feeds', 'Weather on Today', 'Move your tasks in', 'Templates']) {
-      expect(text()).toContain(label);
-    }
+    await openSettingsTab('Sync & backup');
+    expect(text()).toContain('Shared space');
     // Shared space: create a room from the button.
     const create = [...document.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Create a shared space'));
     expect(create).toBeTruthy();
@@ -625,6 +621,10 @@ describe('app smoke', () => {
     expect(text()).toContain('Shared space is on');
     expect(window.localStorage.getItem('planner-shared')).toContain('"code"');
     // Templates: seeded starters are listed and removable.
+    await openSettingsTab('Connections');
+    for (const label of ['Calendar feeds', 'Weather on Today', 'Move your tasks in', 'Templates']) {
+      expect(text()).toContain(label);
+    }
     expect(text()).toContain('Trip packing');
   });
 
@@ -739,6 +739,28 @@ function buttonByText(label: string): HTMLButtonElement | undefined {
   return [...document.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === label);
 }
 
+/*
+ * Settings is grouped into tabs, so "open settings and look for X" has to
+ * say which group X lives in. If a tab ever goes missing the test says so
+ * rather than quietly passing against an empty panel.
+ */
+async function openSettingsTab(label: string) {
+  if (!document.querySelector('.set-nav')) {
+    click(document.querySelector('[aria-label="Settings"]') ?? buttonByText('Settings'));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+  }
+  const tab = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
+    (button) => button.textContent?.trim() === label,
+  );
+  expect(tab, `settings tab: ${label}`).toBeTruthy();
+  click(tab);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+}
+
 describe('new features', () => {
   it('quick adds a repeating task and completing it schedules the next one', () => {
     mountApp();
@@ -787,12 +809,38 @@ describe('new features', () => {
     expect(localStorage.getItem('planner-task-layout')).toContain('board');
   });
 
-  it('shows reminders, calendar and install settings', () => {
+  it('shows reminders, calendar and install settings', async () => {
+    mountApp();
+    await openSettingsTab('Reminders');
+    expect(text()).toContain('Reminders');
+    await openSettingsTab('Language & time');
+    expect(text()).toContain('Week starts on');
+    // Exchanging .ics files is a connection to another calendar, not a
+    // question of language, so it sits with the other connections.
+    await openSettingsTab('Connections');
+    expect(text()).toContain('Export .ics');
+  });
+
+  it('keeps every settings group reachable and only ever shows one', async () => {
     mountApp();
     click(document.querySelector('[aria-label="Settings"]') ?? buttonByText('Settings'));
-    expect(text()).toContain('Reminders');
-    expect(text()).toContain('Export .ics');
-    expect(text()).toContain('Week starts on');
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    const tabs = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    expect(tabs.length).toBeGreaterThan(3);
+    // Exactly one tab is selected, and there is exactly one panel for it.
+    expect(tabs.filter((tab) => tab.getAttribute('aria-selected') === 'true').length).toBe(1);
+    expect(document.querySelectorAll('[role="tabpanel"]').length).toBe(1);
+    for (const tab of tabs) {
+      click(tab);
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+      expect(tabs.filter((tab) => tab.getAttribute('aria-selected') === 'true').length).toBe(1);
+      // A group that renders nothing would be a dead end.
+      expect(document.querySelector('[role="tabpanel"]')?.textContent?.trim().length ?? 0).toBeGreaterThan(0);
+    }
   });
 
   it('renders notes as safe markdown with tags', () => {

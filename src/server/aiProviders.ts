@@ -150,6 +150,14 @@ export interface ResolvedProvider {
   /** Empty for keyless providers; the Authorization header is then omitted. */
   key: string;
   textModel: string;
+  /**
+   * A smaller, cheaper model for work that edits rather than creates.
+   *
+   * Empty means "no cheap model configured", and the caller falls back to
+   * `textModel` — a deployment that never set one keeps working exactly as it
+   * does today.
+   */
+  lightModel: string;
   visionModel: string;
   reasoning: Record<string, string>;
   billingUrl?: string;
@@ -195,14 +203,23 @@ export function visionModelEnvName(id: string): string {
   return `${id === 'custom' ? 'AI' : id.toUpperCase()}_VISION_MODEL`;
 }
 
+/** The variable an operator sets to name a cheaper model for quick edits. */
+export function lightModelEnvName(id: string): string {
+  return `${id === 'custom' ? 'AI' : id.toUpperCase()}_LIGHT_MODEL`;
+}
+
 /** `<ID>_MODEL` / `<ID>_VISION_MODEL`; for the custom provider, `AI_MODEL`. */
-function modelOverride(spec: ProviderSpec, env: Record<string, string | undefined>): { text: string; vision: string } {
+function modelOverride(spec: ProviderSpec, env: Record<string, string | undefined>): { text: string; light: string; vision: string } {
   const prefix = spec.id === 'custom' ? 'AI' : spec.id.toUpperCase();
   const text = normalizeApiKey(env[`${prefix}_MODEL`]);
+  const light = normalizeApiKey(env[lightModelEnvName(spec.id)]);
   const visionRaw = env[`${prefix}_VISION_MODEL`];
   const vision = visionRaw === undefined ? undefined : normalizeApiKey(visionRaw);
   return {
     text: text || spec.textModel,
+    // Unset by default: nothing is silently downgraded. An operator opts in by
+    // naming a model, and until then every request uses the full one.
+    light,
     // An explicitly blank variable disables images for that provider; an unset
     // one keeps the default.
     vision: vision === undefined ? spec.visionModel : vision,
@@ -242,6 +259,7 @@ export function resolveProviders(env: Record<string, string | undefined>): Resol
       url,
       key: normalizeApiKey(env[spec.keyEnv]),
       textModel: models.text,
+      lightModel: models.light,
       visionModel: models.vision,
       reasoning: spec.reasoning ?? {},
       billingUrl: spec.billingUrl,

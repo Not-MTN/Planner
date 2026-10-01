@@ -19,11 +19,6 @@ function markUpdate(worker: ServiceWorker): void {
   waitingWorker = worker;
   updateListeners.forEach((listener) => listener());
 }
-
-export function updateAvailable(): boolean {
-  return waitingWorker !== null;
-}
-
 export function onUpdateAvailable(listener: () => void): () => void {
   updateListeners.add(listener);
   return () => updateListeners.delete(listener);

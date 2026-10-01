@@ -18,9 +18,6 @@ export const CATEGORIES = [
   { id: 'home', get label() { return t('Home'); }, accent: 'pink' },
   { id: 'social', get label() { return t('Social'); }, accent: 'blue' },
 ] as const;
-
-export type CategoryId = (typeof CATEGORIES)[number]['id'];
-
 export const PRIORITIES = [
   { id: 'low', get label() { return t('Low'); } },
   { id: 'medium', get label() { return t('Medium'); } },
@@ -82,8 +79,4 @@ export function categoryById(id: string) {
 
 export function noteKindById(id: string) {
   return NOTE_KINDS.find((item) => item.id === id) ?? NOTE_KINDS[0];
-}
-
-export function habitIconById(id: string) {
-  return HABIT_ICONS.find((item) => item.id === id) ?? HABIT_ICONS[0];
 }

@@ -7,7 +7,8 @@
  */
 import { addDays, parseISODate, startOfWeek, toISODate, todayISO } from './dates';
 import { t } from './i18n';
-import type { ChangeNote, GuardianPlan, Panels, PlanCadence, PlannerState, StudentSubject, WeekResults } from './types';
+import { GOAL_ANSWERS_KEPT, PANEL_GOALS_KEPT } from './types';
+import type { ChangeNote, GoalAnswer, GoalSuggestion, GuardianLink, GuardianPlan, Panels, PlanCadence, PlannerState, StudentSubject, WeekResults } from './types';
 
 export function weekOf(date = todayISO()): string {
   return startOfWeek(date);
@@ -217,6 +218,70 @@ export function withoutLinkPlan(panels: Panels, linkId: string, planId: string):
     link.linkId !== linkId ? link : { ...link, plans: link.plans.filter((item) => item.id !== planId) },
   );
   return { ...panels, guardian: { ...panels.guardian, links } };
+}
+
+/** Guardian: remember a goal suggested to this student, newest first. */
+export function withLinkGoal(panels: Panels, linkId: string, goal: GoalSuggestion): Panels {
+  const links = panels.guardian.links.map((link) =>
+    link.linkId !== linkId
+      ? link
+      : {
+          ...link,
+          goals: [goal, ...(link.goals ?? []).filter((item) => item.id !== goal.id)].slice(0, PANEL_GOALS_KEPT),
+          // A fresh suggestion starts unanswered; an old answer to this id is
+          // about a different question now.
+          goalAnswers: (link.goalAnswers ?? []).filter((item) => item.suggestionId !== goal.id),
+        },
+  );
+  return { ...panels, guardian: { ...panels.guardian, links } };
+}
+
+/** Guardian: forget a suggestion, and the answer that came back for it. */
+export function withoutLinkGoal(panels: Panels, linkId: string, goalId: string): Panels {
+  const links = panels.guardian.links.map((link) =>
+    link.linkId !== linkId
+      ? link
+      : {
+          ...link,
+          goals: (link.goals ?? []).filter((item) => item.id !== goalId),
+          goalAnswers: (link.goalAnswers ?? []).filter((item) => item.suggestionId !== goalId),
+        },
+  );
+  return { ...panels, guardian: { ...panels.guardian, links } };
+}
+
+/**
+ * Student: record how a suggested goal was answered. A refusal is remembered
+ * here so it is not asked again; an acceptance is remembered so the goal can be
+ * dropped without the answer going with it.
+ */
+export function withGoalAnswer(panels: Panels, answer: GoalAnswer): Panels {
+  const answers = [
+    answer,
+    ...(panels.student.goalAnswers ?? []).filter((item) => item.suggestionId !== answer.suggestionId),
+  ].slice(0, GOAL_ANSWERS_KEPT);
+  return { ...panels, student: { ...panels.student, goalAnswers: answers } };
+}
+
+/** Student: how a suggestion stands — unanswered, or how they answered it. */
+export function goalAnswerFor(panels: Panels, suggestionId: string): GoalAnswer | undefined {
+  return (panels.student.goalAnswers ?? []).find((item) => item.suggestionId === suggestionId);
+}
+
+/** Guardian: the answer that came back for one suggestion, if it has. */
+export function goalAnswerOnLink(link: GuardianLink, suggestionId: string): GoalAnswer | undefined {
+  return (link.goalAnswers ?? []).find((item) => item.suggestionId === suggestionId);
+}
+
+/**
+ * Student: the suggestions still waiting for an answer.
+ *
+ * An answered one is kept on the wire until the guardian takes it back — the
+ * answer has to keep travelling — but it is not a question any more, so it is
+ * not shown as one.
+ */
+export function openGoalSuggestions(panels: Panels): GoalSuggestion[] {
+  return (panels.student.inbox.goals ?? []).filter((goal) => !goalAnswerFor(panels, goal.id));
 }
 
 /**

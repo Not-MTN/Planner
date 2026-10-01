@@ -14,7 +14,7 @@ import { createMemoryAuthStore } from '../server/authStore';
 import { resetRateLimits } from '../server/security';
 import { normalizeLinkCode } from './crypto';
 import { createShareKey, formatLinkCode, importDek, keyFromLinkCode, unwrapKeyRaw, wrapKey } from './crypto';
-import type { PlannerState } from '../types';
+import type { GoalSuggestion, PlannerState } from '../types';
 
 const store = createMemoryAuthStore();
 let jar = '';
@@ -268,5 +268,211 @@ describe('linking a guardian and a student', () => {
     await expect(unwrapKeyRaw(sealed, other)).rejects.toThrow();
     void importDek;
   });
+
+  it('suggests a goal, waits for the answer, and brings back counts only', async () => {
+    // 1. Guardian suggests a goal. Nothing has happened to the student yet.
+    await join('parent7', 'parent7@example.com', createEmptyState());
+    const { inviteStudent, sendGoal } = await import('./links');
+    const invited = await inviteStudent(createEmptyState().panels, 'student7');
+
+    await join('student7', 'student7@example.com', createEmptyState());
+    const { acceptInvitation } = await import('./links');
+    let studentPanels = await acceptInvitation(createEmptyState().panels, invited.invitation.code);
+
+    await signInAs('parent7');
+    const { sendGoal: suggest } = await import('./links');
+    const withGoal = await suggest(invited.panels, invited.invitation.link.linkId!, {
+      title: 'Reach a B in maths by the summer',
+      note: 'You have been close on the last three tests.',
+      target: '2027-06-30',
+      steps: ['Finish the past-paper booklet', 'Two past papers a week'],
+    });
+    const suggested = withGoal.guardian.links[0]?.goals?.[0];
+    expect(suggested?.title).toBe('Reach a B in maths by the summer');
+    expect(suggested?.steps).toHaveLength(2);
+
+    // 2. The student picks it up, and it is still only an offer.
+    await signInAs('student7');
+    const { syncStudentInbox } = await import('./links');
+    const first = await syncStudentInbox(studentPanels, []);
+    studentPanels = first.panels;
+    expect(first.added.goals).toHaveLength(1);
+    const offered = studentPanels.student.inbox.goals ?? [];
+    expect(offered).toHaveLength(1);
+    const suggestion = offered[0] as GoalSuggestion;
+    expect(suggestion.title).toBe('Reach a B in maths by the summer');
+
+    // 3. Saying yes makes an ordinary goal of it.
+    const { answerGoalSuggestion } = await import('./links');
+    const { addGoal } = await import('../mutate');
+    const withRealGoal = addGoal(
+      createEmptyState(),
+      {
+        title: suggestion.title,
+        description: suggestion.note,
+        horizon: 'long',
+        deadline: suggestion.target,
+        milestones: suggestion.steps.map((title) => ({ title, dueDate: null })),
+        fromSuggestion: { linkId: suggestion.linkId, suggestionId: suggestion.id },
+      },
+      suggestion.id,
+    );
+    expect(withRealGoal.goals[0]?.milestones).toHaveLength(2);
+    expect(withRealGoal.goals[0]?.fromSuggestion?.suggestionId).toBe(suggestion.id);
+
+    const { openGoalSuggestions } = await import('../panels');
+    studentPanels = answerGoalSuggestion(studentPanels, suggestion, 'accepted');
+    // It stops being a question: an answered suggestion is not asked again.
+    expect(openGoalSuggestions(studentPanels)).toHaveLength(0);
+    // But the answer itself has to keep travelling until it is taken back.
+    expect(studentPanels.student.goalAnswers?.[0]?.state).toBe('accepted');
+
+    // 4. Counts go back — one of two steps finished.
+    const done = { ...withRealGoal.goals[0]!, milestones: withRealGoal.goals[0]!.milestones.map((step, index) => ({ ...step, completed: index === 0 })) };
+    await syncStudentInbox(studentPanels, [done]);
+
+    // 5. The guardian reads the answer: how far, and nothing else. The link
+    // only counts as linked once their panel has caught up.
+    await signInAs('parent7');
+    const { readNotices, syncLinks } = await import('./links');
+    const read = await readNotices((await syncLinks(withGoal)).panels);
+    const answer = read.panels.guardian.links[0]?.goalAnswers?.[0];
+    expect(answer?.state).toBe('accepted');
+    expect(answer?.done).toBe(1);
+    expect(answer?.total).toBe(2);
+    // Only counts came back: no title, no step, nothing the student wrote.
+    // The guardian sees whether the goal moved, not what it became.
+    expect(answer).toEqual({
+      suggestionId: suggestion.id,
+      state: 'accepted',
+      done: 1,
+      total: 2,
+      updatedAt: expect.any(String),
+    });
+
+    // 6. Taking the suggestion back does not take the goal away.
+    const { dropGoal } = await import('./links');
+    const withdrawn = await dropGoal(read.panels, invited.invitation.link.linkId!, suggestion.id);
+    expect(withdrawn.guardian.links[0]?.goals ?? []).toHaveLength(0);
+    void sendGoal;
+  }, 180_000);
+
+  it('keeps what was already sent when something new goes out', async () => {
+    // A guardian's words live in the slot the student reads, and what the
+    // student writes back lives in another. Reading the wrong one when adding
+    // to an outbox silently threw away everything already out there: the
+    // second note wiped the first, and a note wiped the plans.
+    await join('parent6', 'parent6@example.com', createEmptyState());
+    const { inviteStudent, postNotice, sendPlan, dropPlan } = await import('./links');
+    const invited = await inviteStudent(createEmptyState().panels, 'student6');
+
+    await join('student6', 'student6@example.com', createEmptyState());
+    const { acceptInvitation, syncStudentInbox } = await import('./links');
+    const studentPanels = await acceptInvitation(createEmptyState().panels, invited.invitation.code);
+
+    // Back to the guardian: only their session can open the link's share key.
+    await signInAs('parent6');
+    const start = (await import('../dates')).todayISO();
+    let panels = await postNotice(invited.panels, invited.invitation.link.linkId!, 'First thing.');
+    panels = await postNotice(panels, invited.invitation.link.linkId!, 'Second thing.');
+    panels = await sendPlan(panels, invited.invitation.link.linkId!, {
+      cadence: 'week' as const,
+      start,
+      title: 'A week of revision',
+      note: '',
+      items: [{ title: 'Chapter 4', date: start, minutes: 30, subject: 'Maths' }],
+    });
+    // And taking something back leaves the rest standing.
+    const sent = panels.guardian.links[0]?.plans?.[0];
+    panels = await dropPlan(panels, invited.invitation.link.linkId!, sent?.id ?? '');
+    panels = await postNotice(panels, invited.invitation.link.linkId!, 'Third thing.');
+
+    await signInAs('student6');
+    const inbox = await syncStudentInbox(studentPanels, []);
+    expect(inbox.panels.student.inbox.notices.map((item) => item.summary).sort()).toEqual([
+      'First thing.',
+      'Second thing.',
+      'Third thing.',
+    ]);
+    // The plan was withdrawn, so the third note did not resurrect it.
+    expect(inbox.panels.student.inbox.plans).toHaveLength(0);
+  }, 180_000);
+
+  it('carries praise, keeps it for later, and lets it go', async () => {
+    await join('parent5', 'parent5@example.com', createEmptyState());
+    const { inviteStudent } = await import('./links');
+    const invited = await inviteStudent(createEmptyState().panels, 'student5');
+
+    await join('student5', 'student5@example.com', createEmptyState());
+    const { acceptInvitation, syncStudentInbox } = await import('./links');
+    let studentPanels = await acceptInvitation(createEmptyState().panels, invited.invitation.code);
+
+    await signInAs('parent5');
+    const { postPraise, postNotice } = await import('./links');
+    // A note and a kind word, sent the same way.
+    let guardianPanels = await postNotice(invited.panels, invited.invitation.link.linkId!, 'Moved Thursday chemistry to the evening.');
+    guardianPanels = await postPraise(guardianPanels, invited.invitation.link.linkId!, 'You kept going this week, and I saw it.');
+
+    await signInAs('student5');
+    studentPanels = (await syncStudentInbox(studentPanels, [])).panels;
+
+    // Both arrive, and each is marked for what it is.
+    const received = studentPanels.student.inbox.notices;
+    expect(received).toHaveLength(2);
+    const praise = received.find((item) => item.kind === 'praise');
+    expect(praise?.summary).toBe('You kept going this week, and I saw it.');
+    expect(received.find((item) => item.kind === 'note')?.summary).toContain('Thursday');
+
+    // Praise is kept as well as delivered: the inbox is not where it lives.
+    expect(studentPanels.student.praise).toHaveLength(1);
+    expect(studentPanels.student.praise?.[0]?.summary).toBe('You kept going this week, and I saw it.');
+
+    // Arriving twice does not double it.
+    const again = await syncStudentInbox(studentPanels, []);
+    expect(again.panels.student.praise).toHaveLength(1);
+
+    // And it can be let go.
+    const { forgetPraise } = await import('./links');
+    const released = forgetPraise(again.panels, studentPanels.student.praise?.[0]?.id ?? '');
+    expect(released.student.praise).toHaveLength(0);
+    // Letting a kind word go does not touch the note.
+    expect(released.student.inbox.notices).toHaveLength(2);
+    void guardianPanels;
+  }, 180_000);
+
+  it('lets a student say not now, and stops asking', async () => {
+    await join('parent8', 'parent8@example.com', createEmptyState());
+    const { inviteStudent } = await import('./links');
+    const invited = await inviteStudent(createEmptyState().panels, 'student8');
+
+    await join('student8', 'student8@example.com', createEmptyState());
+    const { acceptInvitation, answerGoalSuggestion, syncStudentInbox } = await import('./links');
+    let studentPanels = await acceptInvitation(createEmptyState().panels, invited.invitation.code);
+
+    await signInAs('parent8');
+    const { sendGoal } = await import('./links');
+    const withGoal = await sendGoal(invited.panels, invited.invitation.link.linkId!, {
+      title: 'Read one book a month',
+      note: '',
+      target: null,
+      steps: [],
+    });
+
+    await signInAs('student8');
+    studentPanels = (await syncStudentInbox(studentPanels, [])).panels;
+    const offered = studentPanels.student.inbox.goals ?? [];
+    expect(offered).toHaveLength(1);
+    const suggestion = offered[0] as GoalSuggestion;
+    expect(suggestion.steps).toHaveLength(0);
+
+    studentPanels = answerGoalSuggestion(studentPanels, suggestion, 'declined');
+    // Nothing was added to their planner: a refusal adds nothing anywhere.
+    studentPanels = (await syncStudentInbox(studentPanels, [])).panels;
+
+    await signInAs('parent8');
+    const { readNotices, syncLinks } = await import('./links');
+    const read = await readNotices((await syncLinks(withGoal)).panels);
+    expect(read.panels.guardian.links[0]?.goalAnswers?.[0]?.state).toBe('declined');
+  }, 180_000);
 });
 

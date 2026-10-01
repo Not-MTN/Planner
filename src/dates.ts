@@ -55,11 +55,6 @@ export function setWeekStart(value: WeekStart): void {
     /* ignore */
   }
 }
-
-export function getWeekStart(): WeekStart {
-  return weekStart;
-}
-
 /** Weekday headers in the user's chosen order and language. */
 export function weekdayHeaders(): string[] {
   // 2026-09-27 is a Sunday.
@@ -133,23 +128,6 @@ export function formatDuration(start: string, end: string | null): string | null
 }
 
 export type DayPart = 'Early' | 'Morning' | 'Afternoon' | 'Evening' | 'Night';
-
-export const DAY_PARTS: DayPart[] = ['Early', 'Morning', 'Afternoon', 'Evening', 'Night'];
-
-export function dayPart(time: string): DayPart {
-  const minutes = timeToMinutes(time);
-  if (minutes < 5 * 60) return 'Early';
-  if (minutes < 12 * 60) return 'Morning';
-  if (minutes < 17 * 60) return 'Afternoon';
-  if (minutes < 22 * 60) return 'Evening';
-  return 'Night';
-}
-
-export function dayPartLabel(part: DayPart): string {
-  if (part === 'Early') return t('Early hours');
-  return t(part);
-}
-
 // ── Display preferences: date language and 12/24-hour clock ──────────────
 export type TimeFormat = '24h' | '12h';
 const PREFS_KEY = 'planner-display';
@@ -243,11 +221,6 @@ export function formatJalaliLong(iso: string): string | null {
     return null;
   }
 }
-
-export function getTimeFormat(): TimeFormat {
-  return timeFormat;
-}
-
 /** "14:05" → "14:05" or "2:05 pm", following the user's clock preference. */
 export function displayTime(value: string | null | undefined): string {
   if (!value || !isValidTime(value)) return value ?? '';

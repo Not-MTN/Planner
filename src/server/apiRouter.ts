@@ -45,8 +45,9 @@ import {
   handleTotpLogin,
   handleTotpSetup,
   handleSignup,
+  readSessionToken,
 } from './authApi.js';
-import { authStore } from './authStore.js';
+import { authStore, hashToken } from './authStore.js';
 import { handleReport } from './reportApi.js';
 import { resolveProviders } from './aiProviders.js';
 import { handleICS } from './icsProxy.js';
@@ -59,7 +60,11 @@ export interface ApiEnv {
   DATABASE_URL?: string;
   GROQ_API_KEY?: string;
   GROQ_MODEL?: string;
+  /** Cheaper model used when editing an existing draft rather than writing one. */
+  GROQ_LIGHT_MODEL?: string;
   GROQ_VISION_MODEL?: string;
+  /** AI requests allowed per signed-in account per day; 0 disables the check. */
+  AI_DAILY_REQUESTS?: string;
   /** Optional: forwards each crash report somewhere you actually read. */
   ERROR_REPORT_WEBHOOK?: string;
   /**
@@ -84,11 +89,33 @@ type Handler = (request: Request) => Response | Promise<Response>;
  */
 function aiEnv(env: ApiEnv): Record<string, string | undefined> {
   const merged: Record<string, string | undefined> = { ...(env.AI_ENV ?? {}) };
-  for (const key of ['GROQ_API_KEY', 'GROQ_MODEL', 'GROQ_VISION_MODEL'] as const) {
+  for (const key of ['GROQ_API_KEY', 'GROQ_MODEL', 'GROQ_VISION_MODEL', 'GROQ_LIGHT_MODEL', 'AI_DAILY_REQUESTS'] as const) {
     const value = env[key];
     if (value !== undefined) merged[key] = value;
   }
   return merged;
+}
+
+/**
+ * Which account is making this AI call, when the request carries a session.
+ *
+ * Returns null for a local-only planner, and null whenever anything at all goes
+ * wrong — a missing database, a broken session, a slow query. The AI is a
+ * feature; a dead database must not become a dead feature. Failing open here
+ * means the worst case is the per-client limiter alone, which is what this
+ * endpoint has always relied on.
+ */
+async function resolveAiAccount(request: Request, databaseUrl: string | undefined): Promise<string | null> {
+  try {
+    const token = readSessionToken(request);
+    if (!token || !databaseUrl) return null;
+    const store = await authStore(databaseUrl);
+    if (!store) return null;
+    const found = await store.findSession(hashToken(token));
+    return found?.user.id ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** The one 404 every unrouted /api path gets, in dev and in production alike. */
@@ -171,7 +198,10 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
       return (request) => handleSyncStatus(request, env.DATABASE_URL);
     case '/api/ai/chat/completions':
     case '/api/groq/chat/completions':
-      return (request) => handleGroqChatCompletions(request, env.GROQ_API_KEY, { env: aiEnv(env) });
+      return (request) =>
+        resolveAiAccount(request, env.DATABASE_URL).then((accountId) =>
+          handleGroqChatCompletions(request, env.GROQ_API_KEY, { env: aiEnv(env), accountId }),
+        );
     case '/api/ai/status':
     case '/api/groq/status':
       return (request) => handleGroqStatus(request, env.GROQ_API_KEY, resolveProviders(aiEnv(env)));

@@ -1279,6 +1279,7 @@ function outgoingView(row: LinkRow): OutgoingLink {
     status: row.status,
     weekOf: row.share_week,
     updatedAt: row.share_updated_at ? new Date(row.share_updated_at).toISOString() : null,
+    expiresAt: row.code_expires_at ? new Date(row.code_expires_at).toISOString() : null,
   };
 }
 
@@ -1381,6 +1382,12 @@ export async function handleLinkAccept(request: Request, store: AuthStore | null
   try {
     const row = await session.store.acceptLink(codeHash, { id: session.user.id, usernameLower: session.user.username_lower });
     if (!row) return error(404, 'No invitation matches that code.', 'not_found');
+    // Not the same as a wrong code, and not worth pretending it is: retyping
+    // will never work, and saying "check it" sends someone hunting for a
+    // typo that is not there.
+    if (row === 'expired') {
+      return error(410, 'That invitation has expired. Ask for a new code and try again.', 'invite_expired');
+    }
     const guardian = await guardianOf(session.store, row.guardian_id);
     return json(200, {
       linkId: row.id,
@@ -1452,10 +1459,14 @@ export async function handleNote(request: Request, store: AuthStore | null): Pro
   }
 
   if (request.method === 'GET') {
-    const linkId = cleanLinkId(new URL(request.url).searchParams.get('linkId'));
+    const params = new URL(request.url).searchParams;
+    const linkId = cleanLinkId(params.get('linkId'));
     if (!linkId) return error(400, 'Expected ?linkId=.');
+    // `dir=out` reads the slot this user writes to, so adding a note does not
+    // overwrite the ones already out there.
+    const outgoing = params.get('dir') === 'out';
     try {
-      const note = await session.store.getNote(linkId, session.user.id);
+      const note = await session.store.getNote(linkId, session.user.id, outgoing);
       if (!note) return error(404, 'That link is not there.', 'not_found');
       const payload: NoteResponse = { linkId, ciphertext: note.ciphertext, weekOf: note.weekOf };
       return json(200, payload);

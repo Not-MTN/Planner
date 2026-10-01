@@ -6,7 +6,7 @@ import { DownloadIcon, ExitIcon, SparklesIcon, UploadIcon, UserIcon } from '../i
 import { Rich } from './Rich';
 import { Modal } from './ui';
 import { RecoveryCodes } from './RecoveryCodes';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { FeedsSection, SecuritySection, SharedSpaceSection, TaskImportSection, TemplatesSection, WeatherSection } from './SettingsExtras';
 import { isReportingEnabled, setReportingEnabled } from '../reporting';
 import { useSignOut } from './useSignOut';
@@ -68,6 +68,58 @@ function NavigationSection() {
   );
 }
 
+/**
+ * Two devices changed the same thing, and one version had to lose.
+ *
+ * Edits are not silently dropped: the version that lost is kept and offered
+ * back. Everything here is a choice the person makes — there is no automatic
+ * way to know which of two edited sentences was meant.
+ */
+function ConflictList() {
+  const { syncConflicts, keepConflictVersion, dismissConflict, dismissAllConflicts } = usePlanner();
+  if (syncConflicts.length === 0) return null;
+  return (
+    <div
+      className="sync-conflicts"
+      role="region"
+      aria-label={t("Changed on two devices")}
+      // These appear on their own, after a sync nobody asked for. Without this
+      // a screen reader never mentions them.
+      aria-live="polite"
+    >
+      <p className="set-label">{t("Changed on two devices")}</p>
+      <p className="set-hint">
+        {t("Both this device and another one had edited these since they last met. The newest is in your planner; the other is kept here until you decide.")}
+      </p>
+      <ul className="sync-conflict-list">
+        {syncConflicts.map((conflict) => (
+          <li key={`${conflict.kind}:${conflict.item.id}:${conflict.lostAt}`} className="sync-conflict">
+            <div>
+              <p className="sync-conflict-title">{conflict.title || t("Untitled")}</p>
+              <p className="sync-conflict-when">
+                {t("Other version edited {0}", { 0: new Date(conflict.lostAt).toLocaleString() })}
+              </p>
+            </div>
+            <div className="sync-conflict-actions">
+              <button type="button" className="btn btn-tiny" onClick={() => keepConflictVersion(conflict)}>
+                {t("Use the other version")}
+              </button>
+              <button type="button" className="btn btn-tiny btn-ghost" onClick={() => dismissConflict(conflict)}>
+                {t("Keep what I have")}
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <div className="set-actions">
+        <button type="button" className="btn btn-ghost btn-small" onClick={dismissAllConflicts}>
+          {t("Keep what I have for all of them")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function SyncSection() {
   const { sync, syncStatus, syncMessage, syncAvailable, startSync, stopSync, syncNow, deleteCloudCopy, requestConfirm, flash } = usePlanner();
   const [linking, setLinking] = useState(false);
@@ -119,6 +171,7 @@ function SyncSection() {
               </button>
             </div>
           </div>
+          <ConflictList />
           <div className="set-actions">
             <button type="button" className="btn btn-ghost" onClick={stopSync}>{t("Turn off on this device")}</button>
             <button
@@ -370,22 +423,7 @@ function VoiceSection() {
 }
 
 function CalendarSection() {
-  const { state, importCalendar, flash, undo, weekStart, setWeekStart, display, setDisplay } = usePlanner();
-  const icsFile = useImportFile((text) => {
-    const result = parseICS(text);
-    const count = result.events.length + result.tasks.length;
-    if (count === 0) {
-      flash(t("No calendar events found in that file."));
-      return;
-    }
-    importCalendar(result);
-    flash(
-      result.skipped
-        ? t("Imported {0} events and {1} all-day items, skipping {2}.", { 0: result.events.length, 1: result.tasks.length, 2: result.skipped })
-        : t("Imported {0} events and {1} all-day items.", { 0: result.events.length, 1: result.tasks.length }),
-      { label: t("Undo"), run: undo },
-    );
-  });
+  const { weekStart, setWeekStart, display, setDisplay } = usePlanner();
   return (
     <section className="set-section">
       <h3 className="kicker">{t("Calendar, dates & time")}</h3>
@@ -421,11 +459,15 @@ function CalendarSection() {
         <select aria-label={t("Language")} value={getLang()} onChange={(event) => {
           const next = event.target.value as Lang;
           if (next === getLang()) return;
+          // The week does not start on the same day everywhere: Saturday in
+          // Iran, Monday in Finland and in the English default. Follow the
+          // language, and follow it back again when the language changes.
           if (next === 'fa') {
             setDisplay({ ...display, dateLanguage: 'fa' });
             setWeekStart(6);
-          } else if (display.dateLanguage === 'fa') {
-            setDisplay({ ...display, dateLanguage: 'en-GB' });
+          } else {
+            if (display.dateLanguage === 'fa') setDisplay({ ...display, dateLanguage: 'en-GB' });
+            setWeekStart(1);
           }
           setLang(next);
           window.setTimeout(() => window.location.reload(), 50);
@@ -461,6 +503,30 @@ function CalendarSection() {
           {display.jalali ? t("On") : t("Off")}
         </button>
       </div>
+    </section>
+  );
+}
+
+function CalendarExchangeSection() {
+  const { state, importCalendar, flash, undo } = usePlanner();
+  const icsFile = useImportFile((text) => {
+    const result = parseICS(text);
+    const count = result.events.length + result.tasks.length;
+    if (count === 0) {
+      flash(t("No calendar events found in that file."));
+      return;
+    }
+    importCalendar(result);
+    flash(
+      result.skipped
+        ? t("Imported {0} events and {1} all-day items, skipping {2}.", { 0: result.events.length, 1: result.tasks.length, 2: result.skipped })
+        : t("Imported {0} events and {1} all-day items.", { 0: result.events.length, 1: result.tasks.length }),
+      { label: t("Undo"), run: undo },
+    );
+  });
+  return (
+    <section className="set-section">
+      <h3 className="kicker">{t("Calendar exchange")}</h3>
       <p className="set-hint">{t("Exchange plans with Google Calendar, Outlook or Apple Calendar using .ics files. Timed events come in as events; all-day ones become dated tasks.")}</p>
       <div className="set-actions">
         <button type="button" className="btn btn-soft" onClick={() => { downloadICS(state, todayISO()); flash(t("Calendar file downloaded.")); }}>
@@ -1144,6 +1210,23 @@ function ActivitySection() {
   );
 }
 
+type SettingsTab = 'account' | 'appearance' | 'language' | 'reminders' | 'sync' | 'connections' | 'app';
+
+/*
+ * Settings grew to twenty sections, and one long scroll buries all of them:
+ * the switch you came for is somewhere past the account, the two-factor setup
+ * and the calendar feeds. These groups are the ones people actually look for.
+ */
+const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
+  { id: 'account', label: t("Account") },
+  { id: 'appearance', label: t("Appearance") },
+  { id: 'language', label: t("Language & time") },
+  { id: 'reminders', label: t("Reminders") },
+  { id: 'sync', label: t("Sync & backup") },
+  { id: 'connections', label: t("Connections") },
+  { id: 'app', label: t("App") },
+];
+
 export function SettingsSheet() {
   const planner = usePlanner();
   const {
@@ -1160,14 +1243,68 @@ export function SettingsSheet() {
     requestConfirm,
   } = planner;
   const importFile = useImportFile(importText);
+  const [tab, setTab] = useState<SettingsTab>('account');
+  const tabRefs = useRef<Partial<Record<SettingsTab, HTMLButtonElement | null>>>({});
+
+  // Arrow keys move along the tabs, as a tab list is expected to. Only the
+  // selected tab stops, so a single Tab press still leaves the strip and gets
+  // on with the settings — being trapped in the row would be worse than
+  // having no arrow keys at all.
+  const onTabKeys = (event: ReactKeyboardEvent<HTMLElement>) => {
+    const count = SETTINGS_TABS.length;
+    const here = SETTINGS_TABS.findIndex((entry) => entry.id === tab);
+    const next =
+      event.key === 'Home' ? 0
+        : event.key === 'End' ? count - 1
+          : event.key === 'ArrowRight' ? (here + 1) % count
+            : event.key === 'ArrowLeft' ? (here - 1 + count) % count
+              : -1;
+    if (next < 0) return;
+    event.preventDefault();
+    const id = SETTINGS_TABS[next]!.id;
+    setTab(id);
+    tabRefs.current[id]?.focus();
+  };
+
   if (!settingsOpen) return null;
 
   return (
     <Modal title={t("Settings")} onClose={closeSettings} className="sheet-settings">
-      <AccountSection />
-      <DevicesSection />
-      <TwoFactorSection />
-      <ActivitySection />
+      <div className="set-nav" role="tablist" aria-label={t("Settings sections")} onKeyDown={onTabKeys}>
+        {SETTINGS_TABS.map((entry) => (
+          <button
+            key={entry.id}
+            ref={(node) => { tabRefs.current[entry.id] = node; }}
+            type="button"
+            role="tab"
+            id={`set-tab-${entry.id}`}
+            aria-selected={tab === entry.id}
+            aria-controls="set-panel"
+            tabIndex={tab === entry.id ? 0 : -1}
+            className={cx('set-nav-item', tab === entry.id && 'on')}
+            onClick={() => setTab(entry.id)}
+          >
+            {entry.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Only the open group is mounted. The account tabs talk to the server
+          when they appear, and there is no reason to ask about devices or
+          sign-in history for someone who came to change the theme. */}
+      <div className="set-panels" id="set-panel" role="tabpanel" aria-labelledby={`set-tab-${tab}`}>
+        {tab === 'account' ? (
+          <>
+            <AccountSection />
+            <SecuritySection />
+            <TwoFactorSection />
+            <DevicesSection />
+            <ActivitySection />
+          </>
+        ) : null}
+
+        {tab === 'appearance' ? (
+          <>
       <section className="set-section">
         <h3 className="kicker">{t("Appearance")}</h3>
         <div className="set-row">
@@ -1210,63 +1347,28 @@ export function SettingsSheet() {
           </div>
         </div>
       </section>
+            <NavigationSection />
+          </>
+        ) : null}
 
-      <NavigationSection />
-      <SyncSection />
-      <SharedSpaceSection />
-      <RemindersSection />
-      <BackgroundPushSection />
-      <VoiceSection />
-      <CalendarSection />
-      <FeedsSection />
-      <TaskImportSection />
-      <WeatherSection />
-      <TemplatesSection />
-      <InstallSection />
-      <SecuritySection />
-      <PrivacySection />
-      <section className="set-section">
-        <h3 className="kicker">{t("New here?")}</h3>
-        <div className="set-row">
-          <div>
-            <p className="set-label">{t("The two-minute tour")}</p>
-            <p className="set-hint">{t("Walks through quick add, planning, habits, mood and notes — with the language picker first.")}</p>
-          </div>
-          <span className="set-actions">
-            <button type="button" className="btn btn-soft" onClick={() => { closeSettings(); window.setTimeout(requestAbout, 60); }}>
-              {t("Why Planner?")}
-            </button>
-            <button type="button" className="btn btn-primary" onClick={() => { closeSettings(); window.setTimeout(requestTour, 60); }}>
-              {t("Show me around")}
-            </button>
-          </span>
-        </div>
-      </section>
+        {tab === 'language' ? (
+          <>
+            <CalendarSection />
+            <VoiceSection />
+          </>
+        ) : null}
 
-      <section className="set-section">
-        <h3 className="kicker">{t("AI coach · Groq")}</h3>
-        <p className="set-hint">{t("The planner uses a server-side proxy for Groq. Your API key stays out of the browser and planner backups.")}</p>
-        <pre className="env-code"><code>{t("GROQ_API_KEY=your_groq_api_key")}</code></pre>
-        <p className="set-hint">
-          <Rich
-            text={t("On Vercel: Project Settings → Environment Variables → add {name} with your key as the value, then redeploy. Vercel Functions in {path} handle the requests.")}
-            values={{ name: <code>{t("GROQ_API_KEY")}</code>, path: <code>{t("api/groq")}</code> }}
-          />
-        </p>
-        <p className="set-hint">
-          <Rich
-            text={t("Locally: put that line in {file} at the project root, then restart the dev server.")}
-            values={{ file: <code>{t(".env.local")}</code> }}
-          />
-        </p>
-        <p className="ai-privacy-note">
-          <Rich
-            text={t("Never use a {prefix} prefix for the key. The AI sends your prompt, saved AI memory, and relevant schedule/check-in details to Groq; planner notes are not included. Forget memory from the AI coach at any time.")}
-            values={{ prefix: <code>{t("VITE_")}</code> }}
-          />
-        </p>
-      </section>
+        {tab === 'reminders' ? (
+          <>
+            <RemindersSection />
+            <BackgroundPushSection />
+          </>
+        ) : null}
 
+        {tab === 'sync' ? (
+          <>
+            <SyncSection />
+            <SharedSpaceSection />
       <section className="set-section">
         <h3 className="kicker">{t("Your data")}</h3>
         <p className="set-hint">{t("Planner data is saved in this browser. With sync on, an encrypted copy is kept in your database; AI requests pass through the server-side Groq proxy.")}</p>
@@ -1297,7 +1399,63 @@ export function SettingsSheet() {
         </div>
         <input ref={importFile.ref} className="visually-hidden" tabIndex={-1} aria-hidden="true" type="file" accept="application/json,.json" onChange={importFile.onChange} />
       </section>
+          </>
+        ) : null}
 
+        {tab === 'connections' ? (
+          <>
+            <CalendarExchangeSection />
+            <FeedsSection />
+            <TaskImportSection />
+            <WeatherSection />
+            <TemplatesSection />
+          </>
+        ) : null}
+
+        {tab === 'app' ? (
+          <>
+            <InstallSection />
+            <PrivacySection />
+      <section className="set-section">
+        <h3 className="kicker">{t("New here?")}</h3>
+        <div className="set-row">
+          <div>
+            <p className="set-label">{t("The two-minute tour")}</p>
+            <p className="set-hint">{t("Walks through quick add, planning, habits, mood and notes — with the language picker first.")}</p>
+          </div>
+          <span className="set-actions">
+            <button type="button" className="btn btn-soft" onClick={() => { closeSettings(); window.setTimeout(requestAbout, 60); }}>
+              {t("Why Planner?")}
+            </button>
+            <button type="button" className="btn btn-primary" onClick={() => { closeSettings(); window.setTimeout(requestTour, 60); }}>
+              {t("Show me around")}
+            </button>
+          </span>
+        </div>
+      </section>
+      <section className="set-section">
+        <h3 className="kicker">{t("AI coach · Groq")}</h3>
+        <p className="set-hint">{t("The planner uses a server-side proxy for Groq. Your API key stays out of the browser and planner backups.")}</p>
+        <pre className="env-code"><code>{t("GROQ_API_KEY=your_groq_api_key")}</code></pre>
+        <p className="set-hint">
+          <Rich
+            text={t("On Vercel: Project Settings → Environment Variables → add {name} with your key as the value, then redeploy. Vercel Functions in {path} handle the requests.")}
+            values={{ name: <code>{t("GROQ_API_KEY")}</code>, path: <code>{t("api/groq")}</code> }}
+          />
+        </p>
+        <p className="set-hint">
+          <Rich
+            text={t("Locally: put that line in {file} at the project root, then restart the dev server.")}
+            values={{ file: <code>{t(".env.local")}</code> }}
+          />
+        </p>
+        <p className="ai-privacy-note">
+          <Rich
+            text={t("Never use a {prefix} prefix for the key. The AI sends your prompt, saved AI memory, and relevant schedule/check-in details to Groq; planner notes are not included. Forget memory from the AI coach at any time.")}
+            values={{ prefix: <code>{t("VITE_")}</code> }}
+          />
+        </p>
+      </section>
       <section className="set-section">
         <h3 className="kicker">{t("Shortcuts")}</h3>
         <ul className="shortcut-list">
@@ -1309,8 +1467,11 @@ export function SettingsSheet() {
           <li><span>{t("Open shortcuts")}</span><span><kbd className="kbd">?</kbd></span></li>
         </ul>
       </section>
+          </>
+        ) : null}
 
       <p className="set-foot">{t("Personal Planner · local-first · made for calm days")}</p>
+      </div>
     </Modal>
   );
 }

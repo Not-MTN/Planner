@@ -4,29 +4,36 @@
  * Placeholders use braces: t('{count} tasks', { count: 3 }).
  */
 import { fa } from './locales/fa';
+import { fi } from './locales/fi';
 
-export type Lang = 'en' | 'fa';
+export type Lang = 'en' | 'fa' | 'fi';
 export const LANGUAGES: { id: Lang; label: string; dir: 'ltr' | 'rtl' }[] = [
   { id: 'en', label: 'English', dir: 'ltr' },
+  { id: 'fi', label: 'Suomi', dir: 'ltr' },
   { id: 'fa', label: 'فارسی', dir: 'rtl' },
 ];
 
+/**
+ * Languages that are expected to cover every string in the app.
+ *
+ * A new language starts partial — translating two thousand strings before anyone
+ * can try it is how languages never get added — and missing keys fall back to
+ * English, so nothing renders blank. This is the list of the ones that have
+ * finished that journey, and it is what the tests hold to.
+ */
+export const COMPLETE_LANGS: Lang[] = ['fa'];
+
 const LANG_KEY = 'planner-lang';
-const DICTS: Record<Lang, Record<string, string>> = { en: {}, fa };
+const DICTS: Record<Lang, Record<string, string>> = { en: {}, fa, fi };
 let lang: Lang = 'en';
 
 export function getLang(): Lang {
   return lang;
 }
-
-export function isRTL(): boolean {
-  return LANGUAGES.find((item) => item.id === lang)?.dir === 'rtl';
-}
-
 export function loadLang(): Lang {
   try {
     const raw = localStorage.getItem(LANG_KEY);
-    lang = raw === 'fa' ? 'fa' : 'en';
+    lang = raw === 'fa' || raw === 'fi' ? raw : 'en';
   } catch {
     lang = 'en';
   }

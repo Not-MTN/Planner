@@ -343,6 +343,32 @@ describe('accounts on the real database path', () => {
     void guardianId;
   });
 
+  it('stamps a deadline on an invitation and refuses the code once it has passed', async () => {
+    const store = await createNeonAuthStore(DB_URL);
+    const guardian = cookieFrom(await handleSignup(post('/api/auth/signup', ACCOUNT), store));
+    void cookieFrom(await handleSignup(post('/api/auth/signup', { ...ACCOUNT, username: 'thestudent', email: 'thestudent@example.com' }), store));
+    const studentId = db.tables.planner_users.find((user) => user.username === 'thestudent')!.id as string;
+
+    const { handleLinks } = await import('./authApi');
+    const created = await handleLinks(
+      post('/api/auth/links', { username: 'thestudent', codeHash: HASH, wrappedShare: HASH }, guardian),
+      store,
+    );
+    expect(created.status).toBe(201);
+    // The deadline is written by the database, so every deployment agrees on it.
+    expect(db.tables.planner_links[0]?.code_expires_at).toBeTruthy();
+
+    const row = db.tables.planner_links[0] as unknown as { code_expires_at: string };
+    row.code_expires_at = new Date(Date.now() - 86_400_000).toISOString();
+
+    // The student is not shown a code that cannot work.
+    const incoming = await store!.listIncomingLinks({ id: studentId, usernameLower: 'thestudent' });
+    expect(incoming).toHaveLength(0);
+
+    // And trying it says expired, not wrong — a different fix, so a different answer.
+    expect(await store!.acceptLink(HASH, { id: studentId, usernameLower: 'thestudent' })).toBe('expired');
+  });
+
   it('hashes a credential with the salt it returns', async () => {
     const { hashSalt, authHash } = await hashCredential(ACCOUNT.authToken);
     expect(authHash).toBe(await hashAuthToken(ACCOUNT.authToken, hashSalt));

@@ -97,11 +97,6 @@ let transport: ((body: string) => void) | null = null;
 let installed = false;
 /** Lifted only by `enableReportingInTests`. */
 let testOverride = false;
-
-export function isReportingInstalled(): boolean {
-  return installed;
-}
-
 function randomId(): string {
   const cryptoRef = globalThis.crypto;
   if (cryptoRef?.randomUUID) return cryptoRef.randomUUID().slice(0, 8);

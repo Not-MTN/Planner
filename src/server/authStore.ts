@@ -118,6 +118,10 @@ CREATE TABLE IF NOT EXISTS planner_links (
   share_week             text,
   share_updated_at       timestamptz,
   status                 text NOT NULL CHECK (status IN ('pending','linked','revoked')),
+  -- An invitation is an open door until it is used. Left open forever it is a
+  -- code sitting in an old message that still works; a week is long enough to
+  -- hand over and short enough to stop worrying about.
+  code_expires_at        timestamptz,
   note_to_student        text,
   note_to_guardian       text,
   note_week              text,
@@ -314,6 +318,8 @@ export interface LinkRow {
   student_id: string | null;
   student_username_lower: string;
   code_hash: string;
+  /** When the invitation stops working. Null on an accepted link. */
+  code_expires_at: string | null;
   wrapped_share: string;
   share_ciphertext: string | null;
   note_to_student: string | null;
@@ -325,6 +331,9 @@ export interface LinkRow {
   created_at: string;
   updated_at: string;
 }
+
+/** How long an invitation stays open. Seven days: time to hand it over. */
+export const INVITE_TTL_DAYS = 7;
 
 export interface NewLink {
   id: string;
@@ -420,7 +429,12 @@ export interface AuthStore {
   /** Waiting invitations (matched by username) plus accepted links (matched by id). */
   listIncomingLinks(user: { id: string; usernameLower: string }): Promise<Array<LinkRow & { guardian_username: string; guardian_display_name: string }>>;
   /** Student: turns a pending request into a link, if the code matches. */
-  acceptLink(codeHash: string, student: { id: string; usernameLower: string }): Promise<LinkRow | null>;
+  /**
+   * Student: turns a pending request into a link, if the code matches and has
+   * not expired. An expired code is its own answer — different from a wrong
+   * one, because the fix is to ask for a new invitation, not to retype.
+   */
+  acceptLink(codeHash: string, student: { id: string; usernameLower: string }): Promise<LinkRow | 'expired' | null>;
   /** Student writes this week's results; guardian reads them. */
   putShare(linkId: string, studentId: string, ciphertext: string, weekOf: string): Promise<LinkRow | null>;
   getShare(linkId: string, guardianId: string): Promise<LinkRow | null>;
@@ -433,7 +447,19 @@ export interface AuthStore {
    */
   putNote(linkId: string, userId: string, to: 'student' | 'guardian', ciphertext: string | null, weekOf: string): Promise<LinkRow | null>;
   /** Reads the note addressed to the caller. */
-  getNote(linkId: string, userId: string): Promise<{ ciphertext: string | null; weekOf: string | null } | null>;
+  /**
+   * One of the two note slots on a link.
+   *
+   * `outgoing` asks for the slot this user *writes* to — what they have already
+   * put out there — instead of the one they receive on. Read-modify-write needs
+   * it: without it, adding a second note would wipe the first, because a reader
+   * is handed the other side's words.
+   */
+  getNote(
+    linkId: string,
+    userId: string,
+    outgoing?: boolean,
+  ): Promise<{ ciphertext: string | null; weekOf: string | null } | null>;
 
   /* WebAuthn passkeys: one row per credential, keyed by its id. */
   createPasskey(input: NewPasskey): Promise<PasskeyRow | null>;
@@ -914,12 +940,14 @@ export function createMemoryAuthStore(): AuthStore {
         (link) => link.guardian_id === input.guardianId && link.student_username_lower === input.studentUsernameLower,
       );
       if (clash) return null;
+      const now = new Date();
       const row: LinkRow = {
         id: input.id,
         guardian_id: input.guardianId,
         student_id: null,
         student_username_lower: input.studentUsernameLower,
         code_hash: input.codeHash,
+        code_expires_at: new Date(now.getTime() + INVITE_TTL_DAYS * 86_400_000).toISOString(),
         wrapped_share: input.wrappedShare,
         share_ciphertext: null,
         note_to_student: null,
@@ -941,7 +969,11 @@ export function createMemoryAuthStore(): AuthStore {
       return links
         .filter(
           (link) =>
-            (link.student_username_lower === user.usernameLower && link.status === 'pending') ||
+            (link.student_username_lower === user.usernameLower &&
+              link.status === 'pending' &&
+              // An expired invitation is not an invitation. Showing one would
+              // have the student hunting for a code that cannot work.
+              !(link.code_expires_at && new Date(link.code_expires_at).getTime() <= Date.now())) ||
             (link.student_id === user.id && link.status === 'linked'),
         )
         .map((link) => {
@@ -961,7 +993,10 @@ export function createMemoryAuthStore(): AuthStore {
           item.student_username_lower === student.usernameLower,
       );
       if (!link) return null;
+      if (link.code_expires_at && new Date(link.code_expires_at).getTime() <= Date.now()) return 'expired';
       link.status = 'linked';
+      // The code has done its job; it is not an open door any more.
+      link.code_expires_at = null;
       link.student_id = student.id;
       link.updated_at = new Date().toISOString();
       return link;
@@ -991,10 +1026,21 @@ export function createMemoryAuthStore(): AuthStore {
       link.updated_at = new Date().toISOString();
       return link;
     },
-    async getNote(linkId, userId) {
+    async getNote(linkId, userId, outgoing = false) {
       const link = links.find((item) => item.id === linkId);
       if (!link) return null;
-      const mine = link.guardian_id === userId ? link.note_to_guardian : link.student_id === userId ? link.note_to_student : null;
+      const asGuardian = link.guardian_id === userId;
+      const mine = outgoing
+        ? link.guardian_id === userId
+          ? link.note_to_student
+          : link.student_id === userId
+            ? link.note_to_guardian
+            : null
+        : asGuardian
+          ? link.note_to_guardian
+          : link.student_id === userId
+            ? link.note_to_student
+            : null;
       if (mine === null && link.guardian_id !== userId && link.student_id !== userId) return null;
       return { ciphertext: mine, weekOf: link.note_week };
     },
@@ -1120,6 +1166,7 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
           share_week             text,
           share_updated_at       timestamptz,
           status                 text NOT NULL CHECK (status IN ('pending','linked','revoked')),
+          code_expires_at        timestamptz,
           note_to_student        text,
           note_to_guardian       text,
           note_week              text,
@@ -1538,8 +1585,11 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
     async createLink(input) {
       await ensure();
       const rows = (await sql`
-        INSERT INTO planner_links (id, guardian_id, student_username_lower, code_hash, wrapped_share, status)
-        VALUES (${input.id}, ${input.guardianId}, ${input.studentUsernameLower}, ${input.codeHash}, ${input.wrappedShare}, 'pending')
+        INSERT INTO planner_links (id, guardian_id, student_username_lower, code_hash, wrapped_share, status, code_expires_at)
+        VALUES (
+          ${input.id}, ${input.guardianId}, ${input.studentUsernameLower}, ${input.codeHash}, ${input.wrappedShare}, 'pending',
+          now() + make_interval(days => ${INVITE_TTL_DAYS})
+        )
         ON CONFLICT (guardian_id, student_username_lower) DO NOTHING
         RETURNING *
       `) as LinkRow[];
@@ -1560,7 +1610,8 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
         SELECT l.*, u.username AS guardian_username, u.display_name AS guardian_display_name
         FROM planner_links l
         JOIN planner_users u ON u.id = l.guardian_id
-        WHERE (l.student_username_lower = ${user.usernameLower} AND l.status = 'pending')
+        WHERE (l.student_username_lower = ${user.usernameLower} AND l.status = 'pending'
+               AND (l.code_expires_at IS NULL OR l.code_expires_at > now()))
            OR (l.student_id = ${user.id} AND l.status = 'linked')
         ORDER BY l.created_at
       `) as (LinkRow & { guardian_username: string; guardian_display_name: string })[];
@@ -1569,8 +1620,22 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
 
     async acceptLink(codeHash, student) {
       await ensure();
+      // Asked separately first, so an expired invitation can be answered with
+      // "ask for a new one" instead of "that code is wrong". Same shape as the
+      // memory store, and for the same reason.
+      const stale = (await sql`
+        SELECT id FROM planner_links
+        WHERE code_hash = ${codeHash}
+          AND student_username_lower = ${student.usernameLower}
+          AND status = 'pending'
+          AND code_expires_at IS NOT NULL
+          AND code_expires_at <= now()
+        LIMIT 1
+      `) as { id: string }[];
+      if (stale.length > 0) return 'expired';
       const rows = (await sql`
-        UPDATE planner_links SET status = 'linked', student_id = ${student.id}, updated_at = now()
+        UPDATE planner_links
+        SET status = 'linked', student_id = ${student.id}, updated_at = now(), code_expires_at = NULL
         WHERE code_hash = ${codeHash} AND student_username_lower = ${student.usernameLower} AND status = 'pending'
         RETURNING *
       `) as LinkRow[];
@@ -1614,12 +1679,20 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
       return rows[0] ?? null;
     },
 
-    async getNote(linkId, userId) {
+    async getNote(linkId, userId, outgoing = false) {
       await ensure();
       const rows = (await sql`SELECT * FROM planner_links WHERE id = ${linkId}`) as LinkRow[];
       const row = rows[0];
       if (!row || (row.guardian_id !== userId && row.student_id !== userId)) return null;
-      const ciphertext = row.guardian_id === userId ? row.note_to_guardian : row.note_to_student;
+      const asGuardian = row.guardian_id === userId;
+      // Incoming is what the other side wrote; outgoing is what this user did.
+      const ciphertext = outgoing
+        ? asGuardian
+          ? row.note_to_student
+          : row.note_to_guardian
+        : asGuardian
+          ? row.note_to_guardian
+          : row.note_to_student;
       return { ciphertext, weekOf: row.note_week };
     },
 

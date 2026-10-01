@@ -52,12 +52,15 @@ export function VoiceTalk({ onDraft, currentDraft = null }: {
   const [muted, setMuted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingConflict, setPendingConflict] = useState<{ utterance: string; conflict: PromptScheduleConflict } | null>(null);
+  /** True once the answer has started arriving, as opposed to being thought about. */
+  const [writing, setWriting] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
   const mountedRef = useRef(true);
   const busyRef = useRef(false);
   const mutedRef = useRef(false);
   const phaseRef = useRef<Phase>('idle');
   const lastUtteranceRef = useRef<string | null>(null);
+  const thinkingRef = useRef<AbortController | null>(null);
   mutedRef.current = muted;
   phaseRef.current = phase;
 
@@ -67,6 +70,7 @@ export function VoiceTalk({ onDraft, currentDraft = null }: {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      thinkingRef.current?.abort();
       speech.stop();
       stopSpeaking();
     };
@@ -121,7 +125,19 @@ export function VoiceTalk({ onDraft, currentDraft = null }: {
       const requestText = approvedConflict
         ? `${utterance}\n\nScheduling decision: Keep the existing ${approvedConflict.title} on ${approvedConflict.date} from ${approvedConflict.startTime} to ${approvedConflict.endTime} protected. Do not move or overlap it; find another genuinely free time for my requested activity and tell me you worked around this conflict.`
         : utterance;
-      const result = await voiceTurn({ utterance: requestText, history, state, currentDraft });
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      thinkingRef.current = controller;
+      setWriting(false);
+      const result = await voiceTurn({
+        utterance: requestText,
+        history,
+        state,
+        currentDraft,
+        signal: controller?.signal,
+        onProgress: () => {
+          if (mountedRef.current) setWriting(true);
+        },
+      });
       if (!mountedRef.current) return;
       const replyText = result.followUp ? `${result.reply} ${result.followUp}` : result.reply;
       setBubbles((current) => [...current, newBubble('assistant', replyText)]);
@@ -135,9 +151,12 @@ export function VoiceTalk({ onDraft, currentDraft = null }: {
       });
       setPhase(spoken ? 'speaking' : 'idle');
     } catch (cause) {
-      if (mountedRef.current) setError(cause instanceof Error ? cause.message : t("Something snagged — try again?"));
+      const stopped = cause instanceof Error && cause.message === t("Stopped.");
+      if (mountedRef.current && !stopped) setError(cause instanceof Error ? cause.message : t("Something snagged — try again?"));
       settle('idle');
     } finally {
+      thinkingRef.current = null;
+      setWriting(false);
       busyRef.current = false;
     }
   };
@@ -182,10 +201,18 @@ export function VoiceTalk({ onDraft, currentDraft = null }: {
   const phaseLabel = (() => {
     if (!speech.available) return t("Voice needs Chrome, Edge or Safari — type below instead");
     if (phase === 'listening') return t("I'm listening — just talk");
-    if (phase === 'thinking') return t("Thinking it through…");
+    // Once words are arriving it is no longer thinking — it is writing, and
+    // saying so is the difference between a wait and a wait that looks stuck.
+    if (phase === 'thinking') return writing ? t("Writing…") : t("Thinking it through…");
     if (phase === 'speaking') return t("Speaking…");
     return t("Tap the mic and just say it");
   })();
+
+  const stopWaiting = () => {
+    if (phase === 'speaking') stopSpeaking();
+    thinkingRef.current?.abort();
+    if (phase === 'speaking') settle('idle');
+  };
 
   // Both languages show up either way — saying it in the "other" language
   // works just as well, and the hints make that obvious.
@@ -287,6 +314,11 @@ export function VoiceTalk({ onDraft, currentDraft = null }: {
           )}
         </button>
         <p className={cx('voice-phase', phase === 'listening' && 'live')}>{phaseLabel}</p>
+        {phase === 'thinking' || phase === 'speaking' ? (
+          <button type="button" className="btn btn-ghost btn-small voice-stop" onClick={stopWaiting}>
+            {t("Stop")}
+          </button>
+        ) : null}
       </div>
     </section>
   );

@@ -1,7 +1,5 @@
-import { addDays, formatWeekRange, localDateFromTimestamp, startOfWeek, weekDates } from './dates';
-import { dayScore, formatPercent, habitStreaks } from './logic';
+import { addDays, localDateFromTimestamp } from './dates';
 import type { PlannerState, Task } from './types';
-import { t } from './i18n';
 
 /** The local date a task was finished (falls back to its due date for older data). */
 export function completionDate(task: Task): string | null {
@@ -108,48 +106,3 @@ export function habitLinks(state: PlannerState, today: string, window = 60, minD
 }
 
 /** A plain-text / Markdown summary of this week, for copying or saving. */
-export function weeklyReport(state: PlannerState, today: string): string {
-  const days = weekDates(today).filter((date) => date <= today);
-  const lines = [`# Week of ${formatWeekRange(startOfWeek(today))}`, ''];
-  let done = 0;
-  let total = 0;
-  for (const date of days) {
-    const score = dayScore(state, date, false);
-    done += score.done;
-    total += score.total;
-  }
-  lines.push(
-    total
-      ? t("**Completed:** {0} of {1} planned items ({2})", { 0: done, 1: total, 2: formatPercent(done / total) })
-      : t("**Completed:** {0} of {1} planned items", { 0: done, 1: total }),
-  );
-  const focus = focusSummary(state, today, days.length || 1);
-  if (focus.totalMinutes) lines.push(t("**Focus:** {0} h across {1} sessions", { 0: Math.round(focus.totalMinutes / 6) / 10, 1: focus.sessions }));
-  const finished = state.tasks.filter((task) => {
-    const date = completionDate(task);
-    return date !== null && days.includes(date);
-  });
-  if (finished.length) {
-    lines.push('', '## Finished');
-    for (const task of finished.slice(0, 30)) lines.push(t("- [x] {0}", { 0: task.title }));
-  }
-  const open = state.tasks.filter((task) => !task.completed && task.dueDate !== null && task.dueDate <= today);
-  if (open.length) {
-    lines.push('', '## Still open');
-    for (const task of open.slice(0, 30)) lines.push(t("- [ ] {0} (due {1})", { 0: task.title, 1: task.dueDate ?? "" }));
-  }
-  const habits = state.habits.filter((habit) => !habit.archived);
-  if (habits.length) {
-    lines.push('', '## Habits');
-    for (const habit of habits) {
-      const count = state.completions.filter((item) => item.habitId === habit.id && days.includes(item.date)).length;
-      const streak = habitStreaks(state, habit, today).current;
-      lines.push(
-        streak >= 2
-          ? t("- {0}: {1}/{2} days · {3}-day streak", { 0: habit.name, 1: count, 2: days.length, 3: streak })
-          : t("- {0}: {1}/{2} days", { 0: habit.name, 1: count, 2: days.length }),
-      );
-    }
-  }
-  return lines.join('\n') + '\n';
-}

@@ -28,6 +28,7 @@ function makeDraft(): AIDraft {
     events: [{ title: 'Evening walk', date: '2026-09-28', startTime: '18:00', endTime: '18:30', category: 'health', note: '', important: false }],
     habits: [{ name: 'Stretch', icon: 'stretch', accent: 'sage', frequency: { type: 'daily' } }],
     suggestions: ['Drink water.'],
+    reasons: {},
     skippedEvents: [],
   };
 }
