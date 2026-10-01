@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { displayTime, formatMonthLong, monthGrid, setDisplayPrefs, setWeekStart, startOfWeek, weekdayHeaders } from './dates';
 import { parseICS, toBusyICS, toICS } from './ics';
-import { focusSummary, habitLinks, productiveHours, weeklyReport } from './insights';
+import { focusSummary, habitLinks, productiveHours } from './insights';
+import { weeklyReport } from './weeklyReport';
 import { extractTags } from './components/Markdown';
 import { addAIMemory, addEvent, addFixedCommitment, addHabit, addNote, addTask, clearAIMemory, deleteAIMemory, logFocus, resizeEvent, toggleHabit, toggleSubtask, toggleTask, updateAIMemory, updateNote, updateTask } from './mutate';
 import { parseQuickAdd } from './quickAdd';
@@ -36,10 +37,55 @@ describe('recurrence', () => {
     expect(state.tasks).toHaveLength(2);
     const [done, next] = state.tasks;
     expect(done.completed).toBe(true);
-    expect(done.repeat).toBeNull();
+    // The rule stays on the finished copy: un-checking it must not end the series.
+    expect(done.repeat).toBe('weekly');
     expect(done.completedAt).toBe('2026-09-28T10:00:00.000Z');
+    expect(done.spawnedId).toBe('t2');
     expect(next).toMatchObject({ id: 't2', completed: false, repeat: 'weekly', dueDate: '2026-10-05' });
     expect(next.subtasks[0].completed).toBe(false);
+  });
+
+  it('un-completing a repeating task takes back the copy it spawned and keeps the rule', () => {
+    let state = addTask(createEmptyState(), { ...baseTask, repeat: 'daily', dueDate: '2026-09-28' }, 't1', 'now');
+    state = toggleTask(state, 't1', '2026-09-28T10:00:00.000Z', '2026-09-28', 't2');
+    expect(state.tasks).toHaveLength(2);
+    state = toggleTask(state, 't1', '2026-09-28T11:00:00.000Z', '2026-09-28', 't3');
+    // Back to one task, still repeating, no stale copy left behind.
+    expect(state.tasks).toHaveLength(1);
+    expect(state.tasks[0]).toMatchObject({ id: 't1', completed: false, repeat: 'daily', completedAt: null, spawnedId: null });
+  });
+
+  it('re-completing a repeating task never grows the series', () => {
+    let state = addTask(createEmptyState(), { ...baseTask, repeat: 'daily', dueDate: '2026-09-28' }, 't1', 'now');
+    for (const [index, id] of ['a', 'b', 'c'].entries()) {
+      state = toggleTask(state, 't1', `2026-09-28T1${index}:00:00.000Z`, '2026-09-28', `spawn-${id}`);
+      expect(state.tasks).toHaveLength(2);
+      state = toggleTask(state, 't1', `2026-09-28T1${index}:30:00.000Z`, '2026-09-28');
+      expect(state.tasks).toHaveLength(1);
+    }
+    expect(state.tasks[0].repeat).toBe('daily');
+  });
+
+  it('leaves a spawned copy alone once the user has worked on it', () => {
+    let state = addTask(createEmptyState(), { ...baseTask, repeat: 'daily', dueDate: '2026-09-28', subtasks: [{ id: 's1', title: 'Step', completed: false }] }, 't1', 'now');
+    state = toggleTask(state, 't1', '2026-09-28T10:00:00.000Z', '2026-09-28', 't2');
+    // The user ticks a step on tomorrow's copy — it is their work now.
+    state = toggleSubtask(state, 't2', state.tasks[1].subtasks[0].id);
+    state = toggleTask(state, 't1', '2026-09-28T11:00:00.000Z', '2026-09-28');
+    expect(state.tasks).toHaveLength(2);
+    expect(state.tasks.find((task) => task.id === 't2')?.subtasks[0].completed).toBe(true);
+  });
+
+  it('stamps completedAt when a task is completed through updateTask', () => {
+    let state = addTask(createEmptyState(), baseTask, 't1', 'now');
+    state = updateTask(state, 't1', { completed: true }, '2026-09-28T10:00:00.000Z');
+    expect(state.tasks[0]).toMatchObject({ completed: true, completedAt: '2026-09-28T10:00:00.000Z' });
+    state = updateTask(state, 't1', { completed: false }, '2026-09-28T11:00:00.000Z');
+    expect(state.tasks[0]).toMatchObject({ completed: false, completedAt: null });
+    // A patch that does not mention completion leaves the stamp untouched.
+    state = updateTask(state, 't1', { completed: true }, '2026-09-28T12:00:00.000Z');
+    state = updateTask(state, 't1', { title: 'Watered' }, '2026-09-28T13:00:00.000Z');
+    expect(state.tasks[0].completedAt).toBe('2026-09-28T12:00:00.000Z');
   });
 
   it('non-repeating tasks toggle without copies', () => {

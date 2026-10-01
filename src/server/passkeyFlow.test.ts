@@ -29,9 +29,9 @@ const ACCOUNT = {
   role: 'student' as const,
   kdfSalt: 'c2FsdHNhbHRzYWx0c2E=',
   authToken: 'YXV0aFRva2VuYXV0aFRva2VuYXV0aFRva2VuMTI=',
-  recoveryHash: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+  recoveryHashes: ['AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='],
   wrappedDek: 'd3JhcHBlZERla3dyYXBwZWREZWt3cmFwcGVkRGVrMTI=',
-  wrappedRecovery: 'd3JhcHBlZFJlY292ZXJ5d3JhcHBlZFJlY292ZXJ5MTI=',
+  wrappedRecovery: ['d3JhcHBlZFJlY292ZXJ5d3JhcHBlZFJlY292ZXJ5MTI='],
   ciphertext: 'dmF1bHRjaXBoZXJ0ZXh0',
 };
 

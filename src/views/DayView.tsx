@@ -46,7 +46,9 @@ export function DayView({ date }: { date: string }) {
   const today = todayISO(now);
   const isToday = date === today;
   const events = eventsForDate(state, date);
-  const tasks = tasksForDate(state, date);
+  // Today you act on the one real copy; a projection would only duplicate it
+  // alongside the overdue list. The days ahead are where the week was missing.
+  const tasks = tasksForDate(state, date, date > today);
   const openTasks = tasks.filter((task) => !task.completed);
   const doneTasks = tasks.filter((task) => task.completed);
   const habits = habitsDueOn(state, date).filter((habit) => !habit.essential);
@@ -158,7 +160,11 @@ export function DayView({ date }: { date: string }) {
           <Ring value={score.ratio ?? 0} label={score.total ? `${score.done}/${score.total}` : t("Open")} caption={t("done today")} />
           <p className="progress-phrase">{progressPhrase(score.ratio)}</p>
           <p className="meta">
-            {score.eventsDone}/{score.eventsTotal} {t("events ·")} {score.tasksDone}/{score.tasksTotal} {t("tasks ·")} {score.habitsDone}/{score.habitsTotal} {t('habits')}
+            {t("{events} events · {tasks} tasks · {habits} habits", {
+              events: `${score.eventsDone}/${score.eventsTotal}`,
+              tasks: `${score.tasksDone}/${score.tasksTotal}`,
+              habits: `${score.habitsDone}/${score.habitsTotal}`,
+            })}
           </p>
           <div className="qa-row">
             <button type="button" className="qa-tile accent-peach" onClick={() => openComposer({ mode: 'create', type: 'task', date })}>

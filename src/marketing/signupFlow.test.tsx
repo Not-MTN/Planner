@@ -12,7 +12,6 @@ import { Site } from './Site';
 import { resetRateLimits } from '../server/security';
 
 declare global {
-  // eslint-disable-next-line no-var
   var IS_REACT_ACT_ENVIRONMENT: boolean;
 }
 
@@ -120,12 +119,24 @@ async function click(element: Element | null | undefined) {
   });
 }
 
-async function waitFor(predicate: () => boolean, timeoutMs = 30_000) {
-  await act(async () => {
-    for (let waited = 0; waited < timeoutMs && !predicate(); waited += 100) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-  });
+/**
+ * Poll for a UI condition, flushing React between ticks.
+ *
+ * The loop must not sit inside one big act(): act batches the updates it
+ * flushes, so a predicate that reads the DOM inside the block can never see
+ * intermediate renders. Every wait therefore ran the full timeout, and — worse
+ * — returned silently when the condition never came true, turning a real
+ * failure into a slow pass.
+ */
+async function waitFor(predicate: () => boolean, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (predicate()) return;
+    if (Date.now() >= deadline) throw new Error(`Timed out after ${timeoutMs}ms waiting for a UI condition.`);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+  }
 }
 
 const buttonStartingWith = (text: string) =>
@@ -189,16 +200,33 @@ describe('sign-up journey', () => {
 
     // Default role is "personal" — Continue creates the account.
     await click(buttonStartingWith('Continue'));
-    await waitFor(() => container.textContent.includes('Save your recovery key'));
+    await waitFor(() => container.textContent.includes('Save your recovery codes'));
     expect(signUpCalls()).toHaveLength(1);
     expect(container.querySelector('.auth-error')).toBeNull();
 
-    // The recovery key must be confirmed before the planner opens.
-    const saved = [...container.querySelectorAll('input')].at(-1) as HTMLInputElement;
-    setChecked(saved, true);
-    await click(buttonStartingWith('Open my planner'));
+    // A whole set of codes, each numbered.
+    const listed = [...container.querySelectorAll('.recovery-codes code')].map((node) => node.textContent ?? '');
+    expect(listed.length).toBeGreaterThan(1);
+    listed.forEach((code) => expect(code).toMatch(/^plnr(-[A-Z2-9]{4}){5}$/));
+    expect(new Set(listed).size).toBe(listed.length);
 
-    // pushState alone would leave the marketing site on screen at /app.
+    // The planner stays shut until one named code is typed back.
+    await click(buttonStartingWith('Open my planner'));
+    expect(assign).not.toHaveBeenCalledWith('/app');
+
+    const confirm = container.querySelector('#signup-confirm') as HTMLInputElement;
+    const asked = Number(/(\d+)/.exec(container.querySelector('label[for="signup-confirm"]')?.textContent ?? '')?.[1]);
+    expect(asked).toBeGreaterThan(0);
+
+    setValue(confirm, listed[0]!);
+    await click(buttonStartingWith('Open my planner'));
+    if (asked !== 1) {
+      // The wrong number is not enough, even though the code itself is real.
+      expect(assign).not.toHaveBeenCalledWith('/app');
+    }
+
+    setValue(confirm, listed[asked - 1]!);
+    await click(buttonStartingWith('Open my planner'));
     expect(assign).toHaveBeenCalledWith('/app');
   }, 60_000);
 
@@ -226,14 +254,20 @@ describe('sign-up journey', () => {
     await waitFor(() => Boolean(container.querySelector('.auth-error')));
     expect(container.querySelector('.auth-error')?.textContent).toContain('do not match');
 
-    setValue(inputs[1]!, created.recoveryKey);
+    setValue(inputs[1]!, created.recoveryCodes[0]!);
     await click(container.querySelector('form.auth-fields button[type="submit"]'));
     await waitFor(() => container.textContent?.includes('Password updated') ?? false);
-    expect(container.textContent).toContain('Save this new recovery key somewhere safe.');
+    expect(container.textContent).toContain('The code you used is spent');
     expect(container.textContent).toContain('plnr-');
 
-    const saved = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
-    setChecked(saved, true);
+    // A fresh set replaces the old one, and it must be confirmed too.
+    const listed = [...container.querySelectorAll('.recovery-codes code')].map((node) => node.textContent ?? '');
+    expect(listed.length).toBe(created.recoveryCodes.length);
+    listed.forEach((code) => expect(created.recoveryCodes).not.toContain(code));
+
+    const confirm = container.querySelector('#recover-confirm') as HTMLInputElement;
+    const asked = Number(/(\d+)/.exec(container.querySelector('label[for="recover-confirm"]')?.textContent ?? '')?.[1]);
+    setValue(confirm, listed[asked - 1]!);
     await click(buttonStartingWith('Back to sign in'));
     expect(container.querySelector('.auth-head h1')?.textContent).toBe('Welcome back');
     expect(requests).toContain('POST /api/auth/recovery/start');

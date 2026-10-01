@@ -34,12 +34,22 @@ import {
   handlePasskeyRegisterVerify,
   handleRecoveryComplete,
   handleRecoveryStart,
+  handleRecoveryUpdate,
   handleSalt,
   handleSession,
+  handleSessions,
+  handleAuthEvents,
   handleShare,
+  handleTotpConfirm,
+  handleTotpDisable,
+  handleTotpLogin,
+  handleTotpSetup,
   handleSignup,
+  readSessionToken,
 } from './authApi.js';
-import { authStore } from './authStore.js';
+import { authStore, hashToken } from './authStore.js';
+import { handleReport } from './reportApi.js';
+import { resolveProviders } from './aiProviders.js';
 import { handleICS } from './icsProxy.js';
 import { handleSync, handleSyncStatus, neonStore } from './sync.js';
 import { handleGroqChatCompletions, handleGroqStatus } from './groqProxy.js';
@@ -50,7 +60,19 @@ export interface ApiEnv {
   DATABASE_URL?: string;
   GROQ_API_KEY?: string;
   GROQ_MODEL?: string;
+  /** Cheaper model used when editing an existing draft rather than writing one. */
+  GROQ_LIGHT_MODEL?: string;
   GROQ_VISION_MODEL?: string;
+  /** AI requests allowed per signed-in account per day; 0 disables the check. */
+  AI_DAILY_REQUESTS?: string;
+  /** Optional: forwards each crash report somewhere you actually read. */
+  ERROR_REPORT_WEBHOOK?: string;
+  /**
+   * Every AI provider variable, passed through as read. The proxy resolves
+   * providers from this rather than from a fixed list, so adding a key means
+   * setting an environment variable and nothing else.
+   */
+  AI_ENV?: Record<string, string | undefined>;
   VAPID_PUBLIC_KEY?: string;
   VAPID_PRIVATE_KEY?: string;
   VAPID_SUBJECT?: string;
@@ -58,6 +80,43 @@ export interface ApiEnv {
 }
 
 type Handler = (request: Request) => Response | Promise<Response>;
+
+/**
+ * The AI variables the proxy resolves providers from.
+ *
+ * The typed `env` fields win where they are set, because a `.env.local` value
+ * read by the Vite dev server never reaches `process.env`.
+ */
+function aiEnv(env: ApiEnv): Record<string, string | undefined> {
+  const merged: Record<string, string | undefined> = { ...(env.AI_ENV ?? {}) };
+  for (const key of ['GROQ_API_KEY', 'GROQ_MODEL', 'GROQ_VISION_MODEL', 'GROQ_LIGHT_MODEL', 'AI_DAILY_REQUESTS'] as const) {
+    const value = env[key];
+    if (value !== undefined) merged[key] = value;
+  }
+  return merged;
+}
+
+/**
+ * Which account is making this AI call, when the request carries a session.
+ *
+ * Returns null for a local-only planner, and null whenever anything at all goes
+ * wrong — a missing database, a broken session, a slow query. The AI is a
+ * feature; a dead database must not become a dead feature. Failing open here
+ * means the worst case is the per-client limiter alone, which is what this
+ * endpoint has always relied on.
+ */
+async function resolveAiAccount(request: Request, databaseUrl: string | undefined): Promise<string | null> {
+  try {
+    const token = readSessionToken(request);
+    if (!token || !databaseUrl) return null;
+    const store = await authStore(databaseUrl);
+    if (!store) return null;
+    const found = await store.findSession(hashToken(token));
+    return found?.user.id ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /** The one 404 every unrouted /api path gets, in dev and in production alike. */
 export function notFoundResponse(): Response {
@@ -105,14 +164,28 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
       return (request) => authStore(env.DATABASE_URL).then((store) => handleRecoveryStart(request, store));
     case '/api/auth/recovery/complete':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleRecoveryComplete(request, store));
+    case '/api/auth/recovery/update':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleRecoveryUpdate(request, store));
     case '/api/auth/salt':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleSalt(request, store));
     case '/api/auth/session':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleSession(request, store));
+    case '/api/auth/sessions':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleSessions(request, store));
+    case '/api/auth/events':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleAuthEvents(request, store));
     case '/api/auth/share':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleShare(request, store));
     case '/api/auth/signup':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleSignup(request, store));
+    case '/api/auth/totp/login':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleTotpLogin(request, store));
+    case '/api/auth/totp/setup':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleTotpSetup(request, store));
+    case '/api/auth/totp/confirm':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleTotpConfirm(request, store));
+    case '/api/auth/totp/disable':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleTotpDisable(request, store));
     case '/api/auth/status':
       return (request) => handleAuthStatus(request, env.DATABASE_URL);
     case '/api/auth/vault':
@@ -123,16 +196,23 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
       return (request) => neonStore(env.DATABASE_URL).then((store) => handleSync(request, store));
     case '/api/sync/status':
       return (request) => handleSyncStatus(request, env.DATABASE_URL);
+    case '/api/ai/chat/completions':
     case '/api/groq/chat/completions':
-      return (request) => handleGroqChatCompletions(request, env.GROQ_API_KEY, { model: env.GROQ_MODEL, visionModel: env.GROQ_VISION_MODEL });
+      return (request) =>
+        resolveAiAccount(request, env.DATABASE_URL).then((accountId) =>
+          handleGroqChatCompletions(request, env.GROQ_API_KEY, { env: aiEnv(env), accountId }),
+        );
+    case '/api/ai/status':
     case '/api/groq/status':
-      return (request) => handleGroqStatus(request, env.GROQ_API_KEY);
+      return (request) => handleGroqStatus(request, env.GROQ_API_KEY, resolveProviders(aiEnv(env)));
     case '/api/push/config':
       return (request) => handlePushConfig(request, env.VAPID_PUBLIC_KEY, env.VAPID_PRIVATE_KEY, env.DATABASE_URL, env.CRON_SECRET);
     case '/api/push/subscription':
       return (request) => handlePushSubscription(request, env);
     case '/api/push/dispatch':
       return (request) => handlePushDispatch(request, env);
+    case '/api/report':
+      return (request) => handleReport(request, env.ERROR_REPORT_WEBHOOK);
     default:
       return null;
   }

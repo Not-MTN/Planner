@@ -49,8 +49,10 @@ describe('apiRoute table', () => {
       '/api/auth/note',
       '/api/auth/recovery/start',
       '/api/auth/recovery/complete',
+      '/api/auth/recovery/update',
       '/api/auth/salt',
       '/api/auth/session',
+      '/api/auth/sessions',
       '/api/auth/share',
       '/api/auth/signup',
       '/api/auth/status',
@@ -58,12 +60,12 @@ describe('apiRoute table', () => {
       '/api/ics',
       '/api/sync',
       '/api/sync/status',
-      '/api/groq/chat/completions',
-      '/api/groq/status',
+      '/api/ai/chat/completions',
+      '/api/ai/status',
     ];
     for (const path of paths) expect(apiRoute(path, NO_ENV), path).not.toBeNull();
 
-    for (const path of ['/api', '/api/auth', '/api/auth/nope', '/api/sync/nope', '/api/groq', '/api/not-a-route']) {
+    for (const path of ['/api', '/api/auth', '/api/auth/nope', '/api/sync/nope', '/api/ai', '/api/not-a-route']) {
       expect(apiRoute(path, NO_ENV), path).toBeNull();
     }
   });
@@ -85,12 +87,16 @@ describe('handleApiRequest', () => {
     await expect(response.json()).resolves.toEqual({ configured: false, storage: 'temporary' });
   });
 
-  it('serves /api/groq/status with and without a key', async () => {
-    const without = await handleApiRequest(request('/api/groq/status'), NO_ENV);
-    await expect(without.json()).resolves.toEqual({ configured: false });
+  it('serves /api/ai/status with and without a key', async () => {
+    const without = await handleApiRequest(request('/api/ai/status'), NO_ENV);
+    await expect(without.json()).resolves.toEqual({ configured: false, providers: [] });
 
-    const withKey = await handleApiRequest(request('/api/groq/status'), { GROQ_API_KEY: 'k' });
-    await expect(withKey.json()).resolves.toEqual({ configured: true });
+    const withKey = await handleApiRequest(request('/api/ai/status'), { GROQ_API_KEY: 'k' });
+    await expect(withKey.json()).resolves.toEqual({
+      configured: true,
+      // Names and capabilities only — never a key or an upstream URL.
+      providers: [{ id: 'groq', label: 'Groq', vision: true }],
+    });
   });
 
   it('lets handlers reject wrong methods with 405', async () => {
@@ -100,7 +106,7 @@ describe('handleApiRequest', () => {
     const ics = await handleApiRequest(request('/api/ics', { method: 'POST' }), NO_ENV);
     expect(ics.status).toBe(405);
 
-    const completions = await handleApiRequest(request('/api/groq/chat/completions'), NO_ENV);
+    const completions = await handleApiRequest(request('/api/ai/chat/completions'), NO_ENV);
     expect(completions.status).toBe(405);
   });
 
@@ -121,9 +127,15 @@ describe('handleApiRequest', () => {
       role: 'student' as const,
       kdfSalt: 'c2FsdHNhbHRzYWx0c2E=',
       authToken: 'YXV0aFRva2VuYXV0aFRva2VuYXV0aFRva2VuMTI=',
-      recoveryHash: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+      recoveryHashes: [
+        'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+        'AgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+      ],
       wrappedDek: 'd3JhcHBlZERla3dyYXBwZWREZWt3cmFwcGVkRGVrMTI=',
-      wrappedRecovery: 'd3JhcHBlZFJlY292ZXJ5d3JhcHBlZFJlY292ZXJ5MTI=',
+      wrappedRecovery: [
+        'd3JhcHBlZFJlY292ZXJ5d3JhcHBlZFJlY292ZXJ5MTI=',
+        'd3JhcHBlZFJlY292ZXJ5d3JhcHBlZFJlY292ZXJ5MzQ=',
+      ],
       ciphertext: 'dmF1bHRjaXBoZXJ0ZXh0',
     };
     const response = await handleApiRequest(jsonRequest('POST', '/api/auth/signup', account), NO_ENV);
@@ -143,5 +155,9 @@ describe('handleApiRequest', () => {
       kdfSalt: account.kdfSalt,
       wrappedRecovery: account.wrappedRecovery,
     });
+
+    // Rotating codes needs a session, and the route is reachable in production.
+    const rotate = await handleApiRequest(jsonRequest('POST', '/api/auth/recovery/update', { newRecoveryHashes: [] }), NO_ENV);
+    expect(rotate.status).toBe(401);
   });
 });

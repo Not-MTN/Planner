@@ -2,15 +2,15 @@ import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type Re
 import { CATEGORIES, categoryById } from '../constants';
 import { usePlanner } from '../context';
 import { addDays, addMinutes, formatFullDate, timeToMinutes, todayISO, weekdayIndex, displayTime } from '../dates';
-import { analyzeDraft, filterDraftAgainstState, findPromptScheduleConflicts, habitFrequencyLabel, MAX_PLAN_IMAGE_BYTES, GROQ_KEY_MISSING_MESSAGE, checkGroqConfiguration, friendlyGroqError, generateAIPlan, generateAIReview, hasReviewActivity, refineAIPlan } from '../ai';
-import type { AIReview, AIDraft, DraftWarning, PlanRange, PromptScheduleConflict } from '../ai';
+import { analyzeDraft, filterDraftAgainstState, findPromptScheduleConflicts, habitFrequencyLabel, MAX_PLAN_IMAGE_BYTES, GROQ_KEY_MISSING_MESSAGE, checkGroqConfiguration, friendlyGroqError, generateAIPlan, generateAIReview, hasReviewActivity, parseTimetableImage, refineAIPlan } from '../ai';
+import type { AIReview, AIDraft, DraftWarning, PlanRange, PromptScheduleConflict, TimetableParse } from '../ai';
 import { MAX_PLAN_DAYS, parsePlanDuration } from '../duration';
 import { cx } from '../cx';
 import { useSpeechInput } from '../speech';
 import { VoiceTalk } from '../components/VoiceTalk';
 import { DraftRefine } from '../components/DraftRefine';
 import { CalendarIcon, CheckIcon, LeafIcon, MicIcon, PlusIcon, SparklesIcon, UploadIcon } from '../icons';
-import type { AIMemory, AIMemoryCategory, FixedCommitmentInput } from '../types';
+import type { AIDeclined, AIDeclinedKind, AIMemory, AIMemoryCategory, FixedCommitmentInput } from '../types';
 import { markAIVisited } from '../tour';
 import { t } from '../i18n';
 
@@ -23,6 +23,9 @@ const WEEKDAYS = [
   { value: 6, label: t("Saturday") },
   { value: 0, label: t("Sunday") },
 ];
+
+/** Full names by weekday number (0 = Sunday), for the timetable review card. */
+const WEEKDAY_LABELS: Record<number, string> = Object.fromEntries(WEEKDAYS.map((day) => [day.value, String(day.label)]));
 
 type PlanningPeriod = 'day' | 'week' | 'month' | 'custom';
 type AISection = 'plan' | 'review';
@@ -86,6 +89,9 @@ export function AIView() {
     updateAIMemory,
     deleteAIMemory,
     clearAIMemory,
+    declineSuggestions,
+    forgetDeclined,
+    clearDeclined,
     requestConfirm,
     applyAIPlan,
     saveAIPlan,
@@ -130,6 +136,16 @@ export function AIView() {
   const [blockCategory, setBlockCategory] = useState('learning');
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [blockError, setBlockError] = useState('');
+  /**
+   * Which suggestions on the card are ticked, by `kind:index` key.
+   *
+   * Empty means "everything" rather than "nothing": a draft the user has not
+   * touched yet should offer all of it, and opting out has to be an act.
+   */
+  const [draftSelection, setDraftSelection] = useState<Record<string, boolean>>({});
+  /** A timetable read from an image, waiting to become protected weekly time. */
+  const [timetable, setTimetable] = useState<TimetableParse | null>(null);
+  const [timetableSelection, setTimetableSelection] = useState<Record<number, boolean>>({});
 
   const days = periodDays(period, customDays);
   const planRange = useMemo<PlanRange>(() => ({ startDate: planStart, days }), [planStart, days]);
@@ -212,11 +228,62 @@ export function AIView() {
       setDraft(result);
       setDraftRange(generationRange);
       setDraftPlanId(planId);
+      setDraftSelection({});
     } catch (reason) {
       setError(friendlyGroqError(reason));
     } finally {
       setWorking(false);
     }
+  };
+
+  /**
+   * Read a photo of a timetable.
+   *
+   * Deliberately a separate action from "build a draft": a timetable repeats
+   * for a whole term, so it belongs in protected weekly time, not in a list of
+   * one-off tasks somebody would have to re-enter every week.
+   */
+  const readTimetable = async () => {
+    if (!image) return;
+    setError('');
+    setWorking(true);
+    try {
+      const parsed = await parseTimetableImage({ imageDataUrl: image.dataUrl });
+      setTimetable(parsed);
+      setTimetableSelection({});
+      if (parsed.blocks.length === 0) {
+        setError(t("I could not read any weekly times from that picture. Try a clearer, straight-on photo of the whole timetable."));
+      }
+    } catch (reason) {
+      setError(friendlyGroqError(reason));
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const addTimetable = () => {
+    if (!timetable) return;
+    const kept = timetable.blocks.filter((_, index) => timetableSelection[index] ?? true);
+    if (kept.length === 0) {
+      setError(t("Tick at least one time to protect, or discard the reading."));
+      return;
+    }
+    for (const block of kept) {
+      addFixedCommitment({
+        title: block.title,
+        weekday: block.weekday,
+        startTime: block.startTime,
+        endTime: block.endTime,
+        category: 'learning',
+        // The room or teacher is worth keeping, but it is a note and not part
+        // of the title — titles are what show up everywhere else.
+        note: block.detail ?? '',
+      });
+    }
+    setTimetable(null);
+    setTimetableSelection({});
+    setImage(null);
+    flash(t("Protected {0} weekly {1}. Undo is available.", { 0: kept.length, 1: kept.length === 1 ? t("time") : t("times") }));
   };
 
   /**
@@ -285,6 +352,7 @@ export function AIView() {
     }
     setDraft(next);
     setDraftRange(range);
+    setDraftSelection({});
     setError('');
   };
 
@@ -336,21 +404,78 @@ export function AIView() {
     }
   };
 
+  /** Unticked means no. A draft that was never touched keeps everything. */
+  const isKept = (key: string): boolean => draftSelection[key] ?? true;
+
+  /** The suggestions on the card, in the order they are listed. */
+  const draftItems = useMemo(
+    () =>
+      draft
+        ? [
+            ...draft.events.map((item, index) => ({ key: `event:${index}`, title: item.title, kind: 'event' as AIDeclinedKind })),
+            ...draft.tasks.map((item, index) => ({ key: `task:${index}`, title: item.title, kind: 'task' as AIDeclinedKind })),
+            ...draft.habits.map((item, index) => ({ key: `habit:${index}`, title: item.name, kind: 'habit' as AIDeclinedKind })),
+          ]
+        : [] as Array<{ key: string; title: string; kind: AIDeclinedKind }>,
+    [draft],
+  );
+
+  const keptCount = draftItems.filter((item) => isKept(item.key)).length;
+  const declinedFromDraft = draftItems.filter((item) => !isKept(item.key));
+
   const addDraft = () => {
     if (!draft) return;
+    // Only what was ticked reaches the planner. The rest is remembered in the
+    // same undoable step, so undoing the plan undoes the lesson too.
+    const kept = new Set(draftItems.filter((item) => isKept(item.key)).map((item) => item.key));
     const nowSafe = filterDraftAgainstState(draft, state);
-    const taskCount = nowSafe.tasks.length;
-    const eventCount = nowSafe.events.length;
-    const habitCount = nowSafe.habits.length;
+    const tasks = nowSafe.tasks.filter((_, index) => kept.has(`task:${index}`));
+    const events = nowSafe.events.filter((_, index) => kept.has(`event:${index}`));
+    const habits = nowSafe.habits.filter((_, index) => kept.has(`habit:${index}`));
+    const taskCount = tasks.length;
+    const eventCount = events.length;
+    const habitCount = habits.length;
     if (taskCount + eventCount + habitCount === 0) {
-      setDraft(nowSafe);
-      setError(t("Nothing new can be added from this draft. It may already be in your planner or an event time may conflict with protected time."));
+      // Nothing ticked is a nudge, not an error — unless the draft itself was
+      // empty to begin with, which is worth saying out loud.
+      if (nowSafe.tasks.length + nowSafe.events.length + nowSafe.habits.length === 0) {
+        setDraft(nowSafe);
+        setError(t("Nothing new can be added from this draft. It may already be in your planner or an event time may conflict with protected time."));
+        return;
+      }
+      setError(t("Tick at least one suggestion to add, or discard the draft."));
       return;
     }
-    applyAIPlan({ tasks: nowSafe.tasks, events: nowSafe.events, habits: nowSafe.habits }, draftPlanId ?? undefined);
+    const declined = declinedFromDraft.map(({ title, kind }) => ({ title, kind }));
+    applyAIPlan({ tasks, events, habits }, draftPlanId ?? undefined, declined);
     setDraft(null);
     setDraftPlanId(null);
-    flash(t("Added {0} {1}, {2} {3} and {4} {5}. Undo is available.", { 0: taskCount, 1: taskCount === 1 ? t("task") : t("tasks"), 2: eventCount, 3: eventCount === 1 ? t("event") : t("events"), 4: habitCount, 5: habitCount === 1 ? t("habit") : t("habits") }));
+    setDraftSelection({});
+    flash(
+      declined.length > 0
+        ? t("Added {0} of {1} suggestions. The {2} you left out will not be suggested again — forget them in AI memory if you change your mind.", {
+            0: taskCount + eventCount + habitCount,
+            1: draftItems.length,
+            2: declined.length === 1 ? t("one") : t("ones"),
+          })
+        : t("Added {0} {1}, {2} {3} and {4} {5}. Undo is available.", { 0: taskCount, 1: taskCount === 1 ? t("task") : t("tasks"), 2: eventCount, 3: eventCount === 1 ? t("event") : t("events"), 4: habitCount, 5: habitCount === 1 ? t("habit") : t("habits") }),
+    );
+  };
+
+  const discardDraft = () => {
+    if (!draft) return;
+    // Discarding the lot is the strongest signal there is: every suggestion
+    // on the card was looked at and turned down.
+    const declined = draftItems.map(({ title, kind }) => ({ title, kind }));
+    if (declined.length > 0) declineSuggestions(declined);
+    setDraft(null);
+    setDraftPlanId(null);
+    setDraftSelection({});
+    flash(
+      declined.length > 0
+        ? t("Draft discarded. Those {0} suggestions will not come back.", { 0: declined.length })
+        : t("Draft discarded."),
+    );
   };
 
   const saveBlock = (event: FormEvent<HTMLFormElement>) => {
@@ -445,10 +570,13 @@ export function AIView() {
 
       <MemoryCard
         memories={state.aiMemory}
+        declined={state.aiDeclined ?? []}
         addMemory={addAIMemory}
         updateMemory={updateAIMemory}
         deleteMemory={deleteAIMemory}
         clearMemory={clearAIMemory}
+        forgetDeclined={forgetDeclined}
+        clearDeclined={clearDeclined}
         requestConfirm={requestConfirm}
         flash={flash}
       />
@@ -490,7 +618,10 @@ export function AIView() {
                 </label>
               ) : null}
             </div>
-            <p className="ai-range-note">{formatFullDate(planRange.startDate)} — {formatFullDate(planEnd)}{t(". Fixed weekly times and existing events are treated as busy, protected slots.")}</p>
+            <p className="ai-range-note">{t("{start} — {end}. Fixed weekly times and existing events are treated as busy, protected slots.", {
+              start: formatFullDate(planRange.startDate),
+              end: formatFullDate(planEnd),
+            })}</p>
             {pendingScheduleConflict ? (
               <div className="ai-schedule-conflict" role="alert">
                 <strong>{t("I spotted a schedule conflict")}</strong>
@@ -570,6 +701,14 @@ export function AIView() {
                 <button type="button" className="text-btn" onClick={() => setImage(null)}>{t("Remove")}</button>
               </div>
             ) : null}
+            {image ? (
+              <div className="ai-timetable-row">
+                <button type="button" className="btn btn-soft btn-small" disabled={working} onClick={() => void readTimetable()}>
+                  <CalendarIcon size={15} /> {working ? t("Reading the timetable…") : t("This is a weekly timetable")}
+                </button>
+                <span className="hint">{t("Reads the class grid into protected weekly times instead of one-off tasks.")}</span>
+              </div>
+            ) : null}
             <div className="ai-builder-actions">
               <p className="meta">{t("Health ideas stay gentle and optional. The AI is not a medical professional.")}</p>
               <button type="button" className="btn btn-primary" disabled={working || (!prompt.trim() && !image)} onClick={() => void generatePlan()}>
@@ -578,6 +717,16 @@ export function AIView() {
             </div>
           </section>
 
+          {timetable ? (
+            <TimetableCard
+              timetable={timetable}
+              isKept={(index) => timetableSelection[index] ?? true}
+              onToggle={(index) => setTimetableSelection((current) => ({ ...current, [index]: !(current[index] ?? true) }))}
+              onAdd={addTimetable}
+              onDiscard={() => { setTimetable(null); setTimetableSelection({}); }}
+            />
+          ) : null}
+
           {draft ? (
             <PlanDraft
               draft={draft}
@@ -585,7 +734,10 @@ export function AIView() {
               working={working}
               onRefine={refineDraft}
               onAdd={addDraft}
-              onDiscard={() => { setDraft(null); setDraftPlanId(null); }}
+              onDiscard={discardDraft}
+              isKept={isKept}
+              onToggle={(key) => setDraftSelection((current) => ({ ...current, [key]: !(current[key] ?? true) }))}
+              keptCount={keptCount}
             />
           ) : null}
 
@@ -638,7 +790,11 @@ export function AIView() {
                     <span className={cx('fixed-list-dot', `accent-${categoryById(block.category).accent}`)} />
                     <div className="fixed-list-copy">
                       <strong>{block.title}</strong>
-                      <span>{WEEKDAYS.find((day) => day.value === block.weekday)?.label} · {displayTime(block.startTime)}–{displayTime(block.endTime)} {t("· Protected every week")}</span>
+                      <span>{t("{day} · {start}–{end} · Protected every week", {
+                        day: WEEKDAYS.find((day) => day.value === block.weekday)?.label ?? '',
+                        start: displayTime(block.startTime),
+                        end: displayTime(block.endTime),
+                      })}</span>
                     </div>
                     <button type="button" className="text-btn" onClick={() => editBlock(block.id)}>{t("Edit")}</button>
                     <button type="button" className="icon-btn" aria-label={t("Remove {0}", { 0: block.title })} onClick={() => { deleteFixedCommitment(block.id); if (editingBlockId === block.id) { setEditingBlockId(null); setBlockTitle(''); } }}>×</button>
@@ -715,18 +871,24 @@ export function AIView() {
 
 function MemoryCard({
   memories,
+  declined,
   addMemory,
   updateMemory,
   deleteMemory,
   clearMemory,
+  forgetDeclined,
+  clearDeclined,
   requestConfirm,
   flash,
 }: {
   memories: AIMemory[];
+  declined: AIDeclined[];
   addMemory: (input: { text: string; category: AIMemoryCategory }) => void;
   updateMemory: (id: string, patch: { text?: string; category?: AIMemoryCategory }) => void;
   deleteMemory: (id: string) => void;
   clearMemory: () => void;
+  forgetDeclined: (id: string) => void;
+  clearDeclined: () => void;
   requestConfirm: (request: { title: string; body: string; confirmLabel?: string; onConfirm: () => void }) => void;
   flash: (message: string) => void;
 }) {
@@ -751,6 +913,19 @@ function MemoryCard({
       flash(t("AI will remember that."));
     }
     reset();
+  };
+
+  const forgetAllDeclined = () => {
+    if (declined.length === 0) return;
+    requestConfirm({
+      title: t("Forget every suggestion you turned down?"),
+      body: t("The AI may suggest all of them again. Your saved memories are untouched."),
+      confirmLabel: t("Forget all"),
+      onConfirm: () => {
+        clearDeclined();
+        flash(t("Those suggestions may come back."));
+      },
+    });
   };
 
   const edit = (memory: AIMemory) => {
@@ -832,8 +1007,36 @@ function MemoryCard({
       ) : (
         <p className="empty-inline ai-memory-empty">{t("Nothing saved yet. Add a preference, person, routine, or boundary when you are ready.")}</p>
       )}
+      {declined.length > 0 ? (
+        <div className="ai-declined">
+          <div className="ai-declined-head">
+            <strong>{t("Suggestions you turned down")}</strong>
+            {/* Visible on purpose: a preference the AI learned on its own and
+                then acted on silently is a guess nobody can correct. */}
+            <button type="button" className="text-btn danger-text" onClick={forgetAllDeclined}>{t("Forget all")}</button>
+          </div>
+          <p className="meta">{t("The AI will not suggest these again. They are forgotten on their own after a while. Remove one if you would like to hear it again.")}</p>
+          <ul className="ai-memory-list">
+            {[...declined].reverse().map((item) => (
+              <li key={item.id}>
+                <div className="ai-memory-copy">
+                  <span className="ai-memory-kind">{declinedKindLabel(item.kind)}</span>
+                  <p>{item.title}</p>
+                </div>
+                <div className="ai-memory-item-actions">
+                  <button type="button" className="text-btn" onClick={() => { forgetDeclined(item.id); flash(t("It may suggest that again.")); }}>{t("Forget")}</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </section>
   );
+}
+
+function declinedKindLabel(kind: AIDeclinedKind): string {
+  return kind === 'task' ? t("Task") : kind === 'event' ? t("Event") : t("Habit");
 }
 
 function memoryCategoryLabel(category: AIMemoryCategory): string {
@@ -867,15 +1070,21 @@ function timedTaskConflict(
   return conflict ? `overlaps ${conflict.title}` : null;
 }
 
-function PlanDraft({ draft, warnings, working, onRefine, onAdd, onDiscard }: {
+function PlanDraft({ draft, warnings, working, onRefine, onAdd, onDiscard, isKept, onToggle, keptCount }: {
   draft: AIDraft;
   warnings: DraftWarning[];
   working: boolean;
   onRefine: (request: string) => void;
   onAdd: () => void;
   onDiscard: () => void;
+  /** Unticked means no: opting out has to be an act, not a default. */
+  isKept: (key: string) => boolean;
+  onToggle: (key: string) => void;
+  keptCount: number;
 }) {
   const total = draft.tasks.length + draft.events.length + draft.habits.length;
+  const allKept = keptCount === total;
+  const reason = (key: string): string => draft.reasons?.[key] ?? '';
   return (
     <section className="card ai-draft-card">
       <header className="card-head">
@@ -883,7 +1092,7 @@ function PlanDraft({ draft, warnings, working, onRefine, onAdd, onDiscard }: {
           <p className="kicker">{t("Review before adding")}</p>
           <h2 className="card-title">{t("Your AI draft")}</h2>
         </div>
-        <span className="chip">{total} {t('suggestions')}</span>
+        <span className="chip">{allKept ? `${total} ${t('suggestions')}` : `${keptCount} ${t('of')} ${total}`}</span>
       </header>
       <p className="ai-draft-summary">{draft.summary}</p>
       {warnings.length > 0 ? (
@@ -898,13 +1107,49 @@ function PlanDraft({ draft, warnings, working, onRefine, onAdd, onDiscard }: {
       ) : null}
       {draft.tasks.length + draft.events.length + draft.habits.length === 0 ? <p className="empty-inline">{t("The AI did not find new items to add. Try a more specific request.")}</p> : null}
       {draft.events.length > 0 ? <DraftGroup title={t("Timed plans")} count={draft.events.length}>
-        {draft.events.map((item, index) => <li key={`e-${index}`}><span className="draft-kind event-kind">{t("Event")}</span><span>{item.title}</span><small>{formatFullDate(item.date)} · {displayTime(item.startTime)}–{displayTime(item.endTime)}</small></li>)}
+        {draft.events.map((item, index) => (
+          <li key={`e-${index}`} className={isKept(`event:${index}`) ? 'draft-item' : 'draft-item is-declined'}>
+            <label className="draft-check">
+              <input type="checkbox" checked={isKept(`event:${index}`)} onChange={() => onToggle(`event:${index}`)} aria-label={t("Add {0}", { 0: item.title })} />
+              <span className="draft-kind event-kind">{t("Event")}</span>
+              <span className="draft-item-copy">
+                <span className="draft-item-title">{item.title}</span>
+                {reason(`event:${index}`) ? <small className="draft-item-reason">{reason(`event:${index}`)}</small> : null}
+              </span>
+              <small className="draft-item-when">{formatFullDate(item.date)} · {displayTime(item.startTime)}–{displayTime(item.endTime)}</small>
+            </label>
+          </li>
+        ))}
       </DraftGroup> : null}
       {draft.tasks.length > 0 ? <DraftGroup title={t("Tasks")} count={draft.tasks.length}>
-        {draft.tasks.map((item, index) => <li key={`t-${index}`}><span className="draft-kind task-kind">{t("Task")}</span><span>{item.title}</span><small>{item.dueDate ? formatFullDate(item.dueDate) : ''}</small></li>)}
+        {draft.tasks.map((item, index) => (
+          <li key={`t-${index}`} className={isKept(`task:${index}`) ? 'draft-item' : 'draft-item is-declined'}>
+            <label className="draft-check">
+              <input type="checkbox" checked={isKept(`task:${index}`)} onChange={() => onToggle(`task:${index}`)} aria-label={t("Add {0}", { 0: item.title })} />
+              <span className="draft-kind task-kind">{t("Task")}</span>
+              <span className="draft-item-copy">
+                <span className="draft-item-title">{item.title}</span>
+                {reason(`task:${index}`) ? <small className="draft-item-reason">{reason(`task:${index}`)}</small> : null}
+              </span>
+              <small className="draft-item-when">{item.dueDate ? formatFullDate(item.dueDate) : ''}</small>
+            </label>
+          </li>
+        ))}
       </DraftGroup> : null}
       {draft.habits.length > 0 ? <DraftGroup title={t("Habits")} count={draft.habits.length}>
-        {draft.habits.map((item, index) => <li key={`h-${index}`}><span className="draft-kind habit-kind">{t("Habit")}</span><span>{item.name}</span><small>{habitFrequencyLabel(item.frequency)}</small></li>)}
+        {draft.habits.map((item, index) => (
+          <li key={`h-${index}`} className={isKept(`habit:${index}`) ? 'draft-item' : 'draft-item is-declined'}>
+            <label className="draft-check">
+              <input type="checkbox" checked={isKept(`habit:${index}`)} onChange={() => onToggle(`habit:${index}`)} aria-label={t("Add {0}", { 0: item.name })} />
+              <span className="draft-kind habit-kind">{t("Habit")}</span>
+              <span className="draft-item-copy">
+                <span className="draft-item-title">{item.name}</span>
+                {reason(`habit:${index}`) ? <small className="draft-item-reason">{reason(`habit:${index}`)}</small> : null}
+              </span>
+              <small className="draft-item-when">{habitFrequencyLabel(item.frequency)}</small>
+            </label>
+          </li>
+        ))}
       </DraftGroup> : null}
       {draft.skippedEvents.length > 0 ? (
         <div className="ai-skipped">
@@ -915,10 +1160,91 @@ function PlanDraft({ draft, warnings, working, onRefine, onAdd, onDiscard }: {
       ) : null}
       <div className="form-actions ai-draft-actions">
         <button type="button" className="btn btn-ghost" onClick={onDiscard}>{t("Discard draft")}</button>
-        <button type="button" className="btn btn-primary" disabled={total === 0} onClick={onAdd}><CheckIcon size={16} /> {t("Add this plan")}</button>
+        <button type="button" className="btn btn-primary" disabled={total === 0 || keptCount === 0} onClick={onAdd}>
+          <CheckIcon size={16} /> {allKept ? t("Add this plan") : t("Add {0} selected", { 0: keptCount })}
+        </button>
       </div>
-      <p className="meta ai-undo-note">{t("Adding a draft is one undoable change. Review the dates before you add it.")}</p>
+      {/* Said plainly, because the consequence is otherwise invisible: what
+          is left out here stops being suggested at all. */}
+      <p className="meta ai-undo-note">{allKept ? t("Everything is ticked, so all of it will be added. Untick anything you do not want — the AI stops suggesting what you leave out.") : t("Adding what is ticked is one undoable change. The {0} you left out will not be suggested again.", { 0: keptCount === total ? 0 : total - keptCount })}</p>
       <p className="meta ai-saved-note">{t("Also saved to your Plans page, so you can come back to it any time.")}</p>
+    </section>
+  );
+}
+
+/**
+ * The timetable read from an image, before it becomes protected time.
+ *
+ * Reviewed rather than applied straight away. These blocks are what the whole
+ * week gets planned around, so a wrong one is expensive: it does not just add
+ * a bad item, it quietly pushes everything else out of the way.
+ */
+function TimetableCard({ timetable, isKept, onToggle, onAdd, onDiscard }: {
+  timetable: TimetableParse;
+  isKept: (index: number) => boolean;
+  onToggle: (index: number) => void;
+  onAdd: () => void;
+  onDiscard: () => void;
+}) {
+  const keptCount = timetable.blocks.filter((_, index) => isKept(index)).length;
+  const allKept = keptCount === timetable.blocks.length;
+  return (
+    <section className="card ai-draft-card ai-timetable-card">
+      <header className="card-head">
+        <div>
+          <p className="kicker">{t("Review before protecting")}</p>
+          <h2 className="card-title">{t("Your weekly timetable")}</h2>
+        </div>
+        <span className="chip">{allKept ? `${timetable.blocks.length} ${t("times")}` : `${keptCount} ${t("of")} ${timetable.blocks.length}`}</span>
+      </header>
+      <p className="ai-draft-summary">{timetable.summary}</p>
+
+      {timetable.blocks.length > 0 ? (
+        <div className="draft-group">
+          <div className="draft-group-head">
+            <strong>{t("Every week")}</strong>
+            <span>{timetable.blocks.length}</span>
+          </div>
+          <ul>
+            {timetable.blocks.map((block, index) => (
+              <li key={`${block.weekday}-${block.startTime}-${block.title}`} className={isKept(index) ? 'draft-item' : 'draft-item is-declined'}>
+                <label className="draft-check">
+                  <input
+                    type="checkbox"
+                    checked={isKept(index)}
+                    onChange={() => onToggle(index)}
+                    aria-label={t("Add {0}", { 0: `${block.title} ${WEEKDAY_LABELS[block.weekday] ?? ''} ${displayTime(block.startTime)}` })}
+                  />
+                  <span className="draft-kind event-kind">{WEEKDAY_LABELS[block.weekday] ?? ''}</span>
+                  <span className="draft-item-title">{block.title}</span>
+                  <small>
+                    {displayTime(block.startTime)}–{displayTime(block.endTime)}
+                    {block.detail ? ` · ${block.detail}` : ''}
+                  </small>
+                </label>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {/* What could not be read is named, not guessed: a gap is obvious and
+          fixable, a confidently wrong time is neither. */}
+      {timetable.unclear.length > 0 ? (
+        <div className="ai-skipped">
+          <strong>{t("I could not read these")}</strong>
+          <p>{t("Add them yourself with Protect time — I would rather leave a gap than invent a time.")}</p>
+          <ul>{timetable.unclear.map((item, index) => <li key={index}>{item}</li>)}</ul>
+        </div>
+      ) : null}
+
+      <div className="form-actions ai-draft-actions">
+        <button type="button" className="btn btn-ghost" onClick={onDiscard}>{t("Discard")}</button>
+        <button type="button" className="btn btn-primary" disabled={timetable.blocks.length === 0 || keptCount === 0} onClick={onAdd}>
+          <CheckIcon size={16} /> {allKept ? t("Protect these times") : t("Protect {0} selected", { 0: keptCount })}
+        </button>
+      </div>
+      <p className="meta ai-undo-note">{t("Each one becomes protected weekly time, so future plans work around it. Untick anything that is not right.")}</p>
     </section>
   );
 }

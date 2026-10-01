@@ -10,14 +10,14 @@ import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { CheckIcon, FlagIcon, SlidersIcon, StopwatchIcon, StudyIcon, TrashIcon } from '../icons';
 import { t } from '../i18n';
-import { GRADE_LABELS, gradeLabel, markInboxRead, newId, planPeriodLabel, planProgress, splitExplanations, subjectMinutes, weeklyHistory, weekOf, weekResults, withExplanation, withPlanItemToggled, withoutExplanation } from '../panels';
-import { CompletionRing, FocusTrend, SubjectSplit, WeekBars, minutesLabel } from '../components/charts';
+import { GRADE_LABELS, gradeLabel, markInboxRead, newId, openGoalSuggestions, planPeriodLabel, planProgress, splitExplanations, subjectMinutes, weeklyHistory, weekOf, weekResults, withExplanation, withPlanItemToggled, withoutExplanation } from '../panels';
+import { CompletionRing, FocusTrend, SubjectSplit, SubjectTrend, WeekBars, minutesLabel } from '../components/charts';
 import { normalizeLinkCode } from '../auth/crypto';
 import { friendlyGroqError, generateStudentAdvice, type StudentAdvice } from '../ai';
 import { SparkIcon } from '../icons';
-import { acceptInvitation, removeLink, shareWeeklyResults, syncLinks, syncStudentInbox } from '../auth/links';
+import { acceptInvitation, answerGoalSuggestion, forgetPraise, removeLink, shareWeeklyResults, syncLinks, syncStudentInbox } from '../auth/links';
 import { AuthError } from '../auth/session';
-import type { ChangeNote } from '../types';
+import type { ChangeNote, GoalSuggestion } from '../types';
 import { Field, Empty } from '../components/ui';
 import { StudentWorkspace } from '../components/StudentWorkspace';
 import { upcomingExams } from '../panelFeatures';
@@ -25,14 +25,16 @@ import { formatWeekRange, todayISO } from '../dates';
 import '../panels.css';
 
 export function StudentPanelView() {
-  const { state, panels, updatePanels, flash, navigate, setPanelEnabled, requestConfirm } = usePlanner();
+  const { state, panels, updatePanels, addGoal, flash, navigate, setPanelEnabled, requestConfirm, route } = usePlanner();
   const [editing, setEditing] = useState(false);
   const [details, setDetails] = useState({ field: panels.student.field ?? '', grade: panels.student.grade ?? '' });
   const [code, setCode] = useState('');
+  const [scanned, setScanned] = useState(false);
   const [busy, setBusy] = useState(false);
   const [advice, setAdvice] = useState<StudentAdvice | null>(null);
   const [asking, setAsking] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [answering, setAnswering] = useState<string | null>(null);
 
   // Keep in step with the server: a guardian may have ended the link, or sent
   // something new. Notes left by one guardian are passed to the others here —
@@ -40,7 +42,7 @@ export function StudentPanelView() {
   useEffect(() => {
     let cancelled = false;
     void syncLinks(panels)
-      .then((result) => (cancelled ? null : syncStudentInbox(result.panels)))
+      .then((result) => (cancelled ? null : syncStudentInbox(result.panels, state.goals)))
       .then((inbox) => {
         if (cancelled || !inbox) return;
         if (JSON.stringify(inbox.panels) !== JSON.stringify(panels)) updatePanels((current) => current === panels ? inbox.panels : current);
@@ -64,6 +66,20 @@ export function StudentPanelView() {
     }
   };
 
+  /**
+   * Someone who scanned a QR code has already said, by scanning, that they
+   * want this link. So their code is filled in rather than typed. Saying yes
+   * still takes a press: linking hands a guardian their weekly results for as
+   * long as the link lasts, and that is not something to do on arrival.
+   */
+  useEffect(() => {
+    if (route.name !== 'panels' || !route.invite) return;
+    setCode(route.invite);
+    setScanned(true);
+    // Take the code back out of the address so it is not left in the history.
+    navigate({ name: 'panels' });
+  }, [route, navigate]);
+
   const accept = async () => {
     if (busy) return;
     if (!normalizeLinkCode(code)) {
@@ -76,6 +92,7 @@ export function StudentPanelView() {
       const added = next.student.guardians.filter((guardian) => !panels.student.guardians.some((previous) => previous.linkId === guardian.linkId));
       updatePanels((latest) => ({ ...latest, student: { ...latest.student, guardians: [...latest.student.guardians, ...added.filter((guardian) => !latest.student.guardians.some((previous) => previous.linkId === guardian.linkId))] } }));
       setCode('');
+      setScanned(false);
       // Send this week straight away so their panel is not empty.
       const shared = await shareWeeklyResults(state, next, true);
       updatePanels((latest) => ({ ...latest, student: { ...latest.student, guardians: latest.student.guardians.map((guardian) => {
@@ -87,6 +104,49 @@ export function StudentPanelView() {
       flash(error instanceof AuthError || error instanceof Error ? error.message : t("That code could not be used."));
     } finally {
       setBusy(false);
+    }
+  };
+
+  // Saying yes makes an ordinary goal out of the suggestion — same code path as
+  // any goal they type themselves, so it can be edited, ticked and undone the
+  // same way. The suggestion's id becomes the goal's id, so a double tap on a
+  // slow panel cannot make two.
+  const takeOnGoal = async (suggestion: GoalSuggestion) => {
+    if (answering) return;
+    setAnswering(suggestion.id);
+    try {
+      if (!state.goals.some((goal) => goal.id === suggestion.id)) {
+        addGoal(
+          {
+            title: suggestion.title,
+            description: suggestion.note,
+            horizon: 'long',
+            deadline: suggestion.target,
+            milestones: suggestion.steps.map((title) => ({ title, dueDate: null })),
+            fromSuggestion: { linkId: suggestion.linkId, suggestionId: suggestion.id },
+          },
+          suggestion.id,
+        );
+      }
+      updatePanels((latest) => answerGoalSuggestion(latest, suggestion, 'accepted'));
+      flash(t("Added to your goals."));
+    } catch (error) {
+      flash(error instanceof Error ? error.message : t("That goal could not be added."));
+    } finally {
+      setAnswering(null);
+    }
+  };
+
+  // Not now is an answer, not a silence: it goes back, so the question stops
+  // being asked.
+  const refuseGoal = async (suggestion: GoalSuggestion) => {
+    if (answering) return;
+    setAnswering(suggestion.id);
+    try {
+      updatePanels((latest) => answerGoalSuggestion(latest, suggestion, 'declined'));
+      flash(t("They will see that this is not the right time."));
+    } finally {
+      setAnswering(null);
     }
   };
 
@@ -125,6 +185,7 @@ export function StudentPanelView() {
   const { current, past } = useMemo(() => splitExplanations(panels.student.explanations, week), [panels.student.explanations, week]);
   const history = useMemo(() => weeklyHistory(state, 6, week), [state, week]);
   const inbox = panels.student.inbox;
+  const openGoals = openGoalSuggestions(panels);
   const unreadInbox = inbox.notices.filter((notice) => !notice.read).length;
 
   const [noteDraft, setNoteDraft] = useState({ summary: '', reason: '' });
@@ -248,6 +309,38 @@ export function StudentPanelView() {
       <StudentWorkspace />
 
       {panels.student.guardians.length > 0 ? (
+        <>
+        {(panels.student.praise ?? []).length > 0 ? (
+          <section className="card praise-card" aria-label={t("Kind words")}>
+            <header className="card-head">
+              <div>
+                <p className="kicker">{t("Kind words")}</p>
+                <h2 className="card-title">{t("What they said to you")}</h2>
+              </div>
+            </header>
+            <p className="praise-lead">{t("Kept here until you let them go. Not tasks — just what someone noticed.")}</p>
+            <ul className="praise-list">
+              {(panels.student.praise ?? []).slice(0, 8).map((praise) => (
+                <li key={praise.id} className="praise-item">
+                  <p className="praise-text">“{praise.summary}”</p>
+                  <p className="praise-meta">
+                    {praise.author}
+                    {praise.weekOf ? ` · ${t("Week of {0}", { 0: praise.weekOf })}` : ''}
+                  </p>
+                  <button
+                    type="button"
+                    className="icon-btn round"
+                    aria-label={t("Let go of these words")}
+                    onClick={() => updatePanels((latest) => forgetPraise(latest, praise.id))}
+                  >
+                    <TrashIcon size={14} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
         <section className="card inbox-card" aria-label={t("From your guardians")}>
           <header className="card-head">
             <div>
@@ -264,10 +357,56 @@ export function StudentPanelView() {
             ) : null}
           </header>
 
-          {inbox.notices.length === 0 && inbox.plans.length === 0 ? (
+          {inbox.notices.length === 0 && inbox.plans.length === 0 && openGoals.length === 0 ? (
             <p className="empty-note">
-              {t("Nothing yet. When a parent or advisor plans your week or leaves a note, it shows up here.")}
+              {t("Nothing yet. When a parent or advisor plans your week, suggests a goal, or leaves a note, it shows up here.")}
             </p>
+          ) : null}
+
+          {openGoals.length > 0 ? (
+            <ul className="gplan-list">
+              {openGoals.map((goal) => (
+                <li key={goal.id} className="gplan-card ggoal-card">
+                  <div className="gplan-head">
+                    <div>
+                      <p className="gplan-kicker">
+                        {goal.target ? t("Suggested goal · aiming for {0}", { 0: goal.target }) : t("Suggested goal")}
+                      </p>
+                      <p className="gplan-title">{goal.title}</p>
+                    </div>
+                  </div>
+                  {goal.note ? <p className="gplan-note">{goal.note}</p> : null}
+                  {goal.steps.length > 0 ? (
+                    <ol className="ggoal-step-list">
+                      {goal.steps.map((step, index) => (
+                        <li key={index}>{step}</li>
+                      ))}
+                    </ol>
+                  ) : null}
+                  <p className="gplan-from">{t("From {0}", { 0: goal.author })}</p>
+                  <div className="ggoal-answers">
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-small"
+                      disabled={answering === goal.id}
+                      onClick={() => void takeOnGoal(goal)}
+                    >
+                      {answering === goal.id ? <span className="spinner" aria-hidden="true" /> : null}
+                      {t("Take it on")}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-small"
+                      disabled={answering === goal.id}
+                      onClick={() => void refuseGoal(goal)}
+                    >
+                      {t("Not now")}
+                    </button>
+                  </div>
+                  <p className="hint">{t("Taking it on adds it to your goals. You can change it or drop it afterwards like any other.")}</p>
+                </li>
+              ))}
+            </ul>
           ) : null}
 
           {inbox.notices.length > 0 ? (
@@ -337,6 +476,7 @@ export function StudentPanelView() {
             </ul>
           ) : null}
         </section>
+        </>
       ) : null}
 
       <section className="card" aria-label={t("Tracking")}>
@@ -392,6 +532,13 @@ export function StudentPanelView() {
             <section className="chart-block">
               <p className="chart-title">{t("Where the time went")}</p>
               <SubjectSplit subjects={results.subjects} />
+            </section>
+          ) : null}
+          {history.some((week) => week.subjects.length > 0) ? (
+            <section className="chart-block">
+              <p className="chart-title">{t("Subject by subject")}</p>
+              <p className="chart-note">{t("Which subjects are being looked after, and which have gone quiet.")}</p>
+              <SubjectTrend weeks={history} />
             </section>
           ) : null}
         </div>
@@ -460,7 +607,10 @@ export function StudentPanelView() {
               value={code}
               autoComplete="off"
               placeholder="plnr-XXXX-XXXX-XXXX"
-              onChange={(event) => setCode(event.target.value)}
+              onChange={(event) => {
+                setCode(event.target.value);
+                setScanned(false);
+              }}
             />
           </Field>
           <div className="panel-form-actions">
@@ -469,6 +619,11 @@ export function StudentPanelView() {
               {busy ? t("Linking…") : t("Link")}
             </button>
           </div>
+          {scanned ? (
+            <p className="hint" role="status">
+              {t("That code came from a QR code. Press Link to accept it.")}
+            </p>
+          ) : null}
         </div>
       </section>
 

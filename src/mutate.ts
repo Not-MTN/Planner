@@ -1,7 +1,8 @@
 import { addDays, isValidISODate, isValidTime, timeToMinutes, todayISO, weekDates } from './dates';
 import { nextDueAfterCompletion, REPEAT_SET } from './recurrence';
 import { MAX_PLAN_DAYS } from './duration';
-import { AI_PLAN_LIMIT } from './types';
+import { AI_DECLINED_LIMIT, AI_DECLINED_MAX_AGE_DAYS, AI_PLAN_LIMIT, GOAL_STEPS_MAX } from './types';
+import { t } from './i18n';
 import type {
   AIMemoryCategory,
   AIMemoryInput,
@@ -18,7 +19,10 @@ import type {
   PlannerState,
   SavedAIPlan,
   SavedAIPlanInput,
+  Task,
   TaskInput,
+  AIDeclined,
+  AIDeclinedKind,
 } from './types';
 
 export function uid(): string {
@@ -112,7 +116,16 @@ function cleanUnit(value: HabitInput['unit']): Habit['unit'] {
   return { label, target };
 }
 
-export function updateTask(state: PlannerState, id: string, patch: Partial<TaskInput>, now = nowIso()): PlannerState {
+/**
+ * What a patch may carry. `completed` lives on `Task`, not on `TaskInput`, so a
+ * caller that only knew the input shape had its "done" flag dropped without a
+ * word. Named here so the board and the bulk editor can use it honestly.
+ */
+export interface TaskPatch extends Partial<TaskInput> {
+  completed?: boolean;
+}
+
+export function updateTask(state: PlannerState, id: string, patch: TaskPatch, now = nowIso()): PlannerState {
   return {
     ...state,
     tasks: state.tasks.map((task) => {
@@ -121,12 +134,18 @@ export function updateTask(state: PlannerState, id: string, patch: Partial<TaskI
       if (!title) return task;
       const dueDate = patch.dueDate === undefined ? task.dueDate : patch.dueDate && isValidISODate(patch.dueDate) ? patch.dueDate : null;
       const dueTime = patch.dueTime === undefined ? task.dueTime : patch.dueTime && isValidTime(patch.dueTime) ? patch.dueTime : null;
+      // Ticking a task off through a patch has to stamp the moment as well,
+      // or insights and streaks quietly lose the day it happened.
+      const completed = patch.completed === undefined ? task.completed : patch.completed;
+      const completedAt = patch.completed === undefined ? task.completedAt : completed ? task.completedAt ?? now : null;
       return {
         ...task,
         ...patch,
         title,
         dueDate,
         dueTime,
+        completed,
+        completedAt,
         note: patch.note === undefined ? task.note : patch.note.trim().slice(0, 4000),
         repeat: patch.repeat === undefined ? task.repeat : cleanRepeat(patch.repeat),
         subtasks: patch.subtasks === undefined ? task.subtasks : cleanSubtasks(patch.subtasks),
@@ -139,7 +158,7 @@ export function updateTask(state: PlannerState, id: string, patch: Partial<TaskI
 }
 
 /** Apply the same patch to many tasks at once. Single undo covers the whole batch. */
-export function updateTasks(state: PlannerState, ids: string[], patch: Partial<TaskInput>, now = nowIso()): PlannerState {
+export function updateTasks(state: PlannerState, ids: string[], patch: TaskPatch, now = nowIso()): PlannerState {
   return ids.reduce((next, id) => updateTask(next, id, patch, now), state);
 }
 
@@ -194,15 +213,45 @@ export function clearCompletedTasks(state: PlannerState): PlannerState {
   return { ...state, tasks: state.tasks.filter((task) => !task.completed) };
 }
 
+/**
+ * The next occurrence `id` created when it was completed — but only while
+ * nobody has worked on it. Anything the user has ticked, stepped through or
+ * carried forward again is their work now, so it is left alone.
+ */
+function removableSpawn(state: PlannerState, id: string | null | undefined): Task | null {
+  if (!id) return null;
+  const spawn = state.tasks.find((task) => task.id === id);
+  if (!spawn) return null;
+  if (spawn.completed || spawn.completedAt || spawn.spawnedId) return null;
+  if (spawn.subtasks.some((item) => item.completed)) return null;
+  return spawn;
+}
+
 export function toggleTask(state: PlannerState, id: string, now = nowIso(), today = todayISO(), nextId = uid()): PlannerState {
   const target = state.tasks.find((task) => task.id === id);
   if (!target) return state;
   const completing = !target.completed;
-  const tasks = state.tasks.map((task) =>
-    task.id === id
-      ? { ...task, completed: completing, completedAt: completing ? now : null, repeat: completing ? null : task.repeat, updatedAt: now }
-      : task,
-  );
+  // The copy this task made the last time it was completed. Completing again
+  // replaces it so the date moves on; un-completing takes it back so a series
+  // can never double up.
+  const spawn = completing
+    ? (target.repeat ? removableSpawn(state, target.spawnedId) : null)
+    : removableSpawn(state, target.spawnedId);
+  const tasks = state.tasks
+    .filter((task) => task.id !== spawn?.id)
+    .map((task) =>
+      task.id === id
+        ? {
+            ...task,
+            completed: completing,
+            completedAt: completing ? now : null,
+            // The rule stays on the finished copy on purpose: nulling it here
+            // meant un-checking the task ended the series for good.
+            spawnedId: completing && target.repeat ? nextId : null,
+            updatedAt: now,
+          }
+        : task,
+    );
   if (completing && target.repeat) {
     // The finished copy stays in history; a fresh copy carries the rule forward.
     tasks.push({
@@ -210,6 +259,7 @@ export function toggleTask(state: PlannerState, id: string, now = nowIso(), toda
       id: nextId,
       completed: false,
       completedAt: null,
+      spawnedId: null,
       dueDate: nextDueAfterCompletion(target.dueDate, target.repeat, today),
       subtasks: target.subtasks.map((item) => ({ ...item, completed: false })),
       sortOrder: nextOrder(state.tasks),
@@ -289,6 +339,72 @@ export function deleteAIMemory(state: PlannerState, id: string): PlannerState {
 
 export function clearAIMemory(state: PlannerState): PlannerState {
   return state.aiMemory.length === 0 ? state : { ...state, aiMemory: [] };
+}
+
+// ── Declined AI suggestions ───────────────────────────────────────────
+
+/**
+ * Remember the suggestions this user did not keep, so they stop coming back.
+ *
+ * Two things keep this honest. It is capped and it expires: the record is
+ * meant to prevent an idea being proposed twice in a row, not to build a
+ * permanent file. And every entry is visible in Memory, where it can be
+ * forgotten individually — a preference learned silently and then acted on
+ * invisibly is a guess the user has no way to correct.
+ */
+export function recordDeclined(
+  state: PlannerState,
+  items: Array<{ title: string; kind: AIDeclinedKind }>,
+  now = nowIso(),
+): PlannerState {
+  const incoming = items
+    .map((item) => ({ title: clean(item.title, 140).trim(), kind: item.kind }))
+    .filter((item) => item.title.length > 0);
+  if (incoming.length === 0) return state;
+
+  const cutoff = new Date(Date.now() - AI_DECLINED_MAX_AGE_DAYS * 86_400_000).toISOString();
+  const byKey = new Map<string, AIDeclined>();
+  for (const entry of state.aiDeclined ?? []) {
+    // Expired entries are dropped rather than carried: an old "no" is not
+    // evidence about today.
+    if (entry.updatedAt < cutoff) continue;
+    byKey.set(entry.title.toLowerCase(), entry);
+  }
+  let changed = false;
+  for (const item of incoming) {
+    const key = item.title.toLowerCase();
+    const existing = byKey.get(key);
+    if (existing) {
+      if (existing.kind === item.kind) {
+        // Said no again: that is the strongest signal there is, so refresh it.
+        if (existing.updatedAt !== now) {
+          byKey.set(key, { ...existing, updatedAt: now });
+          changed = true;
+        }
+        continue;
+      }
+      byKey.set(key, { ...existing, kind: item.kind, updatedAt: now });
+      changed = true;
+      continue;
+    }
+    byKey.set(key, { id: uid(), title: item.title, kind: item.kind, createdAt: now, updatedAt: now });
+    changed = true;
+  }
+  if (!changed) return state;
+
+  const next = [...byKey.values()]
+    .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
+    .slice(-AI_DECLINED_LIMIT);
+  return { ...state, aiDeclined: next };
+}
+
+export function forgetDeclined(state: PlannerState, id: string): PlannerState {
+  const next = (state.aiDeclined ?? []).filter((item) => item.id !== id);
+  return next.length === (state.aiDeclined ?? []).length ? state : { ...state, aiDeclined: next };
+}
+
+export function clearDeclined(state: PlannerState): PlannerState {
+  return (state.aiDeclined ?? []).length === 0 ? state : { ...state, aiDeclined: [] };
 }
 
 // ── Saved AI plans (the Plans page) ───────────────────────────────────
@@ -653,7 +769,16 @@ export function skipHabit(state: PlannerState, habitId: string, date: string): P
 export function addGoal(state: PlannerState, input: GoalInput, id = uid(), milestoneId = uid(), now = nowIso()): PlannerState {
   const title = clean(input.title, 140);
   if (!title) return state;
-  const milestone = clean(input.milestone, 140);
+  const milestone = clean(input.milestone ?? '', 140);
+  // Several steps at once when a goal arrives with them; otherwise the single
+  // line someone typed. The second id onwards has to differ, so a step can be
+  // ticked on its own.
+  const steps = (input.milestones ?? []).map((step, index) => ({
+    id: index === 0 ? milestoneId : `${milestoneId}-${index}`,
+    title: clean(step.title, 140),
+    completed: false,
+    dueDate: step.dueDate && isValidISODate(step.dueDate) ? step.dueDate : null,
+  })).filter((step) => step.title).slice(0, GOAL_STEPS_MAX);
   return {
     ...state,
     goals: [
@@ -664,9 +789,13 @@ export function addGoal(state: PlannerState, input: GoalInput, id = uid(), miles
         description: input.description.trim().slice(0, 2000),
         horizon: input.horizon,
         deadline: input.deadline && isValidISODate(input.deadline) ? input.deadline : null,
-        milestones: milestone
-          ? [{ id: milestoneId, title: milestone, completed: false, dueDate: input.milestoneDue && isValidISODate(input.milestoneDue) ? input.milestoneDue : null }]
-          : [],
+        milestones:
+          steps.length > 0
+            ? steps
+            : milestone
+              ? [{ id: milestoneId, title: milestone, completed: false, dueDate: input.milestoneDue && isValidISODate(input.milestoneDue) ? input.milestoneDue : null }]
+              : [],
+        ...(input.fromSuggestion ? { fromSuggestion: input.fromSuggestion } : {}),
         createdAt: now,
         updatedAt: now,
       },
@@ -677,7 +806,8 @@ export function addGoal(state: PlannerState, input: GoalInput, id = uid(), miles
 export function updateGoal(
   state: PlannerState,
   id: string,
-  patch: Partial<Omit<GoalInput, 'milestone'>>,
+  // Steps and provenance are set when a goal is made, not edited afterwards.
+  patch: Partial<Omit<GoalInput, 'milestone' | 'milestones' | 'fromSuggestion'>>,
   now = nowIso(),
 ): PlannerState {
   return {
@@ -758,7 +888,7 @@ export function addNote(state: PlannerState, input: NoteInput, id = uid(), now =
     notes: [
       {
         id,
-        title: title || 'Untitled note',
+        title: title || t("Untitled note"),
         body,
         kind: input.kind,
         date: input.date && isValidISODate(input.date) ? input.date : null,
@@ -777,7 +907,7 @@ export function updateNote(state: PlannerState, id: string, patch: Partial<NoteI
     ...state,
     notes: state.notes.map((note) => {
       if (note.id !== id) return note;
-      const title = patch.title === undefined ? note.title : clean(patch.title, 140) || 'Untitled note';
+      const title = patch.title === undefined ? note.title : clean(patch.title, 140) || t("Untitled note");
       const body = patch.body === undefined ? note.body : patch.body.trim().slice(0, 20000);
       return {
         ...note,
@@ -852,6 +982,7 @@ export function copyWeek(state: PlannerState, fromDate: string, now = nowIso()):
         goalId: task.goalId,
         subtasks: task.subtasks.map((step) => ({ ...step, id: '', completed: false })),
         waiting: task.waiting,
+        estimatedMinutes: task.estimatedMinutes,
       },
       uid(),
       now,

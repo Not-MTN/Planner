@@ -105,16 +105,71 @@ export function hashRecoveryKey(input: string): string {
   return toBase64(sha256(new TextEncoder().encode(normalized)));
 }
 
-/** Returns the usable (non-extractable) DEK plus its two wrapped copies. */
-export async function createVaultKeys(password: string, recoveryKey: string) {
+/**
+ * How many recovery codes an account gets.
+ *
+ * One key was one point of total failure: lose it and the vault was gone for
+ * good, because the server cannot open the wrapped DEK either. Eight codes, any
+ * one of which opens the vault on its own, means losing one is an inconvenience
+ * rather than a disaster — and each is used exactly once.
+ */
+export const RECOVERY_CODE_COUNT = 8;
+
+/** A fresh set of recovery codes, each independently able to open the vault. */
+export function formatRecoveryCodes(
+  count: number = RECOVERY_CODE_COUNT,
+  random: (bytes: Uint8Array) => Uint8Array = (bytes) => crypto.getRandomValues(bytes),
+): string[] {
+  return Array.from({ length: Math.max(1, count) }, () => formatRecoveryKey(random));
+}
+
+/** One-way verifiers, sent to the server so it can tell a real code from a guess. */
+export function hashRecoveryCodes(codes: string[]): string[] {
+  return codes.map((code) => hashRecoveryKey(code));
+}
+
+/**
+ * Open the vault with a typed recovery code.
+ *
+ * The caller does not know which wrapped copy belongs to which code — and
+ * neither does the server, since every copy is opaque — so each is tried in
+ * turn. The index of the copy that opened is returned so the caller can retire
+ * that code; a code that opens nothing is simply wrong.
+ */
+export async function unwrapWithRecoveryCode(
+  code: string,
+  wrapped: string[],
+  salt: string,
+): Promise<{ raw: Uint8Array<ArrayBuffer>; index: number } | null> {
+  if (!code || wrapped.length === 0) return null;
+  const kek = await keyFromRecovery(code, salt);
+  for (let index = 0; index < wrapped.length; index += 1) {
+    try {
+      return { raw: await unwrapKeyRaw(wrapped[index], kek), index };
+    } catch {
+      // Not this copy. Trying them all is what keeps the server from ever
+      // learning which code a user is holding.
+    }
+  }
+  return null;
+}
+
+/** Returns the usable (non-extractable) DEK plus its wrapped copies. */
+export async function createVaultKeys(password: string, recoveryKeys: string | string[]) {
+  const codes = Array.isArray(recoveryKeys) ? recoveryKeys : [recoveryKeys];
   const salt = newSalt();
   const { authToken, kek } = await deriveFromPassword(password, salt);
-  const recoveryKek = await keyFromRecovery(recoveryKey, salt);
 
   const raw = randomBuffer(32);
   const wrappingKey = await importAes(raw, true);
   const wrappedDek = await wrapKey(wrappingKey, kek);
-  const wrappedRecovery = await wrapKey(wrappingKey, recoveryKek);
+  // One wrapped copy per code: the vault can be opened by any of them, and by
+  // nothing the server holds.
+  const wrappedRecovery: string[] = [];
+  for (const code of codes) {
+    const recoveryKek = await keyFromRecovery(code, salt);
+    wrappedRecovery.push(await wrapKey(wrappingKey, recoveryKek));
+  }
   const dek = await importAes(raw, false);
   // Kept only so the caller can re-wrap the key for a trusted device; the live
   // copy below is cleared, and this one should be too as soon as it is used.

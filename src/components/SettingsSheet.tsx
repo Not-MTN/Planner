@@ -3,12 +3,31 @@ import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { useImportFile } from '../hooks';
 import { DownloadIcon, ExitIcon, SparklesIcon, UploadIcon, UserIcon } from '../icons';
+import { Rich } from './Rich';
 import { Modal } from './ui';
-import { useEffect, useState } from 'react';
+import { RecoveryCodes } from './RecoveryCodes';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { FeedsSection, SecuritySection, SharedSpaceSection, TaskImportSection, TemplatesSection, WeatherSection } from './SettingsExtras';
+import { isReportingEnabled, setReportingEnabled } from '../reporting';
 import { useSignOut } from './useSignOut';
 import { accountUser, forgetAccountUser } from '../auth/vault';
-import { deleteAccount, getActiveSession } from '../auth/session';
+import { deviceCacheSupported, forgetDevice, listTrustedUserIds } from '../auth/device';
+import {
+  confirmTotpSetup,
+  deleteAccount,
+  disableTotp,
+  fetchTotpStatus,
+  getActiveSession,
+  listAuthEvents,
+  listDeviceSessions,
+  regenerateRecoveryCodes,
+  revokeDeviceSession,
+  revokeOtherDeviceSessions,
+  startTotpSetup,
+  type AuthEvent,
+  type DeviceSession,
+  type TotpSetup,
+} from '../auth/session';
 import { DATE_LANGUAGES, todayISO, type DateLanguage } from '../dates';
 import { downloadBusyICS, downloadICS, parseICS } from '../ics';
 import { canInstall, isInstalled, onInstallChange, promptInstall } from '../pwa';
@@ -16,7 +35,7 @@ import { requestTour } from '../tour';
 import { requestAbout } from '../about';
 import { LEAD_CHOICES } from '../reminders';
 import { loadSpeechLocaleId, saveSpeechLocaleId, speechAvailable, SPEECH_LOCALES } from '../speech';
-import { t, getLang, setLang, LANGUAGES, type Lang } from '../i18n';
+import { t, tn, getLang, setLang, LANGUAGES, type Lang } from '../i18n';
 import { loadNavigationPages, NAVIGATION_PAGES, saveNavigationPages, type NavigationPage } from '../navigationPrefs';
 import { backgroundPushEnabled, configureBackgroundPush, refreshBackgroundPushSchedule } from '../push';
 
@@ -49,6 +68,58 @@ function NavigationSection() {
   );
 }
 
+/**
+ * Two devices changed the same thing, and one version had to lose.
+ *
+ * Edits are not silently dropped: the version that lost is kept and offered
+ * back. Everything here is a choice the person makes — there is no automatic
+ * way to know which of two edited sentences was meant.
+ */
+function ConflictList() {
+  const { syncConflicts, keepConflictVersion, dismissConflict, dismissAllConflicts } = usePlanner();
+  if (syncConflicts.length === 0) return null;
+  return (
+    <div
+      className="sync-conflicts"
+      role="region"
+      aria-label={t("Changed on two devices")}
+      // These appear on their own, after a sync nobody asked for. Without this
+      // a screen reader never mentions them.
+      aria-live="polite"
+    >
+      <p className="set-label">{t("Changed on two devices")}</p>
+      <p className="set-hint">
+        {t("Both this device and another one had edited these since they last met. The newest is in your planner; the other is kept here until you decide.")}
+      </p>
+      <ul className="sync-conflict-list">
+        {syncConflicts.map((conflict) => (
+          <li key={`${conflict.kind}:${conflict.item.id}:${conflict.lostAt}`} className="sync-conflict">
+            <div>
+              <p className="sync-conflict-title">{conflict.title || t("Untitled")}</p>
+              <p className="sync-conflict-when">
+                {t("Other version edited {0}", { 0: new Date(conflict.lostAt).toLocaleString() })}
+              </p>
+            </div>
+            <div className="sync-conflict-actions">
+              <button type="button" className="btn btn-tiny" onClick={() => keepConflictVersion(conflict)}>
+                {t("Use the other version")}
+              </button>
+              <button type="button" className="btn btn-tiny btn-ghost" onClick={() => dismissConflict(conflict)}>
+                {t("Keep what I have")}
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <div className="set-actions">
+        <button type="button" className="btn btn-ghost btn-small" onClick={dismissAllConflicts}>
+          {t("Keep what I have for all of them")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function SyncSection() {
   const { sync, syncStatus, syncMessage, syncAvailable, startSync, stopSync, syncNow, deleteCloudCopy, requestConfirm, flash } = usePlanner();
   const [linking, setLinking] = useState(false);
@@ -69,7 +140,10 @@ function SyncSection() {
       <h3 className="kicker">{t("Sync across devices")}</h3>
       {syncAvailable === false ? (
         <p className="set-hint">
-          {t("Sync needs a database. Add")} <code>{t("DATABASE_URL")}</code> {t("(your Neon connection string) under Vercel → Environment Variables, or in")} <code>{t(".env.local")}</code>{t(", then restart.")}
+          <Rich
+            text={t("Sync needs a database. Add {name} (your Neon connection string) under Vercel → Environment Variables, or in {file}, then restart.")}
+            values={{ name: <code>{t("DATABASE_URL")}</code>, file: <code>{t(".env.local")}</code> }}
+          />
         </p>
       ) : null}
       {sync.code ? (
@@ -97,6 +171,7 @@ function SyncSection() {
               </button>
             </div>
           </div>
+          <ConflictList />
           <div className="set-actions">
             <button type="button" className="btn btn-ghost" onClick={stopSync}>{t("Turn off on this device")}</button>
             <button
@@ -239,6 +314,38 @@ function RemindersSection() {
   );
 }
 
+/**
+ * The one place a user decides whether crash reports leave the device.
+ *
+ * On by default because a report carries no planner content — the server
+ * cannot decrypt the vault even in principle — but it is a real choice and it
+ * lives with the privacy settings, not buried in a config file.
+ */
+function PrivacySection() {
+  const { flash } = usePlanner();
+  const [reports, setReports] = useState(() => isReportingEnabled());
+  const toggle = () => {
+    const next = !reports;
+    setReportingEnabled(next);
+    setReports(next);
+    flash(next ? t("Crash reports turned on.") : t("Crash reports turned off."));
+  };
+  return (
+    <section className="set-section">
+      <h3 className="kicker">{t("Crash reports")}</h3>
+      <div className="set-row">
+        <div>
+          <p className="set-label">{t("Tell me when Planner breaks")}</p>
+          <p className="set-hint">{t("When something stops working, send a short report with the error, the screen you were on, and the last few things you did. It never includes your tasks, events, or notes — nobody outside this device can read them.")}</p>
+        </div>
+        <button type="button" className={cx('btn', reports ? 'btn-soft' : 'btn-primary')} onClick={toggle}>
+          {reports ? t("Turn off") : t("Turn on")}
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function BackgroundPushSection() {
   const { state, reminders, flash } = usePlanner();
   const [configured, setConfigured] = useState<boolean | null>(null);
@@ -316,17 +423,7 @@ function VoiceSection() {
 }
 
 function CalendarSection() {
-  const { state, importCalendar, flash, undo, weekStart, setWeekStart, display, setDisplay } = usePlanner();
-  const icsFile = useImportFile((text) => {
-    const result = parseICS(text);
-    const count = result.events.length + result.tasks.length;
-    if (count === 0) {
-      flash(t("No calendar events found in that file."));
-      return;
-    }
-    importCalendar(result);
-    flash(t("Imported {0} events and {1} all-day items{2}.", { 0: result.events.length, 1: result.tasks.length, 2: result.skipped ? t(" ({0} skipped)", { 0: result.skipped }) : '' }), { label: t("Undo"), run: undo });
-  });
+  const { weekStart, setWeekStart, display, setDisplay } = usePlanner();
   return (
     <section className="set-section">
       <h3 className="kicker">{t("Calendar, dates & time")}</h3>
@@ -362,11 +459,15 @@ function CalendarSection() {
         <select aria-label={t("Language")} value={getLang()} onChange={(event) => {
           const next = event.target.value as Lang;
           if (next === getLang()) return;
+          // The week does not start on the same day everywhere: Saturday in
+          // Iran, Monday in Finland and in the English default. Follow the
+          // language, and follow it back again when the language changes.
           if (next === 'fa') {
             setDisplay({ ...display, dateLanguage: 'fa' });
             setWeekStart(6);
-          } else if (display.dateLanguage === 'fa') {
-            setDisplay({ ...display, dateLanguage: 'en-GB' });
+          } else {
+            if (display.dateLanguage === 'fa') setDisplay({ ...display, dateLanguage: 'en-GB' });
+            setWeekStart(1);
           }
           setLang(next);
           window.setTimeout(() => window.location.reload(), 50);
@@ -402,6 +503,30 @@ function CalendarSection() {
           {display.jalali ? t("On") : t("Off")}
         </button>
       </div>
+    </section>
+  );
+}
+
+function CalendarExchangeSection() {
+  const { state, importCalendar, flash, undo } = usePlanner();
+  const icsFile = useImportFile((text) => {
+    const result = parseICS(text);
+    const count = result.events.length + result.tasks.length;
+    if (count === 0) {
+      flash(t("No calendar events found in that file."));
+      return;
+    }
+    importCalendar(result);
+    flash(
+      result.skipped
+        ? t("Imported {0} events and {1} all-day items, skipping {2}.", { 0: result.events.length, 1: result.tasks.length, 2: result.skipped })
+        : t("Imported {0} events and {1} all-day items.", { 0: result.events.length, 1: result.tasks.length }),
+      { label: t("Undo"), run: undo },
+    );
+  });
+  return (
+    <section className="set-section">
+      <h3 className="kicker">{t("Calendar exchange")}</h3>
       <p className="set-hint">{t("Exchange plans with Google Calendar, Outlook or Apple Calendar using .ics files. Timed events come in as events; all-day ones become dated tasks.")}</p>
       <div className="set-actions">
         <button type="button" className="btn btn-soft" onClick={() => { downloadICS(state, todayISO()); flash(t("Calendar file downloaded.")); }}>
@@ -461,6 +586,27 @@ function AccountSection() {
   const [confirmation, setConfirmation] = useState('');
   const [deleteError, setDeleteError] = useState('');
   const [deleted, setDeleted] = useState(false);
+  const [rotating, setRotating] = useState(false);
+  const [rotationPassword, setRotationPassword] = useState('');
+  const [rotationBusy, setRotationBusy] = useState(false);
+  const [rotationError, setRotationError] = useState('');
+  const [newCodes, setNewCodes] = useState<string[] | null>(null);
+  const [codesConfirmed, setCodesConfirmed] = useState(false);
+
+  const requestRotation = () => {
+    if (rotationBusy || !rotationPassword) return;
+    setRotationBusy(true);
+    setRotationError('');
+    void regenerateRecoveryCodes(rotationPassword)
+      .then((codes) => {
+        setNewCodes(codes);
+        setCodesConfirmed(false);
+        setRotating(false);
+        setRotationPassword('');
+      })
+      .catch((error: unknown) => setRotationError(error instanceof Error ? error.message : t("The recovery codes could not be replaced.")))
+      .finally(() => setRotationBusy(false));
+  };
 
   const requestDelete = () => {
     if (busy || confirmation.trim().toUpperCase() !== 'DELETE' || !password) return;
@@ -504,6 +650,38 @@ function AccountSection() {
             </button>
           </div>
           {getActiveSession() ? (
+            <div className="set-actions account-recovery-actions">
+              {!rotating ? (
+                <button type="button" className="btn btn-soft" onClick={() => { setRotating(true); setRotationError(''); }}>
+                  {t("Replace recovery codes")}
+                </button>
+              ) : (
+                <div className="account-recovery-form">
+                  <p className="set-hint">{t("If a code has been lost, used, or seen by someone else, replace the whole set. Your old codes stop working straight away.")}</p>
+                  <label className="field">
+                    <span>{t("Current password")}</span>
+                    <input
+                      className="input"
+                      type="password"
+                      autoComplete="current-password"
+                      value={rotationPassword}
+                      onChange={(event) => setRotationPassword(event.target.value)}
+                    />
+                  </label>
+                  {rotationError ? <p className="set-hint is-error" role="alert">{rotationError}</p> : null}
+                  <div className="set-actions">
+                    <button type="button" className="btn btn-ghost" disabled={rotationBusy} onClick={() => { setRotating(false); setRotationPassword(''); }}>
+                      {t("Cancel")}
+                    </button>
+                    <button type="button" className="btn btn-soft" disabled={rotationBusy || !rotationPassword} onClick={requestRotation}>
+                      {rotationBusy ? t("Replacing…") : t("Replace recovery codes")}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
+          {getActiveSession() ? (
             <div className="set-actions account-delete-actions">
               {!deleting ? (
                 <button type="button" className="btn btn-danger" onClick={() => { setDeleting(true); setDeleteError(''); }}>
@@ -539,9 +717,515 @@ function AccountSection() {
           {t("No account on this device. Your planner is saved in this browser only; an account keeps it in an encrypted vault you can open anywhere.")}
         </p>
       )}
+      {newCodes ? (
+        <Modal
+          title={t("Your new recovery codes")}
+          className="modal-recovery"
+          onClose={() => {
+            if (!codesConfirmed) return;
+            setNewCodes(null);
+            flash(t("Recovery codes replaced. The old set no longer works."));
+          }}
+        >
+          <p className="set-hint">{t("Save these now. They are shown only once, and the codes you had before no longer open your account.")}</p>
+          <RecoveryCodes
+            codes={newCodes}
+            copy={{
+              authRecoverySub: t("Each code opens your encrypted planner on its own."),
+              authRecoveryCopy: t("Copy all codes"),
+              authRecoveryCopied: t("Copied"),
+              authRecoveryDownload: t("Download codes"),
+              authRecoveryPrint: t("Print codes"),
+              authRecoveryWarn: t("Each code unlocks your encrypted planner by itself. Anyone who finds one can open your planner."),
+              authRecoveryConfirmLabel: t("Type code {n} to confirm you have saved it"),
+              authRecoveryConfirmHint: t("Look at the list above and type the code numbered {n}. We ask because these codes cannot be shown again."),
+              authRecoveryConfirmOk: t("That matches. You are ready to continue."),
+              authRecoveryConfirmBad: t("That is not code {n}. Check the number above and try again."),
+            }}
+            idPrefix="settings"
+            animationDelay={0}
+            onConfirmedChange={setCodesConfirmed}
+          />
+          <div className="set-actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={!codesConfirmed}
+              onClick={() => { setNewCodes(null); flash(t("Recovery codes replaced. The old set no longer works.")); }}
+            >
+              {t("Done")}
+            </button>
+          </div>
+        </Modal>
+      ) : null}
     </section>
   );
 }
+
+/** "3 minutes ago", in the user's own language. */
+function seenAgo(iso: string, lang: Lang): string {
+  const elapsed = Date.now() - new Date(iso).getTime();
+  const minutes = Math.round(elapsed / 60_000);
+  if (!Number.isFinite(minutes) || minutes < 1) return t("just now");
+  const relative = new Intl.RelativeTimeFormat(lang === 'fa' ? 'fa-IR' : 'en', { numeric: 'auto' });
+  if (minutes < 60) return relative.format(-minutes, 'minute');
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return relative.format(-hours, 'hour');
+  const days = Math.round(hours / 24);
+  if (days < 30) return relative.format(-days, 'day');
+  return relative.format(-Math.round(days / 30), 'month');
+}
+
+/**
+ * This browser's own shortcut past the password.
+ *
+ * A trusted device keeps a wrapped copy of the vault key so the planner opens
+ * without typing the password. Ending sessions does not clear it — the copy is
+ * here, not on the server — so it needs its own way out.
+ */
+function TrustedDeviceRow() {
+  const { flash } = usePlanner();
+  const [remembered, setRemembered] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    const user = accountUser();
+    if (!user) return;
+    void listTrustedUserIds()
+      .then((ids) => { if (live) setRemembered(ids.includes(user.id)); })
+      .catch(() => undefined);
+    return () => { live = false; };
+  }, []);
+
+  if (!deviceCacheSupported() || !remembered) return null;
+
+  return (
+    <div className="set-row">
+      <div>
+        <p className="set-label">{t("This device opens without your password")}</p>
+        <p className="set-hint">{t("A wrapped copy of your key is stored in this browser so the planner opens straight away. Forgetting it means typing your password next time — nothing else changes.")}</p>
+      </div>
+      <button
+        type="button"
+        className="btn btn-ghost"
+        onClick={() => {
+          const user = accountUser();
+          if (!user) return;
+          void forgetDevice(user.id)
+            .then(() => { setRemembered(false); flash(t("This device forgotten. You will need your password next time.")); })
+            .catch(() => undefined);
+        }}
+      >
+        {t("Forget this device")}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The devices signed into this account, each with its own way out.
+ *
+ * Planner cannot lock a vault it cannot read, so "signing a device out" here
+ * means ending its session: it stops being able to fetch the encrypted vault
+ * and has to ask for the password again. Anything already decrypted on that
+ * device stays there — which is why the trusted-device note below matters.
+ */
+function DevicesSection() {
+  const { flash, requestConfirm } = usePlanner();
+  const requestSignOut = useSignOut();
+  const [devices, setDevices] = useState<DeviceSession[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const load = useCallback(() => {
+    let live = true;
+    void listDeviceSessions()
+      .then((rows) => { if (live) setDevices(rows); })
+      .catch(() => { if (live) setDevices([]); });
+    return () => { live = false; };
+  }, []);
+
+  useEffect(() => load(), [load]);
+
+  const revoke = (device: DeviceSession) => {
+    if (device.current) {
+      // Ending the session you are using is a sign-out, so it goes through the
+      // same path as the sign-out button: flush, leave, go home.
+      requestSignOut();
+      return;
+    }
+    requestConfirm({
+      title: t("Sign that device out?"),
+      body: t("That device stops syncing and asks for the password again. Your planner is untouched, and the copy already on it stays until it is signed in and wiped."),
+      confirmLabel: t("Sign that device out"),
+      onConfirm: () => {
+        setBusy(true);
+        setError('');
+        void revokeDeviceSession(device.id)
+          .then(() => { setDevices((rows) => (rows ?? []).filter((row) => row.id !== device.id)); flash(t("That device has been signed out.")); })
+          .catch(() => setError(t("That device could not be signed out. Try again.")))
+          .finally(() => setBusy(false));
+      },
+    });
+  };
+
+  const revokeOthers = () => {
+    const others = (devices ?? []).filter((device) => !device.current).length;
+    if (others === 0) return;
+    requestConfirm({
+      title: t("Sign out every other device?"),
+      body: t("Every device but this one stops syncing and asks for the password again. Your planner is untouched."),
+      confirmLabel: t("Sign out other devices"),
+      onConfirm: () => {
+        setBusy(true);
+        setError('');
+        void revokeOtherDeviceSessions()
+          .then((removed) => {
+            setDevices((rows) => (rows ?? []).filter((device) => device.current));
+            flash(tn(removed, "Signed {count} device out.", "Signed {count} devices out."));
+          })
+          .catch(() => setError(t("The other devices could not be signed out. Try again.")))
+          .finally(() => setBusy(false));
+      },
+    });
+  };
+
+  const others = (devices ?? []).filter((device) => !device.current).length;
+  const lang = getLang();
+
+  return (
+    <section className="set-section">
+      <h3 className="kicker">{t("Devices")}</h3>
+      <TrustedDeviceRow />
+      {devices === null ? (
+        <p className="set-hint">{t("Loading your devices…")}</p>
+      ) : devices.length === 0 ? (
+        <p className="set-hint">{t("No other device is signed in. Sign in on a phone or another computer and it will appear here.")}</p>
+      ) : (
+        <>
+          <ul className="device-list">
+            {devices.map((device) => (
+              <li key={device.id} className="set-row device-row">
+                <div>
+                  <p className="set-label">
+                    {device.label || t("Unknown device")}
+                    {device.current ? <span className="device-badge">{t("This device")}</span> : null}
+                  </p>
+                  <p className="set-hint">
+                    {device.current
+                      ? t("In use now")
+                      : t("Last seen {0}", { 0: seenAgo(device.lastSeenAt, lang) })}
+                    {' · '}
+                    {t("Signed in {0}", { 0: new Date(device.createdAt).toLocaleDateString(lang === 'fa' ? 'fa-IR' : undefined) })}
+                  </p>
+                </div>
+                <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => revoke(device)}>
+                  {t("Sign out")}
+                </button>
+              </li>
+            ))}
+          </ul>
+          {error ? <p className="set-hint is-error" role="alert">{error}</p> : null}
+          {others > 0 ? (
+            <div className="set-actions">
+              <button type="button" className="btn btn-soft" disabled={busy} onClick={revokeOthers}>
+                {t("Sign out every other device")}
+              </button>
+            </div>
+          ) : null}
+          <p className="set-hint">{t("Signing a device out ends its session. A planner already open on it stays there until it is signed in again, so forget the device as well if the device itself is lost.")}</p>
+        </>
+      )}
+    </section>
+  );
+}
+
+/**
+ * A second step at sign-in, for anyone without a passkey.
+ *
+ * A stolen password is the whole disaster in an app like this: it opens the
+ * encrypted planner anywhere. A passkey is the better answer, but not every
+ * browser has one. An authenticator app works everywhere and costs nothing.
+ *
+ * The secret is only shown once, and it does nothing until a code from it has
+ * been accepted — so a half-finished set-up can never lock anybody out.
+ */
+function TwoFactorSection() {
+  const { flash, requestConfirm } = usePlanner();
+  const [setup, setSetup] = useState<TotpSetup | null>(null);
+  const [enrolled, setEnrolled] = useState(false);
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  /** Turning it off needs a current code, so it is a second small step. */
+  const [turningOff, setTurningOff] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    void fetchTotpStatus()
+      .then((status) => {
+        if (!live) return;
+        setEnrolled(Boolean(status?.confirmed));
+        // A set-up that was started but never confirmed is shown again, so it
+        // can be finished rather than silently half-done.
+        if (status && !status.confirmed) setSetup(status);
+      })
+      .catch(() => undefined);
+    return () => { live = false; };
+  }, []);
+
+  const start = () => {
+    setBusy(true);
+    setError('');
+    void startTotpSetup()
+      .then((next) => { setSetup(next); setCode(''); })
+      .catch(() => setError(t("The set-up could not be started. Try again.")))
+      .finally(() => setBusy(false));
+  };
+
+  const confirm = () => {
+    if (busy || code.length !== 6) return;
+    setBusy(true);
+    setError('');
+    void confirmTotpSetup(code)
+      .then(() => {
+        setEnrolled(true);
+        setSetup(null);
+        setCode('');
+        flash(t("Two-step sign-in is on. Keep your recovery codes safe: they are the other way back in if you lose the app."));
+      })
+      .catch(() => setError(t("That code is not right, or has already been used. Wait for the next one.")))
+      .finally(() => setBusy(false));
+  };
+
+  const turnOff = () => {
+    if (code.length !== 6) return;
+    requestConfirm({
+      title: t("Turn off two-step sign-in?"),
+      body: t("Signing in will need only your password again. Enter the code from your app to confirm."),
+      confirmLabel: t("Turn off two-step sign-in"),
+      onConfirm: () => {
+        setBusy(true);
+        setError('');
+        void disableTotp(code)
+          .then(() => {
+            setEnrolled(false);
+            setSetup(null);
+            setCode('');
+            flash(t("Two-step sign-in is off."));
+          })
+          .catch(() => setError(t("That code is not right, or has already been used. Wait for the next one.")))
+          .finally(() => setBusy(false));
+      },
+    });
+  };
+
+  return (
+    <section className="set-section">
+      <h3 className="kicker">{t("Two-step sign-in")}</h3>
+
+      {!getActiveSession() ? (
+        <p className="set-hint">{t("Sign in to add an authenticator app. It asks for a code as well as your password.")}</p>
+      ) : enrolled ? (
+        turningOff ? (
+          <>
+            <label className="field">
+              <span>{t("Enter a code from your app to turn this off")}</span>
+              <input
+                className="input input-totp"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                dir="ltr"
+                maxLength={6}
+                value={code}
+                onChange={(event) => setCode(event.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+              />
+            </label>
+            {error ? <p className="set-hint is-error" role="alert">{error}</p> : null}
+            <div className="set-actions">
+              <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => { setTurningOff(false); setCode(''); setError(''); }}>
+                {t("Cancel")}
+              </button>
+              <button type="button" className="btn btn-danger" disabled={busy || code.length !== 6} onClick={turnOff}>
+                {t("Turn off two-step sign-in")}
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="set-row">
+            <div>
+              <p className="set-label">{t("On — a code from your app is asked for at every sign-in")}</p>
+              <p className="set-hint">{t("Keep your recovery codes safe: they are the other way back in if you lose the app.")}</p>
+            </div>
+            <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => { setTurningOff(true); setCode(''); setError(''); }}>
+              {t("Turn off")}
+            </button>
+          </div>
+        )
+      ) : setup ? (
+        <>
+          <p className="set-hint">{t("Add this to your authenticator app, then type the code it shows.")}</p>
+          <div className="totp-secret">
+            <code dir="ltr">{setup.formatted}</code>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => { void navigator.clipboard?.writeText(setup.secret); }}
+            >
+              {t("Copy")}
+            </button>
+          </div>
+          <p className="set-hint">
+            <Rich
+              text={t("If your app can take a link, {link} instead of typing the secret.")}
+              values={{ link: <a className="link" href={setup.uri}>{t("open it in your app")}</a> }}
+            />
+          </p>
+          <label className="field">
+            <span>{t("Code from your app")}</span>
+            <input
+              className="input input-totp"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              dir="ltr"
+              maxLength={6}
+              value={code}
+              onChange={(event) => setCode(event.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+            />
+          </label>
+          {error ? <p className="set-hint is-error" role="alert">{error}</p> : null}
+          <div className="set-actions">
+            <button type="button" className="btn btn-primary" disabled={busy || code.length !== 6} onClick={confirm}>
+              {t("Turn on two-step sign-in")}
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="set-row">
+          <div>
+            <p className="set-label">{t("Off — your password alone opens your planner")}</p>
+            <p className="set-hint">{t("An authenticator app asks for a six-digit code as well as your password, so a stolen password on its own cannot open your planner.")}</p>
+          </div>
+          <button type="button" className="btn btn-soft" disabled={busy} onClick={start}>
+            {t("Add an authenticator app")}
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * How the account has been used lately, so its owner can read it back.
+ *
+ * The point is the line that is not yours. So the two things worth flagging
+ * are called out: a place this account has not been seen from before, and
+ * getting back in with a recovery code — which is exactly what somebody who
+ * is not you would have to do.
+ *
+ * This is a convenience, not an audit trail: it is trimmed to the last couple
+ * of months, and it is written on a best-effort basis.
+ */
+function activityLine(kind: AuthEvent['kind']): string {
+  // Written as a switch, not a lookup object, so each sentence sits literally
+  // inside t() where the translation scan can see it. A Record of plain
+  // strings would silently ship untranslated.
+  switch (kind) {
+    case 'created':
+      return t("You made this account");
+    case 'password':
+      return t("Signed in with your password");
+    case 'password_totp':
+      return t("Signed in with your password and a code from your app");
+    case 'passkey':
+      return t("Signed in with a passkey");
+    case 'passkey_totp':
+      return t("Signed in with a passkey and a code from your app");
+    case 'recovery':
+      return t("Got back in with a recovery code");
+    case 'password_changed':
+      return t("Changed your password");
+    case 'signed_out':
+      return t("Signed every other device out");
+    case 'totp_on':
+      return t("Turned two-step sign-in on");
+    case 'totp_off':
+      return t("Turned two-step sign-in off");
+    default:
+      return t("Signed in");
+  }
+}
+
+function ActivitySection() {
+  const [events, setEvents] = useState<AuthEvent[] | null>(null);
+  const lang = getLang();
+
+  useEffect(() => {
+    let live = true;
+    void listAuthEvents()
+      .then((rows) => { if (live) setEvents(rows); })
+      .catch(() => { if (live) setEvents([]); });
+    return () => { live = false; };
+  }, []);
+
+  return (
+    <section className="set-section">
+      <h3 className="kicker">{t("Recent activity")}</h3>
+
+      {events === null ? (
+        <p className="set-hint">{t("Loading your recent activity…")}</p>
+      ) : events.length === 0 ? (
+        <p className="set-hint">{t("Nothing here yet. Signing in, changing your password and turning two-step sign-in on or off will all leave a line here.")}</p>
+      ) : (
+        <>
+          <ul className="activity-list">
+            {events.map((event) => {
+              const alarming = event.kind === 'recovery';
+              return (
+                <li key={event.id} className={alarming ? 'set-row activity-row is-alarming' : 'set-row activity-row'}>
+                  <div>
+                    <p className="set-label">
+                      {activityLine(event.kind)}
+                      {event.newNetwork ? <span className="device-badge is-alert">{t("New place")}</span> : null}
+                    </p>
+                    <p className="set-hint">
+                      {event.deviceLabel || t("Unknown device")}
+                      {' · '}
+                      {seenAgo(event.at, lang)}
+                      {' · '}
+                      {new Date(event.at).toLocaleString(lang === 'fa' ? 'fa-IR' : undefined, {
+                        dateStyle: 'medium',
+                        timeStyle: 'short',
+                      })}
+                    </p>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          <p className="set-hint">{t("This is the last couple of months. A line marked “New place” came from a network this account had not used before. If you do not recognise one, change your password and sign your other devices out.")}</p>
+        </>
+      )}
+    </section>
+  );
+}
+
+type SettingsTab = 'account' | 'appearance' | 'language' | 'reminders' | 'sync' | 'connections' | 'app';
+
+/*
+ * Settings grew to twenty sections, and one long scroll buries all of them:
+ * the switch you came for is somewhere past the account, the two-factor setup
+ * and the calendar feeds. These groups are the ones people actually look for.
+ */
+const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
+  { id: 'account', label: t("Account") },
+  { id: 'appearance', label: t("Appearance") },
+  { id: 'language', label: t("Language & time") },
+  { id: 'reminders', label: t("Reminders") },
+  { id: 'sync', label: t("Sync & backup") },
+  { id: 'connections', label: t("Connections") },
+  { id: 'app', label: t("App") },
+];
 
 export function SettingsSheet() {
   const planner = usePlanner();
@@ -559,11 +1243,68 @@ export function SettingsSheet() {
     requestConfirm,
   } = planner;
   const importFile = useImportFile(importText);
+  const [tab, setTab] = useState<SettingsTab>('account');
+  const tabRefs = useRef<Partial<Record<SettingsTab, HTMLButtonElement | null>>>({});
+
+  // Arrow keys move along the tabs, as a tab list is expected to. Only the
+  // selected tab stops, so a single Tab press still leaves the strip and gets
+  // on with the settings — being trapped in the row would be worse than
+  // having no arrow keys at all.
+  const onTabKeys = (event: ReactKeyboardEvent<HTMLElement>) => {
+    const count = SETTINGS_TABS.length;
+    const here = SETTINGS_TABS.findIndex((entry) => entry.id === tab);
+    const next =
+      event.key === 'Home' ? 0
+        : event.key === 'End' ? count - 1
+          : event.key === 'ArrowRight' ? (here + 1) % count
+            : event.key === 'ArrowLeft' ? (here - 1 + count) % count
+              : -1;
+    if (next < 0) return;
+    event.preventDefault();
+    const id = SETTINGS_TABS[next]!.id;
+    setTab(id);
+    tabRefs.current[id]?.focus();
+  };
+
   if (!settingsOpen) return null;
 
   return (
     <Modal title={t("Settings")} onClose={closeSettings} className="sheet-settings">
-      <AccountSection />
+      <div className="set-nav" role="tablist" aria-label={t("Settings sections")} onKeyDown={onTabKeys}>
+        {SETTINGS_TABS.map((entry) => (
+          <button
+            key={entry.id}
+            ref={(node) => { tabRefs.current[entry.id] = node; }}
+            type="button"
+            role="tab"
+            id={`set-tab-${entry.id}`}
+            aria-selected={tab === entry.id}
+            aria-controls="set-panel"
+            tabIndex={tab === entry.id ? 0 : -1}
+            className={cx('set-nav-item', tab === entry.id && 'on')}
+            onClick={() => setTab(entry.id)}
+          >
+            {entry.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Only the open group is mounted. The account tabs talk to the server
+          when they appear, and there is no reason to ask about devices or
+          sign-in history for someone who came to change the theme. */}
+      <div className="set-panels" id="set-panel" role="tabpanel" aria-labelledby={`set-tab-${tab}`}>
+        {tab === 'account' ? (
+          <>
+            <AccountSection />
+            <SecuritySection />
+            <TwoFactorSection />
+            <DevicesSection />
+            <ActivitySection />
+          </>
+        ) : null}
+
+        {tab === 'appearance' ? (
+          <>
       <section className="set-section">
         <h3 className="kicker">{t("Appearance")}</h3>
         <div className="set-row">
@@ -606,47 +1347,28 @@ export function SettingsSheet() {
           </div>
         </div>
       </section>
+            <NavigationSection />
+          </>
+        ) : null}
 
-      <NavigationSection />
-      <SyncSection />
-      <SharedSpaceSection />
-      <RemindersSection />
-      <BackgroundPushSection />
-      <VoiceSection />
-      <CalendarSection />
-      <FeedsSection />
-      <TaskImportSection />
-      <WeatherSection />
-      <TemplatesSection />
-      <InstallSection />
-      <SecuritySection />
-      <section className="set-section">
-        <h3 className="kicker">{t("New here?")}</h3>
-        <div className="set-row">
-          <div>
-            <p className="set-label">{t("The two-minute tour")}</p>
-            <p className="set-hint">{t("Walks through quick add, planning, habits, mood and notes — with the language picker first.")}</p>
-          </div>
-          <span className="set-actions">
-            <button type="button" className="btn btn-soft" onClick={() => { closeSettings(); window.setTimeout(requestAbout, 60); }}>
-              {t("Why Planner?")}
-            </button>
-            <button type="button" className="btn btn-primary" onClick={() => { closeSettings(); window.setTimeout(requestTour, 60); }}>
-              {t("Show me around")}
-            </button>
-          </span>
-        </div>
-      </section>
+        {tab === 'language' ? (
+          <>
+            <CalendarSection />
+            <VoiceSection />
+          </>
+        ) : null}
 
-      <section className="set-section">
-        <h3 className="kicker">{t("AI coach · Groq")}</h3>
-        <p className="set-hint">{t("The planner uses a server-side proxy for Groq. Your API key stays out of the browser and planner backups.")}</p>
-        <pre className="env-code"><code>{t("GROQ_API_KEY=your_groq_api_key")}</code></pre>
-        <p className="set-hint"><strong>{t("On Vercel:")}</strong> {t("Project Settings → Environment Variables → add")} <code>{t("GROQ_API_KEY")}</code> {t("with your key as the value, then redeploy. Vercel Functions in")} <code>{t("api/groq")}</code> {t("handle the requests.")}</p>
-        <p className="set-hint"><strong>{t("Locally:")}</strong> {t("put that line in")} <code>{t(".env.local")}</code> {t("at the project root, then restart the dev server.")}</p>
-        <p className="ai-privacy-note">{t("Never use a")} <code>{t("VITE_")}</code> {t("prefix for the key. The AI sends your prompt, saved AI memory, and relevant schedule/check-in details to Groq; planner notes are not included. Forget memory from the AI coach at any time.")}</p>
-      </section>
+        {tab === 'reminders' ? (
+          <>
+            <RemindersSection />
+            <BackgroundPushSection />
+          </>
+        ) : null}
 
+        {tab === 'sync' ? (
+          <>
+            <SyncSection />
+            <SharedSpaceSection />
       <section className="set-section">
         <h3 className="kicker">{t("Your data")}</h3>
         <p className="set-hint">{t("Planner data is saved in this browser. With sync on, an encrypted copy is kept in your database; AI requests pass through the server-side Groq proxy.")}</p>
@@ -677,7 +1399,63 @@ export function SettingsSheet() {
         </div>
         <input ref={importFile.ref} className="visually-hidden" tabIndex={-1} aria-hidden="true" type="file" accept="application/json,.json" onChange={importFile.onChange} />
       </section>
+          </>
+        ) : null}
 
+        {tab === 'connections' ? (
+          <>
+            <CalendarExchangeSection />
+            <FeedsSection />
+            <TaskImportSection />
+            <WeatherSection />
+            <TemplatesSection />
+          </>
+        ) : null}
+
+        {tab === 'app' ? (
+          <>
+            <InstallSection />
+            <PrivacySection />
+      <section className="set-section">
+        <h3 className="kicker">{t("New here?")}</h3>
+        <div className="set-row">
+          <div>
+            <p className="set-label">{t("The two-minute tour")}</p>
+            <p className="set-hint">{t("Walks through quick add, planning, habits, mood and notes — with the language picker first.")}</p>
+          </div>
+          <span className="set-actions">
+            <button type="button" className="btn btn-soft" onClick={() => { closeSettings(); window.setTimeout(requestAbout, 60); }}>
+              {t("Why Planner?")}
+            </button>
+            <button type="button" className="btn btn-primary" onClick={() => { closeSettings(); window.setTimeout(requestTour, 60); }}>
+              {t("Show me around")}
+            </button>
+          </span>
+        </div>
+      </section>
+      <section className="set-section">
+        <h3 className="kicker">{t("AI coach · Groq")}</h3>
+        <p className="set-hint">{t("The planner uses a server-side proxy for Groq. Your API key stays out of the browser and planner backups.")}</p>
+        <pre className="env-code"><code>{t("GROQ_API_KEY=your_groq_api_key")}</code></pre>
+        <p className="set-hint">
+          <Rich
+            text={t("On Vercel: Project Settings → Environment Variables → add {name} with your key as the value, then redeploy. Vercel Functions in {path} handle the requests.")}
+            values={{ name: <code>{t("GROQ_API_KEY")}</code>, path: <code>{t("api/groq")}</code> }}
+          />
+        </p>
+        <p className="set-hint">
+          <Rich
+            text={t("Locally: put that line in {file} at the project root, then restart the dev server.")}
+            values={{ file: <code>{t(".env.local")}</code> }}
+          />
+        </p>
+        <p className="ai-privacy-note">
+          <Rich
+            text={t("Never use a {prefix} prefix for the key. The AI sends your prompt, saved AI memory, and relevant schedule/check-in details to Groq; planner notes are not included. Forget memory from the AI coach at any time.")}
+            values={{ prefix: <code>{t("VITE_")}</code> }}
+          />
+        </p>
+      </section>
       <section className="set-section">
         <h3 className="kicker">{t("Shortcuts")}</h3>
         <ul className="shortcut-list">
@@ -689,8 +1467,11 @@ export function SettingsSheet() {
           <li><span>{t("Open shortcuts")}</span><span><kbd className="kbd">?</kbd></span></li>
         </ul>
       </section>
+          </>
+        ) : null}
 
       <p className="set-foot">{t("Personal Planner · local-first · made for calm days")}</p>
+      </div>
     </Modal>
   );
 }

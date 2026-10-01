@@ -527,7 +527,7 @@ describe('futures', () => {
   it('expands repeating events onto matching days', () => {
     expect(occursOn('2026-09-22', 'weekly', '2026-09-29')).toBe(true);
     expect(occursOn('2026-09-22', 'weekly', '2026-09-28')).toBe(false);
-    let state = addEvent(createEmptyState(), {
+    const state = addEvent(createEmptyState(), {
       title: 'Class',
       date: '2026-09-22',
       startTime: '08:00',
@@ -584,8 +584,10 @@ describe('futures', () => {
       category: 'work',
       note: '',
       goalId: null,
+      estimatedMinutes: 90,
     }, 't1', now);
     const copied = copyWeek(state, '2026-09-22', now);
+    expect(copied.tasks.find((task) => task.title === 'Ship')?.estimatedMinutes).toBe(90);
     expect(copied.events.some((event) => event.date === '2026-09-29' && event.title === 'Standup')).toBe(true);
     expect(copied.tasks.some((task) => task.dueDate === '2026-09-29' && task.title === 'Ship')).toBe(true);
     expect(weekLeftovers(state, '2026-09-27').map((task) => task.id)).toEqual(['t1']);
@@ -594,7 +596,7 @@ describe('futures', () => {
   });
 
   it('places a milestone on the agenda', () => {
-    let state = addGoal(createEmptyState(), {
+    const state = addGoal(createEmptyState(), {
       title: 'Ship',
       description: '',
       horizon: 'short',

@@ -91,9 +91,11 @@ export function EventRow({ event, onDropSwap }: { event: PlannerEvent; onDropSwa
         </button>
         <p className="meta">
           <i className={cx('dot-inline', `accent-${accent}`)} aria-hidden="true" />
-          {categoryById(event.category).label}
-          {duration ? ` · ${duration}` : ''}
-          {event.important ? t(" · Important") : ''}
+          {t("{category}{duration}{important}", {
+            category: categoryById(event.category).label,
+            duration: duration ? ` · ${duration}` : '',
+            important: event.important ? ` · ${t("Important")}` : '',
+          })}
           {event.repeat || series ? <span className="repeat-chip">↻ {repeatLabel(event.repeat)}</span> : null}
         </p>
       </div>
@@ -177,16 +179,24 @@ export function TaskRow({
   const [picking, setPicking] = useState(false);
   const stepsDone = task.subtasks.filter((item) => item.completed).length;
   const today = todayISO();
-  const overdue = !task.completed && task.dueDate !== null && task.dueDate < today;
+  /**
+   * An upcoming occurrence of a repeating task, drawn from the series rather
+   * than stored. There is nothing here to tick, reorder, snooze or delete —
+   * only the real copy can be changed, so every action on the row opens that
+   * task instead of pretending to work on a projection.
+   */
+  const projected = Boolean(task.seriesTaskId);
+  const editId = task.seriesTaskId ?? task.id;
+  const overdue = !projected && !task.completed && task.dueDate !== null && task.dueDate < today;
   return (
     <li
-      className={cx('task', task.completed && 'is-done', selection?.selected && 'is-selected')}
+      className={cx('task', task.completed && 'is-done', selection?.selected && 'is-selected', projected && 'is-projected')}
       onDragOver={(dragEvent) => {
-        if (!onDropSwap) return;
+        if (!onDropSwap || projected) return;
         dragEvent.preventDefault();
       }}
       onDrop={(dragEvent) => {
-        if (!onDropSwap) return;
+        if (!onDropSwap || projected) return;
         dragEvent.preventDefault();
         const raw = dragEvent.dataTransfer.getData('text/plain');
         if (raw.startsWith('task:')) onDropSwap(raw.slice(5));
@@ -205,13 +215,15 @@ export function TaskRow({
         type="button"
         className={cx('check', task.completed && 'on')}
         aria-pressed={task.completed}
+        disabled={projected}
+        title={projected ? t("This is an upcoming repeat. Open the task to tick it.") : undefined}
         aria-label={task.completed ? t("Mark {0} not done", { 0: task.title }) : t("Mark {0} complete", { 0: task.title })}
         onClick={() => toggleTask(task.id)}
       >
         {task.completed ? <TickIcon size={14} /> : null}
       </button>
       <div className="item-body">
-        <button type="button" className="item-title" dir="auto" onClick={() => openComposer({ mode: 'edit', type: 'task', id: task.id })}>
+        <button type="button" className="item-title" dir="auto" onClick={() => openComposer({ mode: 'edit', type: 'task', id: editId })}>
           {task.title}
         </button>
         <p className="meta">
@@ -226,6 +238,7 @@ export function TaskRow({
           {showDate && task.dueDate ? ` · ${formatWeekdayShort(task.dueDate)} ${dayNumber(task.dueDate)} ${formatMonthShort(task.dueDate)}` : ''}
           {task.waiting ? <span className="repeat-chip">{t("Waiting on {0}", { 0: task.waiting })}</span> : null}
           {task.repeat ? <span className="repeat-chip" title={repeatLabel(task.repeat)}>↻ {repeatLabel(task.repeat).replace('Every ', '')}</span> : null}
+          {projected ? <span className="repeat-chip">{t("Repeats")}</span> : null}
           {task.subtasks.length ? (
             <button type="button" className="steps-chip" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
               <span className="steps-bar" aria-hidden="true"><i style={{ width: `${(stepsDone / task.subtasks.length) * 100}%` }} /></span>
@@ -296,52 +309,56 @@ export function TaskRow({
           </button>
         ) : null}
       </div>
-      <span
-        className="grip"
-        draggable
-        aria-label={t("Drag {0} to reorder", { 0: task.title })}
-        title={t("Drag onto another task to reorder")}
-        onDragStart={(dragEvent) => {
-          dragEvent.dataTransfer.setData('text/plain', `task:${task.id}`);
-          dragEvent.dataTransfer.effectAllowed = 'move';
-        }}
-      >
-        <GripIcon size={14} />
-      </span>
-      <button
-        type="button"
-        className="icon-btn"
-        aria-label={t("Duplicate {0}", { 0: task.title })}
-        title={t("Duplicate")}
-        onClick={() => {
-          duplicateTask(task.id);
-          flash(t("Task “{0}” duplicated.", { 0: task.title }), { label: t("Undo"), run: undo });
-        }}
-      >
-        <span aria-hidden="true">⧉</span>
-      </button>
-      {!task.completed ? (
-        <button
-          type="button"
-          className="icon-btn row-focus"
-          aria-label={t("Start a focus session for {0}", { 0: task.title })}
-          title={t("Focus on this")}
-          onClick={() => startFocus({ taskId: task.id, title: task.title, minutes: 25 })}
-        >
-          <StopwatchIcon size={16} />
-        </button>
+      {!projected ? (
+        <>
+          <span
+            className="grip"
+            draggable
+            aria-label={t("Drag {0} to reorder", { 0: task.title })}
+            title={t("Drag onto another task to reorder")}
+            onDragStart={(dragEvent) => {
+              dragEvent.dataTransfer.setData('text/plain', `task:${task.id}`);
+              dragEvent.dataTransfer.effectAllowed = 'move';
+            }}
+          >
+            <GripIcon size={14} />
+          </span>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label={t("Duplicate {0}", { 0: task.title })}
+            title={t("Duplicate")}
+            onClick={() => {
+              duplicateTask(task.id);
+              flash(t("Task “{0}” duplicated.", { 0: task.title }), { label: t("Undo"), run: undo });
+            }}
+          >
+            <span aria-hidden="true">⧉</span>
+          </button>
+          {!task.completed ? (
+            <button
+              type="button"
+              className="icon-btn row-focus"
+              aria-label={t("Start a focus session for {0}", { 0: task.title })}
+              title={t("Focus on this")}
+              onClick={() => startFocus({ taskId: task.id, title: task.title, minutes: 25 })}
+            >
+              <StopwatchIcon size={16} />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="icon-btn row-delete"
+            aria-label={t("Remove {0}", { 0: task.title })}
+            onClick={() => {
+              deleteTask(task.id);
+              flash(t("Task “{0}” removed.", { 0: task.title }), { label: t("Undo"), run: undo });
+            }}
+          >
+            <TrashIcon size={16} />
+          </button>
+        </>
       ) : null}
-      <button
-        type="button"
-        className="icon-btn row-delete"
-        aria-label={t("Remove {0}", { 0: task.title })}
-        onClick={() => {
-          deleteTask(task.id);
-          flash(t("Task “{0}” removed.", { 0: task.title }), { label: t("Undo"), run: undo });
-        }}
-      >
-        <TrashIcon size={16} />
-      </button>
     </li>
   );
 }

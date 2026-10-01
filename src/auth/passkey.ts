@@ -171,9 +171,15 @@ export async function registerPasskey(label?: string): Promise<RegisteredPasskey
 }
 
 export interface PasskeySignInResult {
-  user: PublicUser;
+  /**
+   * Who signed in. Null while a second factor is still owed: the account is
+   * named only once the code has been accepted.
+   */
+  user: PublicUser | null;
   /** True when the passkey also opened the vault — straight to the planner. */
   unlocked: boolean;
+  /** True when the account also wants a code from its authenticator app. */
+  totpRequired?: boolean;
 }
 
 /**
@@ -208,7 +214,7 @@ export async function passkeySignIn(username?: string): Promise<PasskeySignInRes
 
   const prfOutput = (credential.getClientExtensionResults() as PrfExtensionOutput).prf?.results?.first ?? null;
   const response = credential.response as AuthenticatorAssertionResponse;
-  const result = await request<PasskeyLoginResponse>('/api/auth/passkey/login/verify', {
+  const result = await request<PasskeyLoginResponse & { secondFactor?: 'totp' }>('/api/auth/passkey/login/verify', {
     method: 'POST',
     body: JSON.stringify({
       id: credential.id,
@@ -218,6 +224,12 @@ export async function passkeySignIn(username?: string): Promise<PasskeySignInRes
       userHandle: response.userHandle ? new TextDecoder().decode(new Uint8Array(response.userHandle)) : null,
     }),
   });
+
+  // The account wants a code from its authenticator app as well. The session
+  // does not exist until that code arrives, so there is nothing to open yet.
+  if (result.secondFactor === 'totp') {
+    return { user: null, unlocked: false, totpRequired: true };
+  }
 
   // PRF + wrapped key → the vault opens with no password anywhere.
   if (prfOutput && result.wrappedDek) {

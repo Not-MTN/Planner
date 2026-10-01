@@ -237,6 +237,16 @@ export function TickIcon(props: IconProps) {
   );
 }
 
+export function PrinterIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M7 9V4.5h10V9" />
+      <rect x="4" y="9" width="16" height="7" rx="1.6" />
+      <path d="M7 13.5h10v6H7z" />
+    </Svg>
+  );
+}
+
 export function DownloadIcon(props: IconProps) {
   return (
     <Svg {...props}>

@@ -41,6 +41,8 @@ export function createFakeNeon(): FakeDb {
     planner_links: [],
     planner_passkeys: [],
     planner_sync: [],
+    planner_login_challenges: [],
+    planner_auth_events: [],
   };
 
   const now = () => new Date().toISOString();
@@ -73,8 +75,17 @@ export function createFakeNeon(): FakeDb {
     }
 
     if (/^INSERT INTO planner_credentials /i.test(q)) {
-      const [user_id, kdf_salt, auth_hash, hash_salt, recovery_hash, recovery_hash_salt] = values;
-      tables.planner_credentials.push({ user_id, kdf_salt, auth_hash, hash_salt, recovery_hash, recovery_hash_salt, updated_at: now() });
+      const [user_id, kdf_salt, auth_hash, hash_salt, recovery_hash, recovery_hash_salt, recovery_verifiers] = values;
+      tables.planner_credentials.push({
+        user_id,
+        kdf_salt,
+        auth_hash,
+        hash_salt,
+        recovery_hash,
+        recovery_hash_salt,
+        recovery_verifiers,
+        updated_at: now(),
+      });
       return [];
     }
 
@@ -91,7 +102,12 @@ export function createFakeNeon(): FakeDb {
       if (!user || !tables.planner_vaults.some((row) => row.user_id === user.id)) return [];
       const credential = tables.planner_credentials.find((row) => row.user_id === user.id);
       return credential
-        ? [{ id: user.id, recovery_hash: credential.recovery_hash ?? null, recovery_hash_salt: credential.recovery_hash_salt ?? null }]
+        ? [{
+            id: user.id,
+            recovery_hash: credential.recovery_hash ?? null,
+            recovery_hash_salt: credential.recovery_hash_salt ?? null,
+            recovery_verifiers: credential.recovery_verifiers ?? null,
+          }]
         : [];
     }
 
@@ -107,25 +123,175 @@ export function createFakeNeon(): FakeDb {
     }
 
     if (/^WITH credential_update AS /i.test(q)) {
-      const [kdf_salt, auth_hash, hash_salt, recovery_hash, recovery_hash_salt, user_id, proof, proof_salt, wrapped_dek, wrapped_recovery] = values;
+      // Two statements share this shape: resetting a password with a recovery
+      // code (proved by the verifier array read a moment ago), and rotating the
+      // codes of an account that is already signed in.
+      if (/SET kdf_salt = /i.test(q)) {
+        const [kdf_salt, auth_hash, hash_salt, recovery_hash, recovery_hash_salt, recovery_verifiers, user_id, proof, wrapped_dek, wrapped_recovery] = values;
+        const credential = tables.planner_credentials.find((row) => row.user_id === user_id);
+        if (!credential) return [];
+        // IS NOT DISTINCT FROM: null matches null.
+        if ((credential.recovery_verifiers ?? null) !== (proof ?? null)) return [];
+        const vault = tables.planner_vaults.find((row) => row.user_id === user_id);
+        if (!vault) return [];
+        credential.kdf_salt = kdf_salt;
+        credential.auth_hash = auth_hash;
+        credential.hash_salt = hash_salt;
+        credential.recovery_hash = recovery_hash;
+        credential.recovery_hash_salt = recovery_hash_salt;
+        credential.recovery_verifiers = recovery_verifiers;
+        credential.updated_at = now();
+        vault.wrapped_dek = wrapped_dek;
+        vault.wrapped_recovery = wrapped_recovery;
+        vault.updated_at = now();
+        tables.planner_sessions = tables.planner_sessions.filter((row) => row.user_id !== user_id);
+        return [{ user_id }];
+      }
+      const [recovery_hash, recovery_hash_salt, recovery_verifiers, user_id, wrapped_dek, wrapped_recovery] = values;
       const credential = tables.planner_credentials.find((row) => row.user_id === user_id);
-      if (!credential || credential.recovery_hash !== proof || credential.recovery_hash_salt !== proof_salt) return [];
+      if (!credential) return [];
       const vault = tables.planner_vaults.find((row) => row.user_id === user_id);
       if (!vault) return [];
-      credential.kdf_salt = kdf_salt;
-      credential.auth_hash = auth_hash;
-      credential.hash_salt = hash_salt;
       credential.recovery_hash = recovery_hash;
       credential.recovery_hash_salt = recovery_hash_salt;
+      credential.recovery_verifiers = recovery_verifiers;
       credential.updated_at = now();
       vault.wrapped_dek = wrapped_dek;
       vault.wrapped_recovery = wrapped_recovery;
       vault.updated_at = now();
-      tables.planner_sessions = tables.planner_sessions.filter((row) => row.user_id !== user_id);
       return [{ user_id }];
     }
 
-    if (/^UPDATE planner_credentials SET /i.test(q)) {
+    if (/^SELECT totp_secret AS secret/i.test(q)) {
+      const row = tables.planner_credentials.find((item) => item.user_id === values[0]);
+      if (!row) return [];
+      return [{
+        secret: row.totp_secret ?? null,
+        confirmedAt: row.totp_confirmed_at ?? null,
+        lastStep: row.totp_last_step ?? null,
+      }];
+    }
+
+    if (/^UPDATE planner_credentials SET totp_secret = /i.test(q)) {
+      const [secret, user_id] = values;
+      const row = tables.planner_credentials.find((item) => item.user_id === user_id);
+      if (!row) return [];
+      row.totp_secret = secret;
+      row.totp_confirmed_at = null;
+      row.totp_last_step = null;
+      return [];
+    }
+
+    if (/^UPDATE planner_credentials SET totp_confirmed_at = now\(\)/i.test(q)) {
+      const row = tables.planner_credentials.find((item) => item.user_id === values[0]);
+      if (row) row.totp_confirmed_at = now();
+      return [];
+    }
+
+    if (/^UPDATE planner_credentials SET totp_last_step = /i.test(q)) {
+      const [step, user_id] = values;
+      const row = tables.planner_credentials.find((item) => item.user_id === user_id);
+      if (row) row.totp_last_step = step;
+      return [];
+    }
+
+    if (/^INSERT INTO planner_login_challenges /i.test(q)) {
+      const [token_hash, user_id, expires_at] = values;
+      // Mirrors the real statement: one live challenge per account, and the
+      // expired rows go while we are here.
+      tables.planner_login_challenges = tables.planner_login_challenges.filter(
+        (row) => row.user_id !== user_id && new Date(String(row.expires_at)).getTime() > Date.now(),
+      );
+      tables.planner_login_challenges.push({ token_hash, user_id, expires_at });
+      return [];
+    }
+
+    if (/^SELECT c\.user_id, u\.id/i.test(q)) {
+      const session = tables.planner_login_challenges.find(
+        (row) => row.token_hash === values[0] && new Date(String(row.expires_at)).getTime() > Date.now(),
+      );
+      if (!session) return [];
+      const user = tables.planner_users.find((row) => row.id === session.user_id);
+      if (!user) return [];
+      return [{ ...user, user_id: session.user_id }];
+    }
+
+    if (/^DELETE FROM planner_login_challenges WHERE token_hash = /i.test(q)) {
+      tables.planner_login_challenges = tables.planner_login_challenges.filter((row) => row.token_hash !== values[0]);
+      return [];
+    }
+
+    if (/^DELETE FROM planner_login_challenges WHERE user_id = /i.test(q)) {
+      tables.planner_login_challenges = tables.planner_login_challenges.filter(
+        (row) => row.user_id !== values[0] && new Date(String(row.expires_at)).getTime() > Date.now(),
+      );
+      return [];
+    }
+
+    if (/^INSERT INTO planner_auth_events /i.test(q)) {
+      const [id, user_id, kind, device_label, network, new_network] = values;
+      tables.planner_auth_events.push({
+        id,
+        user_id,
+        kind,
+        device_label,
+        network,
+        new_network,
+        created_at: now(),
+      });
+      // Same trim as the real statement, so a test can watch the list stay
+      // bounded rather than assume it does.
+      const mine = tables.planner_auth_events
+        .filter((row) => row.user_id === user_id)
+        .sort((a, b) => new Date(String(b.created_at)).getTime() - new Date(String(a.created_at)).getTime());
+      const keep = new Set(mine.slice(0, 60).map((row) => row.id));
+      const cutoff = Date.now() - 180 * 86_400_000;
+      tables.planner_auth_events = tables.planner_auth_events.filter(
+        (row) => keep.has(row.id) && new Date(String(row.created_at)).getTime() >= cutoff,
+      );
+      return [];
+    }
+
+    if (/^SELECT id, kind, device_label AS/i.test(q)) {
+      const take = values[values.length - 1];
+      return tables.planner_auth_events
+        .filter((row) => row.user_id === values[0])
+        .sort((a, b) => new Date(String(b.created_at)).getTime() - new Date(String(a.created_at)).getTime())
+        .slice(0, Number(take))
+        // Aliased the way the statement names them: the store reads `at`, not
+        // `created_at`. Getting this wrong is how a missing alias ships.
+        .map((row) => ({
+          id: row.id,
+          kind: row.kind,
+          deviceLabel: row.device_label,
+          at: row.created_at,
+          network: row.network,
+          newNetwork: row.new_network,
+        }));
+    }
+
+    // Both trims in one shape: the row-count trim and the age trim differ only
+    // in their WHERE clause.
+    if (/^DELETE FROM planner_auth_events\s+WHERE user_id = /i.test(q)) {
+      const user_id = values[0];
+      if (/id NOT IN/i.test(q)) {
+        const mine = tables.planner_auth_events
+          .filter((row) => row.user_id === user_id)
+          .sort((a, b) => new Date(String(b.created_at)).getTime() - new Date(String(a.created_at)).getTime());
+        const limit = Number(values[values.length - 1]);
+        const keep = new Set(mine.slice(0, limit).map((row) => row.id));
+        tables.planner_auth_events = tables.planner_auth_events.filter((row) => keep.has(row.id));
+      } else {
+        const days = Number(values[1]);
+        const cutoff = Date.now() - days * 86_400_000;
+        tables.planner_auth_events = tables.planner_auth_events.filter(
+          (row) => new Date(String(row.created_at)).getTime() >= cutoff,
+        );
+      }
+      return [];
+    }
+
+    if (/^UPDATE planner_credentials SET kdf_salt = /i.test(q)) {
       const [kdf_salt, auth_hash, hash_salt, user_id] = values;
       const row = tables.planner_credentials.find((item) => item.user_id === user_id);
       if (!row) return [];
@@ -137,11 +303,14 @@ export function createFakeNeon(): FakeDb {
     }
 
     if (/^INSERT INTO planner_links /i.test(q)) {
-      const [id, guardian_id, student_username_lower, code_hash, wrapped_share] = values;
+      // values: id, guardian, student, code hash, wrapped share, days until the
+      // invitation expires. Real Postgres computes it with make_interval.
+      const [id, guardian_id, student_username_lower, code_hash, wrapped_share, ttlDays] = values;
       const clash = tables.planner_links.some(
         (row) => row.guardian_id === guardian_id && row.student_username_lower === student_username_lower,
       );
       if (clash) return [];
+      const days = typeof ttlDays === 'number' ? ttlDays : Number(ttlDays);
       const row: Row = {
         id,
         guardian_id,
@@ -149,6 +318,7 @@ export function createFakeNeon(): FakeDb {
         student_username_lower,
         code_hash,
         wrapped_share,
+        code_expires_at: Number.isFinite(days) ? new Date(Date.now() + days * 86_400_000).toISOString() : null,
         share_ciphertext: null,
         share_week: null,
         share_updated_at: null,
@@ -166,12 +336,30 @@ export function createFakeNeon(): FakeDb {
         .map((row) => ({ ...row }));
     }
 
+    // Asked before accepting: is this code right but too old?
+    if (/^SELECT id FROM planner_links WHERE code_hash = /i.test(q)) {
+      const [code_hash, student_username_lower] = values;
+      return tables.planner_links
+        .filter(
+          (row) =>
+            row.code_hash === code_hash &&
+            row.student_username_lower === student_username_lower &&
+            row.status === 'pending' &&
+            row.code_expires_at != null &&
+            new Date(String(row.code_expires_at)).getTime() <= Date.now(),
+        )
+        .map((row) => ({ id: row.id }));
+    }
+
     if (/^SELECT l\.\*, u\.username AS guardian_username/i.test(q)) {
       const [usernameLower, userId] = values;
       return tables.planner_links
         .filter(
           (row) =>
-            (row.student_username_lower === usernameLower && row.status === 'pending') ||
+            (row.student_username_lower === usernameLower &&
+              row.status === 'pending' &&
+              (row.code_expires_at == null ||
+                new Date(String(row.code_expires_at)).getTime() > Date.now())) ||
             (row.student_id === userId && row.status === 'linked'),
         )
         .map((row) => {
@@ -191,6 +379,7 @@ export function createFakeNeon(): FakeDb {
       if (!row) return [];
       row.student_id = student_id;
       row.status = 'linked';
+      row.code_expires_at = null;
       row.updated_at = now();
       return [{ ...row }];
     }
@@ -301,6 +490,41 @@ export function createFakeNeon(): FakeDb {
       if (!user) return [];
       const { id: _ignored, ...rest } = user;
       return [{ ...rest, ...session, u_id: user.id }];
+    }
+
+    if (/^SELECT id, label, created_at AS "createdAt"/i.test(q)) {
+      const userId = values[0];
+      return tables.planner_sessions
+        .filter((row) => row.user_id === userId && new Date(String(row.expires_at)).getTime() > Date.now())
+        .sort((a, b) => String(b.last_seen_at).localeCompare(String(a.last_seen_at)))
+        .map((row) => ({
+          id: row.id,
+          label: row.label,
+          createdAt: row.created_at,
+          lastSeenAt: row.last_seen_at,
+          expiresAt: row.expires_at,
+        }));
+    }
+
+    if (/^UPDATE planner_sessions SET last_seen_at = now\(\) WHERE id = /i.test(q)) {
+      const row = tables.planner_sessions.find((item) => item.id === values[0]);
+      if (row) row.last_seen_at = now();
+      return [];
+    }
+
+    if (/^DELETE FROM planner_sessions WHERE id = .* AND user_id = /i.test(q)) {
+      const [id, user_id] = values;
+      const kept = tables.planner_sessions.filter((row) => !(row.id === id && row.user_id === user_id));
+      const removed = kept.length !== tables.planner_sessions.length;
+      tables.planner_sessions = kept;
+      return removed ? [{ id }] : [];
+    }
+
+    if (/^DELETE FROM planner_sessions WHERE user_id = .* AND id <> /i.test(q)) {
+      const [user_id, keepId] = values;
+      const gone = tables.planner_sessions.filter((row) => row.user_id === user_id && row.id !== keepId);
+      tables.planner_sessions = tables.planner_sessions.filter((row) => !(row.user_id === user_id && row.id !== keepId));
+      return gone.map((row) => ({ id: row.id }));
     }
 
     if (/^DELETE FROM planner_sessions WHERE id = /i.test(q)) {

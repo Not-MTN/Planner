@@ -1,4 +1,4 @@
-import { categoryById, noteKindById } from './constants';
+import { noteKindById } from './constants';
 import {
   addDays,
   isValidISODate,
@@ -150,8 +150,47 @@ export function eventsForDate(state: PlannerState, date: string): PlannerEvent[]
   ].sort(compareEvents);
 }
 
-export function tasksForDate(state: PlannerState, date: string): Task[] {
-  return state.tasks.filter((task) => task.dueDate === date).sort(compareTasks);
+/**
+ * Read-only upcoming occurrences of repeating tasks.
+ *
+ * A repeating task is stored once, and the next copy only appears when that one
+ * is completed. So a week view could not show "water the plants" on Thursday:
+ * the recurrence was invisible until the day itself arrived, and the calendar
+ * showed a week that was missing everything you do regularly.
+ *
+ * These are projections, with the same contract the repeating *events* already
+ * use — a stable id built from the series and the date, nothing written to
+ * storage, and a marker naming where the occurrence came from. Only dates after
+ * the task's own due date are projected, so the real, actionable copy is never
+ * duplicated on the day it is actually due.
+ *
+ * Deliberately *not* included where a missing day has consequences other than
+ * display: reminders, push scheduling, auto-scheduling and the AI's context all
+ * count real items, and a projection is not something to remind you about or to
+ * schedule around. Pass `includeRepeats` where the screen is showing a day.
+ */
+export function seriesTasksForDate(state: PlannerState, date: string): Task[] {
+  if (!isValidISODate(date)) return [];
+  return state.tasks
+    .filter((task) => task.repeat && !task.completed && task.dueDate !== null && task.dueDate < date && occursOn(task.dueDate, task.repeat, date))
+    .map((task) => ({
+      ...task,
+      id: `series:${task.id}:${date}`,
+      dueDate: date,
+      completed: false,
+      completedAt: null,
+      // A projection carries no state of its own: ticking it would have
+      // nothing to tick, and a subtask ticked on a projection would vanish.
+      spawnedId: null,
+      subtasks: [],
+      seriesTaskId: task.id,
+    }));
+}
+
+export function tasksForDate(state: PlannerState, date: string, includeRepeats = false): Task[] {
+  const real = state.tasks.filter((task) => task.dueDate === date);
+  const all = includeRepeats ? [...real, ...seriesTasksForDate(state, date)] : real;
+  return all.sort(compareTasks);
 }
 
 export function overdueTasks(state: PlannerState, today: string): Task[] {
@@ -159,11 +198,6 @@ export function overdueTasks(state: PlannerState, today: string): Task[] {
     .filter((task) => !task.completed && !task.waiting && task.dueDate !== null && task.dueDate < today)
     .sort(compareTasks);
 }
-
-export function waitingTasks(state: PlannerState): Task[] {
-  return state.tasks.filter((task) => !task.completed && Boolean(task.waiting)).sort(compareTasks);
-}
-
 export function weekLeftovers(state: PlannerState, today: string): Task[] {
   const days = new Set(weekDates(today).filter((date) => date <= today));
   return state.tasks
@@ -267,7 +301,7 @@ export function frequencyLabel(habit: Pick<Habit, 'frequency'>): string {
   if (frequency.type === 'daily') return t("Every day");
   if (frequency.type === 'weekdays') return t("Weekdays");
   if (frequency.type === 'weekly') return t("{0}× a week", { 0: frequency.times });
-  const names = [t("Sun"), 'Mon', t("Tue"), t("Wed"), t("Thu"), t("Fri"), t("Sat")];
+  const names = [t("Sun"), t("Mon"), t("Tue"), t("Wed"), t("Thu"), t("Fri"), t("Sat")];
   const labels = [...frequency.days].sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map((day) => names[day]);
   return labels.join(', ');
 }
@@ -281,11 +315,6 @@ export function matchesQuery(values: Array<string | null | undefined>, query: st
   if (!needle) return true;
   return values.some((value) => (value ?? '').toLowerCase().includes(needle));
 }
-
-export function categoryLabel(id: string): string {
-  return categoryById(id).label;
-}
-
 export function weekNarrative(state: PlannerState, today: string): string {
   const days = new Set(weekDates(today).filter((date) => date <= today));
   const tasks = state.tasks.filter((task) => task.dueDate !== null && days.has(task.dueDate));
@@ -308,10 +337,16 @@ export function weekNarrative(state: PlannerState, today: string): string {
         : done === total
           ? t("Everything scheduled so far this week is done.")
           : t("{0} of {1} scheduled things are done so far this week.", { 0: done, 1: total });
-  const habitLine =
-    habitDone === 0 ? '' : t(" {0} {1} kept this week.", { 0: habitDone, 1: habitDone === 1 ? t("habit was") : t("habits were") });
-  const goalLine = moving === 0 ? '' : t(" {0} {1} still in motion.", { 0: moving, 1: moving === 1 ? t("goal is") : t("goals are") });
-  return `${head}${habitLine}${goalLine}`.replace(/\s+/g, ' ').trim();
+  // Whole sentences, not leading-space fragments: the clause has to be
+  // translatable on its own, with its own plural agreement.
+  // Whole sentences joined by a space — not leading-space fragments glued on
+  // and then trimmed, which is untranslatable in a right-to-left language.
+  const parts = [head];
+  if (habitDone === 1) parts.push(t("{0} habit was kept this week.", { 0: habitDone }));
+  else if (habitDone > 1) parts.push(t("{0} habits were kept this week.", { 0: habitDone }));
+  if (moving === 1) parts.push(t("{0} goal is still in motion.", { 0: moving }));
+  else if (moving > 1) parts.push(t("{0} goals are still in motion.", { 0: moving }));
+  return parts.join(' ');
 }
 
 export interface AgendaDay {

@@ -4,12 +4,15 @@ import {
   decryptState,
   deriveFromPassword,
   encryptState,
+  formatRecoveryCodes,
   formatRecoveryKey,
   hashRecoveryKey,
+  importDek,
   keyFromRecovery,
   newSalt,
   normalizeRecoveryKey,
   unwrapKey,
+  unwrapWithRecoveryCode,
 } from './crypto';
 import { createEmptyState } from '../types';
 
@@ -67,7 +70,7 @@ describe('vault crypto', () => {
     const recovery = formatRecoveryKey();
     const keys = await createVaultKeys(PASSWORD, recovery);
     const recoveryKek = await keyFromRecovery(recovery, keys.salt);
-    const recovered = await unwrapKey(keys.wrappedRecovery, recoveryKek);
+    const recovered = await unwrapKey(keys.wrappedRecovery[0]!, recoveryKek);
     const state = createEmptyState();
     const cipher = await encryptState(state, keys.dek);
     // Decrypting with the recovered key proves both paths open the same vault.
@@ -78,6 +81,42 @@ describe('vault crypto', () => {
     const keys = await createVaultKeys(PASSWORD, formatRecoveryKey());
     const wrong = await deriveFromPassword('wrong password', keys.salt);
     await expect(unwrapKey(keys.wrappedDek, wrong.kek)).rejects.toThrow();
+  });
+
+  it('gives each recovery code its own wrapped copy of the vault key', async () => {
+    const codes = formatRecoveryCodes(3);
+    expect(codes).toHaveLength(3);
+    // Distinct codes, or a second copy would add nothing.
+    expect(new Set(codes).size).toBe(3);
+
+    const keys = await createVaultKeys(PASSWORD, codes);
+    expect(keys.wrappedRecovery).toHaveLength(3);
+    keys.wrappedRecovery.slice(1).forEach((wrap, index) => expect(wrap).not.toBe(keys.wrappedRecovery[index]));
+
+    const state = createEmptyState();
+    const cipher = await encryptState(state, keys.dek);
+    // Every code must open the same vault on its own.
+    for (const [index, code] of codes.entries()) {
+      const kek = await keyFromRecovery(code, keys.salt);
+      const dek = await unwrapKey(keys.wrappedRecovery[index]!, kek);
+      await expect(decryptState(cipher, dek)).resolves.toBeTruthy();
+    }
+  });
+
+  it('opens the vault with any code without being told which one it is', async () => {
+    const codes = formatRecoveryCodes(4);
+    const keys = await createVaultKeys(PASSWORD, codes);
+    const state = createEmptyState();
+    const cipher = await encryptState(state, keys.dek);
+
+    // The last code in the set is the one being used; the earlier copies fail
+    // first, exactly as they would for a wrong code.
+    const last = await unwrapWithRecoveryCode(codes[3]!, keys.wrappedRecovery, keys.salt);
+    expect(last?.index).toBe(3);
+    await expect(decryptState(cipher, await importDek(last!.raw))).resolves.toBeTruthy();
+
+    expect(await unwrapWithRecoveryCode('plnr-AAAA-AAAA-AAAA-AAAA-AAAA', keys.wrappedRecovery, keys.salt)).toBeNull();
+    expect(await unwrapWithRecoveryCode(codes[0]!, [], keys.salt)).toBeNull();
   });
 
   it('formats and normalises recovery keys tolerantly', () => {

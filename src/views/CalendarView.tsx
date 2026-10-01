@@ -38,7 +38,7 @@ import {
 import { Meter } from '../components/ui';
 import type { CalendarTab } from '../route';
 import type { PlannerEvent } from '../types';
-import { t } from '../i18n';
+import { t, tn } from '../i18n';
 
 const TABS: Array<{ id: CalendarTab; label: string }> = [
   { id: 'week', label: t("Week") },
@@ -149,7 +149,9 @@ function WeekBoard({ anchor, today }: { anchor: string; today: string }) {
       <div className="week-scroller">
         {days.map((date) => {
           const events = eventsForDate(state, date);
-          const tasks = tasksForDate(state, date);
+          // Repeats on the days ahead: a daily task stored once is due every
+          // day, and the week used to look empty because of it.
+          const tasks = tasksForDate(state, date, date > today);
           const habits = habitsDueOn(state, date);
           const score = dayScore(state, date, false);
           return (
@@ -263,30 +265,40 @@ function WeekBoard({ anchor, today }: { anchor: string; today: string }) {
                     </div>
                   );
                 })}
-                {tasks.map((task) => (
-                  <div
-                    key={task.id}
-                    className={cx('week-task', task.completed && 'is-done')}
-                    draggable
-                    title={t("Drag to another day")}
-                    onDragStart={(event) => {
-                      event.dataTransfer.setData('text/plain', `task:${task.id}`);
-                      event.dataTransfer.effectAllowed = 'move';
-                    }}
-                  >
-                    <button
-                      type="button"
-                      className={cx('mini-check', task.completed && 'on')}
-                      aria-label={task.completed ? t("Mark {0} not done", { 0: task.title }) : t("Mark {0} complete", { 0: task.title })}
-                      onClick={() => toggleTask(task.id)}
+                {tasks.map((task) => {
+                  const projected = Boolean(task.seriesTaskId);
+                  return (
+                    <div
+                      key={task.id}
+                      className={cx('week-task', task.completed && 'is-done', projected && 'is-projected')}
+                      draggable={!projected}
+                      title={projected ? t("Upcoming repeat") : t("Drag to another day")}
+                      onDragStart={(event) => {
+                        if (projected) return;
+                        event.dataTransfer.setData('text/plain', `task:${task.id}`);
+                        event.dataTransfer.effectAllowed = 'move';
+                      }}
                     >
-                      {task.completed ? <TickIcon size={12} /> : null}
-                    </button>
-                    <button type="button" className="week-task-title" onClick={() => openComposer({ mode: 'edit', type: 'task', id: task.id })}>
-                      {task.title}
-                    </button>
-                  </div>
-                ))}
+                      <button
+                        type="button"
+                        className={cx('mini-check', task.completed && 'on')}
+                        disabled={projected}
+                        aria-label={task.completed ? t("Mark {0} not done", { 0: task.title }) : t("Mark {0} complete", { 0: task.title })}
+                        onClick={() => toggleTask(task.id)}
+                      >
+                        {task.completed ? <TickIcon size={12} /> : null}
+                      </button>
+                      <button
+                        type="button"
+                        className="week-task-title"
+                        onClick={() => openComposer({ mode: 'edit', type: 'task', id: task.seriesTaskId ?? task.id })}
+                      >
+                        {task.title}
+                      </button>
+                      {projected ? <span className="fixed-chip-tag">{t("Repeats")}</span> : null}
+                    </div>
+                  );
+                })}
               </div>
               {habits.length > 0 ? (
                 <ul className="week-habits">
@@ -385,7 +397,7 @@ function ResizeHandle({ startTime, endTime, title, onResize }: { startTime: stri
         if (next !== base) onResize(clockFrom(next));
       }}
     >
-      {preview !== null ? <em>{t('until')} {displayTime(clockFrom(preview))}</em> : null}
+      {preview !== null ? <em>{t('until {0}', { 0: displayTime(clockFrom(preview)) })}</em> : null}
     </span>
   );
 }
@@ -399,7 +411,7 @@ function MonthBoard({ anchor, today }: { anchor: string; today: string }) {
   const [picked, setPicked] = useState(today);
   const selected = picked.startsWith(prefix) ? picked : today.startsWith(prefix) ? today : `${prefix}-01`;
   const events = eventsForDate(state, selected);
-  const tasks = tasksForDate(state, selected);
+  const tasks = tasksForDate(state, selected, selected > today);
   const isCurrent = today.startsWith(prefix);
 
   const go = (delta: number) => {
@@ -599,7 +611,7 @@ function AgendaBoard({ today }: { today: string }) {
         <p className="quiet-hint">
           {planned === 0
             ? t("The next {0} days are open. Add only what you want to keep.", { 0: horizon })
-            : t("{0} {1} something in the next {2}.", { 0: planned, 1: planned === 1 ? t("day has") : t("days have"), 2: horizon })}
+            : tn(planned, "{count} day has something in the next {horizon}.", "{count} days have something in the next {horizon}.", { horizon })}
         </p>
         <div className="pager">
           {HORIZONS.map((daysAhead) => (
@@ -717,7 +729,7 @@ function AgendaBoard({ today }: { today: string }) {
               <li key={goal.id} className="plain">
                 <button type="button" onClick={() => openComposer({ mode: 'edit', type: 'goal', id: goal.id })}>
                   <time>{goal.date.slice(5)}</time>
-                  <span>{goal.title} {t("· due")}</span>
+                  <span>{t("{title} · due", { title: goal.title })}</span>
                 </button>
               </li>
             ))}

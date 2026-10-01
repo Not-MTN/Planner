@@ -207,3 +207,188 @@
 @media (pointer: coarse) {
   :where(.student-panel-view, .guardian-panel-view) .input { font-size: 16px; }
 }
+
+/* --- Subject by subject ---------------------------------------------- */
+/* One row per subject, each a small line across the weeks on record. Small
+   enough to scan five at a glance — this answers "what has gone quiet", not
+   "how many minutes exactly". */
+.subject-trend {
+  display: grid;
+  gap: 12px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.subject-trend-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.subject-trend-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.subject-trend-value {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.subject-trend-up { color: var(--ok, #2f7d5d); font-style: normal; }
+.subject-trend-down { color: var(--muted); font-style: normal; opacity: 0.8; }
+
+.subject-trend-svg {
+  display: block;
+  width: 100%;
+  height: 34px;
+  margin-top: 2px;
+  overflow: visible;
+}
+
+.subject-trend-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.subject-trend-line-0 { stroke: var(--accent, #4f46e5); }
+.subject-trend-line-1 { stroke: #0e9f6e; }
+.subject-trend-line-2 { stroke: #e0781a; }
+.subject-trend-line-3 { stroke: #8b5cf6; }
+
+.subject-trend-dot { stroke: none; }
+.subject-trend-dot.subject-trend-line-0 { fill: var(--accent, #4f46e5); }
+.subject-trend-dot.subject-trend-line-1 { fill: #0e9f6e; }
+.subject-trend-dot.subject-trend-line-2 { fill: #e0781a; }
+.subject-trend-dot.subject-trend-line-3 { fill: #8b5cf6; }
+
+/* ------------------------------------------------ goals suggested to a student */
+
+/* A suggested goal is a question, not work: it is shown as one until answered. */
+.ggoal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-2);
+}
+
+.ggoal-form-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ggoal-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ggoal-step-list {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.86rem;
+  color: var(--text-2);
+}
+
+.ggoal-card {
+  border-color: var(--accent-line, var(--line));
+}
+
+.ggoal-answers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* ----------------------------------------------------------- kind words */
+
+/* Praise is a keepsake, not a task: warm, quiet, and never a number. */
+.praise-block {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--line);
+}
+
+.praise-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.praise-note {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-3);
+}
+
+.praise-openers {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+.praise-openers .text-btn {
+  text-align: start;
+  line-height: 1.35;
+}
+
+.praise-lead {
+  margin: 0 0 12px;
+  font-size: 0.86rem;
+  color: var(--text-3);
+}
+
+.praise-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+.praise-item {
+  position: relative;
+  padding: 12px 34px 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-2);
+}
+
+.praise-text {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  color: var(--text-1);
+}
+
+.praise-meta {
+  margin: 6px 0 0;
+  font-size: 0.75rem;
+  color: var(--text-3);
+}
+
+.praise-item .icon-btn {
+  position: absolute;
+  inset-block-start: 8px;
+  inset-inline-end: 8px;
+}

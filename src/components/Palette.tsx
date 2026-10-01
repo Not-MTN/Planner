@@ -55,8 +55,6 @@ function PaletteInner() {
     openComposer,
     addTask,
     addEvent,
-    toggleTask,
-    toggleHabit,
     flash,
     undo,
     canUndo,
@@ -178,7 +176,7 @@ function PaletteInner() {
       return [exact, ...list, ...rest].slice(0, 30);
     }
     return [...list, ...matching].slice(0, 30);
-  }, [query, state, today, planner, closePalette, openComposer, navigate, addTask, addEvent, toggleTask, toggleHabit, flash, undo, canUndo, exportData, startFocus, setThemeMode, isDark, themeMode, openSettings]);
+  }, [query, state, today, planner, closePalette, openComposer, navigate, addTask, addEvent, flash, undo, canUndo, exportData, startFocus, setThemeMode, isDark, themeMode, openSettings]);
 
   useEffect(() => {
     setIndex(0);
@@ -320,7 +318,7 @@ function hitItem(hit: SearchHit, close: (run: () => void) => () => void, planner
       icon,
       label,
       sub: hit.sub,
-      run: close(() => planner.navigate({ name: 'day', date: event?.date ?? planner.route.name === 'today' ? todayISO() : todayISO() })),
+      run: close(() => planner.navigate({ name: 'day', date: event?.date ?? todayISO() })),
     };
   }
   if (hit.kind === 'memory') {

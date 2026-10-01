@@ -71,7 +71,7 @@ export function PanelsView() {
 
   const studentTag = panels.student.enabled
     ? `${panels.student.field ?? ''}${panels.student.field && panels.student.grade ? ' · ' : ''}${
-        GRADE_LABELS.find((item) => item.id === panels.student.grade)?.label ?? ''
+        gradeLabel(panels.student.grade) ?? ''
       }`
     : t("Not added");
 

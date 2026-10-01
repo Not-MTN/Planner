@@ -20,8 +20,16 @@ import { displayTime, formatFullDate, todayISO } from '../dates';
 type Phase = 'idle' | 'listening' | 'thinking' | 'speaking';
 
 interface Bubble {
+  /** Stable identity: a retry replaces a bubble, and index keys reused the DOM. */
+  id: string;
   role: 'user' | 'assistant';
   text: string;
+}
+
+let bubbleSeq = 0;
+function newBubble(role: Bubble['role'], text: string): Bubble {
+  bubbleSeq += 1;
+  return { id: `bubble-${bubbleSeq}`, role, text };
 }
 
 function speechErrorMessage(error: SpeechError): string {
@@ -44,12 +52,15 @@ export function VoiceTalk({ onDraft, currentDraft = null }: {
   const [muted, setMuted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingConflict, setPendingConflict] = useState<{ utterance: string; conflict: PromptScheduleConflict } | null>(null);
+  /** True once the answer has started arriving, as opposed to being thought about. */
+  const [writing, setWriting] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
   const mountedRef = useRef(true);
   const busyRef = useRef(false);
   const mutedRef = useRef(false);
   const phaseRef = useRef<Phase>('idle');
   const lastUtteranceRef = useRef<string | null>(null);
+  const thinkingRef = useRef<AbortController | null>(null);
   mutedRef.current = muted;
   phaseRef.current = phase;
 
@@ -59,6 +70,7 @@ export function VoiceTalk({ onDraft, currentDraft = null }: {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      thinkingRef.current?.abort();
       speech.stop();
       stopSpeaking();
     };
@@ -96,7 +108,7 @@ export function VoiceTalk({ onDraft, currentDraft = null }: {
           3: displayTime(conflict.endTime),
           4: displayTime(conflict.requestedTime),
         });
-        setBubbles((current) => [...current, ...(echo ? [{ role: 'user' as const, text: utterance }] : []), { role: 'assistant', text: reply }]);
+        setBubbles((current) => [...current, ...(echo ? [newBubble('user', utterance)] : []), newBubble('assistant', reply)]);
         scrollLog();
         const spoken = !mutedRef.current && speakText(reply, { lang: replyLang(reply), onend: () => settle('idle') });
         setPhase(spoken ? 'speaking' : 'idle');
@@ -106,17 +118,29 @@ export function VoiceTalk({ onDraft, currentDraft = null }: {
     busyRef.current = true;
     setPendingConflict(null);
     setPhase('thinking');
-    if (echo) setBubbles((current) => [...current, { role: 'user', text: utterance }]);
+    if (echo) setBubbles((current) => [...current, newBubble('user', utterance)]);
     scrollLog();
     try {
       const history: VoiceTurn[] = bubbles.slice(-10).map((bubble) => ({ role: bubble.role, text: bubble.text }));
       const requestText = approvedConflict
         ? `${utterance}\n\nScheduling decision: Keep the existing ${approvedConflict.title} on ${approvedConflict.date} from ${approvedConflict.startTime} to ${approvedConflict.endTime} protected. Do not move or overlap it; find another genuinely free time for my requested activity and tell me you worked around this conflict.`
         : utterance;
-      const result = await voiceTurn({ utterance: requestText, history, state, currentDraft });
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      thinkingRef.current = controller;
+      setWriting(false);
+      const result = await voiceTurn({
+        utterance: requestText,
+        history,
+        state,
+        currentDraft,
+        signal: controller?.signal,
+        onProgress: () => {
+          if (mountedRef.current) setWriting(true);
+        },
+      });
       if (!mountedRef.current) return;
       const replyText = result.followUp ? `${result.reply} ${result.followUp}` : result.reply;
-      setBubbles((current) => [...current, { role: 'assistant', text: replyText }]);
+      setBubbles((current) => [...current, newBubble('assistant', replyText)]);
       scrollLog();
       if (result.draft) onDraft(result.draft, result.range);
       // The voice follows the reply's own language, not the app's: a Persian
@@ -127,9 +151,12 @@ export function VoiceTalk({ onDraft, currentDraft = null }: {
       });
       setPhase(spoken ? 'speaking' : 'idle');
     } catch (cause) {
-      if (mountedRef.current) setError(cause instanceof Error ? cause.message : t("Something snagged — try again?"));
+      const stopped = cause instanceof Error && cause.message === t("Stopped.");
+      if (mountedRef.current && !stopped) setError(cause instanceof Error ? cause.message : t("Something snagged — try again?"));
       settle('idle');
     } finally {
+      thinkingRef.current = null;
+      setWriting(false);
       busyRef.current = false;
     }
   };
@@ -174,10 +201,18 @@ export function VoiceTalk({ onDraft, currentDraft = null }: {
   const phaseLabel = (() => {
     if (!speech.available) return t("Voice needs Chrome, Edge or Safari — type below instead");
     if (phase === 'listening') return t("I'm listening — just talk");
-    if (phase === 'thinking') return t("Thinking it through…");
+    // Once words are arriving it is no longer thinking — it is writing, and
+    // saying so is the difference between a wait and a wait that looks stuck.
+    if (phase === 'thinking') return writing ? t("Writing…") : t("Thinking it through…");
     if (phase === 'speaking') return t("Speaking…");
     return t("Tap the mic and just say it");
   })();
+
+  const stopWaiting = () => {
+    if (phase === 'speaking') stopSpeaking();
+    thinkingRef.current?.abort();
+    if (phase === 'speaking') settle('idle');
+  };
 
   // Both languages show up either way — saying it in the "other" language
   // works just as well, and the hints make that obvious.
@@ -223,8 +258,8 @@ export function VoiceTalk({ onDraft, currentDraft = null }: {
             </ul>
           </div>
         ) : (
-          bubbles.map((bubble, index) => (
-            <p key={index} className={cx('voice-bubble', bubble.role)} dir="auto">
+          bubbles.map((bubble) => (
+            <p key={bubble.id} className={cx('voice-bubble', bubble.role)} dir="auto">
               {bubble.text}
             </p>
           ))
@@ -279,6 +314,11 @@ export function VoiceTalk({ onDraft, currentDraft = null }: {
           )}
         </button>
         <p className={cx('voice-phase', phase === 'listening' && 'live')}>{phaseLabel}</p>
+        {phase === 'thinking' || phase === 'speaking' ? (
+          <button type="button" className="btn btn-ghost btn-small voice-stop" onClick={stopWaiting}>
+            {t("Stop")}
+          </button>
+        ) : null}
       </div>
     </section>
   );

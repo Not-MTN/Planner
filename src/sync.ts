@@ -8,8 +8,8 @@
  * The server stores { id, version, ciphertext } and can't read anything.
  */
 import { sanitizeState, serialize } from './storage';
-import { AI_PLAN_LIMIT } from './types';
-import type { GuardianPlan, Panels, PlannerState } from './types';
+import { AI_DECLINED_LIMIT, AI_PLAN_LIMIT, GOAL_ANSWERS_KEPT, PRAISE_KEPT } from './types';
+import type { FixedCommitment, Goal, GoalAnswer, GuardianPlan, Habit, Note, Panels, PlannerEvent, PlannerState, Task } from './types';
 
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O/1/I/L
 const SETTINGS_KEY = 'planner-sync';
@@ -185,7 +185,19 @@ export function mergePanels(local: Panels, remote: Panels): Panels {
         plans: mergePlans(local.student.inbox?.plans ?? [], remote.student.inbox?.plans ?? [])
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
           .slice(0, 10),
+        goals: byId(local.student.inbox?.goals ?? [], remote.student.inbox?.goals ?? [])
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+          .slice(0, 10),
       },
+      // Two devices should not disagree about which kind words were kept.
+      goalAnswers: byIdKey(
+        local.student.goalAnswers ?? [],
+        remote.student.goalAnswers ?? [],
+        (item: GoalAnswer) => item.suggestionId,
+      ).slice(0, GOAL_ANSWERS_KEPT),
+      praise: byId(local.student.praise ?? [], remote.student.praise ?? [])
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, PRAISE_KEPT),
     },
     guardian: {
       enabled: local.guardian.enabled || remote.guardian.enabled,
@@ -199,6 +211,120 @@ export function mergePanels(local: Panels, remote: Panels): Panels {
         .slice(0, 20),
     },
   };
+}
+
+/** The kinds of thing two devices can disagree about. */
+export type ConflictKind = 'task' | 'event' | 'commitment' | 'note' | 'goal' | 'habit';
+
+/**
+ * One thing that two devices both changed.
+ *
+ * Merging has to pick a winner — there is no way to combine two edited versions
+ * of the same sentence. But picking a winner is not the same as being right, so
+ * the version that lost is kept whole and shown. Losing an edit silently is how
+ * people stop trusting sync; being shown "your phone had this, your laptop had
+ * that, which did you mean?" is how they start again.
+ */
+export interface MergeConflict {
+  kind: ConflictKind;
+  /** What it is called, which is the only way a person can tell two versions apart. */
+  title: string;
+  /** When the version that lost was edited. */
+  lostAt: string;
+  /** The version that lost, kept exactly as it was so putting it back is exact. */
+  item: Task | PlannerEvent | FixedCommitment | Note | Goal | Habit;
+}
+
+/** How many disagreements are worth showing. Past this, keep the most recent. */
+export const CONFLICT_LIMIT = 20;
+
+/** An item as it was written, without the moment it was written. */
+function shapeOf(item: Stamped): string {
+  return JSON.stringify(item, (key, value) => (key === 'updatedAt' ? undefined : value));
+}
+
+function editedSince(item: Stamped, since: string | null): boolean {
+  if (!since) return false;
+  return (item.updatedAt ?? '') > since;
+}
+
+/**
+ * The things both devices changed since they last agreed.
+ *
+ * `since` is the moment of the last successful sync. Without it there is nothing
+ * to compare against — two copies simply "differ" — and every item would look
+ * contested, which would be noise rather than help.
+ */
+export function findMergeConflicts(local: PlannerState, remote: PlannerState, since: string | null): MergeConflict[] {
+  if (!since) return [];
+  const found: MergeConflict[] = [];
+
+  const compare = (
+    kind: ConflictKind,
+    mine: Stamped[],
+    theirs: Stamped[],
+    nameOf: (item: Record<string, unknown>) => string,
+  ): void => {
+    const other = new Map(theirs.map((item) => [item.id, item]));
+    for (const localItem of mine) {
+      const remoteItem = other.get(localItem.id);
+      if (!remoteItem) continue;
+      if (!editedSince(localItem, since) || !editedSince(remoteItem, since)) continue;
+      // The edit times always differ; that is not a disagreement. Only the
+      // contents are compared, so two identical edits stay quiet.
+      if (shapeOf(localItem) === shapeOf(remoteItem)) continue;
+      // Keep the one the merge throws away, which is the older of the two.
+      const loser = (localItem.updatedAt ?? '') >= (remoteItem.updatedAt ?? '') ? remoteItem : localItem;
+      found.push({
+        kind,
+        title: nameOf(loser as unknown as Record<string, unknown>),
+        lostAt: loser.updatedAt ?? '',
+        item: loser as MergeConflict['item'],
+      });
+    }
+  };
+
+  const named = (item: Record<string, unknown>): string =>
+    typeof item.title === 'string' ? item.title : typeof item.name === 'string' ? item.name : '';
+
+  compare('task', local.tasks, remote.tasks, named);
+  compare('event', local.events, remote.events, named);
+  compare('commitment', local.fixedCommitments, remote.fixedCommitments, named);
+  compare('note', local.notes, remote.notes, named);
+  compare('goal', local.goals, remote.goals, named);
+  compare('habit', local.habits, remote.habits, named);
+
+  return found.sort((a, b) => b.lostAt.localeCompare(a.lostAt)).slice(0, CONFLICT_LIMIT);
+}
+
+/** Put a version back that lost a merge. It is stamped now, so it wins the next round. */
+export function restoreConflict(state: PlannerState, conflict: MergeConflict, now = new Date().toISOString()): PlannerState {
+  const put = <T extends Stamped>(items: T[], item: T): T[] => {
+    const next = items.some((existing) => existing.id === item.id)
+      ? items.map((existing) => (existing.id === item.id ? item : existing))
+      : [...items, item];
+    return next;
+  };
+  const stamp = { ...(conflict.item as Stamped), updatedAt: now } as Task &
+    PlannerEvent &
+    FixedCommitment &
+    Note &
+    Goal &
+    Habit;
+  switch (conflict.kind) {
+    case 'task':
+      return { ...state, tasks: put(state.tasks, stamp) };
+    case 'event':
+      return { ...state, events: put(state.events, stamp) };
+    case 'commitment':
+      return { ...state, fixedCommitments: put(state.fixedCommitments, stamp) };
+    case 'note':
+      return { ...state, notes: put(state.notes, stamp) };
+    case 'goal':
+      return { ...state, goals: put(state.goals, stamp) };
+    case 'habit':
+      return { ...state, habits: put(state.habits, stamp) };
+  }
 }
 
 /**
@@ -226,6 +352,11 @@ export function mergeStates(local: PlannerState, remote: PlannerState): PlannerS
     events: mergeById(local.events, remote.events),
     fixedCommitments: mergeById(local.fixedCommitments, remote.fixedCommitments),
     aiMemory: mergeById(local.aiMemory, remote.aiMemory),
+    // Declined on one device means declined on all of them: the point is that
+    // it stops being suggested, and a stale copy would bring it straight back.
+    aiDeclined: mergeById(local.aiDeclined, remote.aiDeclined)
+      .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
+      .slice(-AI_DECLINED_LIMIT),
     aiPlans: mergeById(local.aiPlans, remote.aiPlans)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .slice(0, AI_PLAN_LIMIT),
@@ -307,6 +438,8 @@ export interface SyncOutcome {
   /** New local state, if it changed. */
   state: PlannerState | null;
   settings: SyncSettings;
+  /** Things both devices had changed, whose losing versions are worth showing. */
+  conflicts: MergeConflict[];
 }
 
 /**
@@ -315,10 +448,11 @@ export interface SyncOutcome {
  */
 export async function syncOnce(local: PlannerState, settings: SyncSettings, fetchImpl: typeof fetch = fetch, now = () => new Date().toISOString()): Promise<SyncOutcome> {
   const code = settings.code;
-  if (!code) return { state: null, settings };
+  if (!code) return { state: null, settings, conflicts: [] };
   let remote = await pullRemote(code, fetchImpl);
   let working = local;
   let changed = false;
+  const conflicts: MergeConflict[] = [];
   let version = settings.version;
   const dirty = settings.dirty;
 
@@ -326,16 +460,19 @@ export async function syncOnce(local: PlannerState, settings: SyncSettings, fetc
     if (remote && remote.version !== version) {
       const remoteState = await decryptState(remote.ciphertext, code);
       // Merge only when this device has unsent edits; otherwise take the server copy so deletions carry over.
+      // Both copies edited is the only case where something can be lost, so it
+      // is the only case where the losing versions are collected.
+      if (dirty) conflicts.push(...findMergeConflicts(working, remoteState, settings.lastSyncedAt));
       working = dirty ? mergeStates(working, remoteState) : remoteState;
       changed = true;
       version = remote.version;
     }
     if (!dirty && remote) {
-      return { state: changed ? working : null, settings: { ...settings, version, dirty: false, lastSyncedAt: now() } };
+      return { state: changed ? working : null, settings: { ...settings, version, dirty: false, lastSyncedAt: now() }, conflicts };
     }
     try {
       const saved = await pushRemote(code, remote ? version : 0, await encryptState(working, code), fetchImpl);
-      return { state: changed ? working : null, settings: { ...settings, version: saved.version, dirty: false, lastSyncedAt: now() } };
+      return { state: changed ? working : null, settings: { ...settings, version: saved.version, dirty: false, lastSyncedAt: now() }, conflicts };
     } catch (error) {
       if (error instanceof SyncError && error.code === 'conflict') {
         remote = error.current ?? (await pullRemote(code, fetchImpl));

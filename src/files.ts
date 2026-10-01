@@ -72,12 +72,6 @@ export async function storeAttachment(file: File | Blob, name: string, mime: str
 export async function readAttachmentBlob(ref: AttachmentRef): Promise<Blob | null> {
   return idbReadBlob(`${ATTACHMENT_KEY_PREFIX}${ref.id}`);
 }
-
-/** Delete bytes for refs (when an attachment or its note is removed). */
-export async function deleteAttachmentBlobs(refs: AttachmentRef[]): Promise<void> {
-  await Promise.all(refs.map((ref) => idbClear(`${ATTACHMENT_KEY_PREFIX}${ref.id}`)));
-}
-
 /** Create an object URL for rendering; caller revokes it. */
 export async function attachmentObjectUrl(ref: AttachmentRef): Promise<string | null> {
   try {

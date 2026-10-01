@@ -3,8 +3,9 @@ import { isBase64 } from './shared/authContract';
 import { isValidISODate, isValidTime, localDateFromTimestamp, timeToMinutes } from './dates';
 import { REPEAT_SET } from './recurrence';
 import { MAX_PLAN_DAYS } from './duration';
-import { AI_PLAN_LIMIT, createEmptyPanels, createEmptyState, isGradeLevel, type AIMemory, type AttachmentRef, type AIMemoryCategory, type ChangeNote, type EventInput, type FixedCommitment, type FocusLog, type GuardianKind, type GuardianLink, type GuardianNotice, type GuardianPlan, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Panels, type PlanCadence, type PlanItem, type StudentGuardian, type StudentInbox, type StudentSubject, type Subtask, type TaskInput, type TaskRepeat, type WeekResults, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task } from './types';
+import { AI_PLAN_LIMIT, GOAL_STEPS_MAX, PRAISE_KEPT, createEmptyPanels, createEmptyState, isGradeLevel, type AIDeclined, type AIDeclinedKind, type AIMemory, type AttachmentRef, type AIMemoryCategory, type ChangeNote, type EventInput, type FixedCommitment, type FocusLog, type GoalAnswer, type GoalSuggestion, type GuardianKind, type GuardianLink, type GuardianNotice, type GuardianPlan, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Panels, type PlanCadence, type PlanItem, type StudentGuardian, type StudentInbox, type StudentSubject, type Subtask, type TaskInput, type TaskRepeat, type WeekResults, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task } from './types';
 import { t } from './i18n';
+import { downloadBlob } from './download';
 
 export const STORAGE_KEY = 'personal-planner.v1';
 export const STORAGE_FULL = t("Browser storage is full, so that change was not saved.");
@@ -14,6 +15,7 @@ const ACCENT_SET = new Set<string>(ACCENTS);
 const KIND_SET = new Set<string>(NOTE_KINDS.map((item) => item.id));
 const ICON_SET = new Set<string>(HABIT_ICONS.map((item) => item.id));
 const AI_MEMORY_CATEGORY_SET = new Set<AIMemoryCategory>(['preference', 'person', 'routine', 'boundary', 'context']);
+const AI_DECLINED_KIND_SET = new Set<AIDeclinedKind>(['task', 'event', 'habit']);
 
 export interface LoadResult {
   state: PlannerState;
@@ -72,6 +74,7 @@ function sanitizeTask(value: unknown): Task | null {
     completedAt: asString(raw.completedAt, 40) || null,
     waiting: asString(raw.waiting, 140)?.trim() || null,
     estimatedMinutes: sanitizeMinutes(raw.estimatedMinutes),
+    spawnedId: asString(raw.spawnedId, 80),
   };
 }
 
@@ -149,6 +152,28 @@ function sanitizeAIMemory(value: unknown): AIMemory[] {
       id,
       text,
       category: category as AIMemoryCategory,
+      createdAt,
+      updatedAt: asString(raw.updatedAt, 40) || createdAt,
+    }];
+  }).slice(-100);
+}
+
+function sanitizeAIDeclined(value: unknown): AIDeclined[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const raw = item as Record<string, unknown>;
+    const id = asString(raw.id, 80);
+    const title = asString(raw.title, 140)?.trim();
+    const kind = asString(raw.kind, 10);
+    if (!id || !title || !kind || !AI_DECLINED_KIND_SET.has(kind as AIDeclinedKind) || seen.has(id)) return [];
+    seen.add(id);
+    const createdAt = asString(raw.createdAt, 40) || new Date(0).toISOString();
+    return [{
+      id,
+      title,
+      kind: kind as AIDeclinedKind,
       createdAt,
       updatedAt: asString(raw.updatedAt, 40) || createdAt,
     }];
@@ -329,6 +354,10 @@ function sanitizeGoal(value: unknown): Goal | null {
   const title = asString(raw.title, 140)?.trim();
   if (!id || !title) return null;
   const deadline = asString(raw.deadline, 10);
+  const origin = (raw.fromSuggestion ?? null) as { linkId?: unknown; suggestionId?: unknown } | null;
+  const originLink = origin ? asString(origin.linkId, 64) : null;
+  const originId = origin ? asString(origin.suggestionId, 80) : null;
+  const suggestedFrom = originLink && originId ? { linkId: originLink, suggestionId: originId } : null;
   const milestones = Array.isArray(raw.milestones)
     ? raw.milestones.flatMap((item) => {
         if (!item || typeof item !== 'object') return [];
@@ -349,6 +378,9 @@ function sanitizeGoal(value: unknown): Goal | null {
     milestones,
     createdAt: asString(raw.createdAt, 40) || new Date(0).toISOString(),
     updatedAt: asString(raw.updatedAt, 40) || new Date(0).toISOString(),
+    // Where the goal came from, when it came from a guardian — without it the
+    // guardian's question goes unanswered.
+    ...(suggestedFrom ? { fromSuggestion: suggestedFrom } : {}),
   };
 }
 
@@ -418,6 +450,7 @@ export function sanitizeState(raw: unknown): PlannerState | null {
     return commitment ? [commitment] : [];
   }) : [], (item) => item.id);
   const aiMemory = sanitizeAIMemory(source.aiMemory);
+  const aiDeclined = sanitizeAIDeclined(source.aiDeclined);
   const habits = uniqueBy(Array.isArray(source.habits) ? source.habits.flatMap((item) => {
     const habit = sanitizeHabit(item);
     return habit ? [habit] : [];
@@ -474,6 +507,7 @@ export function sanitizeState(raw: unknown): PlannerState | null {
     events,
     fixedCommitments,
     aiMemory,
+    aiDeclined,
     aiPlans: sanitizeAIPlans(source.aiPlans),
     habits,
     completions,
@@ -489,6 +523,8 @@ export function sanitizeState(raw: unknown): PlannerState | null {
 const PANEL_EXPLANATION_LIMIT = 200;
 const PANEL_SUBJECT_LIMIT = 40;
 const PANEL_LINK_LIMIT = 20;
+/** Suggested goals kept per link: a handful is a conversation, a list is a chore. */
+const PANEL_GOAL_LIMIT = 5;
 
 function sanitizeSubject(value: unknown): StudentSubject | null {
   if (!value || typeof value !== 'object') return null;
@@ -563,6 +599,7 @@ function sanitizeGuardianNotice(value: unknown): GuardianNotice | null {
     weekOf: asString(raw.weekOf, 10) ?? '',
     createdAt: asString(raw.createdAt, 40) ?? new Date(0).toISOString(),
     read: raw.read === true,
+    kind: raw.kind === 'praise' ? 'praise' : 'note',
   };
 }
 
@@ -610,6 +647,48 @@ function sanitizeGuardianPlan(value: unknown): GuardianPlan | null {
   };
 }
 
+/** Kept as words only: a suggestion is a sentence until the student says yes. */
+function sanitizeGoalSuggestion(value: unknown): GoalSuggestion | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = asString(raw.id, 80);
+  const title = asString(raw.title, 120)?.trim();
+  if (!id || !title) return null;
+  const target = asString(raw.target, 10);
+  return {
+    id,
+    author: (asString(raw.author, 60) ?? '').trim(),
+    linkId: asString(raw.linkId, 64) ?? '',
+    title,
+    note: (asString(raw.note, 400) ?? '').trim(),
+    target: target && /^\d{4}-\d{2}-\d{2}$/.test(target) ? target : null,
+    steps: (Array.isArray(raw.steps) ? raw.steps : [])
+      .flatMap((step) => {
+        const text = asString(step, 140)?.trim();
+        return text ? [text] : [];
+      })
+      .slice(0, GOAL_STEPS_MAX),
+    createdAt: asString(raw.createdAt, 40) ?? new Date(0).toISOString(),
+  };
+}
+
+function sanitizeGoalAnswer(value: unknown): GoalAnswer | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const suggestionId = asString(raw.suggestionId, 80);
+  if (!suggestionId) return null;
+  if (raw.state !== 'accepted' && raw.state !== 'declined') return null;
+  const total = typeof raw.total === 'number' && Number.isFinite(raw.total) ? Math.max(0, Math.min(GOAL_STEPS_MAX, Math.round(raw.total))) : 0;
+  const done = typeof raw.done === 'number' && Number.isFinite(raw.done) ? Math.max(0, Math.min(total, Math.round(raw.done))) : 0;
+  return {
+    suggestionId,
+    state: raw.state,
+    done,
+    total,
+    updatedAt: asString(raw.updatedAt, 40) ?? new Date(0).toISOString(),
+  };
+}
+
 function sanitizeStudentInbox(value: unknown): StudentInbox {
   const raw = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
   const notices = uniqueBy(
@@ -630,7 +709,16 @@ function sanitizeStudentInbox(value: unknown): StudentInbox {
   )
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .slice(0, 10);
-  return { notices, plans };
+  const goals = uniqueBy(
+    (Array.isArray(raw.goals) ? raw.goals : []).flatMap((item) => {
+      const goal = sanitizeGoalSuggestion(item);
+      return goal ? [goal] : [];
+    }),
+    (item) => item.id,
+  )
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, PANEL_GOAL_LIMIT);
+  return { notices, plans, goals };
 }
 
 function sanitizeGuardianLink(value: unknown): GuardianLink | null {
@@ -665,6 +753,22 @@ function sanitizeGuardianLink(value: unknown): GuardianLink | null {
     )
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .slice(0, 10),
+    goals: uniqueBy(
+      (Array.isArray(raw.goals) ? raw.goals : []).flatMap((item) => {
+        const goal = sanitizeGoalSuggestion(item);
+        return goal ? [goal] : [];
+      }),
+      (item) => item.id,
+    )
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, PANEL_GOAL_LIMIT),
+    goalAnswers: uniqueBy(
+      (Array.isArray(raw.goalAnswers) ? raw.goalAnswers : []).flatMap((item) => {
+        const answer = sanitizeGoalAnswer(item);
+        return answer ? [answer] : [];
+      }),
+      (item) => item.suggestionId,
+    ).slice(0, PANEL_GOAL_LIMIT * 2),
   };
 }
 
@@ -688,7 +792,7 @@ function sanitizeStudentGuardian(value: unknown): StudentGuardian | null {
 /** Panels are opt-in and additive: turning one off never touches the planner itself. */
 export function sanitizePanels(value: unknown): Panels {
   const empty = createEmptyPanels();
-  if (!value || typeof value === 'object' === false) return empty;
+  if (!value || typeof value !== 'object') return empty;
   const raw = value as Record<string, unknown>;
   const student = (raw.student ?? {}) as Record<string, unknown>;
   const guardian = (raw.guardian ?? {}) as Record<string, unknown>;
@@ -747,6 +851,22 @@ export function sanitizePanels(value: unknown): Panels {
       subjects,
       explanations,
       inbox: sanitizeStudentInbox(student.inbox),
+      goalAnswers: uniqueBy(
+        (Array.isArray(student.goalAnswers) ? student.goalAnswers : []).flatMap((item) => {
+          const answer = sanitizeGoalAnswer(item);
+          return answer ? [answer] : [];
+        }),
+        (item) => item.suggestionId,
+      ).slice(0, PANEL_GOAL_LIMIT * 2),
+      praise: uniqueBy(
+        (Array.isArray(student.praise) ? student.praise : []).flatMap((item) => {
+          const notice = sanitizeGuardianNotice(item);
+          return notice && notice.kind === 'praise' ? [notice] : [];
+        }),
+        (item) => item.id,
+      )
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, PRAISE_KEPT),
     },
     guardian: { enabled: guardian.enabled === true && kind !== null, kind, field: field(guardian.field), links, notices },
   };
@@ -801,13 +921,5 @@ export function saveTo(storage: Pick<Storage, 'setItem'>, state: PlannerState): 
 }
 
 export function downloadState(state: PlannerState, date: string): void {
-  const blob = new Blob([serialize(state)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `planner-${date}.json`;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+  downloadBlob(new Blob([serialize(state)], { type: 'application/json' }), `planner-${date}.json`);
 }

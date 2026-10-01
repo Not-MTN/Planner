@@ -1,5 +1,6 @@
 import { isValidISODate, isValidTime, toISODate } from './dates';
 import { rruleFor } from './recurrence';
+import { downloadBlob } from './download';
 import type { EventInput, PlannerState, TaskInput } from './types';
 
 const BYDAY = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
@@ -195,15 +196,7 @@ export function toBusyICS(state: PlannerState, now = new Date()): string {
 }
 
 function triggerDownload(body: string, name: string): void {
-  const blob = new Blob([body], { type: 'text/calendar' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = name;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+  downloadBlob(new Blob([body], { type: 'text/calendar' }), name);
 }
 
 export function downloadICS(state: PlannerState, date: string): void {

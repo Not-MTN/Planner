@@ -15,17 +15,28 @@ export type Route =
   | { name: 'matrix' }
   | { name: 'review' }
   /** Optional panels: off until the user adds them, and never replace the planner. */
-  | { name: 'panels' }
+  /** `invite` comes from scanning a guardian's QR code: a code to fill in, not a command. */
+  | { name: 'panels'; invite?: string }
   | { name: 'student' }
   | { name: 'guardian' }
   | { name: 'quickadd' }
   | { name: 'ai'; tab?: 'plan' | 'review' };
 
-const PLAIN_NAMES = new Set(['today', 'tasks', 'habits', 'goals', 'notes', 'insights', 'plans', 'matrix', 'review', 'panels', 'student', 'guardian']);
+const PLAIN_NAMES = new Set(['today', 'tasks', 'habits', 'goals', 'notes', 'insights', 'plans', 'matrix', 'review', 'student', 'guardian']);
 const CALENDAR_TABS = new Set(['week', 'month', 'agenda']);
 
 export function calendarDateFor(year: number, month: number): string {
   return `${year}-${String(month).padStart(2, '0')}-01`;
+}
+
+/** The address a student lands on when they scan a guardian's QR code. */
+export function inviteHash(code: string): string {
+  return `#/panels?invite=${encodeURIComponent(code)}`;
+}
+
+/** The whole link, for a QR code or a message. Relative to wherever it is shown. */
+export function inviteLink(code: string, origin: string): string {
+  return `${origin.replace(/\/+$/, '')}/${inviteHash(code)}`;
 }
 
 export function parseHash(hash: string, now = new Date()): Route {
@@ -56,6 +67,13 @@ export function parseHash(hash: string, now = new Date()): Route {
   if (head === 'future') return { name: 'calendar', tab: 'agenda', date: today };
   if (head === 'progress') return { name: 'insights' };
   if (head === 'quickadd') return { name: 'quickadd' };
+  // A scanned invite arrives as a link, not as something typed. The code rides
+  // along in the address and is taken out of it as soon as it is read.
+  if (head === 'panels') {
+    const invite = /(?:^|&)invite=([^&]*)/.exec(queryPart ?? '')?.[1];
+    const code = invite ? decodeURIComponent(invite).trim() : '';
+    return code ? { name: 'panels', invite: code } : { name: 'panels' };
+  }
   if (PLAIN_NAMES.has(head)) return { name: head as 'today' };
   return { name: 'today' };
 }
@@ -73,6 +91,8 @@ export function toHash(route: Route): string {
       return `#/calendar/${route.tab}/${route.date}`;
     case 'ai':
       return route.tab === 'review' ? '#/ai/review' : '#/ai';
+    case 'panels':
+      return route.invite ? inviteHash(route.invite) : '#/panels';
     default:
       return `#/${route.name}`;
   }

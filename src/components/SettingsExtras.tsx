@@ -8,7 +8,7 @@ import { geocode } from '../weather';
 import { loadTemplates, removeTemplate, saveTemplates, type PlannerTemplate } from '../templates';
 import { PasskeyError, listPasskeys, passkeysSupported, registerPasskey, removePasskey, type ListedPasskey } from '../auth/passkey';
 import { AuthError } from '../auth/session';
-import { t } from '../i18n';
+import { t, tn } from '../i18n';
 
 /**
  * The smaller settings sections: shared space, calendar feeds, weather,
@@ -233,11 +233,9 @@ export function FeedsSection() {
                 <small className={cx('set-hint', feed.lastError && 'is-error')}>
                   {feed.lastError
                     ? feed.lastError
-                    : t("{0} {1}{2}", {
-                        0: feed.count,
-                        1: feed.count === 1 ? t("event") : t("events"),
-                        2: feed.lastFetchedAt ? ` · ${displayTime(feed.lastFetchedAt.slice(11, 16))}` : '',
-                      })}
+                    : `${tn(feed.count, "{count} event", "{count} events")}${
+                        feed.lastFetchedAt ? ` · ${displayTime(feed.lastFetchedAt.slice(11, 16))}` : ''
+                      }`}
                 </small>
               </div>
               <button type="button" className="btn btn-tiny" onClick={() => refreshFeeds(true)}>
@@ -370,7 +368,7 @@ export function TaskImportSection() {
         {t("Import a CSV export from Todoist or TickTick, or any CSV with a task-title column. Done items are skipped, dates and priorities come along.")}
       </p>
       <div className="set-actions">
-        <button type="button" className={cx('btn', 'btn-soft', busy && 'is-disabled')} disabled={busy} onClick={() => fileRef.current?.click()}>
+        <button type="button" className="btn btn-soft" disabled={busy} onClick={() => fileRef.current?.click()}>
           <UploadIcon size={16} /> {busy ? t("Importing…") : t("Choose a .csv file")}
         </button>
       </div>
@@ -396,11 +394,9 @@ export function TaskImportSection() {
               }
               importTaskList(result.tasks);
               flash(
-                t("Imported {0} {1}{2}.", {
-                  0: result.tasks.length,
-                  1: result.tasks.length === 1 ? t("task") : t("tasks"),
-                  2: result.done > 0 ? t(" ({0} already-done {1} skipped)", { 0: result.done, 1: result.done === 1 ? t("task") : t("tasks") }) : '',
-                }),
+                result.done > 0
+                  ? tn(result.tasks.length, "Imported {count} task, skipping {done} already done.", "Imported {count} tasks, skipping {done} already done.", { done: result.done })
+                  : tn(result.tasks.length, "Imported {count} task.", "Imported {count} tasks."),
               );
             })
             .catch(() => flash(t("Couldn't read that file.")))

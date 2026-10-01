@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { Modal } from './ui';
+import { Rich } from '../components/Rich';
 import { t } from '../i18n';
 
 const SHORTCUTS = [
@@ -37,7 +38,9 @@ export function ShortcutsSheet({ onClose }: { onClose: () => void }) {
         ))}
       </div>
       <div className="shortcuts-foot">
-        <p className="meta">{t('Tip: Press')} <kbd className="kbd">/</kbd> {t('anywhere to quickly add or search.')}</p>
+        <p className="meta">
+      <Rich text={t('Tip: Press {key} anywhere to quickly add or search.')} values={{ key: <kbd className="kbd">/</kbd> }} />
+    </p>
       </div>
     </Modal>
   );

@@ -172,3 +172,156 @@ describe('Groq planning assistant', () => {
     expect(result.carryForward[0]).toMatchObject({ taskId: 'task-real', date: '2026-09-28' });
   });
 });
+
+/**
+ * A rate limit is measured per minute, so waiting is the one fix left after the
+ * server has already tried every configured provider. These tests use fake
+ * timers: the point is *how many* attempts happen, not how long they take.
+ */
+describe('AI request retries', () => {
+  function plan(): Promise<unknown> {
+    return generateAIPlan({
+      prompt: 'Plan a calm day.',
+      range: { startDate: '2026-09-27', days: 1 },
+      state: createEmptyState(),
+    });
+  }
+
+  function respondWith(responses: { status: number; body?: unknown; headers?: Record<string, string> }[]) {
+    let call = 0;
+    const fetchMock = vi.fn(async () => {
+      const next = responses[Math.min(call, responses.length - 1)];
+      call += 1;
+      return new Response(JSON.stringify(next.body ?? { error: { message: 'nope' } }), {
+        status: next.status,
+        headers: { 'Content-Type': 'application/json', ...(next.headers ?? {}) },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('gives up on a rate limit only after waiting it out', async () => {
+    vi.useFakeTimers();
+    const fetchMock = respondWith([
+      { status: 429, body: { error: { message: 'Rate limit reached', code: 'rate_limited' } } },
+      { status: 200, body: { choices: [{ message: { content: '{"summary":"Second time lucky.","tasks":[],"events":[],"habits":[],"wellbeing":[]}' } }] } },
+    ]);
+    const pending = plan();
+    // Let the retry timer fire without actually waiting seconds in the test.
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(pending).resolves.toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry a response the user is meant to read', async () => {
+    vi.useFakeTimers();
+    const fetchMock = respondWith([{ status: 400, body: { error: { message: 'The token limit is invalid.' } } }]);
+    await expect(plan()).rejects.toThrow(/token limit/i);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops after four attempts so a dead service cannot hang the UI', async () => {
+    vi.useFakeTimers();
+    const fetchMock = respondWith([{ status: 503, body: { error: { message: 'Service unavailable' } } }]);
+    // Attach the expectation before running the timers: a rejection left
+    // unattended across a timer advance is reported as an unhandled error.
+    const pending = expect(plan()).rejects.toThrow();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await pending;
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it('retries a dropped connection the same way', async () => {
+    vi.useFakeTimers();
+    let call = 0;
+    const fetchMock = vi.fn(async () => {
+      call += 1;
+      if (call === 1) throw new Error('network down');
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"summary":"Back online.","tasks":[],"events":[],"habits":[],"wellbeing":[]}' } }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const pending = plan();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(pending).resolves.toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('never waits past an abort', async () => {
+    const controller = new AbortController();
+    respondWith([{ status: 500, body: { error: { message: 'down' } } }]);
+    const pending = generateAIPlan({
+      prompt: 'Plan a calm day.',
+      range: { startDate: '2026-09-27', days: 1 },
+      state: createEmptyState(),
+      signal: controller.signal,
+    });
+    controller.abort();
+    await expect(pending).rejects.toThrow();
+  });
+});
+
+describe('when the AI cannot be reached', () => {
+  afterEach(() => {
+    // navigator.onLine is a getter in jsdom; put it back however we set it.
+    Object.defineProperty(navigator, 'onLine', { value: true, configurable: true });
+  });
+
+  function goOffline() {
+    Object.defineProperty(navigator, 'onLine', { value: false, configurable: true });
+  }
+
+  it('says you are offline rather than asking you to check a connection you know is gone', async () => {
+    goOffline();
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const state = addTask(createEmptyState(), {
+      title: 'Ship the project', priority: 'high', dueDate: '2026-09-27', dueTime: null,
+      category: 'work', note: '', goalId: null,
+    }, 'task-1', '2026-09-27T08:00:00.000Z');
+
+    await expect(
+      generateAIPlan({ prompt: 'plan my week', state, range: { startDate: '2026-09-27', days: 7 } }),
+    ).rejects.toThrow(/offline/i);
+
+    // The point of asking first: no request is spent discovering it.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('reassures rather than only reporting a failure', async () => {
+    goOffline();
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) })));
+
+    const state = createEmptyState();
+    await expect(
+      generateAIPlan({ prompt: 'plan my week', state, range: { startDate: '2026-09-27', days: 7 } }),
+    ).rejects.toThrow(/saved on this device/);
+  });
+
+  it('keeps the ordinary failure message when there is a connection', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new Error('network down');
+    }));
+    // The retry backoff is real seconds long (0.8 + 2 + 4.5). Skip the waiting,
+    // not the retries: this test is about the message that survives all of them.
+    vi.useFakeTimers();
+    try {
+      const state = createEmptyState();
+      const rejected = expect(
+        generateAIPlan({ prompt: 'plan my week', state, range: { startDate: '2026-09-27', days: 7 } }),
+      ).rejects.toThrow(/Could not reach the AI service/);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await rejected;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

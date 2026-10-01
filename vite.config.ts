@@ -25,15 +25,17 @@ import {
   handlePasskeyRegisterVerify,
   handleRecoveryComplete,
   handleRecoveryStart,
+  handleRecoveryUpdate,
   handleSalt,
   handleSession,
+  handleSessions,
+  handleAuthEvents,
   handleShare,
   handleSignup,
 } from './src/server/authApi';
 import { authStore } from './src/server/authStore';
 import { handleICS } from './src/server/icsProxy';
 import { notFoundResponse } from './src/server/apiRouter';
-import { handlePushConfig, handlePushDispatch, handlePushSubscription } from './src/server/pushApi';
 
 // API responses can use a deny-all CSP; the HTML document needs its own app CSP,
 // which is configured in vercel.json. Do not put the API CSP on Vite's HTML page.
@@ -177,6 +179,16 @@ function authHandler(databaseUrl: string | undefined): NextHandleFunction {
           ? (webRequest) => authStore(databaseUrl).then((store) => handleRecoveryStart(webRequest, store))
           : pathname === '/recovery/complete'
             ? (webRequest) => authStore(databaseUrl).then((store) => handleRecoveryComplete(webRequest, store))
+          : pathname === '/recovery/update'
+            ? (webRequest) => authStore(databaseUrl).then((store) => handleRecoveryUpdate(webRequest, store))
+        : pathname === '/totp/login'
+          ? (webRequest) => authStore(databaseUrl).then((store) => handleTotpLogin(webRequest, store))
+        : pathname === '/totp/setup'
+          ? (webRequest) => authStore(databaseUrl).then((store) => handleTotpSetup(webRequest, store))
+        : pathname === '/totp/confirm'
+          ? (webRequest) => authStore(databaseUrl).then((store) => handleTotpConfirm(webRequest, store))
+        : pathname === '/totp/disable'
+          ? (webRequest) => authStore(databaseUrl).then((store) => handleTotpDisable(webRequest, store))
         : pathname === '/salt'
           ? (webRequest) => authStore(databaseUrl).then((store) => handleSalt(webRequest, store))
           : pathname === '/login'
@@ -185,6 +197,10 @@ function authHandler(databaseUrl: string | undefined): NextHandleFunction {
               ? (webRequest) => authStore(databaseUrl).then((store) => handleSession(webRequest, store))
               : pathname === '/logout'
                 ? (webRequest) => authStore(databaseUrl).then((store) => handleLogout(webRequest, store))
+              : pathname === '/sessions'
+                ? (webRequest) => authStore(databaseUrl).then((store) => handleSessions(webRequest, store))
+                : pathname === '/events'
+                  ? (webRequest) => authStore(databaseUrl).then((store) => handleAuthEvents(webRequest, store))
           : pathname === '/vault'
             ? (webRequest) => authStore(databaseUrl).then((store) => handleAccountVault(webRequest, store))
           : pathname === '/passkey/register/options'
@@ -288,6 +304,8 @@ export default defineConfig(({ mode }) => {
     VAPID_PRIVATE_KEY: env.VAPID_PRIVATE_KEY || fileEnv.VAPID_PRIVATE_KEY,
     VAPID_SUBJECT: env.VAPID_SUBJECT || fileEnv.VAPID_SUBJECT,
     CRON_SECRET: env.CRON_SECRET || fileEnv.CRON_SECRET,
+    ERROR_REPORT_WEBHOOK: env.ERROR_REPORT_WEBHOOK || fileEnv.ERROR_REPORT_WEBHOOK,
+    AI_ENV: { ...env, ...fileEnv } as Record<string, string | undefined>,
   };
   return {
     plugins: [react(), groqProxyPlugin(apiKey, model, visionModel), syncApi(databaseUrl), authApi(databaseUrl), icsApi(), pushApi(pushEnv), apiFallback()],

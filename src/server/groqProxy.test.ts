@@ -8,6 +8,7 @@ import {
   GROQ_DEFAULT_TEXT_MODEL,
   GROQ_DEFAULT_VISION_MODEL,
   finalizeUpstreamBody,
+  GROQ_DEFAULT_LIGHT_MODEL,
   GROQ_UPSTREAM_CHAT_COMPLETIONS,
   handleGroqChatCompletions,
   handleGroqStatus,
@@ -65,7 +66,7 @@ describe('Vercel function discovery', () => {
     // Functions; the API has 16 routes, so they all share the one catch-all.
     expect(functions.map((file) => relative(apiRoot, file).split(sep).join('/'))).toEqual(['[...path].ts']);
     expect(typeof vercelFunction).toBe('function');
-    expect(await (await vercelFunction(request(GROQ_STATUS_URL))).json()).toEqual({ configured: false });
+    expect(await (await vercelFunction(request(GROQ_STATUS_URL))).json()).toEqual({ configured: false, providers: [] });
   });
 });
 
@@ -76,14 +77,19 @@ describe('status route', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('cache-control')).toBe('no-store');
     const text = await response.text();
-    expect(JSON.parse(text)).toEqual({ configured: true });
+    expect(JSON.parse(text)).toEqual({
+      configured: true,
+      // Names and capabilities only — no key, no base URL, nothing useful to
+      // anyone reading the response.
+      providers: [{ id: 'groq', label: 'Groq', vision: true }],
+    });
     expect(text).not.toContain(FAKE_KEY);
   });
 
   it('reports configured:false when the variable is missing or blank', async () => {
     vi.stubEnv('GROQ_API_KEY', '   ');
-    expect(await (await vercelFunction(request(GROQ_STATUS_URL))).json()).toEqual({ configured: false });
-    expect(await handleGroqStatus(request('/api/groq/status'), undefined).json()).toEqual({ configured: false });
+    expect(await (await vercelFunction(request(GROQ_STATUS_URL))).json()).toEqual({ configured: false, providers: [] });
+    expect(await handleGroqStatus(request('/api/groq/status'), undefined).json()).toEqual({ configured: false, providers: [] });
   });
 
   it('rejects cross-origin browser requests', () => {
@@ -154,7 +160,11 @@ describe('chat completions route', () => {
     expect(validateChatPayload({ ...valid, model: 'another-model' })).toContain('model');
     expect(GROQ_DEFAULT_TEXT_MODEL).toBe('openai/gpt-oss-120b');
     expect(GROQ_DEFAULT_VISION_MODEL).toBe('qwen/qwen3.8-27b');
-    expect(validateChatPayload({ ...valid, stream: true })).toContain('unsupported');
+    // Streaming is now allowed, and only as a flag — never as a way to smuggle
+    // a field through to the provider.
+    expect(validateChatPayload({ ...valid, stream: true })).toBeNull();
+    expect(validateChatPayload({ ...valid, stream: 'yes' })).toContain('stream');
+    expect(validateChatPayload({ ...valid, top_p: 0.9 })).toContain('unsupported');
     expect(validateChatPayload({
       ...valid,
       messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: 'https://example.com/secret.png' } }] }],
@@ -165,6 +175,43 @@ describe('chat completions route', () => {
     // Groq documents 0-2 for its reasoning models.
     expect(validateChatPayload({ ...valid, temperature: 1.4 })).toBeNull();
     expect(validateChatPayload({ ...valid, temperature: 2.5 })).toContain('temperature');
+  });
+
+  it('passes a streamed answer through instead of waiting for the whole thing', async () => {
+    const events = 'data: {"choices":[{"delta":{"content":"Half"}}]}\n\ndata: [DONE]\n\n';
+    const seen: string[] = [];
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push(String(init?.body));
+      return new Response(events, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    });
+    const response = await handleGroqChatCompletions(
+      request('/api/groq/chat/completions', { method: 'POST', body: chatBody({ stream: true }) }),
+      FAKE_KEY,
+      { fetchImpl },
+    );
+    expect(response.status).toBe(200);
+    // The browser can only read the stream if it is told it is one.
+    expect(response.headers.get('content-type')).toContain('text/event-stream');
+    expect(await response.text()).toBe(events);
+    // Asked for upstream, and only because the caller did.
+    expect(JSON.parse(seen[0]!).stream).toBe(true);
+  });
+
+  it('does not ask for a stream unless the caller did', async () => {
+    const seen: string[] = [];
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push(String(init?.body));
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+    const response = await handleGroqChatCompletions(
+      request('/api/groq/chat/completions', { method: 'POST', body: chatBody() }),
+      FAKE_KEY,
+      { fetchImpl },
+    );
+    expect(response.headers.get('content-type')).toContain('application/json');
+    // Never forwarded when it was not asked for: a client expecting one JSON
+    // object must not be handed a series of events instead.
+    expect('stream' in (JSON.parse(seen[0]!) as Record<string, unknown>)).toBe(false);
   });
 
   it('sends images only to a model that can read them', () => {
@@ -454,5 +501,221 @@ describe('what actually reaches Groq', () => {
     const parsed = (await response.json()) as { error: { message: string } };
     expect(parsed.error.message).toContain('GROQ_VISION_MODEL');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Editing a plan is not the same job as writing one, and the operator's key is
+ * not free. A refinement asks for the cheap model; whether one exists is the
+ * server's call, and the answer must never be a worse plan.
+ */
+describe('using a cheaper model to revise a draft', () => {
+  const CHEAP = { id: 'groq', label: 'Groq', url: 'https://api.groq.com/openai/v1/chat/completions', key: FAKE_KEY, textModel: GROQ_DEFAULT_TEXT_MODEL, lightModel: 'openai/gpt-oss-20b', visionModel: GROQ_DEFAULT_VISION_MODEL, reasoning: {}, keyEnv: 'GROQ_API_KEY' };
+  const NO_CHEAP = { ...CHEAP, lightModel: '' };
+
+  function postChat(options: Record<string, unknown> = {}, body = chatBody()) {
+    return handleGroqChatCompletions(
+      request('/api/ai/chat/completions', { method: 'POST', body }),
+      FAKE_KEY,
+      options as never,
+    );
+  }
+
+  function echoModel() {
+    return vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const sent = JSON.parse(String(init?.body)) as { model: string };
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ model: sent.model }) } }] }), { status: 200 });
+    });
+  }
+
+  it('sends a light request to the cheap model', async () => {
+    resetRateLimits();
+    const fetchMock = echoModel();
+    const body = JSON.stringify({ ...JSON.parse(chatBody()), model: GROQ_DEFAULT_LIGHT_MODEL });
+    const response = await postChat({ providers: [CHEAP], fetchImpl: fetchMock }, body);
+    expect(response.status).toBe(200);
+    expect((await response.json() as { choices: { message: { content: string } }[] }).choices[0].message.content).toContain('openai/gpt-oss-20b');
+  });
+
+  it('falls back to the full model when no cheap one is configured', async () => {
+    resetRateLimits();
+    const fetchMock = echoModel();
+    const body = JSON.stringify({ ...JSON.parse(chatBody()), model: GROQ_DEFAULT_LIGHT_MODEL });
+    const response = await postChat({ providers: [NO_CHEAP], fetchImpl: fetchMock }, body);
+    expect(response.status).toBe(200);
+    // Opt-in, never a silent downgrade: asking for cheap must not mean bad.
+    expect((await response.json() as { choices: { message: { content: string } }[] }).choices[0].message.content).toContain('openai/gpt-oss-120b');
+  });
+
+  it('gives each provider its own cheap model, not the first one named', async () => {
+    resetRateLimits();
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const sent = JSON.parse(String(init?.body)) as { model: string };
+      if (String(_input).includes('groq')) return new Response(JSON.stringify({ error: { message: 'Rate limit reached' } }), { status: 429 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ model: sent.model }) } }] }), { status: 200 });
+    });
+    const body = JSON.stringify({ ...JSON.parse(chatBody()), model: GROQ_DEFAULT_LIGHT_MODEL });
+    const response = await postChat(
+      { providers: [CHEAP, { ...CHEAP, id: 'openai', url: 'https://api.openai.com/v1/chat/completions', textModel: 'gpt-4o', lightModel: 'gpt-4o-mini' }], fetchImpl: fetchMock },
+      body,
+    );
+    expect(response.status).toBe(200);
+    expect((await response.json() as { choices: { message: { content: string } }[] }).choices[0].message.content).toContain('gpt-4o-mini');
+  });
+
+  it('leaves an ordinary request on the full model', async () => {
+    resetRateLimits();
+    const fetchMock = echoModel();
+    const response = await postChat({ providers: [CHEAP], fetchImpl: fetchMock });
+    expect((await response.json() as { choices: { message: { content: string } }[] }).choices[0].message.content).toContain('openai/gpt-oss-120b');
+  });
+});
+
+/**
+ * One signed-in account should not be able to spend the whole deployment's key.
+ */
+describe('a daily allowance per account', () => {
+  const PROVIDERS = [{ id: 'groq', label: 'Groq', url: 'https://api.groq.com/openai/v1/chat/completions', key: FAKE_KEY, textModel: GROQ_DEFAULT_TEXT_MODEL, lightModel: '', visionModel: GROQ_DEFAULT_VISION_MODEL, reasoning: {}, keyEnv: 'GROQ_API_KEY' }];
+
+  function postChat(options: Record<string, unknown> = {}) {
+    return handleGroqChatCompletions(
+      request('/api/ai/chat/completions', { method: 'POST', body: chatBody() }),
+      FAKE_KEY,
+      options as never,
+    );
+  }
+
+  function ok() {
+    return vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }] }), { status: 200 }));
+  }
+
+  it('stops one account at its daily allowance, and says when it resets', async () => {
+    resetRateLimits();
+    const fetchMock = ok();
+    for (let index = 0; index < 3; index += 1) {
+      const response = await postChat({ providers: PROVIDERS, fetchImpl: fetchMock, accountId: 'account-a', env: { AI_DAILY_REQUESTS: '3' } });
+      expect(response.status).toBe(200);
+    }
+    const blocked = await postChat({ providers: PROVIDERS, fetchImpl: fetchMock, accountId: 'account-a', env: { AI_DAILY_REQUESTS: '3' } });
+    expect(blocked.status).toBe(429);
+    const body = (await blocked.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe('quota_exceeded');
+    // "Try again later" is not an answer; an hour is.
+    expect(body.error.message).toMatch(/resets in about \d+ hour/);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(blocked.headers.get('retry-after')).toBeTruthy();
+  });
+
+  it('does not let one account spend another one’s allowance', async () => {
+    resetRateLimits();
+    const fetchMock = ok();
+    for (let index = 0; index < 3; index += 1) {
+      await postChat({ providers: PROVIDERS, fetchImpl: fetchMock, accountId: 'account-a', env: { AI_DAILY_REQUESTS: '3' } });
+    }
+    expect((await postChat({ providers: PROVIDERS, fetchImpl: fetchMock, accountId: 'account-a', env: { AI_DAILY_REQUESTS: '3' } })).status).toBe(429);
+    // A different account is untouched.
+    expect((await postChat({ providers: PROVIDERS, fetchImpl: fetchMock, accountId: 'account-b', env: { AI_DAILY_REQUESTS: '3' } })).status).toBe(200);
+    // And so is a planner with no account at all.
+    expect((await postChat({ providers: PROVIDERS, fetchImpl: fetchMock, env: { AI_DAILY_REQUESTS: '3' } })).status).toBe(200);
+  });
+
+  it('can be turned off, and defaults to a sane number', async () => {
+    resetRateLimits();
+    const fetchMock = ok();
+    for (let index = 0; index < 5; index += 1) {
+      expect((await postChat({ providers: PROVIDERS, fetchImpl: fetchMock, accountId: 'account-c', env: { AI_DAILY_REQUESTS: '0' } })).status).toBe(200);
+    }
+    // No variable set at all still allows ordinary use.
+    expect((await postChat({ providers: PROVIDERS, fetchImpl: fetchMock, accountId: 'account-d' })).status).toBe(200);
+  });
+});
+
+/**
+ * One provider is one single point of failure. When Groq is throttling, out of
+ * credit, or simply down, a second configured provider should answer — and the
+ * user should never have to know it happened.
+ */
+describe('provider fallback', () => {
+  const GROQ_FIRST = [
+    { id: 'groq', label: 'Groq', url: 'https://api.groq.com/openai/v1/chat/completions', key: FAKE_KEY, textModel: GROQ_DEFAULT_TEXT_MODEL, lightModel: '', visionModel: GROQ_DEFAULT_VISION_MODEL, reasoning: {}, keyEnv: 'GROQ_API_KEY', billingUrl: 'https://console.groq.com/settings/billing' },
+    { id: 'openai', label: 'OpenAI', url: 'https://api.openai.com/v1/chat/completions', key: 'sk-test', textModel: 'gpt-4o-mini', lightModel: 'gpt-4o-mini', visionModel: 'gpt-4o-mini', reasoning: {}, keyEnv: 'OPENAI_API_KEY' },
+  ];
+
+  function postChat(options: Record<string, unknown> = {}, body = chatBody()) {
+    return handleGroqChatCompletions(
+      request('/api/ai/chat/completions', { method: 'POST', body }),
+      FAKE_KEY,
+      options as never,
+    );
+  }
+
+  it('answers from the next provider when the first is rate-limiting', async () => {
+    resetRateLimits();
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(_input);
+      if (url.includes('groq')) return new Response(JSON.stringify({ error: { message: 'Rate limit reached' } }), { status: 429 });
+      const sent = JSON.parse(String(init?.body)) as { model: string };
+      // The fallback gets its own model, not Groq's id.
+      return new Response(JSON.stringify({ choices: [{ message: { content: `{"model":"${sent.model}"}` } }] }), { status: 200 });
+    });
+    const response = await postChat({ providers: GROQ_FIRST, fetchImpl: fetchMock });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-ai-provider')).toBe('openai');
+    expect((await response.json() as { choices: { message: { content: string } }[] }).choices[0].message.content).toContain('gpt-4o-mini');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps trying past a provider that cannot be reached at all', async () => {
+    resetRateLimits();
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => {
+      if (String(_input).includes('groq')) throw new Error('network down');
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{}' } }] }), { status: 200 });
+    });
+    const response = await postChat({ providers: GROQ_FIRST, fetchImpl: fetchMock });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-ai-provider')).toBe('openai');
+  });
+
+  it('sends images only to a provider that can read them', async () => {
+    resetRateLimits();
+    const textOnly = [{ ...GROQ_FIRST[0], visionModel: '' }, GROQ_FIRST[1]];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response(JSON.stringify({ choices: [{ message: { content: '{}' } }] }), { status: 200 }));
+    const response = await postChat({ providers: textOnly, fetchImpl: fetchMock }, imageChatBody(GROQ_DEFAULT_VISION_MODEL));
+    expect(response.status).toBe(200);
+    // The text-only provider was never asked.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('openai');
+  });
+
+  it('does not waste a second provider on a request both would refuse', async () => {
+    resetRateLimits();
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: { message: 'The token limit is invalid.' } }), { status: 400 }));
+    const response = await postChat({ providers: GROQ_FIRST, fetchImpl: fetchMock });
+    expect(response.status).toBe(400);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('names the provider it failed on, so a log can say whose key to fix', async () => {
+    resetRateLimits();
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: { message: 'Incorrect API key provided' } }), { status: 401 }));
+    const response = await postChat({ providers: GROQ_FIRST, fetchImpl: fetchMock });
+    const parsed = (await response.json()) as { error: { provider: string; message: string } };
+    // Both failed; the first is the operator's primary, so it is the one named.
+    expect(parsed.error.provider).toBe('groq');
+    expect(parsed.error.message).toBe('Incorrect API key provided');
+    // Every attempt is recorded, so a log can see the fallback happened.
+    expect(response.headers.get('x-ai-attempts')).toContain('openai');
+  });
+
+  it('explains a second provider the same way it explains the first', async () => {
+    resetRateLimits();
+    // No message from the provider: the advice is what the user gets.
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 401 }));
+    const openaiOnly = [GROQ_FIRST[1]];
+    const response = await postChat({ providers: openaiOnly, fetchImpl: fetchMock });
+    const parsed = (await response.json()) as { error: { message: string; provider: string } };
+    // Not "re-copy it from console.groq.com" — that is the wrong console.
+    expect(parsed.error.message).toContain('OPENAI_API_KEY');
+    expect(parsed.error.provider).toBe('openai');
   });
 });

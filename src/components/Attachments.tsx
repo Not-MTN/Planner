@@ -81,7 +81,7 @@ function ImageAttachment({ item, onRemove }: { item: AttachmentRef; onRemove?: R
   }
   return (
     <span className="attach-image">
-      <a href={url} target="_blank" rel="noreferrer" aria-label={t("Open {0}", { 0: item.name })}>
+      <a href={url} target="_blank" rel="noopener noreferrer" aria-label={t("Open {0}", { 0: item.name })}>
         <img src={url} alt={item.name} loading="lazy" />
       </a>
       {onRemove ? (

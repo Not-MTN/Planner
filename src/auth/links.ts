@@ -28,13 +28,14 @@ import {
   unwrapKeyRaw,
   wrapKey,
 } from './crypto';
-import { getActiveSession, request } from './session';
-import { newId, weekOf, weekResults, withLinkPlan, withoutLinkPlan } from '../panels';
+import { AuthError, getActiveSession, request } from './session';
+import { newId, weekOf, weekResults, withGoalAnswer, withLinkGoal, withLinkPlan, withoutLinkGoal, withoutLinkPlan } from '../panels';
 import { t } from '../i18n';
-import type { GuardianLink, GuardianNotice, GuardianPlan, Panels, PlanItem, PlannerState, StudentGuardian, WeekResults, WeekSubjectMinutes } from '../types';
+import { GOAL_ANSWERS_KEPT, GOAL_STEPS_MAX, PANEL_GOALS_KEPT, PRAISE_KEPT } from '../types';
+import type { Goal, GoalAnswer, GoalSuggestion, GuardianLink, GuardianNotice, GuardianPlan, Panels, PlanItem, PlannerState, StudentGuardian, WeekResults, WeekSubjectMinutes } from '../types';
 /** Matches the cap in storage.ts, so the vault and the view agree. */
 const WEEKS_KEPT = 12;
-import type { AcceptLinkResponse, LinksResponse, ShareResponse } from '../shared/authContract';
+import type { AcceptLinkResponse, LinksResponse, OutgoingLink, ShareResponse } from '../shared/authContract';
 
 export class LinkError extends Error {}
 
@@ -50,6 +51,15 @@ export interface Invitation {
   link: GuardianLink;
   /** Show this to the student once; it is never stored on the server. */
   code: string;
+  /** When the code stops working. Comes from the server, so it is the truth. */
+  expiresAt: string | null;
+}
+
+/** True when a pending code has stopped working. */
+export function isInviteExpired(expiresAt: string | null | undefined, now = Date.now()): boolean {
+  if (!expiresAt) return false;
+  const at = new Date(expiresAt).getTime();
+  return Number.isFinite(at) && at <= now;
 }
 
 /**
@@ -68,10 +78,11 @@ export async function inviteStudent(panels: Panels, username: string, displayNam
   const wrappedShare = await wrapKey(shareKey, codeKey);
   const wrappedShareKey = await wrapKey(shareKey, session.dek);
 
-  const result = await request<{ link: { id: string } }>('/api/auth/links', {
+  const result = await request<{ link: OutgoingLink }>('/api/auth/links', {
     method: 'POST',
     body: JSON.stringify({ username: clean, codeHash: await linkCodeHash(code), wrappedShare }),
   });
+  const expiresAt = result.link.expiresAt ?? null;
 
   const link: GuardianLink = {
     id: newId('link'),
@@ -84,10 +95,11 @@ export async function inviteStudent(panels: Panels, username: string, displayNam
     wrappedShareKey,
     results: null,
     plans: [],
+    expiresAt,
   };
   return {
     panels: { ...panels, guardian: { ...panels.guardian, links: [...panels.guardian.links, link] } },
-    invitation: { link, code },
+    invitation: { link, code, expiresAt },
   };
 }
 
@@ -180,20 +192,25 @@ interface PlanTick {
  * up on the next one.
  */
 interface GuardianOutbox {
-  v: 2;
+  v: 3;
   notices: Array<Omit<GuardianNotice, 'read'>>;
   plans: GuardianPlan[];
+  /** Goals suggested to this student. Words only, until they say yes. */
+  goals: GoalSuggestion[];
 }
 
 interface StudentOutbox {
-  v: 2;
+  v: 3;
   relayed: Array<Omit<GuardianNotice, 'read'>>;
   progress: PlanTick[];
+  /** How the suggested goals were answered, and how far each has got. */
+  answers: GoalAnswer[];
 }
 
 const OUTBOX_PLANS = 5;
 const OUTBOX_NOTICES = 10;
 const PLAN_ITEMS_MAX = 40;
+const OUTBOX_GOALS = 5;
 
 function wireNotice(value: unknown): Omit<GuardianNotice, 'read'> | null {
   if (!value || typeof value !== 'object') return null;
@@ -206,6 +223,7 @@ function wireNotice(value: unknown): Omit<GuardianNotice, 'read'> | null {
     summary: raw.summary.trim().slice(0, 160),
     weekOf: String(raw.weekOf ?? '').slice(0, 10),
     createdAt: String(raw.createdAt ?? new Date().toISOString()).slice(0, 40),
+    kind: raw.kind === 'praise' ? 'praise' : 'note',
   };
 }
 
@@ -244,9 +262,60 @@ function wirePlan(value: unknown): GuardianPlan | null {
   };
 }
 
-async function readSlot(linkId: string, wrappedShareKey: string, dek: CryptoKey): Promise<unknown> {
+/** A suggestion is only words, so a malformed one is dropped rather than guessed at. */
+function wireGoalSuggestion(value: unknown): GoalSuggestion | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = String(raw.id ?? '').slice(0, 80);
+  const title = typeof raw.title === 'string' ? raw.title.trim().slice(0, 120) : '';
+  if (!id || !title) return null;
+  const target = String(raw.target ?? '');
+  const steps = (Array.isArray(raw.steps) ? raw.steps : [])
+    .flatMap((step) => (typeof step === 'string' && step.trim() ? [step.trim().slice(0, 140)] : []))
+    .slice(0, GOAL_STEPS_MAX);
+  return {
+    id,
+    author: String(raw.author ?? '').slice(0, 60),
+    linkId: String(raw.linkId ?? '').slice(0, 64),
+    title,
+    note: typeof raw.note === 'string' ? raw.note.trim().slice(0, 400) : '',
+    target: /^\d{4}-\d{2}-\d{2}$/.test(target) ? target : null,
+    steps,
+    createdAt: String(raw.createdAt ?? new Date().toISOString()).slice(0, 40),
+  };
+}
+
+function wireGoalAnswer(value: unknown): GoalAnswer | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const suggestionId = String(raw.suggestionId ?? '').slice(0, 80);
+  if (!suggestionId) return null;
+  if (raw.state !== 'accepted' && raw.state !== 'declined') return null;
+  const total = typeof raw.total === 'number' && Number.isFinite(raw.total) ? Math.max(0, Math.min(GOAL_STEPS_MAX, Math.round(raw.total))) : 0;
+  const done = typeof raw.done === 'number' && Number.isFinite(raw.done) ? Math.max(0, Math.min(total, Math.round(raw.done))) : 0;
+  return {
+    suggestionId,
+    state: raw.state,
+    done,
+    total,
+    updatedAt: String(raw.updatedAt ?? new Date().toISOString()).slice(0, 40),
+  };
+}
+
+/**
+ * `outgoing` reads what this account put out there rather than what it was
+ * sent. Needed before writing: the two are different slots, and adding to the
+ * wrong one loses whatever was already there.
+ */
+async function readSlot(
+  linkId: string,
+  wrappedShareKey: string,
+  dek: CryptoKey,
+  outgoing = false,
+): Promise<unknown> {
   const key = await shareKeyFor(dek, wrappedShareKey);
-  const incoming = await request<{ ciphertext: string | null }>(`/api/auth/note?linkId=${encodeURIComponent(linkId)}`);
+  const query = `/api/auth/note?linkId=${encodeURIComponent(linkId)}${outgoing ? '&dir=out' : ''}`;
+  const incoming = await request<{ ciphertext: string | null }>(query);
   if (!incoming.ciphertext) return null;
   return decryptJson<unknown>(incoming.ciphertext, key);
 }
@@ -261,7 +330,7 @@ async function writeSlot(linkId: string, wrappedShareKey: string, dek: CryptoKey
 }
 
 /** The guardian's outbox for one link; a legacy single note folds in as one notice. */
-function asGuardianOutbox(payload: unknown): { notices: Array<Omit<GuardianNotice, 'read'>>; plans: GuardianPlan[] } {
+function asGuardianOutbox(payload: unknown): { notices: Array<Omit<GuardianNotice, 'read'>>; plans: GuardianPlan[]; goals: GoalSuggestion[] } {
   const raw = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
   const legacy = wireNotice(payload);
   const notices = [
@@ -271,11 +340,14 @@ function asGuardianOutbox(payload: unknown): { notices: Array<Omit<GuardianNotic
   const plans = (Array.isArray(raw.plans) ? raw.plans : [])
     .flatMap((item) => (wirePlan(item) ? [wirePlan(item)!] : []))
     .slice(0, OUTBOX_PLANS);
-  return { notices, plans };
+  const goals = (Array.isArray(raw.goals) ? raw.goals : [])
+    .flatMap((item) => (wireGoalSuggestion(item) ? [wireGoalSuggestion(item)!] : []))
+    .slice(0, OUTBOX_GOALS);
+  return { notices, plans, goals };
 }
 
 /** The student's outbox for one link; a legacy relayed note folds in too. */
-function asStudentOutbox(payload: unknown): { relayed: Array<Omit<GuardianNotice, 'read'>>; progress: PlanTick[] } {
+function asStudentOutbox(payload: unknown): { relayed: Array<Omit<GuardianNotice, 'read'>>; progress: PlanTick[]; answers: GoalAnswer[] } {
   const raw = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
   const legacy = wireNotice(payload);
   const relayed = [
@@ -294,7 +366,10 @@ function asStudentOutbox(payload: unknown): { relayed: Array<Omit<GuardianNotice
       }];
     })
     .slice(0, OUTBOX_PLANS);
-  return { relayed, progress };
+  const answers = (Array.isArray(raw.answers) ? raw.answers : [])
+    .flatMap((item) => (wireGoalAnswer(item) ? [wireGoalAnswer(item)!] : []))
+    .slice(0, OUTBOX_GOALS);
+  return { relayed, progress, answers };
 }
 
 /**
@@ -302,6 +377,27 @@ function asStudentOutbox(payload: unknown): { relayed: Array<Omit<GuardianNotice
  * changed. The note lands in the student's inbox and in their next relay.
  */
 export async function postNotice(panels: Panels, linkId: string, summary: string): Promise<Panels> {
+  return postToStudent(panels, linkId, summary, 'note');
+}
+
+/**
+ * Guardian: send encouragement rather than instruction.
+ *
+ * Same channel as a note, and deliberately so — a parent should not have to
+ * learn a second screen to say well done. It is marked so the student's panel
+ * can keep it apart: a note is read once and acted on, praise is read again
+ * on the week nothing went right.
+ */
+export async function postPraise(panels: Panels, linkId: string, summary: string): Promise<Panels> {
+  return postToStudent(panels, linkId, summary, 'praise');
+}
+
+async function postToStudent(
+  panels: Panels,
+  linkId: string,
+  summary: string,
+  kind: 'note' | 'praise',
+): Promise<Panels> {
   const session = await requireSession();
   const link = panels.guardian.links.find((item) => item.linkId === linkId);
   if (!link?.wrappedShareKey) throw new LinkError('That link is not ready yet.');
@@ -309,27 +405,29 @@ export async function postNotice(panels: Panels, linkId: string, summary: string
   if (!text) return panels;
 
   const note = {
-    id: newId('note'),
+    id: newId(kind === 'praise' ? 'praise' : 'note'),
     student: link.username,
     author: session.user.displayName || session.user.username,
     summary: text,
     weekOf: weekOf(),
     createdAt: new Date().toISOString(),
+    kind,
   };
-  // Full-state write: whatever plans are already out there must survive.
-  let outbox: GuardianOutbox = { v: 2, notices: [note], plans: [] };
+  // Full-state write: whatever plans and goals are already out there must survive.
+  let outbox: GuardianOutbox = { v: 3, notices: [note], plans: [], goals: [] };
   try {
-    const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek));
+    const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
     outbox = {
-      v: 2,
+      v: 3,
       notices: [note, ...current.notices.filter((item) => item.id !== note.id)].slice(0, OUTBOX_NOTICES),
       plans: current.plans,
+      goals: current.goals,
     };
   } catch {
     /* first write, or the slot is empty */
   }
   await writeSlot(linkId, link.wrappedShareKey, session.dek, outbox);
-  // The author sees their own note straight away, marked as read.
+  // The author sees their own words straight away, marked as read.
   const notice: GuardianNotice = { ...note, read: true };
   return { ...panels, guardian: { ...panels.guardian, notices: [notice, ...panels.guardian.notices].slice(0, 20) } };
 }
@@ -373,13 +471,14 @@ export async function sendPlan(panels: Panels, linkId: string, draft: PlanDraft)
     updatedAt: now,
   };
 
-  let outbox: GuardianOutbox = { v: 2, notices: [], plans: [plan] };
+  let outbox: GuardianOutbox = { v: 3, notices: [], plans: [plan], goals: [] };
   try {
-    const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek));
+    const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
     outbox = {
-      v: 2,
+      v: 3,
       notices: current.notices,
       plans: [plan, ...current.plans.filter((item) => item.id !== plan.id)].slice(0, OUTBOX_PLANS),
+      goals: current.goals,
     };
   } catch {
     /* first write */
@@ -388,17 +487,92 @@ export async function sendPlan(panels: Panels, linkId: string, draft: PlanDraft)
   return withLinkPlan(panels, linkId, plan);
 }
 
+export interface GoalDraft {
+  title: string;
+  /** Why they are asking. Shown to the student, so it is worth writing. */
+  note: string;
+  /** A date to aim at, or null when there isn't one. */
+  target: string | null;
+  /** Steps in order. Empty is allowed: a goal can be one line. */
+  steps: string[];
+}
+
+/**
+ * Guardian: suggest a goal. Nothing reaches the student's planner until they
+ * agree — this is a question travelling, not work being handed over.
+ */
+export async function sendGoal(panels: Panels, linkId: string, draft: GoalDraft): Promise<Panels> {
+  const session = await requireSession();
+  const link = panels.guardian.links.find((item) => item.linkId === linkId);
+  if (!link?.wrappedShareKey) throw new LinkError('That link is not ready yet.');
+  const title = draft.title.trim().slice(0, 120);
+  if (!title) throw new LinkError('Give the goal a name.');
+
+  const goal: GoalSuggestion = {
+    id: newId('goal'),
+    author: session.user.displayName || session.user.username,
+    linkId,
+    title,
+    note: draft.note.trim().slice(0, 400),
+    target: draft.target && /^\d{4}-\d{2}-\d{2}$/.test(draft.target) ? draft.target : null,
+    steps: draft.steps
+      .map((step) => step.trim().slice(0, 140))
+      .filter((step) => step)
+      .slice(0, GOAL_STEPS_MAX),
+    createdAt: new Date().toISOString(),
+  };
+
+  let outbox: GuardianOutbox = { v: 3, notices: [], plans: [], goals: [goal] };
+  try {
+    const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
+    outbox = {
+      v: 3,
+      notices: current.notices,
+      plans: current.plans,
+      goals: [goal, ...current.goals.filter((item) => item.id !== goal.id)].slice(0, OUTBOX_GOALS),
+    };
+  } catch {
+    /* first write */
+  }
+  await writeSlot(linkId, link.wrappedShareKey, session.dek, outbox);
+  return withLinkGoal(panels, linkId, goal);
+}
+
+/**
+ * Guardian: take a suggestion back. The student's panel drops it on the next
+ * pull — and if they had already said yes, the goal they made is theirs and
+ * stays.
+ */
+export async function dropGoal(panels: Panels, linkId: string, goalId: string): Promise<Panels> {
+  const session = await requireSession();
+  const link = panels.guardian.links.find((item) => item.linkId === linkId);
+  if (!link?.wrappedShareKey) throw new LinkError('That link is not ready yet.');
+  try {
+    const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
+    await writeSlot(linkId, link.wrappedShareKey, session.dek, {
+      v: 3,
+      notices: current.notices,
+      plans: current.plans,
+      goals: current.goals.filter((item) => item.id !== goalId),
+    } satisfies GuardianOutbox);
+  } catch {
+    /* dropping locally is still the right outcome */
+  }
+  return withoutLinkGoal(panels, linkId, goalId);
+}
+
 /** Guardian: take a plan back (the student's panel drops it on the next pull). */
 export async function dropPlan(panels: Panels, linkId: string, planId: string): Promise<Panels> {
   const session = await requireSession();
   const link = panels.guardian.links.find((item) => item.linkId === linkId);
   if (!link?.wrappedShareKey) throw new LinkError('That link is not ready yet.');
   try {
-    const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek));
+    const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
     await writeSlot(linkId, link.wrappedShareKey, session.dek, {
-      v: 2,
+      v: 3,
       notices: current.notices,
       plans: current.plans.filter((item) => item.id !== planId),
+      goals: current.goals,
     } satisfies GuardianOutbox);
   } catch {
     /* dropping locally is still the right outcome */
@@ -414,18 +588,26 @@ export async function dropPlan(panels: Panels, linkId: string, planId: string): 
  */
 export async function syncStudentInbox(
   panels: Panels,
-): Promise<{ panels: Panels; added: { notices: GuardianNotice[]; plans: GuardianPlan[] }; relayed: number; changed: boolean }> {
+  /**
+   * The student's goals, so a goal they took on can report how far it has got.
+   * Optional because the caller may only have the panels to hand; without it,
+   * answers already recorded are still sent.
+   */
+  goals: Goal[] = [],
+): Promise<{ panels: Panels; added: { notices: GuardianNotice[]; plans: GuardianPlan[]; goals: GoalSuggestion[] }; relayed: number; changed: boolean }> {
   const session = await requireSession();
   const guardians = panels.student.guardians;
-  if (guardians.length === 0) return { panels, added: { notices: [], plans: [] }, relayed: 0, changed: false };
+  if (guardians.length === 0) return { panels, added: { notices: [], plans: [], goals: [] }, relayed: 0, changed: false };
 
   let notices = panels.student.inbox.notices;
   let plans = panels.student.inbox.plans;
+  let suggestions = panels.student.inbox.goals ?? [];
+  let praise = panels.student.praise ?? [];
   let changed = false;
-  const added: { notices: GuardianNotice[]; plans: GuardianPlan[] } = { notices: [], plans: [] };
+  const added: { notices: GuardianNotice[]; plans: GuardianPlan[]; goals: GoalSuggestion[] } = { notices: [], plans: [], goals: [] };
 
   for (const source of guardians) {
-    let outbox: { notices: Array<Omit<GuardianNotice, 'read'>>; plans: GuardianPlan[] };
+    let outbox: { notices: Array<Omit<GuardianNotice, 'read'>>; plans: GuardianPlan[]; goals: GoalSuggestion[] };
     try {
       outbox = asGuardianOutbox(await readSlot(source.linkId, source.wrappedShareKey, session.dek));
     } catch {
@@ -439,6 +621,12 @@ export async function syncStudentInbox(
       notices = [received, ...notices];
       added.notices.push(received);
       changed = true;
+      // Praise is kept as well as delivered: it is the one message worth
+      // reading twice, and the inbox is not — twenty notes and it is gone.
+      if (received.kind === 'praise' && !(panels.student.praise ?? []).some((item) => item.id === id)) {
+        praise = [{ ...received, read: true }, ...praise];
+        changed = true;
+      }
     }
     for (const plan of outbox.plans) {
       const existing = plans.find((item) => item.id === plan.id);
@@ -458,10 +646,28 @@ export async function syncStudentInbox(
       plans = plans.map((item) => (item.id === plan.id ? merged : item));
       changed = true;
     }
+    for (const goal of outbox.goals) {
+      // Answered suggestions are kept, not dropped: the answer has to keep
+      // travelling back until the guardian takes the suggestion away. Hiding
+      // them is the panel's job, not the wire's.
+      if (suggestions.some((item) => item.id === goal.id)) continue;
+      suggestions = [{ ...goal, linkId: source.linkId }, ...suggestions];
+      added.goals.push(goal);
+      changed = true;
+    }
+    // One the guardian withdrew disappears again.
+    const offered = new Set(outbox.goals.map((item) => item.id));
+    const kept = suggestions.filter((item) => item.linkId !== source.linkId || offered.has(item.id));
+    if (kept.length !== suggestions.length) {
+      suggestions = kept;
+      changed = true;
+    }
   }
 
   notices = notices.slice(0, 20);
   plans = plans.slice(0, 10);
+  suggestions = suggestions.slice(0, PANEL_GOALS_KEPT * 2);
+  praise = praise.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, PRAISE_KEPT);
 
   // Everyone gets a full-state outbox: what the others said, and the ticks for
   // their own plans. One guardian being offline never blocks the rest.
@@ -479,7 +685,26 @@ export async function syncStudentInbox(
         doneIds: plan.items.filter((item) => item.done).map((item) => item.id),
         updatedAt: new Date().toISOString(),
       }));
-    const outbox: StudentOutbox = { v: 2, relayed: passed, progress };
+    // Goals this guardian suggested: how far the student has got. Counts only —
+    // they wrote the steps, but the goal is the student's now.
+    const answers: GoalAnswer[] = suggestions
+      .filter((suggestion) => suggestion.linkId === target.linkId)
+      .flatMap((suggestion): GoalAnswer[] => {
+        const goal = goals.find((item) => item.fromSuggestion?.suggestionId === suggestion.id);
+        if (goal) {
+          return [{
+            suggestionId: suggestion.id,
+            state: 'accepted' as const,
+            done: goal.milestones.filter((step) => step.completed).length,
+            total: goal.milestones.length,
+            updatedAt: goal.updatedAt,
+          }];
+        }
+        const remembered = (panels.student.goalAnswers ?? []).find((item) => item.suggestionId === suggestion.id);
+        return remembered ? [remembered] : [];
+      })
+      .slice(0, GOAL_ANSWERS_KEPT);
+    const outbox: StudentOutbox = { v: 3, relayed: passed, progress, answers };
     try {
       await writeSlot(target.linkId, target.wrappedShareKey, session.dek, outbox);
       relayed += passed.length;
@@ -489,7 +714,7 @@ export async function syncStudentInbox(
   }
 
   return {
-    panels: { ...panels, student: { ...panels.student, inbox: { notices, plans } } },
+    panels: { ...panels, student: { ...panels.student, inbox: { notices, plans, goals: suggestions }, praise } },
     added,
     relayed,
     changed,
@@ -505,9 +730,11 @@ export async function readNotices(panels: Panels): Promise<{ panels: Panels; cha
 
   const links = [...panels.guardian.links];
 
-  for (const link of links) {
+  for (let index = 0; index < links.length; index += 1) {
+    // Re-read each time: the loop updates the entry as answers land on it.
+    let link = links[index]!;
     if (link.status !== 'linked' || !link.linkId || !link.wrappedShareKey) continue;
-    let outbox: { relayed: Array<Omit<GuardianNotice, 'read'>>; progress: PlanTick[] };
+    let outbox: { relayed: Array<Omit<GuardianNotice, 'read'>>; progress: PlanTick[]; answers: GoalAnswer[] };
     try {
       outbox = asStudentOutbox(await readSlot(link.linkId, link.wrappedShareKey, session.dek));
     } catch {
@@ -532,8 +759,22 @@ export async function readNotices(panels: Panels): Promise<{ panels: Panels; cha
       });
       if (JSON.stringify(plans) !== JSON.stringify(link.plans)) {
         changed = true;
-        const index = panels.guardian.links.indexOf(link);
         links[index] = { ...link, plans };
+        link = links[index]!;
+      }
+    }
+    // Answers land on the suggestions they belong to. Only counts come back:
+    // the guardian learns whether the goal moved, not what the student made of it.
+    if (outbox.answers.length > 0) {
+      const answers = [...outbox.answers];
+      const goalAnswers = [
+        ...(link.goalAnswers ?? []).map((item) => answers.find((answer) => answer.suggestionId === item.suggestionId) ?? item),
+        ...answers.filter((answer) => !(link.goalAnswers ?? []).some((item) => item.suggestionId === answer.suggestionId)),
+      ].slice(0, GOAL_ANSWERS_KEPT);
+      if (JSON.stringify(goalAnswers) !== JSON.stringify(link.goalAnswers ?? [])) {
+        changed = true;
+        links[index] = { ...link, goalAnswers };
+        link = links[index]!;
       }
     }
   }
@@ -555,6 +796,18 @@ export async function readNotices(panels: Panels): Promise<{ panels: Panels; cha
   };
 }
 
+/**
+ * Student: let go of one piece of praise. Kept words are theirs to keep or not
+ * — including the ones that have stopped helping.
+ */
+export function forgetPraise(panels: Panels, praiseId: string): Panels {
+  if (!(panels.student.praise ?? []).some((item) => item.id === praiseId)) return panels;
+  return {
+    ...panels,
+    student: { ...panels.student, praise: (panels.student.praise ?? []).filter((item) => item.id !== praiseId) },
+  };
+}
+
 /** Guardian: mark every notice as read. */
 export function markNoticesRead(panels: Panels): Panels {
   if (panels.guardian.notices.every((notice) => notice.read)) return panels;
@@ -569,10 +822,21 @@ export function markNoticesRead(panels: Panels): Panels {
 /** Student: redeem the code a guardian gave them. */
 export async function acceptInvitation(panels: Panels, code: string): Promise<Panels> {
   const session = await requireSession();
-  const result = await request<AcceptLinkResponse>('/api/auth/link-accept', {
-    method: 'POST',
-    body: JSON.stringify({ code: code.trim() }),
-  });
+  let result: AcceptLinkResponse;
+  try {
+    result = await request<AcceptLinkResponse>('/api/auth/link-accept', {
+      method: 'POST',
+      body: JSON.stringify({ code: code.trim() }),
+    });
+  } catch (caught) {
+    // Distinct from a typo, and worth its own sentence: retyping will never
+    // work, and "check the code" would send someone hunting for a mistake
+    // that is not there. Ask for a new invitation instead.
+    if (caught instanceof AuthError && caught.code === 'invite_expired') {
+      throw new LinkError(t('That invitation is too old to use. Ask for a new code.'));
+    }
+    throw caught;
+  }
 
   const codeKey = await keyFromLinkCode(code);
   const raw = await unwrapKeyRaw(result.wrappedShare, codeKey);
@@ -589,6 +853,26 @@ export async function acceptInvitation(panels: Panels, code: string): Promise<Pa
   };
   if (panels.student.guardians.some((item) => item.linkId === guardian.linkId)) return panels;
   return { ...panels, student: { ...panels.student, guardians: [...panels.student.guardians, guardian] } };
+}
+
+/**
+ * Student: say yes or not now to a suggested goal.
+ *
+ * The answer goes out on the next sync. Saying yes does not itself create
+ * anything in the planner — the caller does that, so the goal is made exactly
+ * the way every other goal is made, and can be undone like one.
+ */
+export function answerGoalSuggestion(panels: Panels, suggestion: GoalSuggestion, state: 'accepted' | 'declined'): Panels {
+  // Already answered: the second click on a slow panel must not flip the answer.
+  const prior = (panels.student.goalAnswers ?? []).find((item) => item.suggestionId === suggestion.id);
+  if (prior?.state === state) return panels;
+  return withGoalAnswer(panels, {
+    suggestionId: suggestion.id,
+    state,
+    done: 0,
+    total: 0,
+    updatedAt: new Date().toISOString(),
+  });
 }
 
 /**
@@ -648,7 +932,9 @@ export async function syncLinks(panels: Panels): Promise<{ panels: Panels; chang
     // The code has served its purpose once the student has accepted.
     const code = status === 'linked' ? null : link.code;
     if (code !== link.code) changed = true;
-    return { ...link, status, code };
+    const expiresAt = status === 'linked' ? null : remote.expiresAt ?? link.expiresAt ?? null;
+    if (expiresAt !== link.expiresAt) changed = true;
+    return { ...link, status, code, expiresAt };
   });
 
   // /links lists both waiting invitations and accepted ones, so a guardian who

@@ -49,11 +49,6 @@ function loadLastUserInfo(): PublicUser | null {
     return null;
   }
 }
-
-export function unlockedUser(): PublicUser | null {
-  return getActiveSession()?.user ?? null;
-}
-
 /**
  * Who this device belongs to, even when the vault key is not in memory right
  * now (offline boot, trusted-device boot): the live session first, then the
@@ -69,11 +64,6 @@ export function forgetAccountUser(): void {
     localStorage.removeItem(LAST_USER_INFO_KEY);
   } catch {}
 }
-
-export function isUnlocked(): boolean {
-  return getActiveSession() !== null;
-}
-
 export function lock(): void {
   endSession();
 }
@@ -269,9 +259,4 @@ async function writeVault(state: PlannerState): Promise<void> {
       /* leave it for the next save */
     }
   }
-}
-
-/** True when the planner should keep using the browser copy instead of a vault. */
-export function usesVault(): boolean {
-  return getActiveSession() !== null;
 }

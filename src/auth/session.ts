@@ -3,14 +3,16 @@
  * never in storage — so a reload simply asks for the password again until the
  * trusted-device flow (phase 2) is built.
  */
-import type { LoginResponse, PublicUser, SessionResponse, VaultResponse } from '../shared/authContract';
+import type { AuthEvent, AuthEventsResponse, LoginResponse, PublicUser, SessionResponse, VaultResponse } from '../shared/authContract';
 import {
   createVaultKeys,
   decryptState,
   deriveFromPassword,
   encryptState,
-  formatRecoveryKey,
+  formatRecoveryCodes,
+  hashRecoveryCodes,
   hashRecoveryKey,
+  unwrapWithRecoveryCode,
   importDek,
   keyFromRecovery,
   newSalt,
@@ -93,6 +95,12 @@ export type AuthErrorCode =
   | 'deployment_gate'
   /** Nothing serves the accounts API at this address: the route or function is missing. */
   | 'api_missing'
+  /** The password was accepted, and a code from the authenticator app is owed. */
+  | 'totp_required'
+  /** An invitation code was right, but sat unused until it stopped working. */
+  | 'invite_expired'
+  /** A code typed during set-up or removal did not match. */
+  | 'totp_invalid'
   | 'unknown';
 
 /**
@@ -305,10 +313,10 @@ export interface SignUpInput {
   remember?: boolean;
 }
 
-export async function signUp(input: SignUpInput): Promise<{ recoveryKey: string; session: ActiveSession }> {
-  const recoveryKey = formatRecoveryKey();
-  const recoveryHash = hashRecoveryKey(recoveryKey);
-  const { salt, authToken, dek, dekRaw, wrappedDek, wrappedRecovery } = await createVaultKeys(input.password, recoveryKey);
+export async function signUp(input: SignUpInput): Promise<{ recoveryCodes: string[]; session: ActiveSession }> {
+  const recoveryCodes = formatRecoveryCodes();
+  const recoveryHashes = hashRecoveryCodes(recoveryCodes);
+  const { salt, authToken, dek, dekRaw, wrappedDek, wrappedRecovery } = await createVaultKeys(input.password, recoveryCodes);
   const ciphertext = await encryptState(input.initialState, dek);
 
   const result = await request<{ user: PublicUser }>('/api/auth/signup', {
@@ -320,7 +328,7 @@ export async function signUp(input: SignUpInput): Promise<{ recoveryKey: string;
       role: input.role,
       kdfSalt: salt,
       authToken,
-      recoveryHash,
+      recoveryHashes,
       wrappedDek,
       wrappedRecovery,
       ciphertext,
@@ -331,9 +339,16 @@ export async function signUp(input: SignUpInput): Promise<{ recoveryKey: string;
   // This is the device they signed up on, so open straight into the planner.
   if (input.remember !== false) await rememberOnDevice(result.user.id, dekRaw);
   persistAuth(result.user.id);
-  return { recoveryKey, session: active };
+  return { recoveryCodes, session: active };
 }
 
+/**
+ * A sign-in that got as far as a correct password and stopped there.
+ *
+ * The key derived from the password is held only until the six-digit code
+ * arrives, and is dropped the moment it is used or the attempt is abandoned.
+ */
+let pendingSecondFactor: { kek: CryptoKey | null; remember: boolean } | null = null;
 export async function signIn(identifier: string, password: string, remember = true): Promise<ActiveSession> {
   // The salt is stored with the account, so fetch it before stretching. Unknown
   // accounts receive a decoy salt and simply fail the next step.
@@ -343,10 +358,17 @@ export async function signIn(identifier: string, password: string, remember = tr
   });
   const { authToken, kek } = await deriveFromPassword(password, kdfSalt);
 
-  const result = await request<LoginResponse>('/api/auth/login', {
+  const result = await request<LoginResponse & { secondFactor?: 'totp' }>('/api/auth/login', {
     method: 'POST',
     body: JSON.stringify({ username: identifier.trim(), authToken }),
   });
+
+  // The account has an authenticator app: nothing is signed in yet, and the
+  // session does not exist until the code arrives.
+  if (result.secondFactor === 'totp') {
+    pendingSecondFactor = { kek, remember };
+    throw new AuthError('totp_required', 'Enter the code from your authenticator app.');
+  }
 
   const raw = await unwrapKeyRaw(result.wrappedDek, kek);
   if (remember) await rememberOnDevice(result.user.id, raw);
@@ -367,60 +389,138 @@ export async function signIn(identifier: string, password: string, remember = tr
 }
 
 /**
- * Change a forgotten password using the recovery key. The vault key is unwrapped
- * and re-wrapped in this browser; only its encrypted copies and one-way recovery
- * verifier are sent to the server.
+ * Re-wrap the vault key for a new set of recovery codes.
+ *
+ * Every code is a separate lock on the vault, so a fresh set means a fresh
+ * wrapped copy per code. The old set stops working the moment the server
+ * accepts these.
+ */
+async function rotateRecoveryCodes(
+  raw: Uint8Array<ArrayBuffer>,
+  request: {
+    salt: string;
+    authToken: string;
+    wrappedDek: string;
+    extra?: Record<string, unknown>;
+  },
+): Promise<{ recoveryCodes: string[]; body: Record<string, unknown> }> {
+  const recoveryCodes = formatRecoveryCodes();
+  const wrappedRecovery: string[] = [];
+  for (const code of recoveryCodes) {
+    const kek = await keyFromRecovery(code, request.salt);
+    wrappedRecovery.push(await wrapRawKey(raw, kek));
+  }
+  return {
+    recoveryCodes,
+    body: {
+      ...request.extra,
+      newRecoveryHashes: hashRecoveryCodes(recoveryCodes),
+      kdfSalt: request.salt,
+      authToken: request.authToken,
+      wrappedDek: request.wrappedDek,
+      wrappedRecovery,
+    },
+  };
+}
+
+/**
+ * Change a forgotten password using one of the account's recovery codes. The
+ * vault key is unwrapped and re-wrapped in this browser; only its encrypted
+ * copies and one-way recovery verifiers are sent to the server.
+ *
+ * Recovery issues a whole new set of codes. The one just used is spent, and
+ * there is no way to know which of the others may have leaked along with the
+ * forgotten password, so all of them are replaced.
  */
 export async function resetPasswordWithRecovery(
   identifier: string,
-  recoveryKeyInput: string,
+  recoveryCodeInput: string,
   newPassword: string,
-): Promise<string> {
+): Promise<string[]> {
   const identifierValue = identifier.trim();
-  const recoveryKey = normalizeRecoveryKey(recoveryKeyInput);
-  if (!identifierValue || !recoveryKey) {
+  const recoveryCode = normalizeRecoveryKey(recoveryCodeInput);
+  if (!identifierValue || !recoveryCode) {
     throw new AuthError('bad_credentials', 'Wrong username or recovery key.');
   }
 
-  const { kdfSalt: oldSalt, wrappedRecovery: oldWrappedRecovery } = await request<{ kdfSalt: string; wrappedRecovery: string }>(
-    '/api/auth/recovery/start',
-    { method: 'POST', body: JSON.stringify({ username: identifierValue }) },
-  );
+  const { kdfSalt: oldSalt, wrappedRecovery: oldWrapped } = await request<{
+    kdfSalt: string;
+    wrappedRecovery: string | string[];
+  }>('/api/auth/recovery/start', { method: 'POST', body: JSON.stringify({ username: identifierValue }) });
+  // Accounts created before codes came in sets still hold a single wrapped
+  // copy; old and new shapes are treated the same from here on.
+  const oldWrappedRecovery = Array.isArray(oldWrapped) ? oldWrapped : [oldWrapped];
 
   let raw: Uint8Array<ArrayBuffer> | null = null;
   try {
-    const oldRecoveryKek = await keyFromRecovery(recoveryKey, oldSalt);
-    try {
-      raw = await unwrapKeyRaw(oldWrappedRecovery, oldRecoveryKek);
-    } catch {
+    // Any one of the codes opens the vault. The server cannot tell which, so
+    // each wrapped copy is tried in turn.
+    const opened = await unwrapWithRecoveryCode(recoveryCode, oldWrappedRecovery, oldSalt);
+    if (!opened) {
       // The endpoint deliberately returns a decoy for unknown accounts. Keep
-      // the same message for an unknown identifier and a wrong recovery key.
+      // the same message for an unknown identifier and a wrong recovery code.
       throw new AuthError('bad_credentials', 'Wrong username or recovery key.');
     }
+    raw = opened.raw;
 
     const salt = newSalt();
     const { authToken, kek } = await deriveFromPassword(newPassword, salt);
-    const nextRecoveryKey = formatRecoveryKey();
-    const recoveryHash = hashRecoveryKey(recoveryKey);
-    const nextRecoveryHash = hashRecoveryKey(nextRecoveryKey);
     const wrappedDek = await wrapRawKey(raw, kek);
-    const nextRecoveryKek = await keyFromRecovery(nextRecoveryKey, salt);
-    const wrappedRecovery = await wrapRawKey(raw, nextRecoveryKek);
+    const recoveryHash = hashRecoveryKey(recoveryCode);
+    const { recoveryCodes, body } = await rotateRecoveryCodes(raw, {
+      salt,
+      authToken,
+      wrappedDek,
+      extra: { username: identifierValue, recoveryHash },
+    });
 
     await request<{ ok: true }>('/api/auth/recovery/complete', {
       method: 'POST',
-      body: JSON.stringify({
-        username: identifierValue,
-        recoveryHash,
-        newRecoveryHash: nextRecoveryHash,
-        kdfSalt: salt,
-        authToken,
-        wrappedDek,
-        wrappedRecovery,
-      }),
+      body: JSON.stringify(body),
     });
     endSession();
-    return nextRecoveryKey;
+    return recoveryCodes;
+  } finally {
+    raw?.fill(0);
+  }
+}
+
+/**
+ * Replace the signed-in account's recovery codes with a fresh set.
+ *
+ * The password is required: it is the only proof of identity that also unlocks
+ * the vault, and the server holds nothing that could re-wrap the key itself.
+ * Codes are replaced wholesale, because one leaked code is indistinguishable
+ * from a leaked set.
+ */
+export async function regenerateRecoveryCodes(password: string): Promise<string[]> {
+  const current = active;
+  if (!current) throw new AuthError('unauthenticated', 'Unlock your account to continue.');
+  if (!password) throw new AuthError('bad_credentials', 'Enter your password to continue.');
+
+  const { kdfSalt } = await request<{ kdfSalt: string }>('/api/auth/salt', {
+    method: 'POST',
+    body: JSON.stringify({ username: current.user.username }),
+  });
+  const { authToken, kek } = await deriveFromPassword(password, kdfSalt);
+  const login = await request<LoginResponse>('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username: current.user.username, authToken }),
+  });
+
+  let raw: Uint8Array<ArrayBuffer> | null = null;
+  try {
+    raw = await unwrapKeyRaw(login.wrappedDek, kek);
+    const { recoveryCodes, body } = await rotateRecoveryCodes(raw, {
+      salt: kdfSalt,
+      authToken,
+      wrappedDek: login.wrappedDek,
+    });
+    await request<{ ok: true }>('/api/auth/recovery/update', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    return recoveryCodes;
   } finally {
     raw?.fill(0);
   }
@@ -450,6 +550,181 @@ export async function fetchSession(): Promise<PublicUser | null> {
         localStorage.removeItem(REDIRECT_KEY);
       } catch {}
       return null;
+    }
+    throw error;
+  }
+}
+
+/** One signed-in device, as the account holder sees it. */
+export type { AuthEvent };
+
+/**
+ * A line from the account's history, newest first.
+ *
+ * An empty list means "offline" or "nothing recorded yet", never "nothing
+ * happened" — the log is a convenience, not an audit trail.
+ */
+export async function listAuthEvents(): Promise<AuthEvent[]> {
+  try {
+    const result = await request<AuthEventsResponse>('/api/auth/events');
+    return result.events ?? [];
+  } catch (error) {
+    if (error instanceof AuthError && error.code === 'unauthenticated') return [];
+    throw error;
+  }
+}
+
+export interface DeviceSession {
+  id: string;
+  /** A short description captured at sign-in, e.g. "Chrome on Mac". */
+  label: string;
+  createdAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+  /** True for the session this browser is using right now. */
+  current: boolean;
+}
+
+/**
+ * Every device signed into this account, newest first.
+ *
+ * The list is only available while signed in, and an expired session simply
+ * disappears from it — so a missing list means "offline", not "no devices".
+ */
+export async function listDeviceSessions(): Promise<DeviceSession[]> {
+  try {
+    const result = await request<{ sessions: DeviceSession[]; current: string }>('/api/auth/sessions');
+    const current = result.current;
+    return (result.sessions ?? []).map((session) => ({ ...session, current: session.id === current }));
+  } catch (error) {
+    if (error instanceof AuthError && error.code === 'unauthenticated') return [];
+    throw error;
+  }
+}
+
+/**
+ * Sign one device out. The vault stays encrypted and untouched; the revoked
+ * session simply stops being able to fetch it, and has to ask for the password
+ * again.
+ */
+export async function revokeDeviceSession(id: string): Promise<void> {
+  await request<{ ok: true }>('/api/auth/sessions', { method: 'DELETE', body: JSON.stringify({ id }) });
+}
+
+/** Sign every other device out, keeping this one. */
+export async function revokeOtherDeviceSessions(): Promise<number> {
+  const result = await request<{ ok: true; removed: number }>('/api/auth/sessions', {
+    method: 'DELETE',
+    body: JSON.stringify({ others: true }),
+  });
+  return result.removed;
+}
+
+/**
+ * Finishes a password sign-in with a code from the authenticator app.
+ *
+ * Throws `totp_required` again when the code is wrong or already used, so the
+ * caller can simply ask for another one.
+ */
+export async function completeTotpSignIn(code: string): Promise<ActiveSession> {
+  const pending = pendingSecondFactor;
+  if (!pending?.kek) throw new AuthError('unauthenticated', 'Start signing in again.');
+
+  let result: LoginResponse;
+  try {
+    result = await request<LoginResponse>('/api/auth/totp/login', {
+      method: 'POST',
+      body: JSON.stringify({ code: code.trim() }),
+    });
+  } catch (error) {
+    if (error instanceof AuthError && error.code === 'bad_credentials') {
+      throw new AuthError('totp_required', 'That code is not right, or has already been used. Wait for the next one.');
+    }
+    throw error;
+  }
+  // Spent either way: the challenge is single-use on the server.
+  pendingSecondFactor = null;
+
+  const raw = await unwrapKeyRaw(result.wrappedDek, pending.kek);
+  if (pending.remember) await rememberOnDevice(result.user.id, raw);
+  else {
+    try {
+      const last = getLastUserId();
+      if (last && last !== result.user.id) await forgetDevice(last);
+    } catch {}
+  }
+  const dekRaw = new Uint8Array(raw);
+  const dek = await importDek(raw, false);
+  active = { user: result.user, dek, dekRaw, vault: result.vault };
+  persistAuth(result.user.id);
+  return active;
+}
+
+/** Finishes a passkey sign-in with a code. The vault opens on the gate as usual. */
+export async function completePasskeyTotpSignIn(code: string): Promise<void> {
+  try {
+    await request<LoginResponse>('/api/auth/totp/login', {
+      method: 'POST',
+      body: JSON.stringify({ code: code.trim() }),
+    });
+  } catch (error) {
+    if (error instanceof AuthError && error.code === 'bad_credentials') {
+      throw new AuthError('totp_required', 'That code is not right, or has already been used. Wait for the next one.');
+    }
+    throw error;
+  }
+  pendingSecondFactor = null;
+}
+
+export interface TotpSetup {
+  secret: string;
+  formatted: string;
+  uri: string;
+  confirmed: boolean;
+}
+
+/** The account's authenticator app, if it has one. */
+export async function fetchTotpStatus(): Promise<TotpSetup | null> {
+  const result = await request<{ enrolled: boolean } & Partial<TotpSetup>>('/api/auth/totp/setup');
+  if (!result.enrolled || !result.secret) return null;
+  return {
+    secret: result.secret,
+    formatted: result.formatted ?? result.secret,
+    uri: result.uri ?? '',
+    confirmed: Boolean(result.confirmed),
+  };
+}
+
+/** Issues a new secret. It does nothing until a code from it is accepted. */
+export async function startTotpSetup(): Promise<TotpSetup> {
+  return request<TotpSetup>('/api/auth/totp/setup', { method: 'POST' });
+}
+
+/** Proves the app is set up by accepting one code from it. */
+export async function confirmTotpSetup(code: string): Promise<void> {
+  try {
+    await request<{ ok: true }>('/api/auth/totp/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ code: code.trim() }),
+    });
+  } catch (error) {
+    if (error instanceof AuthError && error.code === 'bad_credentials') {
+      throw new AuthError('totp_invalid', 'That code is not right, or has already been used. Wait for the next one.');
+    }
+    throw error;
+  }
+}
+
+/** Turns the second step off. A current code is required. */
+export async function disableTotp(code: string): Promise<void> {
+  try {
+    await request<{ ok: true }>('/api/auth/totp/disable', {
+      method: 'POST',
+      body: JSON.stringify({ code: code.trim() }),
+    });
+  } catch (error) {
+    if (error instanceof AuthError && error.code === 'bad_credentials') {
+      throw new AuthError('totp_invalid', 'That code is not right, or has already been used. Wait for the next one.');
     }
     throw error;
   }

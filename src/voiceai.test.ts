@@ -126,7 +126,7 @@ describe('voice ai', () => {
       const state = createEmptyState();
       const result = await voiceTurn({ utterance: "I'm wiped. Make tomorrow soft?", history: [{ role: 'user', text: 'hi' }], state });
       expect(calls).toHaveLength(1);
-      expect(calls[0].url).toContain('/api/groq/chat/completions');
+      expect(calls[0].url).toContain('/api/ai/chat/completions');
       const body = JSON.parse(calls[0].body) as { messages: Array<{ role: string; content: string }>; response_format?: { type: string } };
       expect(body.response_format?.type).toBe('json_object');
       const userMessage = JSON.parse(body.messages[1].content) as {

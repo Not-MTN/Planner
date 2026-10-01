@@ -10,6 +10,7 @@
 import { createHash } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { isSameOriginRequest } from './groqProxy.js';
+import { formatTotpSecret, newTotpSecret, totpUri, verifyTotp } from './totp.js';
 import { WebAuthnError, fromBase64Url, verifyAssertion, verifyRegistration } from './webauthn.js';
 import { API_SECURITY_HEADERS, BodyTooLargeError, rateLimitResponse, readLimitedBody } from './security.js';
 import {
@@ -34,6 +35,8 @@ import {
   type LoginResponse,
   type OutgoingLink,
   type PasskeyLoginResponse,
+  type SecondFactorResponse,
+  type TotpSetupResponse,
   type PasskeyOptionsResponse,
   type PublicUser,
   type SessionResponse,
@@ -45,7 +48,9 @@ import {
   hashToken,
   newId as newStoreId,
   newToken,
+  parseRecoveryWraps,
   safeEqual,
+  type AuthEventKind,
   type AuthStore,
   type LinkRow,
   type UserRow,
@@ -115,6 +120,36 @@ function clearedCookie(secure: boolean): string {
   return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure ? '; Secure' : ''}`;
 }
 
+/** The half-signed-in state: password accepted, second step still owed. */
+const TWO_STEP_COOKIE = 'planner_two_step';
+const TWO_STEP_TTL_SECONDS = 300;
+
+function twoStepCookie(token: string, secure: boolean): string {
+  const parts = [
+    `${TWO_STEP_COOKIE}=${token}`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    `Max-Age=${TWO_STEP_TTL_SECONDS}`,
+  ];
+  if (secure) parts.push('Secure');
+  return parts.join('; ');
+}
+
+function clearedTwoStepCookie(secure: boolean): string {
+  return `${TWO_STEP_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure ? '; Secure' : ''}`;
+}
+
+export function readTwoStepToken(request: Request): string | null {
+  const header = request.headers.get('cookie');
+  if (!header) return null;
+  for (const part of header.split(';')) {
+    const [name, ...rest] = part.trim().split('=');
+    if (name === TWO_STEP_COOKIE) return decodeURIComponent(rest.join('=')) || null;
+  }
+  return null;
+}
+
 export function readSessionToken(request: Request): string | null {
   const header = request.headers.get('cookie');
   if (!header) return null;
@@ -138,6 +173,108 @@ async function readJsonBody(request: Request, maxBytes: number = MAX_AUTH_BODY_B
     return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * A bounded list of base64 strings.
+ *
+ * Recovery codes arrive as a set, so the server accepts many — but never an
+ * unbounded number: a huge list would be a cheap way to make it store and hash
+ * whatever it is sent.
+ */
+const MAX_RECOVERY_CODES = 16;
+
+function isBase64List(
+  value: unknown,
+  itemMin: number,
+  itemMax: number,
+  minCount: number,
+  maxCount: number,
+): value is string[] {
+  if (!Array.isArray(value) || value.length < minCount || value.length > maxCount) return false;
+  return value.every((entry) => isBase64(entry, itemMin, itemMax));
+}
+
+/**
+ * A short, readable name for the device that just signed in.
+ *
+ * Enough to tell "the laptop I use every day" from "a phone I signed into once
+ * at a library" — which is the whole point of a devices list. Deliberately
+ * coarse: a precise user-agent string is a fingerprint, and none of this is
+ * needed to authenticate anybody.
+ */
+export function deviceLabel(request: Request): string {
+  const agent = request.headers.get('user-agent') ?? '';
+  const system = /iPhone/i.test(agent)
+    ? 'iPhone'
+    : /iPad|Macintosh/i.test(agent) && /Mac OS X/i.test(agent) && !/iPhone|iPad/i.test(agent)
+      ? 'Mac'
+      : /iPad/i.test(agent)
+        ? 'iPad'
+        : /Android/i.test(agent)
+          ? 'Android'
+          : /Windows/i.test(agent)
+            ? 'Windows'
+            : /Macintosh|Mac OS X/i.test(agent)
+              ? 'Mac'
+              : /Linux/i.test(agent)
+                ? 'Linux'
+                : '';
+  const browser = /Edg\//i.test(agent)
+    ? 'Edge'
+    : /OPR\/|Opera/i.test(agent)
+      ? 'Opera'
+      : /Firefox\//i.test(agent)
+        ? 'Firefox'
+        : /Chrome\//i.test(agent)
+          ? 'Chrome'
+          : /Safari\//i.test(agent)
+            ? 'Safari'
+            : '';
+  if (browser && system) return `${browser} on ${system}`;
+  return browser || system || 'Unknown device';
+}
+
+/**
+ * Which network a request came from, as a hash salted with the account id.
+ *
+ * Never the address itself. We only ever need to answer one question — "is
+ * this somewhere this account has been before?" — and a salted hash answers
+ * it without the server holding a list of everywhere anybody has been. Salted
+ * per account, so the same address cannot be matched across two accounts.
+ */
+function clientNetwork(request: Request, userId: string): string | null {
+  const address =
+    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+    request.headers.get('x-real-ip')?.trim() ||
+    '';
+  if (!address) return null;
+  return createHash('sha256').update(`${userId}:${address}`).digest('base64url').slice(0, 22);
+}
+
+/**
+ * Adds a line to the account's history.
+ *
+ * Deliberately swallows its own failures: a history nobody is looking at is
+ * never a good reason to turn somebody away at the door. Sign-in has to keep
+ * working even when this table is unhappy.
+ */
+async function recordEvent(
+  store: AuthStore,
+  request: Request,
+  userId: string,
+  kind: AuthEventKind,
+): Promise<void> {
+  try {
+    await store.recordAuthEvent({
+      userId,
+      kind,
+      deviceLabel: deviceLabel(request),
+      network: clientNetwork(request, userId),
+    });
+  } catch {
+    // See above: the log is a passenger, not the engine.
   }
 }
 
@@ -165,7 +302,7 @@ export async function handleSignup(request: Request, store: AuthStore | null): P
   const email = cleanEmail(body.email);
   const kdfSalt = body.kdfSalt;
   const authToken = body.authToken;
-  const recoveryHash = body.recoveryHash;
+  const recoveryHashes = body.recoveryHashes;
   const wrappedDek = body.wrappedDek;
   const wrappedRecovery = body.wrappedRecovery;
   const ciphertext = body.ciphertext;
@@ -176,9 +313,13 @@ export async function handleSignup(request: Request, store: AuthStore | null): P
   if (email === undefined) return error(400, 'That email address does not look right.');
   if (!isBase64(kdfSalt, 16, 64)) return error(400, 'Missing or invalid KDF salt.');
   if (!isBase64(authToken, 32, 64)) return error(400, 'Missing or invalid auth token.');
-  if (!isBase64(recoveryHash, 43, 44)) return error(400, 'Missing or invalid recovery verifier.');
+  if (!isBase64List(recoveryHashes, 43, 44, 1, MAX_RECOVERY_CODES)) return error(400, 'Missing or invalid recovery verifiers.');
   if (!isBase64(wrappedDek, 32, 256)) return error(400, 'Missing or invalid wrapped key.');
-  if (!isBase64(wrappedRecovery, 32, 256)) return error(400, 'Missing or invalid recovery key.');
+  // One wrapped copy per code: the sets must line up, or a code would open
+  // nothing and quietly be useless.
+  if (!isBase64List(wrappedRecovery, 32, 256, 1, MAX_RECOVERY_CODES) || wrappedRecovery.length !== recoveryHashes.length) {
+    return error(400, 'Missing or invalid recovery keys.');
+  }
   if (typeof ciphertext !== 'string' || !ciphertext || ciphertext.length > MAX_VAULT_BYTES * 2) {
     return error(400, 'Missing or invalid vault.');
   }
@@ -191,9 +332,9 @@ export async function handleSignup(request: Request, store: AuthStore | null): P
       role,
       kdfSalt,
       authToken,
-      recoveryHash: recoveryHash as string,
+      recoveryHashes: recoveryHashes as string[],
       wrappedDek,
-      wrappedRecovery,
+      wrappedRecovery: wrappedRecovery as string[],
       ciphertext,
     });
     if (!result.ok) {
@@ -202,7 +343,8 @@ export async function handleSignup(request: Request, store: AuthStore | null): P
 
     const token = newToken();
     const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * DAY_MS);
-    await store!.createSession(result.user.id, hashToken(token), 'This device', expiresAt);
+    await store!.createSession(result.user.id, hashToken(token), deviceLabel(request), expiresAt);
+    await recordEvent(store!, request, result.user.id, 'created');
 
     return json(201, { user: toPublicUser(result.user) }, { 'Set-Cookie': sessionCookie(token, isHttps(request)) });
   } catch {
@@ -278,7 +420,7 @@ export async function handleRecoveryStart(request: Request, store: AuthStore | n
     const vault = account ? await store!.getVault(account.user.id) : null;
     return json(200, {
       kdfSalt: account?.kdfSalt ?? decoySalt(login),
-      wrappedRecovery: vault?.wrappedRecovery ?? decoyRecoveryWrap(login),
+      wrappedRecovery: account ? parseRecoveryWraps(vault?.wrappedRecovery) : [decoyRecoveryWrap(login)],
     });
   } catch {
     return error(502, 'The accounts database could not be reached. Try again shortly.');
@@ -294,29 +436,87 @@ export async function handleRecoveryComplete(request: Request, store: AuthStore 
   const body = await readJsonBody(request);
   const login = typeof body?.username === 'string' ? body.username.trim() : '';
   const recoveryHash = body?.recoveryHash;
-  const newRecoveryHash = body?.newRecoveryHash;
+  const newRecoveryHashes = body?.newRecoveryHashes;
   const kdfSalt = body?.kdfSalt;
   const authToken = body?.authToken;
   const wrappedDek = body?.wrappedDek;
   const wrappedRecovery = body?.wrappedRecovery;
   if (
     !login || login.length > 200 ||
-    !isBase64(recoveryHash, 43, 44) || !isBase64(newRecoveryHash, 43, 44) ||
+    !isBase64(recoveryHash, 43, 44) || !isBase64List(newRecoveryHashes, 43, 44, 1, MAX_RECOVERY_CODES) ||
     !isBase64(kdfSalt, 16, 64) || !isBase64(authToken, 32, 64) ||
-    !isBase64(wrappedDek, 32, 256) || !isBase64(wrappedRecovery, 32, 256)
+    !isBase64(wrappedDek, 32, 256) ||
+    !isBase64List(wrappedRecovery, 32, 256, 1, MAX_RECOVERY_CODES) ||
+    wrappedRecovery.length !== newRecoveryHashes.length
   ) {
     return error(400, 'Missing or invalid recovery details.');
   }
 
   try {
     const updated = await store!.recoverAccount(login, recoveryHash, {
-      newRecoveryHash,
+      newRecoveryHashes,
       kdfSalt,
       authToken,
       wrappedDek,
       wrappedRecovery,
     });
     if (!updated) return error(401, 'Wrong username or recovery key.', 'bad_credentials');
+    // Recovery is the loudest line in the log: somebody had the codes and
+    // took the account back. Say so, even if only to the account's owner.
+    const recovered = await store!.findAccount(login);
+    if (recovered) await recordEvent(store!, request, recovered.user.id, 'recovery');
+    return json(200, { ok: true });
+  } catch {
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
+}
+
+/**
+ * Replace the recovery codes of an account that is already signed in.
+ *
+ * The caller proved who it is with its password — there is no verifier to
+ * check here — so all this does is swap one set of opaque verifiers and wrapped
+ * keys for another.
+ */
+export async function handleRecoveryUpdate(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'auth-recovery-update', 8) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'POST') return error(405, 'Method not allowed.', undefined);
+
+  const token = readSessionToken(request);
+  if (!token) return error(401, 'Sign in first.', 'unauthenticated');
+
+  const body = await readJsonBody(request);
+  const newRecoveryHashes = body?.newRecoveryHashes;
+  const kdfSalt = body?.kdfSalt;
+  const authToken = body?.authToken;
+  const wrappedDek = body?.wrappedDek;
+  const wrappedRecovery = body?.wrappedRecovery;
+  if (
+    !isBase64List(newRecoveryHashes, 43, 44, 1, MAX_RECOVERY_CODES) ||
+    !isBase64(kdfSalt, 16, 64) || !isBase64(authToken, 32, 64) ||
+    !isBase64(wrappedDek, 32, 256) ||
+    !isBase64List(wrappedRecovery, 32, 256, 1, MAX_RECOVERY_CODES) ||
+    wrappedRecovery.length !== newRecoveryHashes.length
+  ) {
+    return error(400, 'Missing or invalid recovery details.');
+  }
+
+  try {
+    const found = await store!.findSession(hashToken(token));
+    if (!found) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+    if (!store!.updateRecovery) return error(501, 'This server cannot rotate recovery codes yet.');
+    const updated = await store!.updateRecovery(found.user.id, {
+      newRecoveryHashes,
+      kdfSalt,
+      authToken,
+      wrappedDek,
+      wrappedRecovery,
+    });
+    if (!updated) return error(502, 'The accounts database could not be reached. Try again shortly.');
+    // A new password and a fresh set of codes: worth a line someone can find
+    // later, because it is the one line that explains a signed-out device.
+    await recordEvent(store!, request, found.user.id, 'password_changed');
     return json(200, { ok: true });
   } catch {
     return error(502, 'The accounts database could not be reached. Try again shortly.');
@@ -353,9 +553,24 @@ export async function handleLogin(request: Request, store: AuthStore | null): Pr
     const vault = await store!.getVault(account.user.id);
     if (!vault) return error(500, 'This account has no vault. Please contact support.', 'no_vault');
 
+    // A verified authenticator app turns a stolen password into half a key.
+    // No session exists until the code arrives, so nothing is signed in here.
+    const totp = await store!.getTotp(account.user.id);
+    if (totp?.secret && totp.confirmedAt) {
+      const challenge = newToken();
+      await store!.createLoginChallenge(
+        account.user.id,
+        hashToken(challenge),
+        new Date(Date.now() + TWO_STEP_TTL_SECONDS * 1000),
+      );
+      const payload: SecondFactorResponse = { secondFactor: 'totp' };
+      return json(200, payload, { 'Set-Cookie': twoStepCookie(challenge, isHttps(request)) });
+    }
+
     const token = newToken();
     const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * DAY_MS);
-    await store!.createSession(account.user.id, hashToken(token), 'This device', expiresAt);
+    await store!.createSession(account.user.id, hashToken(token), deviceLabel(request), expiresAt);
+    await recordEvent(store!, request, account.user.id, 'password');
 
     const payload: LoginResponse = {
       user: toPublicUser(account.user),
@@ -364,6 +579,179 @@ export async function handleLogin(request: Request, store: AuthStore | null): Pr
       vault: { version: vault.version, ciphertext: vault.ciphertext },
     };
     return json(200, payload, { 'Set-Cookie': sessionCookie(token, isHttps(request)) });
+  } catch {
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
+}
+
+/* ------------------------------------------------------- second step (TOTP) */
+
+/**
+ * Finishing a sign-in with a code from the authenticator app.
+ *
+ * The challenge cookie is the only thing that says the password already passed,
+ * and it is spent the moment a code is accepted — so this endpoint cannot be
+ * used to try codes against an account whose password you do not have.
+ */
+export async function handleTotpLogin(request: Request, store: AuthStore | null): Promise<Response> {
+  // Tight: there are a million six-digit codes, and this is the only place one
+  // can be tried against a password that has already been accepted.
+  const blocked = guard(request, 'auth-totp-login', 10) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'POST') return error(405, 'Method not allowed.', undefined);
+
+  const challenge = readTwoStepToken(request);
+  if (!challenge) return error(401, 'That sign-in has expired. Please start again.', 'unauthenticated');
+
+  const body = await readJsonBody(request);
+  const code = typeof body?.code === 'string' ? body.code : '';
+  if (!/^\d{6}$/.test(code)) return error(400, 'Enter the six-digit code from your authenticator app.');
+
+  try {
+    const pending = await store!.findLoginChallenge(hashToken(challenge));
+    // A missing or expired challenge is the same answer: it stops an old
+    // cookie, or a made-up one, from being a way in.
+    if (!pending) return error(401, 'That sign-in has expired. Please start again.', 'unauthenticated');
+
+    const totp = await store!.getTotp(pending.user.id);
+    if (!totp?.secret || !totp.confirmedAt) {
+      return error(500, 'This account has no confirmed authenticator. Please contact support.', 'no_vault');
+    }
+    // The one place replay matters: this code is what opens the vault, so the
+    // step it belongs to is spent.
+    const checked = verifyTotp(totp.secret, code, { afterCounter: totp.lastStep ?? -1 });
+    if (!checked.ok) return error(401, 'That code is not right, or has already been used. Wait for the next one.', 'bad_credentials');
+    await store!.recordTotpStep(pending.user.id, checked.counter);
+
+    const vault = await store!.getVault(pending.user.id);
+    if (!vault) return error(500, 'This account has no vault. Please contact support.', 'no_vault');
+
+    const token = newToken();
+    const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * DAY_MS);
+    await store!.createSession(pending.user.id, hashToken(token), deviceLabel(request), expiresAt);
+    await store!.deleteLoginChallenge(hashToken(challenge));
+    await recordEvent(store!, request, pending.user.id, 'password_totp');
+
+    // The salt travels again so the client can re-derive the key here the
+    // same way it does on an ordinary sign-in.
+    const account = await store!.findAccount(pending.user.username);
+    const payload: LoginResponse = {
+      user: toPublicUser(pending.user),
+      kdfSalt: account?.kdfSalt ?? '',
+      wrappedDek: vault.wrappedDek,
+      vault: { version: vault.version, ciphertext: vault.ciphertext },
+    };
+    return json(200, payload, {
+      'Set-Cookie': [sessionCookie(token, isHttps(request)), clearedTwoStepCookie(isHttps(request))].join(', '),
+    });
+  } catch {
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
+}
+
+/**
+ * Start (or restart) setting up an authenticator app, and read back the current
+ * state. The secret is not live until a code from it has been accepted, so a
+ * half-finished set-up cannot lock anybody out.
+ */
+export async function handleTotpSetup(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'auth-totp-setup', 12) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+
+  const token = readSessionToken(request);
+  if (!token) return error(401, 'Sign in first.', 'unauthenticated');
+
+  try {
+    const found = await store!.findSession(hashToken(token));
+    if (!found) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+
+    if (request.method === 'GET') {
+      const totp = await store!.getTotp(found.user.id);
+      if (!totp?.secret) return json(200, { enrolled: false } satisfies { enrolled: false });
+      const payload: TotpSetupResponse = {
+        secret: totp.secret,
+        formatted: formatTotpSecret(totp.secret),
+        uri: totpUri(found.user.username, totp.secret),
+        confirmed: Boolean(totp.confirmedAt),
+      };
+      return json(200, { enrolled: true, ...payload });
+    }
+
+    if (request.method === 'POST') {
+      const secret = newTotpSecret();
+      await store!.setTotpSecret(found.user.id, secret);
+      const payload: TotpSetupResponse = {
+        secret,
+        formatted: formatTotpSecret(secret),
+        uri: totpUri(found.user.username, secret),
+        confirmed: false,
+      };
+      return json(200, payload);
+    }
+
+    return error(405, 'Method not allowed.', undefined);
+  } catch {
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
+}
+
+/** Confirms a new secret, or turns the existing one off. */
+export async function handleTotpConfirm(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'auth-totp-confirm', 10) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'POST') return error(405, 'Method not allowed.', undefined);
+
+  const token = readSessionToken(request);
+  if (!token) return error(401, 'Sign in first.', 'unauthenticated');
+
+  const body = await readJsonBody(request);
+  const code = typeof body?.code === 'string' ? body.code : '';
+  if (!/^\d{6}$/.test(code)) return error(400, 'Enter the six-digit code from your authenticator app.');
+
+  try {
+    const found = await store!.findSession(hashToken(token));
+    if (!found) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+    const totp = await store!.getTotp(found.user.id);
+    if (!totp?.secret) return error(400, 'Start set-up first.', 'not_found');
+
+    const checked = verifyTotp(totp.secret, code);
+    if (!checked.ok) return error(401, 'That code is not right, or has already been used. Wait for the next one.', 'bad_credentials');
+    await store!.confirmTotp(found.user.id);
+    await recordEvent(store!, request, found.user.id, 'totp_on');
+    return json(200, { ok: true });
+  } catch {
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
+}
+
+/**
+ * Turns the second step off. The code is required: without it, anyone who
+ * finds an unlocked laptop could switch off the only thing standing between a
+ * stolen password and the vault.
+ */
+export async function handleTotpDisable(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'auth-totp-disable', 8) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'POST') return error(405, 'Method not allowed.', undefined);
+
+  const token = readSessionToken(request);
+  if (!token) return error(401, 'Sign in first.', 'unauthenticated');
+
+  const body = await readJsonBody(request);
+  const code = typeof body?.code === 'string' ? body.code : '';
+  if (!/^\d{6}$/.test(code)) return error(400, 'Enter the six-digit code from your authenticator app.');
+
+  try {
+    const found = await store!.findSession(hashToken(token));
+    if (!found) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+    const totp = await store!.getTotp(found.user.id);
+    if (!totp?.secret) return error(400, 'There is no authenticator to turn off.', 'not_found');
+
+    const checked = verifyTotp(totp.secret, code);
+    if (!checked.ok) return error(401, 'That code is not right, or has already been used. Wait for the next one.', 'bad_credentials');
+    await store!.setTotpSecret(found.user.id, null);
+    await recordEvent(store!, request, found.user.id, 'totp_off');
+    return json(200, { ok: true });
   } catch {
     return error(502, 'The accounts database could not be reached. Try again shortly.');
   }
@@ -633,12 +1021,25 @@ export async function handlePasskeyLoginVerify(request: Request, store: AuthStor
     const vault = await store!.getVault(user.id);
     if (!vault) return error(500, 'This account has no vault. Please contact support.', 'no_vault');
 
+    // A passkey is already two factors in one gesture, but an authenticator app
+    // was asked for at sign-up, so it is asked for here too: one rule, not two.
+    await store!.touchPasskey(id, signCount);
+    const totp = await store!.getTotp(user.id);
+    if (totp?.secret && totp.confirmedAt) {
+      const challenge = newToken();
+      await store!.createLoginChallenge(
+        user.id,
+        hashToken(challenge),
+        new Date(Date.now() + TWO_STEP_TTL_SECONDS * 1000),
+      );
+      const pending: SecondFactorResponse = { secondFactor: 'totp' };
+      return json(200, pending, { 'Set-Cookie': twoStepCookie(challenge, isHttps(request)) });
+    }
+
     const token = newToken();
     const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * DAY_MS);
-    await Promise.all([
-      store!.createSession(user.id, hashToken(token), 'Passkey', expiresAt),
-      store!.touchPasskey(id, signCount),
-    ]);
+    await store!.createSession(user.id, hashToken(token), `${deviceLabel(request)} · passkey`.slice(0, 60), expiresAt);
+    await recordEvent(store!, request, user.id, 'passkey');
 
     const payload: PasskeyLoginResponse = {
       user: toPublicUser(user),
@@ -719,6 +1120,79 @@ export async function handlePasskeyDelete(request: Request, store: AuthStore | n
     const removed = await session.store.deletePasskey(session.user.id, credentialId);
     if (!removed) return error(404, 'That passkey is no longer here.', 'not_found');
     return json(200, { ok: true });
+  } catch {
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
+}
+
+/* ---------------------------------------------------------------- sessions */
+
+/**
+ * The devices signed into this account, and the way to end them.
+ *
+ * In a zero-knowledge app the server cannot lock a stolen vault, but it can
+ * stop handing out the encrypted vault to a session that should no longer have
+ * it — which is exactly what signing a device out means here.
+ */
+export async function handleSessions(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'auth-sessions', 60) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+
+  const token = readSessionToken(request);
+  if (!token) return error(401, 'Sign in first.', 'unauthenticated');
+
+  try {
+    const found = await store!.findSession(hashToken(token));
+    if (!found) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+
+    if (request.method === 'GET') {
+      const sessions = await store!.listSessions(found.user.id);
+      return json(200, { sessions, current: found.session.id });
+    }
+
+    if (request.method === 'DELETE') {
+      const body = await readJsonBody(request);
+      const id = typeof body?.id === 'string' && /^[a-f0-9-]{36}$/.test(body.id) ? body.id : null;
+      const all = body?.others === true;
+      if (!id && !all) return error(400, 'Expected { id } or { others: true }.');
+      // Ending every other session keeps this one: the caller is still using
+      // it, and locking yourself out is never what "sign out my other devices"
+      // means.
+      const removed = all
+        ? await store!.deleteOtherSessions(found.user.id, found.session.id)
+        : (await store!.deleteSessionForUser(id as string, found.user.id))
+          ? 1
+          : 0;
+      if (removed === 0) return error(404, 'That session has already ended.', 'not_found');
+      if (all && removed > 0) await recordEvent(store!, request, found.user.id, 'signed_out');
+      return json(200, { ok: true, removed });
+    }
+
+    return error(405, 'Method not allowed.', undefined);
+  } catch {
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
+}
+
+/**
+ * The account's own history, newest first.
+ *
+ * Nothing here is needed to authenticate anybody — it exists so the owner can
+ * glance at it and notice the line that is not theirs.
+ */
+export async function handleAuthEvents(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'auth-events', 60) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'GET' && request.method !== 'HEAD') return error(405, 'Method not allowed.', undefined);
+
+  const token = readSessionToken(request);
+  if (!token) return error(401, 'Sign in first.', 'unauthenticated');
+
+  try {
+    const found = await store!.findSession(hashToken(token));
+    if (!found) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+    const events = await store!.listAuthEvents(found.user.id);
+    return json(200, { events });
   } catch {
     return error(502, 'The accounts database could not be reached. Try again shortly.');
   }
@@ -805,6 +1279,7 @@ function outgoingView(row: LinkRow): OutgoingLink {
     status: row.status,
     weekOf: row.share_week,
     updatedAt: row.share_updated_at ? new Date(row.share_updated_at).toISOString() : null,
+    expiresAt: row.code_expires_at ? new Date(row.code_expires_at).toISOString() : null,
   };
 }
 
@@ -907,6 +1382,12 @@ export async function handleLinkAccept(request: Request, store: AuthStore | null
   try {
     const row = await session.store.acceptLink(codeHash, { id: session.user.id, usernameLower: session.user.username_lower });
     if (!row) return error(404, 'No invitation matches that code.', 'not_found');
+    // Not the same as a wrong code, and not worth pretending it is: retyping
+    // will never work, and saying "check it" sends someone hunting for a
+    // typo that is not there.
+    if (row === 'expired') {
+      return error(410, 'That invitation has expired. Ask for a new code and try again.', 'invite_expired');
+    }
     const guardian = await guardianOf(session.store, row.guardian_id);
     return json(200, {
       linkId: row.id,
@@ -978,10 +1459,14 @@ export async function handleNote(request: Request, store: AuthStore | null): Pro
   }
 
   if (request.method === 'GET') {
-    const linkId = cleanLinkId(new URL(request.url).searchParams.get('linkId'));
+    const params = new URL(request.url).searchParams;
+    const linkId = cleanLinkId(params.get('linkId'));
     if (!linkId) return error(400, 'Expected ?linkId=.');
+    // `dir=out` reads the slot this user writes to, so adding a note does not
+    // overwrite the ones already out there.
+    const outgoing = params.get('dir') === 'out';
     try {
-      const note = await session.store.getNote(linkId, session.user.id);
+      const note = await session.store.getNote(linkId, session.user.id, outgoing);
       if (!note) return error(404, 'That link is not there.', 'not_found');
       const payload: NoteResponse = { linkId, ciphertext: note.ciphertext, weekOf: note.weekOf };
       return json(200, payload);

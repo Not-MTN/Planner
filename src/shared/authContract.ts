@@ -59,6 +59,60 @@ export interface LoginResponse {
   vault: { version: number; ciphertext: string };
 }
 
+/**
+ * The password was right, but a second step is still owed.
+ *
+ * No session exists yet. The caller holds a short-lived challenge in a cookie
+ * and must answer with a code from the account's authenticator app.
+ */
+export interface SecondFactorResponse {
+  secondFactor: 'totp';
+}
+
+/** What happened, in the account's own history. */
+export type AuthEventKind =
+  | 'created'
+  | 'password'
+  | 'password_totp'
+  | 'passkey'
+  | 'passkey_totp'
+  | 'recovery'
+  | 'password_changed'
+  | 'signed_out'
+  | 'totp_on'
+  | 'totp_off';
+
+export interface AuthEvent {
+  id: string;
+  kind: AuthEventKind;
+  /** A short description captured at the time, e.g. "Chrome on Mac". */
+  deviceLabel: string;
+  at: string;
+  /**
+   * A salted hash of the network the request came from — never the address.
+   * Enough to tell "the same place" from "somewhere new", and no more.
+   */
+  network: string | null;
+  /** True the first time this account was seen from that network. */
+  newNetwork: boolean;
+}
+
+export interface AuthEventsResponse {
+  events: AuthEvent[];
+}
+
+/** An authenticator app being set up, or already set up. */
+export interface TotpSetupResponse {
+  /** Base32 secret, grouped in fours for reading aloud or typing. */
+  secret: string;
+  /** The same secret, grouped, for display. */
+  formatted: string;
+  /** `otpauth://` URI, for apps that import by link. */
+  uri: string;
+  /** True once a code from this secret has been accepted. */
+  confirmed: boolean;
+}
+
 /** Challenge for a WebAuthn ceremony; allowCredentials narrows the chooser
  *  when the account is known, and is empty for a discoverable-credential flow. */
 export interface PasskeyOptionsResponse {
@@ -136,6 +190,12 @@ export interface OutgoingLink {
   /** Week of the results waiting to be read, if any. */
   weekOf: string | null;
   updatedAt: string | null;
+  /**
+   * When a pending invitation stops working. Null once it is accepted. Shown
+   * to the guardian so a code they sent last month and forgot about reads as
+   * dead rather than as an unanswered request.
+   */
+  expiresAt: string | null;
 }
 
 /** What a student sees: a guardian asking to follow them. */

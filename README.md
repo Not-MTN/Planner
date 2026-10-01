@@ -176,14 +176,41 @@ Push delivery can work while Planner is closed, but it needs server configuratio
 
 Push uses the standard Web Push protocol. Some hosting plans do not permit minute-level scheduled functions, so use an external scheduler if needed; without scheduled calls the browser cannot be woken at reminder time.
 
-## Groq setup
+## AI setup
 
-The browser never talks to Groq directly. It calls two same-origin endpoints, and a server-side proxy adds the API key:
+The browser never talks to an AI provider directly. It calls two same-origin endpoints, and a server-side proxy adds the API key:
 
 | Endpoint | Method | Purpose |
 | --- | --- | --- |
-| `/api/groq/status` | GET | Returns `{"configured": true}` or `{"configured": false}` — never the key |
-| `/api/groq/chat/completions` | POST | Forwards the request to Groq's chat-completions API |
+| `/api/ai/status` | GET | Returns `{"configured": true, "providers": [...]}` — names and capabilities only, never a key |
+| `/api/ai/chat/completions` | POST | Forwards the request to an OpenAI-compatible chat-completions API |
+
+`/api/groq/status` and `/api/groq/chat/completions` remain as aliases, so a PWA installed from an older deploy keeps working after you update.
+
+### More than one provider
+
+One provider is one single point of failure: when Groq is throttling, out of credit, or down, every AI feature in Planner stops at once. So the proxy takes a **list** of providers and falls through to the next when one is unreachable (network error or timeout), rate-limiting, out of credit, or rejecting its key.
+
+Adding a fallback is additive — set a second key and redeploy:
+
+| Provider | Variables | Vision |
+| --- | --- | --- |
+| Groq (default) | `GROQ_API_KEY`, `GROQ_MODEL`, `GROQ_VISION_MODEL` | yes |
+| Cerebras | `CEREBRAS_API_KEY`, `CEREBRAS_MODEL` | no |
+| OpenAI | `OPENAI_API_KEY`, `OPENAI_MODEL` | yes |
+| Mistral | `MISTRAL_API_KEY`, `MISTRAL_MODEL` | yes |
+| Together AI | `TOGETHER_API_KEY`, `TOGETHER_MODEL` | yes |
+| OpenRouter | `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | yes |
+| Ollama (local) | `OLLAMA_BASE_URL`, `OLLAMA_MODEL` | yes |
+| Any OpenAI-compatible endpoint | `AI_BASE_URL`, `AI_API_KEY`, `AI_MODEL`, `AI_VISION_MODEL` | if it has one |
+
+- **Order:** `AI_PROVIDERS=openai,groq` puts those first; every other configured provider follows in the table's order.
+- **Images** go only to a provider with a vision model. Set a provider's `*_VISION_MODEL` to an empty string to turn images off for it.
+- **Which one answered** comes back in the `X-AI-Provider` header, and every attempt in `X-AI-Attempts`.
+- **Error messages name the provider they came from** and the variable to change, so "OpenAI rejected the API key. Re-copy it into `OPENAI_API_KEY`…" never sends you to the wrong console.
+- **The browser also retries** — up to four attempts with backoff — because a rate limit is measured per minute and waiting is the only fix left once every provider has been tried. A bad request, a rejected key or an exhausted allowance is never retried.
+
+Every provider above speaks the OpenAI chat-completions API; `OLLAMA_BASE_URL` and `AI_BASE_URL` accept any base URL that does too.
 
 The same handler code (`src/server/groqProxy.ts`) serves both environments:
 
@@ -296,6 +323,27 @@ renames it, set `GROQ_VISION_MODEL` to whatever the [vision guide](https://conso
 lists, or set it to an empty string to turn image input off.
 
 Old links keep working: `#/daily/…`, `#/weekly/…`, `#/month/…`, `#/future`, and `#/progress` all map to their new homes.
+
+## Crash reports
+
+When something in the app breaks, Planner can tell us about it. Without this, a crash in somebody's browser is invisible: the vault is zero-knowledge, so there is no server-side data to inspect and no way to know a screen failed to render.
+
+A report carries only what is needed to reproduce a crash:
+
+- the error message and its stack (with paths shortened to the file that threw),
+- the screen you were on (`/app#/calendar`) and which bundle (`app` or `site`),
+- the last 30 things the app did — navigation, AI calls, sync — as breadcrumbs,
+- a random per-page id, quoted on the crash screen so it can be pasted into a bug report.
+
+Every string is passed through a redactor before it leaves the device: e-mail addresses, tokens, long opaque blobs, ids and URL query strings are replaced with placeholders. **No task, event, note, title or sync code is ever included** — the report could not contain planner content even by accident, because the server cannot decrypt the vault. The endpoint re-redacts on the way in rather than trusting the client.
+
+Turn it off any time under **Settings → Crash reports**; the choice is remembered on that device. Anyone whose browser sends `Do-Not-Track` is opted out by default.
+
+| Endpoint | Method | Purpose |
+| --- | --- | --- |
+| `/api/report` | POST | Accepts one crash report, logs it, answers `204` with no body |
+
+Logs are the sink that always exists: each report is one structured `[planner:report]` line, which Vercel (or any host) captures and forwards to log drains. To also get them somewhere you read, set `ERROR_REPORT_WEBHOOK` to a URL that accepts a JSON POST — on Vercel under **Project → Settings → Environment Variables**, locally in `.env.local`. A webhook that is down never fails report intake.
 
 ## Notes
 

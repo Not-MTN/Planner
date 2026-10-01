@@ -155,6 +155,24 @@ html { scroll-behavior: smooth; }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
 }
+
+/*
+ * Asking for less motion is a request about the whole page, not about one
+ * animation. Eleven separate rules were each quieting one effect, which only
+ * works for the ones someone remembered to write — so this settles everything,
+ * including whatever is added next, and the handful of rules that do something
+ * more considered (a spinner slowed rather than stopped) still stand.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 body { overflow-x: clip; }
 body {
   margin: 0;

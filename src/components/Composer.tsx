@@ -655,7 +655,10 @@ function GoalForm({ composer, onClose, onRemove }: { composer: ComposerState; on
 function NoteForm({ composer, onClose, onRemove }: { composer: ComposerState; onClose: () => void; onRemove: () => void }) {
   const { state, addNote, updateNote, attachFilesToNote } = usePlanner();
   const existing = composer.mode === 'edit' ? state.notes.find((note) => note.id === composer.id) : undefined;
-  const [title, setTitle] = useState((existing?.title === 'Untitled note' || existing?.title === t('Untitled note')) ? '' : existing?.title ?? '');
+  // The placeholder is stored translated now; the English spelling is only
+  // matched for notes saved before that, so they still open with an empty title.
+  const untitled = existing ? existing.title === t('Untitled note') || existing.title === 'Untitled note' : false;
+  const [title, setTitle] = useState(untitled ? '' : existing?.title ?? '');
   const [kind, setKind] = useState<NoteKind>(existing?.kind ?? 'quick');
   const [date, setDate] = useState(existing?.date ?? (composer.mode === 'create' ? composer.date ?? '' : ''));
   const [body, setBody] = useState(existing?.body ?? '');

@@ -1,7 +1,17 @@
 import { useEffect, useState } from 'react';
 import { COPY, type Lang } from './copy';
-import { AuthError, fetchApiStatus, resetPasswordWithRecovery, signIn, signUp, type AuthErrorCode } from '../auth/session';
+import {
+  AuthError,
+  completePasskeyTotpSignIn,
+  completeTotpSignIn,
+  fetchApiStatus,
+  resetPasswordWithRecovery,
+  signIn,
+  signUp,
+  type AuthErrorCode,
+} from '../auth/session';
 import { PasskeyError, passkeySignIn, passkeysSupported, registerPasskey } from '../auth/passkey';
+import { RecoveryCodes } from '../components/RecoveryCodes';
 import { EMAIL_PATTERN, USERNAME_PATTERN } from '../shared/authContract';
 import { loadFrom } from '../storage';
 
@@ -218,6 +228,9 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  /** Set when the password was accepted and a code is owed before signing in. */
+  const [totpReason, setTotpReason] = useState<'password' | 'passkey' | null>(null);
+  const [code, setCode] = useState('');
   const server = useServerNotice(c, lang);
 
   // If already signed in, go straight to app
@@ -241,6 +254,15 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
       await signIn(identifier, password, remember);
       navigate('/app');
     } catch (caught) {
+      // Half a sign-in: the password was right, and an authenticator app is
+      // owed. Nothing is signed in yet, so stay here and ask for the code.
+      if (caught instanceof AuthError && caught.code === 'totp_required') {
+        setTotpReason('password');
+        setCode('');
+        setError(null);
+        setBusy(false);
+        return;
+      }
       setError(errorText(caught instanceof AuthError ? caught.code : null, caught instanceof AuthError ? caught.detail : null, c, lang));
       setErrorDetail(errorDetailText(caught));
       setBusy(false);
@@ -255,10 +277,41 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
     setError(null);
     setErrorDetail(null);
     try {
-      await passkeySignIn(identifier);
+      const result = await passkeySignIn(identifier);
+      if (result.totpRequired) {
+        setTotpReason('passkey');
+        setCode('');
+        setBusy(false);
+        return;
+      }
       navigate('/app');
     } catch (caught) {
       setError(passkeyErrorText(caught, c, lang));
+      setErrorDetail(errorDetailText(caught));
+      setBusy(false);
+    }
+  };
+
+  const submitCode = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (busy || !totpReason) return;
+    setBusy(true);
+    setError(null);
+    setErrorDetail(null);
+    try {
+      if (totpReason === 'password') await completeTotpSignIn(code);
+      else await completePasskeyTotpSignIn(code);
+      setTotpReason(null);
+      setCode('');
+      navigate('/app');
+    } catch (caught) {
+      if (caught instanceof AuthError && caught.code === 'totp_required') {
+        setError(c.authTotpWrong);
+        setCode('');
+        setBusy(false);
+        return;
+      }
+      setError(errorText(caught instanceof AuthError ? caught.code : null, caught instanceof AuthError ? caught.detail : null, c, lang));
       setErrorDetail(errorDetailText(caught));
       setBusy(false);
     }
@@ -269,6 +322,62 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
       <Aside lang={lang} />
       <section className="auth-panel">
         <div className="auth-form">
+          {totpReason ? (
+            <form
+              className="auth-fields reveal-in"
+              onSubmit={submitCode}
+              aria-busy={busy}
+              aria-describedby={error ? 'signin-error' : undefined}
+            >
+              <header className="auth-head">
+                <h1>{c.authTotpTitle}</h1>
+                <p>{c.authTotpSub}</p>
+              </header>
+
+              <label className="field">
+                <span>{c.authTotpLabel}</span>
+                <input
+                  id="signin-totp"
+                  className="input-totp"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  dir="ltr"
+                  maxLength={7}
+                  value={code}
+                  onChange={(event) => setCode(event.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+                  placeholder="000000"
+                  autoFocus
+                  required
+                />
+              </label>
+
+              {error ? (
+                <p id="signin-error" className="auth-error" role="alert">
+                  {error}
+                </p>
+              ) : null}
+
+              <button type="submit" className="btn btn-primary btn-block" disabled={busy || code.length !== 6}>
+                {busy ? c.authBusy : c.authTotpContinue}
+              </button>
+
+              <p className="auth-note">
+                <button
+                  type="button"
+                  className="link"
+                  onClick={() => {
+                    setTotpReason(null);
+                    setCode('');
+                    setError(null);
+                  }}
+                >
+                  {c.authTotpBack}
+                </button>
+              </p>
+            </form>
+          ) : (
+          <>
           <header className="auth-head reveal-in">
             <h1>{c.authSignInTitle}</h1>
             <p>{c.authSignInSub}</p>
@@ -351,8 +460,10 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
               {busy ? c.authBusy : c.authSignInAction}
             </button>
           </form>
+          </>
+          )}
 
-          {passkeysSupported() ? (
+          {!totpReason && passkeysSupported() ? (
             <>
               <div className="auth-or reveal-in" style={{ animationDelay: '120ms' }}>
                 <span>{c.authOr}</span>
@@ -374,6 +485,7 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
             </>
           ) : null}
 
+          {totpReason ? null : (
           <footer className="auth-foot reveal-in" style={{ animationDelay: '220ms' }}>
             <button type="button" className="link" onClick={() => navigate('/recover')}>
               {c.authForgot}
@@ -382,6 +494,7 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
               {c.authNoAccount} <button type="button" className="link" onClick={() => navigate('/signup')}>{c.authCreate}</button>
             </p>
           </footer>
+          )}
         </div>
       </section>
     </div>
@@ -415,8 +528,7 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
   ];
   const [agreed, setAgreed] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [recoveryKey, setRecoveryKey] = useState('');
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
@@ -503,7 +615,7 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
         // Signed up on this device, so trust it by default; Settings can forget it.
         initialState: { ...state, panels },
       });
-      setRecoveryKey(created.recoveryKey);
+      setRecoveryCodes(created.recoveryCodes);
       setBusy(false);
       setStep('recovery');
     } catch (caught) {
@@ -513,28 +625,7 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
     }
   };
 
-  const key = recoveryKey;
   const meter = strength(password, lang);
-
-  const download = () => {
-    const blob = new Blob([`Planner recovery key\n\n${key}\n\n${c.authRecoverySub}\n`], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'planner-recovery-key.txt';
-    link.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(key);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2200);
-    } catch {
-      setCopied(false);
-    }
-  };
 
   return (
     <div className="auth">
@@ -807,23 +898,7 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
                 <p>{c.authRecoverySub}</p>
               </header>
 
-              <div className="recovery reveal-in" style={{ animationDelay: '60ms' }}>
-                <code>{key}</code>
-                <div className="recovery-actions">
-                  <button type="button" className="btn btn-outline" onClick={copy}>
-                    {copied ? c.authRecoveryCopied : c.authRecoveryCopy}
-                  </button>
-                  <button type="button" className="btn btn-outline" onClick={download}>
-                    {c.authRecoveryDownload}
-                  </button>
-                </div>
-                <p className="recovery-warn">{c.authRecoveryWarn}</p>
-              </div>
-
-              <label className="check reveal-in" style={{ animationDelay: '110ms' }}>
-                <input type="checkbox" checked={saved} onChange={(event) => setSaved(event.target.checked)} />
-                <span>{c.authRecoverySaved}</span>
-              </label>
+              <RecoveryCodes codes={recoveryCodes} copy={c} idPrefix="signup" onConfirmedChange={setSaved} />
 
               {passkeysSupported() ? (
                 <>
@@ -888,9 +963,8 @@ function Recover({ lang, navigate }: { lang: Lang; navigate: Nav }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
-  const [nextRecoveryKey, setNextRecoveryKey] = useState<string | null>(null);
+  const [nextRecoveryCodes, setNextRecoveryCodes] = useState<string[] | null>(null);
   const [saved, setSaved] = useState(false);
-  const [copied, setCopied] = useState(false);
   const meter = strength(password, lang);
   const server = useServerNotice(c, lang);
 
@@ -930,7 +1004,7 @@ function Recover({ lang, navigate }: { lang: Lang; navigate: Nav }) {
     setBusy(true);
     try {
       const generated = await resetPasswordWithRecovery(identifier, key, password);
-      setNextRecoveryKey(generated);
+      setNextRecoveryCodes(generated);
       setSaved(false);
     } catch (caught) {
       if (caught instanceof AuthError && caught.code === 'bad_credentials') {
@@ -944,55 +1018,18 @@ function Recover({ lang, navigate }: { lang: Lang; navigate: Nav }) {
     }
   };
 
-  const download = () => {
-    if (!nextRecoveryKey) return;
-    const blob = new Blob([`Planner recovery key\n\n${nextRecoveryKey}\n\n${c.authRecoverySub}\n`], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'planner-recovery-key.txt';
-    link.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const copy = async () => {
-    if (!nextRecoveryKey) return;
-    try {
-      await navigator.clipboard.writeText(nextRecoveryKey);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2200);
-    } catch {
-      setCopied(false);
-    }
-  };
-
   return (
     <div className="auth">
       <Aside lang={lang} />
       <section className="auth-panel">
         <div className="auth-form">
-          {nextRecoveryKey ? (
+          {nextRecoveryCodes ? (
             <>
               <header className="auth-head reveal-in">
                 <h1>{c.authRecoveryCompleteTitle}</h1>
                 <p>{c.authRecoveryCompleteSub}</p>
               </header>
-              <div className="recovery reveal-in" style={{ animationDelay: '60ms' }}>
-                <code dir="ltr">{nextRecoveryKey}</code>
-                <div className="recovery-actions">
-                  <button type="button" className="btn btn-outline" onClick={() => void copy()}>
-                    {copied ? c.authRecoveryCopied : c.authRecoveryCopy}
-                  </button>
-                  <button type="button" className="btn btn-outline" onClick={download}>
-                    {c.authRecoveryDownload}
-                  </button>
-                </div>
-                <p className="recovery-warn">{c.authRecoveryWarn}</p>
-              </div>
-              <label className="check reveal-in" style={{ animationDelay: '100ms' }}>
-                <input type="checkbox" checked={saved} onChange={(event) => setSaved(event.target.checked)} />
-                <span>{c.authRecoverySaved}</span>
-              </label>
+              <RecoveryCodes codes={nextRecoveryCodes} copy={c} idPrefix="recover" onConfirmedChange={setSaved} />
               <footer className="auth-foot reveal-in" style={{ animationDelay: '130ms' }}>
                 <button type="button" className="btn btn-primary btn-block" disabled={!saved} onClick={() => navigate('/login')}>
                   {c.authRecoveryComplete}

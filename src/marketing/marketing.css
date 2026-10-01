@@ -3462,3 +3462,15 @@
     align-items: center;
   }
 }
+
+/* The six-digit code asked for after the password. */
+.input-totp {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: clamp(18px, 3vw, 22px);
+  letter-spacing: 0.4em;
+  text-align: center;
+}
+
+.mkt[data-lang='fa'] .input-totp {
+  letter-spacing: 0.2em;
+}

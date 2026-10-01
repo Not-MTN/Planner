@@ -208,6 +208,7 @@ function completion(content: string): unknown {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -217,9 +218,11 @@ describeFailures('when the AI is unhappy', () => {
   itFailure('explains a missing key instead of failing silently', async () => {
     // A 503 with no detail of its own is the signature of an unset key.
     vi.stubGlobal('fetch', vi.fn(async () => reply({ error: { code: 'upstream_auth' } }, 503)));
-    await expectFailure(generateStudentAdvice({ state: createEmptyState() })).rejects.toThrow(/GROQ_API_KEY/);
+    // The client no longer names a provider it cannot know; the server's own
+    // message does, and names the variable to change.
+    await expectFailure(generateStudentAdvice({ state: createEmptyState() })).rejects.toThrow(/rejected the API key/i);
     vi.stubGlobal('fetch', vi.fn(async () => reply({ error: { code: 'upstream_auth' } }, 503)));
-    await expectFailure(generateGuardianGuidance({ results })).rejects.toThrow(/GROQ_API_KEY/);
+    await expectFailure(generateGuardianGuidance({ results })).rejects.toThrow(/rejected the API key/i);
   });
 
   itFailure('passes on whatever the proxy actually said, when it said something', async () => {
@@ -253,11 +256,16 @@ describeFailures('when the AI is unhappy', () => {
   });
 
   itFailure('passes a rate limit message through in plain words', async () => {
+    // A rate limit is the one failure waiting can fix, so this is retried:
+    // run it on fake timers so the test measures the message, not the wait.
+    vi.useFakeTimers();
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => reply({ error: { message: 'Slow down for a minute.', code: 'rate_limited' } }, 429)),
     );
-    await expectFailure(generateGuardianGuidance({ results })).rejects.toThrow(/Slow down for a minute/);
+    const pending = expectFailure(generateGuardianGuidance({ results })).rejects.toThrow(/Slow down for a minute/);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await pending;
   });
 
   itFailure('reports a missing proxy rather than hanging', async () => {

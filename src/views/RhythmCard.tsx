@@ -1,15 +1,19 @@
 import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { formatWeekdayShort } from '../dates';
-import { focusSummary, habitLinks, hourLabel, productiveHours, weeklyReport } from '../insights';
-import { DownloadIcon } from '../icons';
-import { t } from '../i18n';
+import { focusSummary, habitLinks, hourLabel, productiveHours } from '../insights';
+import { buildWeeklyReport, weeklyReport, weeklyReportHtml } from '../weeklyReport';
+import { printDocument } from '../printDocument';
+import { Rich } from '../components/Rich';
+import { downloadBlob } from '../download';
+import { DownloadIcon, PrinterIcon } from '../icons';
+import { t, tn } from '../i18n';
 
 function formatMinutes(total: number): string {
   if (total < 60) return t("{0} min", { 0: total });
   const hours = Math.floor(total / 60);
   const rest = total % 60;
-  return rest ? t("{0} h {1} min", { 0: hours, 1: rest }) : `${hours} h`;
+  return rest ? t("{0} h {1} min", { 0: hours, 1: rest }) : t("{0} h", { 0: hours });
 }
 
 export function RhythmCard({ today }: { today: string }) {
@@ -26,15 +30,22 @@ export function RhythmCard({ today }: { today: string }) {
       await navigator.clipboard.writeText(text);
       flash(t("Weekly report copied — paste it anywhere."));
     } catch {
-      const blob = new Blob([text], { type: 'text/markdown' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `week-${today}.md`;
-      link.click();
-      URL.revokeObjectURL(url);
+      downloadBlob(new Blob([text], { type: 'text/markdown' }), `week-${today}.md`);
       flash(t("Weekly report downloaded."));
     }
+  };
+
+  // The same week, on paper. If the print window is blocked the report is
+  // handed over as a file instead, so the button never silently does nothing.
+  const printReport = () => {
+    const html = weeklyReportHtml(buildWeeklyReport(state, today), {
+      madeOn: today,
+      dir: document.documentElement.dir || 'ltr',
+      lang: document.documentElement.lang || 'en',
+    });
+    if (printDocument(html)) return;
+    downloadBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), `week-${today}.html`);
+    flash(t("Pop-ups are blocked, so the report was downloaded. Open it to print it."));
   };
 
   return (
@@ -60,8 +71,14 @@ export function RhythmCard({ today }: { today: string }) {
               ))}
             </div>
             <p className="meta">
-              {focus.sessions} {focus.sessions === 1 ? t("session") : t("sessions")}
-              {focus.topTasks.length ? t(" · most on “{0}” ({1})", { 0: focus.topTasks[0].title, 1: formatMinutes(focus.topTasks[0].minutes) }) : ''}
+              {focus.topTasks.length
+                ? tn(
+                    focus.sessions,
+                    "{count} session · most on “{title}” ({time})",
+                    "{count} sessions · most on “{title}” ({time})",
+                    { title: focus.topTasks[0].title, time: formatMinutes(focus.topTasks[0].minutes) },
+                  )
+                : tn(focus.sessions, "{count} session", "{count} sessions")}
             </p>
           </>
         )}
@@ -70,9 +87,14 @@ export function RhythmCard({ today }: { today: string }) {
       <section className="card chart-card">
         <header className="card-head">
           <div><p className="kicker">{t("Your rhythm")}</p><h2 className="card-title">{t("When you get things done")}</h2></div>
-          <button type="button" className="btn btn-tiny" onClick={() => void copyReport()}>
-            <DownloadIcon size={14} /> {t("Weekly report")}
-          </button>
+          <div className="rhythm-actions">
+            <button type="button" className="btn btn-tiny" onClick={() => void copyReport()}>
+              <DownloadIcon size={14} /> {t("Weekly report")}
+            </button>
+            <button type="button" className="btn btn-tiny" onClick={printReport}>
+              <PrinterIcon size={14} /> {t("Print")}
+            </button>
+          </div>
         </header>
         {profile.bestHour === null ? (
           <p className="meta">{t("Complete a few more tasks and your most productive hours will show up here.")}</p>
@@ -84,7 +106,12 @@ export function RhythmCard({ today }: { today: string }) {
               ))}
             </div>
             <div className="hour-axis" aria-hidden="true"><span>6</span><span>12</span><span>18</span><span>24</span></div>
-            <p className="meta">{t("You finish the most around")} <strong>{hourLabel(profile.bestHour)}</strong>{t(". Try protecting that hour for your hardest task.")}</p>
+            <p className="meta">
+              <Rich
+                text={t("You finish the most around {hour}. Try protecting that hour for your hardest task.")}
+                values={{ hour: <strong>{hourLabel(profile.bestHour)}</strong> }}
+              />
+            </p>
           </>
         )}
         {links.length ? (
@@ -92,7 +119,15 @@ export function RhythmCard({ today }: { today: string }) {
             {links.map((link) => (
               <li key={link.habitId}>
                 <span className={cx('link-lift', link.lift > 0 ? 'up' : 'down')}>{link.lift > 0 ? '↑' : '↓'} {Math.round(Math.abs(link.lift) * 100)}%</span>
-                {t("On days you do")} <strong>{link.name}</strong>{t(", you finish")} {link.lift > 0 ? t("more") : t("fewer")} {t("tasks (")}{link.withHabit.toFixed(1)} {t('vs')} {link.without.toFixed(1)}).
+                <Rich
+                  text={t("On days you do {habit}, you finish {direction} tasks ({with} vs {without}).")}
+                  values={{
+                    habit: <strong>{link.name}</strong>,
+                    direction: link.lift > 0 ? t("more") : t("fewer"),
+                    with: link.withHabit.toFixed(1),
+                    without: link.without.toFixed(1),
+                  }}
+                />
               </li>
             ))}
           </ul>

@@ -38,6 +38,14 @@ export interface Task {
   waiting: string | null;
   /** Planned effort in minutes; used by Plan my day, the board, and plan-vs-focus insights. */
   estimatedMinutes: number | null;
+  /**
+   * The next occurrence this task created when it was last completed.
+   * Completing again replaces it; un-completing takes it back, so ticking a
+   * repeating task on and off can never double the series up.
+   */
+  spawnedId?: string | null;
+  /** Present on read-only dates generated from a repeating task (see logic.ts). */
+  seriesTaskId?: string;
 }
 
 export interface FocusLog {
@@ -63,6 +71,24 @@ export interface AIMemory {
 export interface AIMemoryInput {
   text: string;
   category: AIMemoryCategory;
+}
+
+export type AIDeclinedKind = 'task' | 'event' | 'habit';
+
+/**
+ * A suggestion the AI made and the user did not keep.
+ *
+ * Kept so the same thing is not proposed again and again — but kept visibly:
+ * these are listed in Memory where they can be read and forgotten one by one.
+ * A preference learned silently and then acted on invisibly is not a
+ * preference, it is a guess the user cannot correct.
+ */
+export interface AIDeclined {
+  id: string;
+  title: string;
+  kind: AIDeclinedKind;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface PlannerEvent {
@@ -154,6 +180,55 @@ export interface Goal {
   milestones: Milestone[];
   createdAt: string;
   updatedAt: string;
+  /**
+   * Set when this goal arrived from a guardian and the student took it on, so
+   * the guardian can be told how far it has got — and only how far, never the
+   * words of the steps they wrote.
+   */
+  fromSuggestion?: { linkId: string; suggestionId: string } | null;
+}
+
+/**
+ * A goal a guardian would like their student to take on.
+ *
+ * It travels as words and nothing else. Nothing appears in the student's
+ * planner until they agree; a suggestion that is refused stays a sentence that
+ * was once offered, and can be taken back.
+ */
+export interface GoalSuggestion {
+  id: string;
+  /** Who is asking, so the student knows who they are answering. */
+  author: string;
+  /** The link it travels on — the return address for the answer. */
+  linkId: string;
+  title: string;
+  /** Why they are asking, in their own words. */
+  note: string;
+  /** A date to aim at, when there is one. */
+  target: string | null;
+  /** Steps in the order they should happen. Words until accepted. */
+  steps: string[];
+  createdAt: string;
+}
+
+/**
+ * How a student answered a suggested goal, and how far they have got with it.
+ * Counts travel back — not the steps, and not the title: a goal the student
+ * made their own is theirs, and this is only a progress light.
+ */
+/** The most steps one goal can be broken into. More than this is a project. */
+export const GOAL_STEPS_MAX = 6;
+/** Suggestions kept per link, and answers remembered: a handful, not a ledger. */
+export const PANEL_GOALS_KEPT = 5;
+export const GOAL_ANSWERS_KEPT = 20;
+
+export interface GoalAnswer {
+  suggestionId: string;
+  state: 'accepted' | 'declined';
+  /** Steps finished, and how many there are. */
+  done: number;
+  total: number;
+  updatedAt: string;
 }
 
 export interface Note {
@@ -183,6 +258,17 @@ export type AIPlanSource = 'typed' | 'voice';
 
 /** How many drafted plans the Plans page keeps; the oldest falls off. */
 export const AI_PLAN_LIMIT = 30;
+
+/**
+ * How many declined suggestions are remembered, and for how long.
+ *
+ * Bounded on purpose: this is meant to stop an idea being proposed twice, not
+ * to build a permanent file on the user. Forgetting is the fallback — a
+ * preference held for six months without being revisited is a preference the
+ * user never really had.
+ */
+export const AI_DECLINED_LIMIT = 40;
+export const AI_DECLINED_MAX_AGE_DAYS = 180;
 
 /** Lifecycle of a saved AI plan: drafted, then (optionally) added to the planner. */
 export type AIPlanStatus = 'draft' | 'added';
@@ -248,6 +334,17 @@ export interface StudentPanel {
   explanations: ChangeNote[];
   /** What guardians sent: short notices and day/week/month plans. */
   inbox: StudentInbox;
+  /**
+   * Kind words, kept. Praise is the one thing worth re-reading, so it does not
+   * fall out of the inbox when more notes arrive.
+   */
+  praise: GuardianNotice[];
+  /**
+   * How each suggested goal was answered. Kept here rather than in the planner
+   * because a goal that was refused is not the student's to carry, and a goal
+   * that was accepted and later dropped should not look unanswered.
+   */
+  goalAnswers?: GoalAnswer[];
 }
 
 /** Curated so a guardian can read it at a glance; 'other' keeps everyone included. */
@@ -279,7 +376,15 @@ export interface GuardianNotice {
   weekOf: string;
   createdAt: string;
   read: boolean;
+  /**
+   * Praise, rather than something to act on. Kept apart because the two are
+   * read at different times: a note on a Sunday, kind words on a bad Thursday.
+   */
+  kind?: 'note' | 'praise';
 }
+
+/** Praise worth keeping: a note for a bad week, not a task for a good one. */
+export const PRAISE_KEPT = 20;
 
 export interface GuardianPanel {
   enabled: boolean;
@@ -368,6 +473,8 @@ export interface StudentInbox {
   notices: GuardianNotice[];
   /** Active plans, newest first. */
   plans: GuardianPlan[];
+  /** Goals a guardian would like them to take on, newest first. */
+  goals?: GoalSuggestion[];
 }
 
 /** One week of results: all a guardian ever sees of a student's planner. */
@@ -406,6 +513,12 @@ export interface GuardianLink {
   results: WeekResults | null;
   /** Plans sent to this student, newest first. Ticks come back and land on items. */
   plans: GuardianPlan[];
+  /** Goals suggested to this student, newest first. */
+  goals?: GoalSuggestion[];
+  /** How this student answered them, newest last write wins. */
+  goalAnswers?: GoalAnswer[];
+  /** When a pending code stops working. Null once accepted, or if unknown. */
+  expiresAt?: string | null;
 }
 
 export interface PlannerState {
@@ -414,6 +527,8 @@ export interface PlannerState {
   fixedCommitments: FixedCommitment[];
   /** Explicit, user-controlled context for the AI. */
   aiMemory: AIMemory[];
+  /** AI suggestions this user did not keep, so they stop being proposed. */
+  aiDeclined: AIDeclined[];
   /** AI-drafted plans waiting on the Plans page. */
   aiPlans: SavedAIPlan[];
   habits: Habit[];
@@ -466,8 +581,13 @@ export interface GoalInput {
   description: string;
   horizon: GoalHorizon;
   deadline: string | null;
-  milestone: string;
+  /** The first step, when a goal is written one line at a time. */
+  milestone?: string;
   milestoneDue?: string | null;
+  /** Several steps at once, when a goal arrives with more than one. */
+  milestones?: Array<{ title: string; dueDate?: string | null }>;
+  /** Set when the goal came from a guardian's suggestion. */
+  fromSuggestion?: { linkId: string; suggestionId: string } | null;
 }
 
 export interface NoteInput {
@@ -503,6 +623,7 @@ export function createEmptyState(): PlannerState {
     events: [],
     fixedCommitments: [],
     aiMemory: [],
+    aiDeclined: [],
     aiPlans: [],
     habits: [],
     completions: [],
@@ -524,7 +645,9 @@ export function createEmptyPanels(): Panels {
       guardians: [],
       subjects: [],
       explanations: [],
-      inbox: { notices: [], plans: [] },
+      inbox: { notices: [], plans: [], goals: [] },
+      goalAnswers: [],
+      praise: [],
     },
     guardian: { enabled: false, kind: null, field: null, links: [], notices: [] },
   };

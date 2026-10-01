@@ -171,7 +171,7 @@ export function parseQuickAdd(input: string, defaultDate: string | null): QuickA
   let endTime: string | null = null;
   let rangeFound = false;
 
-  const use = (index: number) => {
+  const consume = (index: number) => {
     if (index >= 0 && index < tokens.length) tokens[index].used = true;
   };
   const isFree = (index: number) => index >= 0 && index < tokens.length && !tokens[index].used;
@@ -213,19 +213,19 @@ export function parseQuickAdd(input: string, defaultDate: string | null): QuickA
     const FA_SOLO: Record<string, TaskRepeat> = { روزانه: 'daily', هفتگی: 'weekly', ماهانه: 'monthly', سالانه: 'yearly' };
     if (SOLO[word] || FA_SOLO[word]) {
       repeat = SOLO[word] ?? FA_SOLO[word];
-      use(i);
+      consume(i);
     } else if ((word === 'every' || word === 'هر') && isFree(i + 1)) {
       const next = normalizeWord(tokens[i + 1].text);
       const AFTER_FA: Record<string, TaskRepeat> = { روز: 'daily', هفته: 'weekly', ماه: 'monthly', سال: 'yearly' };
       if (AFTER_EVERY[next] || AFTER_FA[next]) {
         repeat = AFTER_EVERY[next] ?? AFTER_FA[next];
-        use(i);
-        use(i + 1);
+        consume(i);
+        consume(i + 1);
       } else if (WEEKDAYS[next] !== undefined) {
         repeat = 'weekly';
         date = weekdayDate(next, today, false);
-        use(i);
-        use(i + 1);
+        consume(i);
+        consume(i + 1);
       }
     }
   }
@@ -262,7 +262,7 @@ export function parseQuickAdd(input: string, defaultDate: string | null): QuickA
     }
     if (!parsed) continue;
     date = parsed;
-    for (let k = i - (span - 1); k <= i; k += 1) use(k);
+    for (let k = i - (span - 1); k <= i; k += 1) consume(k);
   }
 
   // Time ranges create events. Checked before single times.
@@ -288,8 +288,8 @@ export function parseQuickAdd(input: string, defaultDate: string | null): QuickA
     const hasMeridiem = Boolean(left.meridiem || right.meridiem);
     const hasColon = left.explicit || right.explicit;
     if (!hasMeridiem && !hasColon) continue; // avoid turning "9-1-1" into times
-    if (i > 0 && isFree(i - 1) && ['from', 'at'].includes(tokens[i - 1].text.toLowerCase())) use(i - 1);
-    for (let k = i; k < i + span; k += 1) use(k);
+    if (i > 0 && isFree(i - 1) && ['from', 'at'].includes(tokens[i - 1].text.toLowerCase())) consume(i - 1);
+    for (let k = i; k < i + span; k += 1) consume(k);
     startTime = leftClock;
     endTime = rightClock;
     rangeFound = true;
@@ -307,8 +307,8 @@ export function parseQuickAdd(input: string, defaultDate: string | null): QuickA
       if (!parts.explicit && !afterAt) continue;
       const clock = toClock(parts);
       if (!clock) continue;
-      if (afterAt) use(i - 1);
-      use(i);
+      if (afterAt) consume(i - 1);
+      consume(i);
       startTime = clock;
       break;
     }

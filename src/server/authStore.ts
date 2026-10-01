@@ -9,7 +9,7 @@
  */
 import { scrypt as scryptCallback, randomBytes, timingSafeEqual, randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
-import type { AccountRole } from '../shared/authContract.js';
+import type { AccountRole, AuthEvent, AuthEventKind } from '../shared/authContract.js';
 import type { NeonQueryFunction } from '@neondatabase/serverless';
 
 const scrypt = promisify(scryptCallback) as (
@@ -44,6 +44,19 @@ CREATE TABLE IF NOT EXISTS planner_credentials (
 ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS recovery_hash text;
 ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS recovery_hash_salt text;
 
+-- An account can hold several recovery codes, and each one is a separate lock
+-- on the vault: all the server ever keeps is one opaque verifier per code, so a
+-- leaked row is useless on its own. The old single pair of columns is kept for
+-- accounts that predate sets, and is honoured while this array is empty.
+ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS recovery_verifiers text;
+
+-- Second step at sign-in. The secret has to sit here: verifying a code means
+-- recomputing it, and only this server can do that. It is not the vault key,
+-- and it opens nothing on its own.
+ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS totp_secret text;
+ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS totp_confirmed_at timestamptz;
+ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS totp_last_step bigint;
+
 CREATE TABLE IF NOT EXISTS planner_vaults (
   user_id          text PRIMARY KEY REFERENCES planner_users(id) ON DELETE CASCADE,
   version          integer NOT NULL CHECK (version > 0),
@@ -65,6 +78,32 @@ CREATE TABLE IF NOT EXISTS planner_sessions (
 
 CREATE INDEX IF NOT EXISTS planner_sessions_user_idx ON planner_sessions (user_id);
 
+-- A half-finished sign-in: password right, second step still owed. It is a
+-- token hash and a deadline and nothing else, and it is spent the moment the
+-- right code arrives.
+CREATE TABLE IF NOT EXISTS planner_login_challenges (
+  token_hash text PRIMARY KEY,
+  user_id    text NOT NULL REFERENCES planner_users(id) ON DELETE CASCADE,
+  expires_at timestamptz NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS planner_login_challenges_user_idx ON planner_login_challenges (user_id);
+
+--- What this account has been up to, so its owner can read it back. No
+--- address is kept: network is a hash of the address salted with the user
+--- id, which is enough to group by place and not enough to find one.
+CREATE TABLE IF NOT EXISTS planner_auth_events (
+  id           text PRIMARY KEY,
+  user_id      text NOT NULL REFERENCES planner_users(id) ON DELETE CASCADE,
+  kind         text NOT NULL,
+  device_label text NOT NULL DEFAULT '',
+  network      text,
+  new_network  boolean NOT NULL DEFAULT false,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS planner_auth_events_user_idx ON planner_auth_events (user_id, created_at DESC);
+
 -- A guardian's request to follow a student. code_hash is all the server ever
 -- sees of the pairing code; wrapped_share is the results key sealed by a key
 -- derived from that code, so the server cannot read the results either.
@@ -79,6 +118,10 @@ CREATE TABLE IF NOT EXISTS planner_links (
   share_week             text,
   share_updated_at       timestamptz,
   status                 text NOT NULL CHECK (status IN ('pending','linked','revoked')),
+  -- An invitation is an open door until it is used. Left open forever it is a
+  -- code sitting in an old message that still works; a week is long enough to
+  -- hand over and short enough to stop worrying about.
+  code_expires_at        timestamptz,
   note_to_student        text,
   note_to_guardian       text,
   note_week              text,
@@ -131,8 +174,69 @@ export interface VaultRow {
   version: number;
   ciphertext: string;
   wrappedDek: string;
-  wrappedRecovery: string;
+  /**
+   * One wrapped copy of the vault key per recovery code. Accounts created
+   * before codes came in sets hold a single plain string.
+   */
+  wrappedRecovery: string | string[];
   updated_at: string | Date;
+}
+
+/** One-way verifier for a single recovery code. */
+export interface RecoveryVerifier {
+  hash: string;
+  salt: string;
+}
+
+/** Parse the stored verifier array, falling back to the legacy single pair. */
+export function parseRecoveryVerifiers(
+  stored: string | null | undefined,
+  legacyHash?: string | null,
+  legacySalt?: string | null,
+): RecoveryVerifier[] {
+  if (stored) {
+    try {
+      const parsed: unknown = JSON.parse(stored);
+      if (Array.isArray(parsed)) {
+        const rows = parsed.filter(
+          (entry): entry is RecoveryVerifier =>
+            !!entry && typeof entry === 'object' && typeof (entry as RecoveryVerifier).hash === 'string' && typeof (entry as RecoveryVerifier).salt === 'string',
+        );
+        if (rows.length > 0) return rows;
+      }
+    } catch {
+      // Not JSON, or not the shape we wrote: fall through to the legacy pair.
+    }
+  }
+  if (legacyHash && legacySalt) return [{ hash: legacyHash, salt: legacySalt }];
+  return [];
+}
+
+/** Read a wrapped-DEK list that may still be a single legacy copy. */
+export function parseRecoveryWraps(stored: string | string[] | null | undefined): string[] {
+  if (Array.isArray(stored)) return stored;
+  if (typeof stored === 'string' && stored.length > 0) {
+    if (stored.startsWith('[')) {
+      try {
+        const parsed: unknown = JSON.parse(stored);
+        if (Array.isArray(parsed)) return parsed.filter((entry): entry is string => typeof entry === 'string');
+      } catch {
+        // Fall through: treat it as one opaque blob.
+      }
+    }
+    return [stored];
+  }
+  return [];
+}
+
+/** The account's authenticator-app second step, if it has one. */
+export interface TotpRecord {
+  /** Base32 secret. Null until set-up starts, and cleared when it is removed. */
+  secret: string | null;
+  /** Set only once a code from the app has been accepted. */
+  confirmedAt: string | null;
+  /** The last accepted 30-second step, so one code cannot be used twice. */
+  lastStep: number | null;
 }
 
 export interface NewAccount {
@@ -142,20 +246,23 @@ export interface NewAccount {
   role: AccountRole;
   kdfSalt: string;
   authToken: string;
-  recoveryHash: string;
+  /** One verifier per recovery code, in the same order as the wrapped copies. */
+  recoveryHashes: string[];
   wrappedDek: string;
-  wrappedRecovery: string;
+  wrappedRecovery: string[];
   ciphertext: string;
 }
 
 export type CreateResult = { ok: true; user: UserRow } | { ok: false; reason: 'username_taken' | 'email_taken' };
 
 export interface RecoveryUpdate {
-  newRecoveryHash: string;
+  /** Verifiers for the replacement set of codes. */
+  newRecoveryHashes: string[];
   kdfSalt: string;
   authToken: string;
   wrappedDek: string;
-  wrappedRecovery: string;
+  /** One wrapped copy per new code, in the same order as the verifiers. */
+  wrappedRecovery: string[];
 }
 
 export interface SessionRow {
@@ -164,12 +271,55 @@ export interface SessionRow {
   expires_at: string | Date;
 }
 
+/**
+ * A signed-in device, as the signed-in user may see it.
+ *
+ * The token hash never leaves the server, so a stolen list is useless: the
+ * most it allows is ending a session, which its owner could do anyway.
+ */
+export interface SessionInfo {
+  id: string;
+  /** A short description captured at sign-in, e.g. "Chrome on Mac". */
+  label: string;
+  createdAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+}
+
+export type { AuthEvent, AuthEventKind } from '../shared/authContract.js';
+
+export interface NewAuthEvent {
+  userId: string;
+  kind: AuthEventKind;
+  deviceLabel?: string | null;
+  network?: string | null;
+}
+
+/** How much history one account keeps, and for how long. */
+const AUTH_EVENT_LIMIT = 60;
+const AUTH_EVENT_DAYS = 180;
+
+const AUTH_EVENT_KINDS: ReadonlySet<string> = new Set([
+  'created', 'password', 'password_totp', 'passkey', 'passkey_totp',
+  'recovery', 'password_changed', 'signed_out', 'totp_on', 'totp_off',
+]);
+
+/**
+ * The kinds the log will accept. Written into the column as text, so a bad
+ * value from anywhere upstream cannot smuggle in a row the UI will choke on.
+ */
+export function cleanAuthEventKind(value: unknown): AuthEventKind | null {
+  return typeof value === 'string' && AUTH_EVENT_KINDS.has(value) ? (value as AuthEventKind) : null;
+}
+
 export interface LinkRow {
   id: string;
   guardian_id: string;
   student_id: string | null;
   student_username_lower: string;
   code_hash: string;
+  /** When the invitation stops working. Null on an accepted link. */
+  code_expires_at: string | null;
   wrapped_share: string;
   share_ciphertext: string | null;
   note_to_student: string | null;
@@ -181,6 +331,9 @@ export interface LinkRow {
   created_at: string;
   updated_at: string;
 }
+
+/** How long an invitation stays open. Seven days: time to hand it over. */
+export const INVITE_TTL_DAYS = 7;
 
 export interface NewLink {
   id: string;
@@ -217,8 +370,13 @@ export interface NewPasskey {
 export interface AuthStore {
   createAccount(input: NewAccount): Promise<CreateResult>;
   findAccount(login: string): Promise<AccountRow | null>;
-  /** Verify a recovery-key verifier, rotate the password wraps, and revoke sessions. */
+  /** Verify one of the account's recovery verifiers, rotate the password wraps, and revoke sessions. */
   recoverAccount(login: string, recoveryHash: string, update: RecoveryUpdate): Promise<boolean>;
+  /**
+   * Rotate the recovery codes of a signed-in, already-authenticated account.
+   * The caller proved who it is with its password, so no verifier is checked.
+   */
+  updateRecovery?(userId: string, update: Omit<RecoveryUpdate, 'authToken'> & { authToken: string }): Promise<boolean>;
   findUserById(id: string): Promise<UserRow | null>;
   getVault(userId: string): Promise<VaultRow | null>;
   putVault(userId: string, baseVersion: number, ciphertext: string): Promise<VaultRow | null>;
@@ -226,6 +384,42 @@ export interface AuthStore {
   createSession(userId: string, tokenHash: string, label: string, expiresAt: Date): Promise<void>;
   findSession(tokenHash: string): Promise<{ session: SessionRow; user: UserRow } | null>;
   deleteSession(id: string): Promise<void>;
+  /** The account's authenticator-app second step, or null when it has none. */
+  getTotp(userId: string): Promise<TotpRecord | null>;
+  /** Starts (or restarts) set-up. Not confirmed until a code is accepted. */
+  setTotpSecret(userId: string, secret: string | null): Promise<void>;
+  /**
+   * Marks set-up finished. The secret is live from here on.
+   *
+   * No step is recorded: confirming and removing only happen inside an existing
+   * session, where replaying a code gains nobody anything.
+   */
+  confirmTotp(userId: string): Promise<void>;
+  /**
+   * Records the step of a code accepted at sign-in, so the same 30-second code
+   * cannot open the account twice.
+   */
+  recordTotpStep(userId: string, step: number): Promise<void>;
+  /**
+   * A password that checked out, waiting on a second step. The account is not
+   * signed in yet: this only remembers that the first half passed.
+   */
+  createLoginChallenge(userId: string, tokenHash: string, expiresAt: Date): Promise<void>;
+  findLoginChallenge(tokenHash: string): Promise<{ user: UserRow } | null>;
+  deleteLoginChallenge(tokenHash: string): Promise<void>;
+  /** Every live session for this account, most recently used first. */
+  listSessions(userId: string): Promise<SessionInfo[]>;
+  /** Ends one of this account's own sessions. Other accounts are untouched. */
+  deleteSessionForUser(id: string, userId: string): Promise<boolean>;
+  /** Ends every session but the given one, for "sign out everywhere else". */
+  deleteOtherSessions(userId: string, keepId: string): Promise<number>;
+  /**
+   * Adds a line to the account's history, and drops what is no longer worth
+   * keeping. Best-effort: a failed log line must never block a sign-in.
+   */
+  recordAuthEvent(event: NewAuthEvent): Promise<void>;
+  /** Newest first. */
+  listAuthEvents(userId: string, limit?: number): Promise<AuthEvent[]>;
   /** Permanently remove an account and all account-owned data. */
   deleteAccount?(userId: string): Promise<boolean>;
   /** Guardian: ask a student to be followed. Returns null when already asked. */
@@ -235,7 +429,12 @@ export interface AuthStore {
   /** Waiting invitations (matched by username) plus accepted links (matched by id). */
   listIncomingLinks(user: { id: string; usernameLower: string }): Promise<Array<LinkRow & { guardian_username: string; guardian_display_name: string }>>;
   /** Student: turns a pending request into a link, if the code matches. */
-  acceptLink(codeHash: string, student: { id: string; usernameLower: string }): Promise<LinkRow | null>;
+  /**
+   * Student: turns a pending request into a link, if the code matches and has
+   * not expired. An expired code is its own answer — different from a wrong
+   * one, because the fix is to ask for a new invitation, not to retype.
+   */
+  acceptLink(codeHash: string, student: { id: string; usernameLower: string }): Promise<LinkRow | 'expired' | null>;
   /** Student writes this week's results; guardian reads them. */
   putShare(linkId: string, studentId: string, ciphertext: string, weekOf: string): Promise<LinkRow | null>;
   getShare(linkId: string, guardianId: string): Promise<LinkRow | null>;
@@ -248,7 +447,19 @@ export interface AuthStore {
    */
   putNote(linkId: string, userId: string, to: 'student' | 'guardian', ciphertext: string | null, weekOf: string): Promise<LinkRow | null>;
   /** Reads the note addressed to the caller. */
-  getNote(linkId: string, userId: string): Promise<{ ciphertext: string | null; weekOf: string | null } | null>;
+  /**
+   * One of the two note slots on a link.
+   *
+   * `outgoing` asks for the slot this user *writes* to — what they have already
+   * put out there — instead of the one they receive on. Read-modify-write needs
+   * it: without it, adding a second note would wipe the first, because a reader
+   * is handed the other side's words.
+   */
+  getNote(
+    linkId: string,
+    userId: string,
+    outgoing?: boolean,
+  ): Promise<{ ciphertext: string | null; weekOf: string | null } | null>;
 
   /* WebAuthn passkeys: one row per credential, keyed by its id. */
   createPasskey(input: NewPasskey): Promise<PasskeyRow | null>;
@@ -293,6 +504,14 @@ export async function hashRecoveryVerifier(recoveryHash: string): Promise<{ reco
     recoveryHash: await hashAuthToken(recoveryHash, recoveryHashSalt),
     recoveryHashSalt,
   };
+}
+
+/** One verifier per recovery code, each with its own server-side salt. */
+export async function hashRecoveryVerifiers(recoveryHashes: string[]): Promise<RecoveryVerifier[]> {
+  return Promise.all(recoveryHashes.map(async (hash) => {
+    const salt = newSalt();
+    return { hash: await hashAuthToken(hash, salt), salt };
+  }));
 }
 
 export function newSalt(): string {
@@ -404,9 +623,19 @@ export function createMemoryAuthStore(): AuthStore {
     authHash: string;
     recoveryHash: string | null;
     recoveryHashSalt: string | null;
+    /** One verifier per recovery code; the legacy pair above is kept in sync. */
+    recoveryVerifiers: RecoveryVerifier[];
+    totpSecret: string | null;
+    totpConfirmedAt: string | null;
+    totpLastStep: number | null;
   }>();
   const vaults = new Map<string, VaultRow>();
-  const sessions = new Map<string, SessionRow>();
+  const sessions = new Map<string, SessionRow & { label: string; createdAt: string; lastSeenAt: string }>();
+  const loginChallenges = new Map<string, { userId: string; expiresAt: string }>();
+  const authEvents = new Map<
+    string,
+    Array<{ id: string; kind: AuthEventKind; deviceLabel: string; at: string; network: string | null; newNetwork: boolean }>
+  >();
   const links: LinkRow[] = [];
   const passkeys: PasskeyRow[] = [];
 
@@ -432,8 +661,18 @@ export function createMemoryAuthStore(): AuthStore {
       };
       users.set(user.id, user);
       const credential = await hashCredential(input.authToken);
-      const recoveryVerifier = await hashRecoveryVerifier(input.recoveryHash);
-      credentials.set(user.id, { kdfSalt: input.kdfSalt, ...credential, ...recoveryVerifier });
+      const verifiers = await hashRecoveryVerifiers(input.recoveryHashes);
+      const first = verifiers[0];
+      credentials.set(user.id, {
+        kdfSalt: input.kdfSalt,
+        ...credential,
+        recoveryHash: first?.hash ?? null,
+        recoveryHashSalt: first?.salt ?? null,
+        recoveryVerifiers: verifiers,
+        totpSecret: null,
+        totpConfirmedAt: null,
+        totpLastStep: null,
+      });
       vaults.set(user.id, {
         version: 1,
         ciphertext: input.ciphertext,
@@ -463,19 +702,29 @@ export function createMemoryAuthStore(): AuthStore {
       }
       const current = credentials.get(user.id);
       const vault = vaults.get(user.id);
-      if (!current?.recoveryHash || !current.recoveryHashSalt || !vault) {
+      const verifiers = current?.recoveryVerifiers ?? [];
+      if (!current || verifiers.length === 0 || !vault) {
         await spendRecoveryFailureWork(recoveryHash);
         return false;
       }
-      const candidate = await hashAuthToken(recoveryHash, current.recoveryHashSalt);
-      if (!safeEqual(current.recoveryHash, candidate)) return false;
+      // Any code in the set works; the server never learns which one was used.
+      const matches = await Promise.all(verifiers.map((v) => hashAuthToken(recoveryHash, v.salt)));
+      if (!verifiers.some((v, index) => safeEqual(v.hash, matches[index]))) return false;
 
       const credential = await hashCredential(update.authToken);
-      const recoveryVerifier = await hashRecoveryVerifier(update.newRecoveryHash);
+      const nextVerifiers = await hashRecoveryVerifiers(update.newRecoveryHashes);
+      const nextFirst = nextVerifiers[0];
       credentials.set(user.id, {
         kdfSalt: update.kdfSalt,
         ...credential,
-        ...recoveryVerifier,
+        recoveryHash: nextFirst?.hash ?? null,
+        recoveryHashSalt: nextFirst?.salt ?? null,
+        recoveryVerifiers: nextVerifiers,
+        // A password reset is the moment someone is most likely to have lost
+        // their phone along with it, so the second step starts over too.
+        totpSecret: null,
+        totpConfirmedAt: null,
+        totpLastStep: null,
       });
       vaults.set(user.id, {
         ...vault,
@@ -509,11 +758,43 @@ export function createMemoryAuthStore(): AuthStore {
         kdfSalt,
         recoveryHash: prior?.recoveryHash ?? null,
         recoveryHashSalt: prior?.recoveryHashSalt ?? null,
+        recoveryVerifiers: prior?.recoveryVerifiers ?? [],
+        totpSecret: prior?.totpSecret ?? null,
+        totpConfirmedAt: prior?.totpConfirmedAt ?? null,
+        totpLastStep: prior?.totpLastStep ?? null,
         ...(await hashCredential(authToken)),
       });
     },
-    async createSession(userId, tokenHash, _label, expiresAt) {
-      sessions.set(tokenHash, { id: newId(), user_id: userId, expires_at: expiresAt.toISOString() });
+    async updateRecovery(userId, update) {
+      const current = credentials.get(userId);
+      const vault = vaults.get(userId);
+      if (!current || !vault) return false;
+      const verifiers = await hashRecoveryVerifiers(update.newRecoveryHashes);
+      const first = verifiers[0];
+      credentials.set(userId, {
+        ...current,
+        recoveryHash: first?.hash ?? null,
+        recoveryHashSalt: first?.salt ?? null,
+        recoveryVerifiers: verifiers,
+      });
+      vaults.set(userId, {
+        ...vault,
+        wrappedDek: update.wrappedDek,
+        wrappedRecovery: update.wrappedRecovery,
+        updated_at: new Date().toISOString(),
+      });
+      return true;
+    },
+    async createSession(userId, tokenHash, label, expiresAt) {
+      const stamp = new Date().toISOString();
+      sessions.set(tokenHash, {
+        id: newId(),
+        user_id: userId,
+        expires_at: expiresAt.toISOString(),
+        label,
+        createdAt: stamp,
+        lastSeenAt: stamp,
+      });
     },
     async findSession(tokenHash) {
       const session = sessions.get(tokenHash);
@@ -522,6 +803,8 @@ export function createMemoryAuthStore(): AuthStore {
         sessions.delete(tokenHash);
         return null;
       }
+      // Seen just now. Throttled in SQL; harmless to do every time here.
+      session.lastSeenAt = new Date().toISOString();
       const user = users.get(session.user_id);
       return user ? { session, user } : null;
     },
@@ -530,14 +813,120 @@ export function createMemoryAuthStore(): AuthStore {
         if (session.id === id) sessions.delete(hash);
       }
     },
+    async getTotp(userId) {
+      const credential = credentials.get(userId);
+      if (!credential) return null;
+      return {
+        secret: credential.totpSecret,
+        confirmedAt: credential.totpConfirmedAt,
+        lastStep: credential.totpLastStep,
+      };
+    },
+    async setTotpSecret(userId, secret) {
+      const credential = credentials.get(userId);
+      if (!credential) return;
+      credential.totpSecret = secret;
+      // A new secret is unproven, so it must not stand in for the old one
+      // until a code from it has been accepted.
+      credential.totpConfirmedAt = null;
+      credential.totpLastStep = null;
+    },
+    async confirmTotp(userId) {
+      const credential = credentials.get(userId);
+      if (!credential) return;
+      credential.totpConfirmedAt = new Date().toISOString();
+    },
+    async recordTotpStep(userId, step) {
+      const credential = credentials.get(userId);
+      if (!credential) return;
+      credential.totpLastStep = step;
+    },
+    async createLoginChallenge(userId, tokenHash, expiresAt) {
+      // One live challenge per account; stale ones are dead weight.
+      for (const [hash, row] of loginChallenges) {
+        if (row.userId === userId || new Date(row.expiresAt).getTime() <= Date.now()) loginChallenges.delete(hash);
+      }
+      loginChallenges.set(tokenHash, { userId, expiresAt: expiresAt.toISOString() });
+    },
+    async findLoginChallenge(tokenHash) {
+      const row = loginChallenges.get(tokenHash);
+      if (!row) return null;
+      if (new Date(row.expiresAt).getTime() <= Date.now()) {
+        loginChallenges.delete(tokenHash);
+        return null;
+      }
+      const user = users.get(row.userId);
+      return user ? { user } : null;
+    },
+    async deleteLoginChallenge(tokenHash) {
+      loginChallenges.delete(tokenHash);
+    },
+    async listSessions(userId) {
+      const now = Date.now();
+      return [...sessions.values()]
+        .filter((session) => session.user_id === userId && new Date(session.expires_at).getTime() > now)
+        .sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt))
+        .map((session) => ({
+          id: session.id,
+          label: session.label,
+          createdAt: session.createdAt,
+          lastSeenAt: session.lastSeenAt,
+          expiresAt: new Date(session.expires_at).toISOString(),
+        }));
+    },
+    async deleteSessionForUser(id, userId) {
+      for (const [hash, session] of sessions) {
+        if (session.id === id && session.user_id === userId) {
+          sessions.delete(hash);
+          return true;
+        }
+      }
+      return false;
+    },
+    async deleteOtherSessions(userId, keepId) {
+      let removed = 0;
+      for (const [hash, session] of sessions) {
+        if (session.user_id === userId && session.id !== keepId) {
+          sessions.delete(hash);
+          removed += 1;
+        }
+      }
+      return removed;
+    },
+    async recordAuthEvent(event) {
+      const list = authEvents.get(event.userId) ?? [];
+      const network = event.network ?? null;
+      const newNetwork = network !== null && !list.some((row) => row.network === network);
+      list.push({
+        id: newId(),
+        kind: event.kind,
+        deviceLabel: event.deviceLabel ?? '',
+        at: new Date().toISOString(),
+        network,
+        newNetwork,
+      });
+      const cutoff = Date.now() - AUTH_EVENT_DAYS * 86_400_000;
+      const kept = list.filter((row) => new Date(row.at).getTime() >= cutoff).slice(-AUTH_EVENT_LIMIT);
+      authEvents.set(event.userId, kept);
+    },
+    async listAuthEvents(userId, limit = AUTH_EVENT_LIMIT) {
+      return (authEvents.get(userId) ?? [])
+        .slice()
+        .sort((a, b) => b.at.localeCompare(a.at))
+        .slice(0, Math.max(1, Math.min(limit, AUTH_EVENT_LIMIT)));
+    },
     async deleteAccount(userId) {
       if (!users.has(userId)) return false;
       users.delete(userId);
       credentials.delete(userId);
       vaults.delete(userId);
+      for (const [hash, row] of loginChallenges) {
+        if (row.userId === userId) loginChallenges.delete(hash);
+      }
       for (const [hash, session] of sessions) {
         if (session.user_id === userId) sessions.delete(hash);
       }
+      authEvents.delete(userId);
       for (let index = links.length - 1; index >= 0; index -= 1) {
         if (links[index]?.guardian_id === userId || links[index]?.student_id === userId) links.splice(index, 1);
       }
@@ -551,12 +940,14 @@ export function createMemoryAuthStore(): AuthStore {
         (link) => link.guardian_id === input.guardianId && link.student_username_lower === input.studentUsernameLower,
       );
       if (clash) return null;
+      const now = new Date();
       const row: LinkRow = {
         id: input.id,
         guardian_id: input.guardianId,
         student_id: null,
         student_username_lower: input.studentUsernameLower,
         code_hash: input.codeHash,
+        code_expires_at: new Date(now.getTime() + INVITE_TTL_DAYS * 86_400_000).toISOString(),
         wrapped_share: input.wrappedShare,
         share_ciphertext: null,
         note_to_student: null,
@@ -578,7 +969,11 @@ export function createMemoryAuthStore(): AuthStore {
       return links
         .filter(
           (link) =>
-            (link.student_username_lower === user.usernameLower && link.status === 'pending') ||
+            (link.student_username_lower === user.usernameLower &&
+              link.status === 'pending' &&
+              // An expired invitation is not an invitation. Showing one would
+              // have the student hunting for a code that cannot work.
+              !(link.code_expires_at && new Date(link.code_expires_at).getTime() <= Date.now())) ||
             (link.student_id === user.id && link.status === 'linked'),
         )
         .map((link) => {
@@ -598,7 +993,10 @@ export function createMemoryAuthStore(): AuthStore {
           item.student_username_lower === student.usernameLower,
       );
       if (!link) return null;
+      if (link.code_expires_at && new Date(link.code_expires_at).getTime() <= Date.now()) return 'expired';
       link.status = 'linked';
+      // The code has done its job; it is not an open door any more.
+      link.code_expires_at = null;
       link.student_id = student.id;
       link.updated_at = new Date().toISOString();
       return link;
@@ -628,10 +1026,21 @@ export function createMemoryAuthStore(): AuthStore {
       link.updated_at = new Date().toISOString();
       return link;
     },
-    async getNote(linkId, userId) {
+    async getNote(linkId, userId, outgoing = false) {
       const link = links.find((item) => item.id === linkId);
       if (!link) return null;
-      const mine = link.guardian_id === userId ? link.note_to_guardian : link.student_id === userId ? link.note_to_student : null;
+      const asGuardian = link.guardian_id === userId;
+      const mine = outgoing
+        ? link.guardian_id === userId
+          ? link.note_to_student
+          : link.student_id === userId
+            ? link.note_to_guardian
+            : null
+        : asGuardian
+          ? link.note_to_guardian
+          : link.student_id === userId
+            ? link.note_to_student
+            : null;
       if (mine === null && link.guardian_id !== userId && link.student_id !== userId) return null;
       return { ciphertext: mine, weekOf: link.note_week };
     },
@@ -757,6 +1166,7 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
           share_week             text,
           share_updated_at       timestamptz,
           status                 text NOT NULL CHECK (status IN ('pending','linked','revoked')),
+          code_expires_at        timestamptz,
           note_to_student        text,
           note_to_guardian       text,
           note_week              text,
@@ -808,24 +1218,25 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
         return { ok: false, reason: 'email_taken' };
       }
 
-      const [credential, recoveryVerifier] = await Promise.all([
+      const [credential, verifiers] = await Promise.all([
         hashCredential(input.authToken),
-        hashRecoveryVerifier(input.recoveryHash),
+        hashRecoveryVerifiers(input.recoveryHashes),
       ]);
+      const first = verifiers[0];
       try {
         // Credentials and vault land together: an account with one but not the
         // other could never sign in, and the name would be gone for good.
         await sql.transaction([
           sql`
             INSERT INTO planner_credentials
-              (user_id, kdf_salt, auth_hash, hash_salt, recovery_hash, recovery_hash_salt)
+              (user_id, kdf_salt, auth_hash, hash_salt, recovery_hash, recovery_hash_salt, recovery_verifiers)
             VALUES
               (${id}, ${input.kdfSalt}, ${credential.authHash}, ${credential.hashSalt},
-               ${recoveryVerifier.recoveryHash}, ${recoveryVerifier.recoveryHashSalt})
+               ${first?.hash ?? null}, ${first?.salt ?? null}, ${JSON.stringify(verifiers)})
           `,
           sql`
             INSERT INTO planner_vaults (user_id, version, ciphertext, wrapped_dek, wrapped_recovery)
-            VALUES (${id}, 1, ${input.ciphertext}, ${input.wrappedDek}, ${input.wrappedRecovery})
+            VALUES (${id}, 1, ${input.ciphertext}, ${input.wrappedDek}, ${JSON.stringify(input.wrappedRecovery)})
           `,
         ]);
       } catch (error) {
@@ -856,36 +1267,46 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
       await ensure();
       const needle = login.trim().toLowerCase();
       const rows = (await sql`
-        SELECT u.id, c.recovery_hash, c.recovery_hash_salt
+        SELECT u.id, c.recovery_hash, c.recovery_hash_salt, c.recovery_verifiers
         FROM planner_users u
         JOIN planner_credentials c ON c.user_id = u.id
         JOIN planner_vaults v ON v.user_id = u.id
         WHERE u.username_lower = ${needle} OR u.email_lower = ${needle}
         LIMIT 1
-      `) as { id: string; recovery_hash: string | null; recovery_hash_salt: string | null }[];
+      `) as {
+        id: string;
+        recovery_hash: string | null;
+        recovery_hash_salt: string | null;
+        recovery_verifiers: string | null;
+      }[];
       const row = rows[0];
-      if (!row?.recovery_hash || !row.recovery_hash_salt) {
+      const verifiers = row ? parseRecoveryVerifiers(row.recovery_verifiers, row.recovery_hash, row.recovery_hash_salt) : [];
+      if (verifiers.length === 0) {
         await spendRecoveryFailureWork(recoveryHash);
         return false;
       }
-      const candidate = await hashAuthToken(recoveryHash, row.recovery_hash_salt);
-      if (!safeEqual(row.recovery_hash, candidate)) return false;
+      // Any code in the set works, and the server cannot tell which one it was.
+      const candidates = await Promise.all(verifiers.map((v) => hashAuthToken(recoveryHash, v.salt)));
+      if (!verifiers.some((v, index) => safeEqual(v.hash, candidates[index]))) return false;
 
       const credential = await hashCredential(update.authToken);
-      const recoveryVerifier = await hashRecoveryVerifier(update.newRecoveryHash);
+      const nextVerifiers = await hashRecoveryVerifiers(update.newRecoveryHashes);
+      const nextFirst = nextVerifiers[0];
       const updated = (await sql`
         WITH credential_update AS (
           UPDATE planner_credentials
           SET kdf_salt = ${update.kdfSalt}, auth_hash = ${credential.authHash},
-              hash_salt = ${credential.hashSalt}, recovery_hash = ${recoveryVerifier.recoveryHash},
-              recovery_hash_salt = ${recoveryVerifier.recoveryHashSalt}, updated_at = now()
-          WHERE user_id = ${row.id} AND recovery_hash = ${row.recovery_hash}
-            AND recovery_hash_salt = ${row.recovery_hash_salt}
+              hash_salt = ${credential.hashSalt}, recovery_hash = ${nextFirst?.hash ?? null},
+              recovery_hash_salt = ${nextFirst?.salt ?? null},
+              recovery_verifiers = ${JSON.stringify(nextVerifiers)},
+              totp_secret = NULL, totp_confirmed_at = NULL, totp_last_step = NULL, updated_at = now()
+          WHERE user_id = ${row.id}
+            AND recovery_verifiers IS NOT DISTINCT FROM ${row.recovery_verifiers}
           RETURNING user_id
         ),
         vault_update AS (
           UPDATE planner_vaults
-          SET wrapped_dek = ${update.wrappedDek}, wrapped_recovery = ${update.wrappedRecovery}, updated_at = now()
+          SET wrapped_dek = ${update.wrappedDek}, wrapped_recovery = ${JSON.stringify(update.wrappedRecovery)}, updated_at = now()
           WHERE user_id IN (SELECT user_id FROM credential_update)
           RETURNING user_id
         ),
@@ -904,6 +1325,29 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
       return rows[0] ?? null;
     },
 
+    async updateRecovery(userId, update) {
+      await ensure();
+      const nextVerifiers = await hashRecoveryVerifiers(update.newRecoveryHashes);
+      const first = nextVerifiers[0];
+      const rows = (await sql`
+        WITH credential_update AS (
+          UPDATE planner_credentials
+          SET recovery_hash = ${first?.hash ?? null}, recovery_hash_salt = ${first?.salt ?? null},
+              recovery_verifiers = ${JSON.stringify(nextVerifiers)}, updated_at = now()
+          WHERE user_id = ${userId}
+          RETURNING user_id
+        ),
+        vault_update AS (
+          UPDATE planner_vaults
+          SET wrapped_dek = ${update.wrappedDek}, wrapped_recovery = ${JSON.stringify(update.wrappedRecovery)}, updated_at = now()
+          WHERE user_id IN (SELECT user_id FROM credential_update)
+          RETURNING user_id
+        )
+        SELECT user_id FROM credential_update
+      `) as { user_id: string }[];
+      return rows.length > 0;
+    },
+
     async getVault(userId) {
       await ensure();
       // Aliased: the rest of the code reads camelCase names.
@@ -911,7 +1355,11 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
         SELECT version, ciphertext, wrapped_dek AS "wrappedDek", wrapped_recovery AS "wrappedRecovery", updated_at
         FROM planner_vaults WHERE user_id = ${userId}
       `) as VaultRow[];
-      return rows[0] ?? null;
+      const row = rows[0];
+      if (!row) return null;
+      // Rows written before codes came in sets hold one plain wrapped copy;
+      // callers always get a list.
+      return { ...row, wrappedRecovery: parseRecoveryWraps(row.wrappedRecovery) };
     },
 
     async putVault(userId, baseVersion, ciphertext) {
@@ -947,15 +1395,21 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
     async findSession(tokenHash) {
       await ensure();
       const rows = (await sql`
-        SELECT s.id, s.user_id, s.expires_at, u.id AS u_id, u.username, u.username_lower, u.email_lower,
+        SELECT s.id, s.user_id, s.expires_at, s.last_seen_at, u.id AS u_id, u.username, u.username_lower, u.email_lower,
                u.display_name, u.role, u.created_at
         FROM planner_sessions s
         JOIN planner_users u ON u.id = s.user_id
         WHERE s.token_hash = ${tokenHash} AND s.expires_at > now()
         LIMIT 1
-      `) as (SessionRow & { u_id: string; username: string; username_lower: string; email_lower: string | null; display_name: string; role: AccountRole; created_at: string })[];
+      `) as (SessionRow & { u_id: string; username: string; username_lower: string; email_lower: string | null; display_name: string; role: AccountRole; created_at: string; last_seen_at: string | Date })[];
       const row = rows[0];
       if (!row) return null;
+      // "Last seen" is only worth a write about once a minute: it is a hint for
+      // the devices list, not an audit log, and this runs on every request.
+      const seen = new Date(row.last_seen_at).getTime();
+      if (!Number.isFinite(seen) || Date.now() - seen > 60_000) {
+        await sql`UPDATE planner_sessions SET last_seen_at = now() WHERE id = ${row.id}`;
+      }
       return {
         session: { id: row.id, user_id: row.user_id, expires_at: row.expires_at },
         user: {
@@ -975,6 +1429,153 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
       await sql`DELETE FROM planner_sessions WHERE id = ${id}`;
     },
 
+    async getTotp(userId) {
+      await ensure();
+      const rows = (await sql`
+        SELECT totp_secret AS secret, totp_confirmed_at AS "confirmedAt", totp_last_step AS "lastStep"
+        FROM planner_credentials WHERE user_id = ${userId}
+      `) as { secret: string | null; confirmedAt: string | Date | null; lastStep: number | string | null }[];
+      const row = rows[0];
+      if (!row) return null;
+      return {
+        secret: row.secret ?? null,
+        confirmedAt: row.confirmedAt ? new Date(row.confirmedAt).toISOString() : null,
+        // bigint comes back from the driver as a string.
+        lastStep: row.lastStep === null || row.lastStep === undefined ? null : Number(row.lastStep),
+      };
+    },
+
+    async setTotpSecret(userId, secret) {
+      await ensure();
+      await sql`UPDATE planner_credentials
+        SET totp_secret = ${secret}, totp_confirmed_at = NULL, totp_last_step = NULL, updated_at = now()
+        WHERE user_id = ${userId}`;
+    },
+
+    async confirmTotp(userId) {
+      await ensure();
+      await sql`UPDATE planner_credentials
+        SET totp_confirmed_at = now(), updated_at = now()
+        WHERE user_id = ${userId}`;
+    },
+
+    async recordTotpStep(userId, step) {
+      await ensure();
+      await sql`UPDATE planner_credentials
+        SET totp_last_step = ${step}, updated_at = now()
+        WHERE user_id = ${userId}`;
+    },
+
+    async createLoginChallenge(userId, tokenHash, expiresAt) {
+      await ensure();
+      // One live challenge per account; anything expired is dead weight, and
+      // this keeps the table bounded without a cron job.
+      await sql`DELETE FROM planner_login_challenges
+        WHERE user_id = ${userId} OR expires_at < now()`;
+      await sql`INSERT INTO planner_login_challenges (token_hash, user_id, expires_at)
+        VALUES (${tokenHash}, ${userId}, ${expiresAt.toISOString()})`;
+    },
+
+    async findLoginChallenge(tokenHash) {
+      await ensure();
+      const rows = (await sql`
+        SELECT c.user_id, u.id, u.username, u.username_lower, u.email_lower, u.display_name, u.role, u.created_at
+        FROM planner_login_challenges c
+        JOIN planner_users u ON u.id = c.user_id
+        WHERE c.token_hash = ${tokenHash} AND c.expires_at > now()
+        LIMIT 1
+      `) as (UserRow & { user_id: string })[];
+      const row = rows[0];
+      if (!row) return null;
+      return { user: { id: row.id, username: row.username, username_lower: row.username_lower, email_lower: row.email_lower, display_name: row.display_name, role: row.role, created_at: row.created_at } };
+    },
+
+    async deleteLoginChallenge(tokenHash) {
+      await ensure();
+      await sql`DELETE FROM planner_login_challenges WHERE token_hash = ${tokenHash}`;
+    },
+
+    async listSessions(userId) {
+      await ensure();
+      const rows = (await sql`
+        SELECT id, label, created_at AS "createdAt", last_seen_at AS "lastSeenAt", expires_at AS "expiresAt"
+        FROM planner_sessions
+        WHERE user_id = ${userId} AND expires_at > now()
+        ORDER BY last_seen_at DESC
+      `) as { id: string; label: string; createdAt: string | Date; lastSeenAt: string | Date; expiresAt: string | Date }[];
+      const iso = (value: string | Date) => (value instanceof Date ? value.toISOString() : new Date(value).toISOString());
+      return rows.map((row) => ({
+        id: row.id,
+        label: row.label,
+        createdAt: iso(row.createdAt),
+        lastSeenAt: iso(row.lastSeenAt),
+        expiresAt: iso(row.expiresAt),
+      }));
+    },
+
+    async deleteSessionForUser(id, userId) {
+      await ensure();
+      const rows = (await sql`
+        DELETE FROM planner_sessions WHERE id = ${id} AND user_id = ${userId} RETURNING id
+      `) as { id: string }[];
+      return rows.length > 0;
+    },
+
+    async deleteOtherSessions(userId, keepId) {
+      await ensure();
+      const rows = (await sql`
+        DELETE FROM planner_sessions WHERE user_id = ${userId} AND id <> ${keepId} RETURNING id
+      `) as { id: string }[];
+      return rows.length;
+    },
+
+    async recordAuthEvent(event) {
+      await ensure();
+      const network = event.network ?? null;
+      // "Have we seen this place before?" is answered inside the insert, so
+      // two sign-ins at once cannot both read "no" and both claim to be new.
+      await sql`INSERT INTO planner_auth_events (id, user_id, kind, device_label, network, new_network)
+        VALUES (
+          ${newId()}, ${event.userId}, ${event.kind}, ${event.deviceLabel ?? ''}, ${network},
+          ${network} IS NOT NULL
+            AND NOT EXISTS (
+              SELECT 1 FROM planner_auth_events
+              WHERE user_id = ${event.userId} AND network = ${network}
+            )
+        )`;
+      // Bounded without a cron job: the log is for reading, not for hoarding.
+      await sql`DELETE FROM planner_auth_events
+        WHERE user_id = ${event.userId}
+          AND id NOT IN (
+            SELECT id FROM planner_auth_events
+            WHERE user_id = ${event.userId}
+            ORDER BY created_at DESC
+            LIMIT ${AUTH_EVENT_LIMIT}
+          )`;
+      await sql`DELETE FROM planner_auth_events
+        WHERE user_id = ${event.userId} AND created_at < now() - make_interval(days => ${AUTH_EVENT_DAYS})`;
+    },
+
+    async listAuthEvents(userId, limit = AUTH_EVENT_LIMIT) {
+      await ensure();
+      const take = Math.max(1, Math.min(limit, AUTH_EVENT_LIMIT));
+      const rows = (await sql`
+        SELECT id, kind, device_label AS "deviceLabel", created_at AS "at", network, new_network AS "newNetwork"
+        FROM planner_auth_events
+        WHERE user_id = ${userId}
+        ORDER BY created_at DESC
+        LIMIT ${take}
+      `) as { id: string; kind: string; deviceLabel: string | null; at: string | Date; network: string | null; newNetwork: boolean | null }[];
+      return rows.map((row) => ({
+        id: row.id,
+        kind: cleanAuthEventKind(row.kind) ?? 'password',
+        deviceLabel: row.deviceLabel ?? '',
+        at: row.at instanceof Date ? row.at.toISOString() : new Date(row.at).toISOString(),
+        network: row.network ?? null,
+        newNetwork: Boolean(row.newNetwork),
+      }));
+    },
+
     async deleteAccount(userId) {
       await ensure();
       const rows = (await sql`DELETE FROM planner_users WHERE id = ${userId} RETURNING id`) as Array<{ id: string }>;
@@ -984,8 +1585,11 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
     async createLink(input) {
       await ensure();
       const rows = (await sql`
-        INSERT INTO planner_links (id, guardian_id, student_username_lower, code_hash, wrapped_share, status)
-        VALUES (${input.id}, ${input.guardianId}, ${input.studentUsernameLower}, ${input.codeHash}, ${input.wrappedShare}, 'pending')
+        INSERT INTO planner_links (id, guardian_id, student_username_lower, code_hash, wrapped_share, status, code_expires_at)
+        VALUES (
+          ${input.id}, ${input.guardianId}, ${input.studentUsernameLower}, ${input.codeHash}, ${input.wrappedShare}, 'pending',
+          now() + make_interval(days => ${INVITE_TTL_DAYS})
+        )
         ON CONFLICT (guardian_id, student_username_lower) DO NOTHING
         RETURNING *
       `) as LinkRow[];
@@ -1006,7 +1610,8 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
         SELECT l.*, u.username AS guardian_username, u.display_name AS guardian_display_name
         FROM planner_links l
         JOIN planner_users u ON u.id = l.guardian_id
-        WHERE (l.student_username_lower = ${user.usernameLower} AND l.status = 'pending')
+        WHERE (l.student_username_lower = ${user.usernameLower} AND l.status = 'pending'
+               AND (l.code_expires_at IS NULL OR l.code_expires_at > now()))
            OR (l.student_id = ${user.id} AND l.status = 'linked')
         ORDER BY l.created_at
       `) as (LinkRow & { guardian_username: string; guardian_display_name: string })[];
@@ -1015,8 +1620,22 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
 
     async acceptLink(codeHash, student) {
       await ensure();
+      // Asked separately first, so an expired invitation can be answered with
+      // "ask for a new one" instead of "that code is wrong". Same shape as the
+      // memory store, and for the same reason.
+      const stale = (await sql`
+        SELECT id FROM planner_links
+        WHERE code_hash = ${codeHash}
+          AND student_username_lower = ${student.usernameLower}
+          AND status = 'pending'
+          AND code_expires_at IS NOT NULL
+          AND code_expires_at <= now()
+        LIMIT 1
+      `) as { id: string }[];
+      if (stale.length > 0) return 'expired';
       const rows = (await sql`
-        UPDATE planner_links SET status = 'linked', student_id = ${student.id}, updated_at = now()
+        UPDATE planner_links
+        SET status = 'linked', student_id = ${student.id}, updated_at = now(), code_expires_at = NULL
         WHERE code_hash = ${codeHash} AND student_username_lower = ${student.usernameLower} AND status = 'pending'
         RETURNING *
       `) as LinkRow[];
@@ -1060,12 +1679,20 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
       return rows[0] ?? null;
     },
 
-    async getNote(linkId, userId) {
+    async getNote(linkId, userId, outgoing = false) {
       await ensure();
       const rows = (await sql`SELECT * FROM planner_links WHERE id = ${linkId}`) as LinkRow[];
       const row = rows[0];
       if (!row || (row.guardian_id !== userId && row.student_id !== userId)) return null;
-      const ciphertext = row.guardian_id === userId ? row.note_to_guardian : row.note_to_student;
+      const asGuardian = row.guardian_id === userId;
+      // Incoming is what the other side wrote; outgoing is what this user did.
+      const ciphertext = outgoing
+        ? asGuardian
+          ? row.note_to_student
+          : row.note_to_guardian
+        : asGuardian
+          ? row.note_to_guardian
+          : row.note_to_student;
       return { ciphertext, weekOf: row.note_week };
     },
 

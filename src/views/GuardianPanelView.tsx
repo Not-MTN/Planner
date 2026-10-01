@@ -18,11 +18,16 @@ import {
 import { friendlyGroqError, generateGuardianGuidance, type GuardianGuidance } from '../ai';
 import { t } from '../i18n';
 import { Field, Empty } from '../components/ui';
-import { CompletionRing, FocusTrend, SubjectSplit, WeekBars, minutesLabel } from '../components/charts';
+import { CompletionRing, FocusTrend, SubjectSplit, SubjectTrend, WeekBars, minutesLabel } from '../components/charts';
+import { GuardianGoalForm } from '../components/GuardianGoalForm';
+import { InviteQr } from '../components/InviteQr';
+import { PraiseComposer } from '../components/PraiseComposer';
 import { GuardianPlanComposer } from '../components/GuardianPlanComposer';
 import {
+  dropGoal,
   dropPlan,
   inviteStudent,
+  isInviteExpired,
   markNoticesRead,
   postNotice,
   readNotices,
@@ -31,7 +36,7 @@ import {
   syncLinks,
   type Invitation,
 } from '../auth/links';
-import { planPeriodLabel, planProgress, withoutLinkPlan } from '../panels';
+import { goalAnswerOnLink, planPeriodLabel, planProgress, withoutLinkPlan } from '../panels';
 import {
   filterGuardianLinks,
   guardianResultStatus,
@@ -42,6 +47,20 @@ import {
 import type { GuardianLink, PlanCadence } from '../types';
 import '../panels.css';
 
+/**
+ * Plain words for when a code stops working. A date means nothing to someone
+ * deciding whether to send it now or tonight, so count the days instead.
+ */
+function inviteExpiryNote(expiresAt: string | null, now = Date.now()): string {
+  if (!expiresAt) return t('The code works until they use it.');
+  const at = new Date(expiresAt).getTime();
+  if (!Number.isFinite(at)) return t('The code works until they use it.');
+  const daysLeft = Math.ceil((at - now) / 86_400_000);
+  if (daysLeft <= 0) return t('This code has expired. It has to be sent again.');
+  if (daysLeft === 1) return t('This code stops working tomorrow.');
+  return t('This code stops working in {0} days.', { 0: daysLeft });
+}
+
 export function GuardianPanelView() {
   const { panels, updatePanels, flash, navigate, requestConfirm } = usePlanner();
   const [adding, setAdding] = useState(false);
@@ -50,6 +69,7 @@ export function GuardianPanelView() {
   const [lastChecked, setLastChecked] = useState<string | null>(null);
   const [invitation, setInvitation] = useState<Invitation | null>(null);
   const [copied, setCopied] = useState(false);
+  const [showQr, setShowQr] = useState(false);
   const [draft, setDraft] = useState({ username: '', displayName: '' });
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [sending, setSending] = useState<string | null>(null);
@@ -57,6 +77,7 @@ export function GuardianPanelView() {
   const [guiding, setGuiding] = useState<string | null>(null);
   const [planning, setPlanning] = useState<{ id: string; cadence: PlanCadence } | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [goalForm, setGoalForm] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<RosterFilter>('all');
   const [sort, setSort] = useState<RosterSort>('name');
@@ -107,9 +128,40 @@ export function GuardianPanelView() {
       }));
       setInvitation(made);
       setCopied(false);
+      setShowQr(false);
       setDraft({ username: '', displayName: '' });
       setAdding(false);
       flash(t('Invitation ready. Give the code to your student.'));
+    } catch (error) {
+      flash(error instanceof Error ? error.message : t('That invitation could not be sent.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // A code that expired is not a code to re-show. Withdraw the dead one and
+  // hand over a fresh one, so there is never a choice of which one to type.
+  const resendInvitation = async (linkId: string) => {
+    const link = guardian.links.find((item) => item.id === linkId);
+    if (!link) return;
+    setBusy(true);
+    try {
+      let latest = panels;
+      if (link.linkId) latest = await removeLink(latest, link.linkId);
+      latest = {
+        ...latest,
+        guardian: { ...latest.guardian, links: latest.guardian.links.filter((item) => item.id !== linkId) },
+      };
+      updatePanels(() => latest);
+      const { invitation: made } = await inviteStudent(latest, link.username, link.displayName);
+      updatePanels((current) => ({
+        ...current,
+        guardian: { ...current.guardian, links: [...current.guardian.links.filter((item) => item.id !== made.link.id), made.link] },
+      }));
+      setInvitation(made);
+      setCopied(false);
+      setShowQr(false);
+      flash(t('A new code is ready for {0}.', { 0: made.link.displayName }));
     } catch (error) {
       flash(error instanceof Error ? error.message : t('That invitation could not be sent.'));
     } finally {
@@ -211,6 +263,19 @@ export function GuardianPanelView() {
     setExpanded(link.id);
     setPlanning({ id: link.id, cadence });
   };
+  // Taking a suggestion back is not undoing a goal: if they already said yes,
+  // the goal they made is theirs and stays. This only stops the asking.
+  const withdrawGoal = async (link: GuardianLink, goalId: string) => {
+    if (!link.linkId) return;
+    try {
+      const next = await dropGoal(panels, link.linkId, goalId);
+      updatePanels(() => next);
+      flash(t('Suggestion taken back.'));
+    } catch (error) {
+      flash(error instanceof Error ? error.message : t('That suggestion could not be taken back.'));
+    }
+  };
+
   const dropSentPlan = (link: GuardianLink, planId: string) =>
     requestConfirm({
       title: t('Take this plan back?'),
@@ -381,15 +446,25 @@ export function GuardianPanelView() {
               <button type="button" className="btn btn-outline btn-small" onClick={() => void copyCode()}>
                 {copied ? t('Code copied') : t('Copy code')}
               </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-small"
+                aria-expanded={showQr}
+                onClick={() => setShowQr((open) => !open)}
+              >
+                {showQr ? t('Hide QR code') : t('Show a QR code')}
+              </button>
               <button type="button" className="btn btn-ghost btn-small" onClick={() => setInvitation(null)}>
                 {t('Done')}
               </button>
             </div>
+            {showQr ? <InviteQr code={invitation.code} /> : null}
             <p className="hint">
               {t(
                 'They type it once in their own panel. After that their weekly results come to you on their own — the code is never stored on our servers.',
               )}
             </p>
+            <p className="hint">{inviteExpiryNote(invitation.expiresAt)}</p>
           </div>
         ) : null}
         {guardian.links.length > 0 ? (
@@ -525,7 +600,9 @@ export function GuardianPanelView() {
                   ) : (
                     <p className="student-pending">
                       {status === 'pending'
-                        ? t('Waiting for them to accept — no results yet.')
+                        ? isInviteExpired(link.expiresAt)
+                          ? t('That code expired before they used it. Send a new invitation.')
+                          : t('Waiting for them to accept — no results yet.')
                         : t('Linked. Their first results will appear after they share.')}
                     </p>
                   )}
@@ -535,16 +612,26 @@ export function GuardianPanelView() {
                     </p>
                   ) : null}
                   <div className="student-card-actions">
-                    {link.status === 'pending' && link.code ? (
+                    {link.status === 'pending' && link.code && !isInviteExpired(link.expiresAt) ? (
                       <button
                         type="button"
                         className="btn btn-outline btn-small"
                         onClick={() => {
-                          setInvitation({ link, code: link.code! });
+                          setInvitation({ link, code: link.code!, expiresAt: link.expiresAt ?? null });
                           setCopied(false);
                         }}
                       >
                         {t('Show the code again')}
+                      </button>
+                    ) : null}
+                    {link.status === 'pending' && link.username ? (
+                      <button
+                        type="button"
+                        className="btn btn-outline btn-small"
+                        disabled={busy}
+                        onClick={() => void resendInvitation(link.id)}
+                      >
+                        {t('Send a new code')}
                       </button>
                     ) : null}
                     {link.status === 'linked' ? (
@@ -605,6 +692,13 @@ export function GuardianPanelView() {
                             <section className="chart-block">
                               <p className="chart-title">{t('Where the time went')}</p>
                               <SubjectSplit subjects={link.results.subjects} />
+                            </section>
+                          ) : null}
+                          {link.history.some((week) => week.subjects.length > 0) ? (
+                            <section className="chart-block">
+                              <p className="chart-title">{t('Subject by subject')}</p>
+                              <p className="chart-note">{t('Which subjects are being looked after, and which have gone quiet.')}</p>
+                              <SubjectTrend weeks={link.history} />
                             </section>
                           ) : null}
                           {!link.results ? (
@@ -690,6 +784,11 @@ export function GuardianPanelView() {
                               <span className="note-character-count">{(notes[link.id] ?? '').length}/160</span>
                             </div>
                           </form>
+                          {link.status === 'linked' ? (
+                            <div className="praise-block">
+                              <PraiseComposer link={link} />
+                            </div>
+                          ) : null}
                         </section>
                       </div>
                       <section className="gplan-actions">
@@ -733,6 +832,86 @@ export function GuardianPanelView() {
                           onClose={() => setPlanning(null)}
                         />
                       ) : null}
+                      <section className="gplan-actions">
+                        <p className="chart-title">{t('Goals')}</p>
+                        <p className="chart-note">
+                          {t('Something bigger than this week. They say yes or not now — only a yes reaches their planner.')}
+                        </p>
+                        {goalForm === link.id ? null : (
+                          <div className="gplan-picks">
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-small"
+                              disabled={!ready}
+                              onClick={() => setGoalForm(link.id)}
+                            >
+                              {t('Suggest a goal')}
+                            </button>
+                          </div>
+                        )}
+                        {goalForm === link.id ? (
+                          <GuardianGoalForm link={link} onClose={() => setGoalForm(null)} />
+                        ) : null}
+                        {(link.goals ?? []).length > 0 ? (
+                          <ul className="gplan-list">
+                            {(link.goals ?? []).map((goal) => {
+                              const answer = goalAnswerOnLink(link, goal.id);
+                              const percent = answer && answer.total > 0 ? Math.round((answer.done / answer.total) * 100) : 0;
+                              return (
+                                <li key={goal.id} className="gplan-card">
+                                  <div className="gplan-head">
+                                    <div>
+                                      <p className="gplan-kicker">
+                                        {goal.target ? t('Aiming for {0}', { 0: goal.target }) : t('Suggested goal')}
+                                      </p>
+                                      <p className="gplan-title">{goal.title}</p>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      className="icon-btn round"
+                                      aria-label={t('Take back {0}', { 0: goal.title })}
+                                      onClick={() => void withdrawGoal(link, goal.id)}
+                                    >
+                                      <TrashIcon size={14} />
+                                    </button>
+                                  </div>
+                                  {goal.note ? <p className="gplan-note">{goal.note}</p> : null}
+                                  {goal.steps.length > 0 ? (
+                                    <ol className="ggoal-step-list">
+                                      {goal.steps.map((step, index) => (
+                                        <li key={index}>{step}</li>
+                                      ))}
+                                    </ol>
+                                  ) : null}
+                                  {answer?.state === 'accepted' ? (
+                                    <>
+                                      <div
+                                        className="gplan-bar"
+                                        role="progressbar"
+                                        aria-label={t('Progress for {0}', { 0: goal.title })}
+                                        aria-valuemin={0}
+                                        aria-valuemax={100}
+                                        aria-valuenow={percent}
+                                      >
+                                        <i style={{ width: `${percent}%` }} />
+                                      </div>
+                                      <p className="gplan-from">
+                                        {answer.total > 0
+                                          ? t('They took it on. {0} of {1} steps done.', { 0: answer.done, 1: answer.total })
+                                          : t('They took it on.')}
+                                      </p>
+                                    </>
+                                  ) : answer?.state === 'declined' ? (
+                                    <p className="gplan-from">{t('They said not now.')}</p>
+                                  ) : (
+                                    <p className="gplan-from">{t('Waiting for their answer.')}</p>
+                                  )}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        ) : null}
+                      </section>
                       {link.plans.length > 0 ? (
                         <section className="gplan-sent">
                           <p className="chart-title">{t('Plans you sent')}</p>

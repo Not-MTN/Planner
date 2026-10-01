@@ -24,6 +24,8 @@ const {
   handleRecoveryComplete,
   handleRecoveryStart,
   handleSession,
+  handleSessions,
+  handleAuthEvents,
   handleSignup,
 } = await import('./authApi');
 const { resetRateLimits } = await import('./security');
@@ -45,9 +47,9 @@ const ACCOUNT = {
   role: 'student' as const,
   kdfSalt: 'c2FsdHNhbHRzYWx0c2E=',
   authToken: 'YXV0aFRva2VuYXV0aFRva2VuYXV0aFRva2VuMTI=',
-  recoveryHash: HASH,
+  recoveryHashes: [HASH],
   wrappedDek: 'd3JhcHBlZERla3dyYXBwZWREZWt3cmFwcGVkRGVrMTI=',
-  wrappedRecovery: 'd3JhcHBlZFJlY292ZXJ5d3JhcHBlZFJlY292ZXJ5MTI=',
+  wrappedRecovery: ['d3JhcHBlZFJlY292ZXJ5d3JhcHBlZFJlY292ZXJ5MTI='],
   ciphertext: 'dmF1bHRjaXBoZXJ0ZXh0',
 };
 
@@ -71,6 +73,14 @@ function get(path: string, cookie?: string): Request {
   return new Request(`https://planner.test${path}`, { headers: cookie ? { Cookie: cookie } : undefined });
 }
 
+function del(path: string, body: unknown, cookie?: string): Request {
+  return new Request(`https://planner.test${path}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
+    body: JSON.stringify(body),
+  });
+}
+
 function cookieFrom(response: Response): string {
   return (response.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
 }
@@ -88,7 +98,7 @@ describe('accounts on the real database path', () => {
     // One row per table: a missing credential or vault would break sign-in.
     expect(db.tables.planner_users).toHaveLength(1);
     expect(db.tables.planner_credentials).toHaveLength(1);
-    expect(db.tables.planner_credentials[0]?.recovery_hash).not.toBe(ACCOUNT.recoveryHash);
+    expect(db.tables.planner_credentials[0]?.recovery_hash).not.toBe(ACCOUNT.recoveryHashes[0]);
     expect(db.tables.planner_credentials[0]?.recovery_hash_salt).toBeTruthy();
     expect(db.tables.planner_vaults).toHaveLength(1);
     expect(db.tables.planner_sessions).toHaveLength(1);
@@ -117,6 +127,61 @@ describe('accounts on the real database path', () => {
     expect(body.vault.ciphertext).toBe(ACCOUNT.ciphertext);
     expect(body.vault.version).toBe(1);
     expect(body.kdfSalt).toBe(salt);
+  });
+
+  it('lists devices through the database path and revokes only the account’s own sessions', async () => {
+    const store = await createNeonAuthStore(DB_URL);
+    const signup = await handleSignup(post('/api/auth/signup', ACCOUNT), store);
+    const cookie = cookieFrom(signup);
+    await handleLogin(post('/api/auth/login', { username: 'sara', authToken: ACCOUNT.authToken }), store);
+
+    const listed = await handleSessions(get('/api/auth/sessions', cookie), store);
+    expect(listed.status).toBe(200);
+    const body = (await listed.json()) as { current: string; sessions: { id: string; label: string }[] };
+    expect(body.sessions).toHaveLength(2);
+    expect(db.tables.planner_sessions).toHaveLength(2);
+    // The label captured at sign-in travelled through the real SQL path.
+    expect(body.sessions.every((session) => session.label.length > 0)).toBe(true);
+
+    const other = body.sessions.find((session) => session.id !== body.current)!;
+    const revoked = await handleSessions(del('/api/auth/sessions', { id: other.id }, cookie), store);
+    expect(revoked.status).toBe(200);
+    expect(db.tables.planner_sessions).toHaveLength(1);
+    expect(db.tables.planner_sessions[0]!.id).toBe(body.current);
+
+    // Signing out everywhere else keeps the caller's own session.
+    await handleLogin(post('/api/auth/login', { username: 'sara', authToken: ACCOUNT.authToken }), store);
+    const cleared = await handleSessions(del('/api/auth/sessions', { others: true }, cookie), store);
+    expect(cleared.status).toBe(200);
+    expect((await cleared.json() as { removed: number }).removed).toBe(1);
+    expect(db.tables.planner_sessions).toHaveLength(1);
+  });
+
+  it('writes the account’s history through the real SQL path, and trims it there', async () => {
+    const store = await createNeonAuthStore(DB_URL);
+    const signup = await handleSignup(post('/api/auth/signup', ACCOUNT), store);
+    const cookie = cookieFrom(signup);
+    await handleLogin(post('/api/auth/login', { username: 'sara', authToken: ACCOUNT.authToken }), store);
+
+    const listed = await handleAuthEvents(get('/api/auth/events', cookie), store);
+    expect(listed.status).toBe(200);
+    const body = (await listed.json()) as { events: { kind: string; deviceLabel: string; at: string }[] };
+    expect(body.events.map((event) => event.kind)).toEqual(['password', 'created']);
+    expect(body.events.every((event) => event.deviceLabel.length > 0)).toBe(true);
+    // Dates come back as ISO strings, not whatever the driver hands over.
+    expect(body.events.every((event) => !Number.isNaN(new Date(event.at).getTime()))).toBe(true);
+    // The rows really are in the table the schema created.
+    expect(db.tables.planner_auth_events).toHaveLength(2);
+
+    // The trim is SQL, so it has to be exercised through SQL: 90 lines in,
+    // 60 come back, and the table holds no more than that.
+    const id = 'user-trim';
+    for (let index = 0; index < 90; index += 1) {
+      await store!.recordAuthEvent({ userId: id, kind: 'password' });
+    }
+    const kept = await store!.listAuthEvents(id, 200);
+    expect(kept).toHaveLength(60);
+    expect(db.tables.planner_auth_events.filter((row) => row.user_id === id)).toHaveLength(60);
   });
 
   it('rejects the wrong password and an unknown account the same way', async () => {
@@ -206,13 +271,13 @@ describe('accounts on the real database path', () => {
     const update = {
       username: 'sara',
       recoveryHash: HASH,
-      newRecoveryHash: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+      newRecoveryHashes: ['AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='],
       kdfSalt: 'bmV3LXNhbHQtMDEyMzQ1Ng==',
       authToken: 'bm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm4=',
       wrappedDek: 'eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4',
-      wrappedRecovery: 'eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5',
+      wrappedRecovery: ['eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5'],
     };
-    const wrong = await handleRecoveryComplete(post('/api/auth/recovery/complete', { ...update, recoveryHash: update.newRecoveryHash }), store);
+    const wrong = await handleRecoveryComplete(post('/api/auth/recovery/complete', { ...update, recoveryHash: update.newRecoveryHashes[0] }), store);
     expect(wrong.status).toBe(401);
 
     const recovered = await handleRecoveryComplete(post('/api/auth/recovery/complete', update), store);
@@ -223,8 +288,8 @@ describe('accounts on the real database path', () => {
     expect(newLogin.status).toBe(200);
     expect((await handleLogin(post('/api/auth/login', { username: 'sara', authToken: ACCOUNT.authToken }), store)).status).toBe(401);
     expect(db.tables.planner_vaults[0]?.wrapped_dek).toBe(update.wrappedDek);
-    expect(db.tables.planner_vaults[0]?.wrapped_recovery).toBe(update.wrappedRecovery);
-    expect(db.tables.planner_credentials[0]?.recovery_hash).not.toBe(update.newRecoveryHash);
+    expect(db.tables.planner_vaults[0]?.wrapped_recovery).toBe(JSON.stringify(update.wrappedRecovery));
+    expect(db.tables.planner_credentials[0]?.recovery_hash).not.toBe(update.newRecoveryHashes[0]);
     expect(db.tables.planner_credentials[0]?.recovery_hash_salt).toBeTruthy();
   });
 
@@ -276,6 +341,32 @@ describe('accounts on the real database path', () => {
     // The student's slot stays empty: nothing has been relayed yet.
     expect(db.tables.planner_links[0]?.note_to_guardian).toBeFalsy();
     void guardianId;
+  });
+
+  it('stamps a deadline on an invitation and refuses the code once it has passed', async () => {
+    const store = await createNeonAuthStore(DB_URL);
+    const guardian = cookieFrom(await handleSignup(post('/api/auth/signup', ACCOUNT), store));
+    void cookieFrom(await handleSignup(post('/api/auth/signup', { ...ACCOUNT, username: 'thestudent', email: 'thestudent@example.com' }), store));
+    const studentId = db.tables.planner_users.find((user) => user.username === 'thestudent')!.id as string;
+
+    const { handleLinks } = await import('./authApi');
+    const created = await handleLinks(
+      post('/api/auth/links', { username: 'thestudent', codeHash: HASH, wrappedShare: HASH }, guardian),
+      store,
+    );
+    expect(created.status).toBe(201);
+    // The deadline is written by the database, so every deployment agrees on it.
+    expect(db.tables.planner_links[0]?.code_expires_at).toBeTruthy();
+
+    const row = db.tables.planner_links[0] as unknown as { code_expires_at: string };
+    row.code_expires_at = new Date(Date.now() - 86_400_000).toISOString();
+
+    // The student is not shown a code that cannot work.
+    const incoming = await store!.listIncomingLinks({ id: studentId, usernameLower: 'thestudent' });
+    expect(incoming).toHaveLength(0);
+
+    // And trying it says expired, not wrong — a different fix, so a different answer.
+    expect(await store!.acceptLink(HASH, { id: studentId, usernameLower: 'thestudent' })).toBe('expired');
   });
 
   it('hashes a credential with the salt it returns', async () => {

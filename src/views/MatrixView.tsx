@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { todayISO } from '../dates';
 import { t } from '../i18n';
 import type { Task } from '../types';
 import { TaskRow } from '../components/items';
@@ -8,7 +9,9 @@ type Props = {
 };
 
 function quadrant(task: Task): 'q1' | 'q2' | 'q3' | 'q4' {
-  const today = new Date().toISOString().slice(0, 10);
+  // Local, not UTC — the rest of the planner draws "today" this way, and an
+  // offset of a few hours moves a task between quadrants.
+  const today = todayISO();
   const urgent = task.dueDate ? task.dueDate <= today : false;
   const important = task.priority === 'high';
   if (urgent && important) return 'q1';
