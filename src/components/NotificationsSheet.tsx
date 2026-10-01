@@ -1,6 +1,7 @@
 import type { PlannerNotification } from '../notificationCenter';
-import { BellIcon, CheckIcon } from '../icons';
+import { BellIcon, CheckIcon, StopwatchIcon } from '../icons';
 import { t } from '../i18n';
+import { SNOOZE_CHOICES } from '../reminders';
 import { Modal } from './ui';
 
 export function NotificationsSheet({
@@ -10,6 +11,7 @@ export function NotificationsSheet({
   onMarkAllRead,
   onClear,
   onRead,
+  onSnooze,
 }: {
   items: PlannerNotification[];
   onClose: () => void;
@@ -17,6 +19,7 @@ export function NotificationsSheet({
   onMarkAllRead: () => void;
   onClear: () => void;
   onRead: (key: string) => void;
+  onSnooze: (key: string, minutes: number) => void;
 }) {
   const unread = items.filter((item) => !item.read).length;
   return (
@@ -49,6 +52,19 @@ export function NotificationsSheet({
                 </span>
                 {!item.read ? <i className="notification-dot" aria-label={t('Unread')} /> : <CheckIcon size={15} />}
               </button>
+              <div className="notification-snooze" role="group" aria-label={t('Snooze {0}', { 0: item.title })}>
+                <StopwatchIcon size={13} />
+                {SNOOZE_CHOICES.map((minutes) => (
+                  <button
+                    key={minutes}
+                    type="button"
+                    className="btn btn-tiny btn-ghost"
+                    onClick={() => onSnooze(item.key, minutes)}
+                  >
+                    {t('{0} min', { 0: minutes })}
+                  </button>
+                ))}
+              </div>
             </li>
           ))}
         </ul>

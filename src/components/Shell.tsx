@@ -49,6 +49,7 @@ import { ShortcutsSheet } from './ShortcutsSheet';
 import { WeeklyReview } from './WeeklyReview';
 import { NotificationsSheet } from './NotificationsSheet';
 import { clearNotifications, loadNotifications, markNotificationsRead, subscribeNotifications } from '../notificationCenter';
+import { snoozeReminder } from '../reminders';
 import { loadNavigationPages, subscribeNavigationPages } from '../navigationPrefs';
 
 const CalendarView = lazy(() => import('../views/CalendarView').then((m) => ({ default: m.CalendarView })));
@@ -119,6 +120,7 @@ export function Shell() {
     setThemeMode,
     isDark,
     confettiSeed,
+    flash,
   } = planner;
   const [moreOpen, setMoreOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -788,6 +790,14 @@ export function Shell() {
           onMarkAllRead={() => markNotificationsRead()}
           onClear={() => clearNotifications()}
           onRead={(key) => markNotificationsRead([key])}
+          onSnooze={(key, minutes) => {
+            // Snoozing means "not now, but do come back": the reminder is
+            // rescheduled rather than dismissed, and the entry is marked read
+            // so the badge stops nagging in the meantime.
+            snoozeReminder(key, minutes);
+            markNotificationsRead([key]);
+            flash(t('Snoozed for {0} minutes.', { 0: minutes }));
+          }}
         />
       ) : null}
       {composer ? <Composer /> : null}

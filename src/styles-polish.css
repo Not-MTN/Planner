@@ -1040,3 +1040,8 @@
 .error-detail { margin: 0 0 20px; padding: 10px 12px; border-radius: 12px; color: var(--muted); background: var(--surface-2, var(--surface)); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; text-align: start; }
 .error-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
 .error-id { margin: 18px 0 0; color: var(--muted); font-size: 11px; letter-spacing: 0.04em; }
+
+/* ---------- Snooze, on a reminder in the notification centre ---------- */
+.notification-snooze { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 0 14px 10px 60px; color: var(--muted); }
+.notification-snooze svg { flex: none; opacity: 0.7; }
+.notification-snooze .btn { padding: 2px 8px; min-height: 26px; font-size: 11px; }

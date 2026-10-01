@@ -1,5 +1,7 @@
 /** Service worker registration and the "Install app" prompt. */
 
+import { snoozeReminder } from './reminders';
+
 interface InstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
@@ -34,6 +36,14 @@ export function applyUpdate(): void {
 
 export function registerPWA(): void {
   if (typeof window === 'undefined') return;
+  // "Snooze 10 min" pressed on a system notification. The worker cannot
+  // reschedule anything itself, so it asks an open tab to do it.
+  navigator.serviceWorker?.addEventListener('message', (event) => {
+    const data = (event as MessageEvent).data as { type?: string; key?: string; minutes?: number } | null;
+    if (!data || data.type !== 'planner-snooze') return;
+    if (typeof data.key !== 'string' || typeof data.minutes !== 'number') return;
+    snoozeReminder(data.key, data.minutes);
+  });
   window.addEventListener('beforeinstallprompt', (event) => {
     event.preventDefault();
     deferred = event as InstallPromptEvent;

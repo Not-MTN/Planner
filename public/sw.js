@@ -74,15 +74,38 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const target = event.notification.data && typeof event.notification.data.url === 'string' ? event.notification.data.url : '/#/today';
+  const data = event.notification.data || {};
+  const target = typeof data.url === 'string' ? data.url : '/#/today';
+
+  // "Snooze 10 min" on a system notification. The service worker does not know
+  // what a reminder is — the page owns that state — so it hands the key back
+  // and lets Planner reschedule it. With no tab open there is nobody to tell,
+  // so open the app instead of silently dropping the snooze.
+  const snooze = /^snooze-(\d+)$/.exec(event.action || '');
+  if (snooze && typeof data.key === 'string') {
+    const minutes = Number(snooze[1]);
+    event.waitUntil(
+      self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+        const open = clients.find((client) => 'focus' in client);
+        if (open) {
+          open.postMessage({ type: 'planner-snooze', key: data.key, minutes });
+          return undefined;
+        }
+        return self.clients.openWindow(target);
+      }),
+    );
+    return;
+  }
+
+  const focusTarget = typeof data.url === 'string' ? data.url : '/#/today';
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (clients) => {
       const open = clients.find((client) => 'focus' in client);
       if (open) {
-        if ('navigate' in open) await open.navigate(target);
+        if ('navigate' in open) await open.navigate(focusTarget);
         return open.focus();
       }
-      return self.clients.openWindow(target);
+      return self.clients.openWindow(focusTarget);
     }),
   );
 });

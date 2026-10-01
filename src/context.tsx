@@ -64,7 +64,17 @@ import {
 } from './mutate';
 import type { TaskPatch } from './mutate';
 import { loadDisplayPrefs, loadWeekStart, setDisplayPrefs as storeDisplayPrefs, setWeekStart as storeWeekStart, todayISO, type DisplayPrefs, type WeekStart } from './dates';
-import { dueReminders, loadFired, loadReminderSettings, saveFired, saveReminderSettings, showNotification, type ReminderSettings } from './reminders';
+import {
+  clearSnoozes,
+  dueReminders,
+  loadFired,
+  loadReminderSettings,
+  loadSnoozes,
+  saveFired,
+  saveReminderSettings,
+  showNotification,
+  type ReminderSettings,
+} from './reminders';
 import { appendNotifications } from './notificationCenter';
 import { backgroundPushEnabled, refreshBackgroundPushSchedule } from './push';
 import { buildSampleState } from './sample';
@@ -988,7 +998,10 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     const check = () => {
       const now = new Date();
       const fired = loadFired(todayISO(now));
-      const due = dueReminders(stateRef.current, now, reminders, fired);
+      // A snoozed reminder has already fired once; its snooze is what makes it
+      // eligible again, and firing it again clears that snooze.
+      const snoozes = loadSnoozes(now.getTime());
+      const due = dueReminders(stateRef.current, now, reminders, fired, snoozes);
       if (due.length === 0) return;
       appendNotifications(due, now);
       for (const reminder of due) {
@@ -999,6 +1012,7 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
         void showNotification(reminder);
         flash(`🔔 ${reminder.title} — ${reminder.body}`);
       }
+      clearSnoozes(due.map((reminder) => reminder.key));
       saveFired(fired);
     };
     check();
