@@ -6,6 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StrictMode, act } from 'react';
+import { settle as settleTicks, waitFor, waitForBoot } from './testing/wait';
 import { createRoot, type Root } from 'react-dom/client';
 import { App } from './App';
 
@@ -29,12 +30,13 @@ function mountApp(): void {
   });
 }
 
-async function settle(times = 6): Promise<void> {
-  for (let index = 0; index < times; index += 1) {
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    });
-  }
+/** Booting reads IndexedDB, so wait until the app is ready — never a fixed sleep. */
+async function boot(): Promise<void> {
+  await waitForBoot(text);
+}
+
+async function settle(times = 3): Promise<void> {
+  await settleTicks(times);
 }
 
 function buttons(): HTMLButtonElement[] {
@@ -99,7 +101,7 @@ afterEach(() => {
 describe('optional panels', () => {
   it('boots with no panel and offers one without forcing it', async () => {
     mountApp();
-    await settle();
+    await boot();
     expect(text()).toContain('Personal Planner');
     expect(text()).toContain('Add a panel when you want one');
     // No panel pages in the sidebar until one is added.
@@ -108,7 +110,7 @@ describe('optional panels', () => {
 
   it('will not add the student panel without what you study and where you are', async () => {
     mountApp();
-    await settle();
+    await boot();
     await clickText('See the panels');
     await clickText('Add student panel');
     // The form is open and the panel is still off: details come first.
@@ -119,7 +121,7 @@ describe('optional panels', () => {
 
   it('adds the student panel, keeps the planner, and reaches it from the dashboard', async () => {
     mountApp();
-    await settle();
+    await boot();
 
     await clickText('See the panels');
     expect(text()).toContain('Panels are additions to your planner');
@@ -137,7 +139,7 @@ describe('optional panels', () => {
 
     // The dashboard now links to it, and the personal planner is still there.
     await clickText('Open student panel');
-    expect(text()).toContain('This week, and what’s coming');
+    await waitFor(() => text().includes('This week, and what’s coming'), 10_000, 'the student panel to open');
 
     // Add a subject and see it land.
     await clickText('Subject');
@@ -181,7 +183,7 @@ describe('optional panels', () => {
     );
 
     mountApp();
-    await settle();
+    await boot();
     await clickText('See the panels');
     await clickText('Add student panel');
     setValue(document.querySelector('.panel-form input.input') as HTMLInputElement, 'Physics');
@@ -190,7 +192,7 @@ describe('optional panels', () => {
     await clickText('Open student panel');
 
     await clickText('Ask');
-    for (let attempt = 0; attempt < 12 && !text().includes('Revise chapter 4'); attempt += 1) await settle(2);
+    await waitFor(() => text().includes('Revise chapter 4'), 10_000, 'the AI answer');
 
     expect(text()).toContain('A steady week.');
     expect(text()).toContain('Revise chapter 4 for 25 minutes');
@@ -205,10 +207,10 @@ describe('optional panels', () => {
 
   it('asks which kind of guardian before adding that panel', async () => {
     mountApp();
-    await settle();
+    await boot();
     await clickText('See the panels');
     await clickText('Add guardian panel');
-    expect(text()).toContain('Which kind of guardian are you?');
+    await waitFor(() => text().includes('Which kind of guardian are you?'), 10_000, 'the guardian kind question');
     await clickText('Parent');
     const field = document.querySelector('.panel-form input.input') as HTMLInputElement | null;
     expect(field).toBeTruthy();
@@ -216,19 +218,19 @@ describe('optional panels', () => {
     await clickText('Add guardian panel');
     expect(text()).toContain('Parent panel added');
     await clickText('Open guardian panel');
-    expect(text()).toContain('The week, as results');
+    await waitFor(() => text().includes('The week, as results'), 10_000, 'the guardian panel to open');
   });
 
   it('removes a panel without touching the planner', async () => {
     mountApp();
-    await settle();
+    await boot();
     await clickText('See the panels');
     await clickText('Add student panel');
     setValue(document.querySelector('.panel-form input.input') as HTMLInputElement, 'Physics');
     setSelect(document.querySelector('.panel-form select.input') as HTMLSelectElement, 'school-11');
     await clickText('Add student panel');
     await clickText('Remove panel');
-    expect(text()).toContain('Student panel removed');
+    await waitFor(() => text().includes('Student panel removed'), 10_000, 'the panel to be removed');
     // The panel is still offered, and the sidebar no longer lists it.
     expect(text()).toContain('Not added');
     expect(buttons().some((item) => (item.textContent ?? '').trim() === 'Student')).toBe(false);

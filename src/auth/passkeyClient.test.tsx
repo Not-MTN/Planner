@@ -214,12 +214,24 @@ async function click(element: Element | null | undefined) {
   });
 }
 
-async function waitFor(predicate: () => boolean, timeoutMs = 30_000) {
-  await act(async () => {
-    for (let waited = 0; waited < timeoutMs && !predicate(); waited += 100) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-  });
+/**
+ * Poll for a UI condition, flushing React between ticks.
+ *
+ * The loop must not sit inside one big act(): act batches the updates it
+ * flushes, so a predicate that reads the DOM inside the block can never see
+ * intermediate renders. Every wait therefore ran the full timeout, and — worse
+ * — returned silently when the condition never came true, turning a real
+ * failure into a slow pass.
+ */
+async function waitFor(predicate: () => boolean, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (predicate()) return;
+    if (Date.now() >= deadline) throw new Error(`Timed out after ${timeoutMs}ms waiting for a UI condition.`);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+  }
 }
 
 const buttonStartingWith = (text: string) =>
