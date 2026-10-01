@@ -44,6 +44,8 @@ export interface Task {
    * repeating task on and off can never double the series up.
    */
   spawnedId?: string | null;
+  /** Present on read-only dates generated from a repeating task (see logic.ts). */
+  seriesTaskId?: string;
 }
 
 export interface FocusLog {

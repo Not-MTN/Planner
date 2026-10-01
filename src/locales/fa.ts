@@ -1727,4 +1727,9 @@ export const fa: Record<string, string> = {
   "The AI request timed out. Please try again.": "زمان درخواست هوش مصنوعی تمام شد. لطفاً دوباره امتحان کنید.",
   "The AI proxy was not found on this deployment. Redeploy with the api/ functions included.": "پراکسی هوش مصنوعی در این استقرار پیدا نشد. با توابع api/ دوباره منتشر کنید.",
   "The AI returned a review in an unexpected format. Try again.": "هوش مصنوعی مرور را در قالبی غیرمنتظره برگرداند. دوباره امتحان کنید.",
+  "Upcoming repeat": "تکرار پیش‌رو",
+  "This is an upcoming repeat. Open the task to tick it.": "این یک تکرار پیش‌رو است. برای تیک زدن، خود کار را باز کنید.",
+  "Snooze {0} min": "{0} دقیقه بعد",
+  "Snooze {0}": "به تعویق انداختن «{0}»",
+  "Snoozed for {0} minutes.": "{0} دقیقه به تعویق افتاد.",
 };

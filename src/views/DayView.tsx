@@ -46,7 +46,9 @@ export function DayView({ date }: { date: string }) {
   const today = todayISO(now);
   const isToday = date === today;
   const events = eventsForDate(state, date);
-  const tasks = tasksForDate(state, date);
+  // Today you act on the one real copy; a projection would only duplicate it
+  // alongside the overdue list. The days ahead are where the week was missing.
+  const tasks = tasksForDate(state, date, date > today);
   const openTasks = tasks.filter((task) => !task.completed);
   const doneTasks = tasks.filter((task) => task.completed);
   const habits = habitsDueOn(state, date).filter((habit) => !habit.essential);

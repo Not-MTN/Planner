@@ -1491,6 +1491,12 @@ h1, .page-head h1 {
   line-height: 1.35;
 }
 .week-task.is-done .week-task-title { text-decoration: line-through; color: var(--muted); }
+/* An upcoming repetition: visible so the week has its shape, quiet so it is
+   never mistaken for the copy you can tick today. */
+.week-task.is-projected .week-task-title { color: var(--muted); font-weight: 500; }
+.task.is-projected { opacity: 0.72; }
+.task.is-projected .check, .week-task.is-projected .mini-check { opacity: 0.45; cursor: default; }
+.task.is-projected .repeat-chip { opacity: 0.85; }
 .mini-check {
   width: 18px;
   height: 18px;

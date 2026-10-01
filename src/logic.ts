@@ -150,8 +150,47 @@ export function eventsForDate(state: PlannerState, date: string): PlannerEvent[]
   ].sort(compareEvents);
 }
 
-export function tasksForDate(state: PlannerState, date: string): Task[] {
-  return state.tasks.filter((task) => task.dueDate === date).sort(compareTasks);
+/**
+ * Read-only upcoming occurrences of repeating tasks.
+ *
+ * A repeating task is stored once, and the next copy only appears when that one
+ * is completed. So a week view could not show "water the plants" on Thursday:
+ * the recurrence was invisible until the day itself arrived, and the calendar
+ * showed a week that was missing everything you do regularly.
+ *
+ * These are projections, with the same contract the repeating *events* already
+ * use — a stable id built from the series and the date, nothing written to
+ * storage, and a marker naming where the occurrence came from. Only dates after
+ * the task's own due date are projected, so the real, actionable copy is never
+ * duplicated on the day it is actually due.
+ *
+ * Deliberately *not* included where a missing day has consequences other than
+ * display: reminders, push scheduling, auto-scheduling and the AI's context all
+ * count real items, and a projection is not something to remind you about or to
+ * schedule around. Pass `includeRepeats` where the screen is showing a day.
+ */
+export function seriesTasksForDate(state: PlannerState, date: string): Task[] {
+  if (!isValidISODate(date)) return [];
+  return state.tasks
+    .filter((task) => task.repeat && !task.completed && task.dueDate !== null && task.dueDate < date && occursOn(task.dueDate, task.repeat, date))
+    .map((task) => ({
+      ...task,
+      id: `series:${task.id}:${date}`,
+      dueDate: date,
+      completed: false,
+      completedAt: null,
+      // A projection carries no state of its own: ticking it would have
+      // nothing to tick, and a subtask ticked on a projection would vanish.
+      spawnedId: null,
+      subtasks: [],
+      seriesTaskId: task.id,
+    }));
+}
+
+export function tasksForDate(state: PlannerState, date: string, includeRepeats = false): Task[] {
+  const real = state.tasks.filter((task) => task.dueDate === date);
+  const all = includeRepeats ? [...real, ...seriesTasksForDate(state, date)] : real;
+  return all.sort(compareTasks);
 }
 
 export function overdueTasks(state: PlannerState, today: string): Task[] {
