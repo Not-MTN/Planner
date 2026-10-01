@@ -91,6 +91,26 @@ beforeEach(() => {
 });
 
 describe('accounts on the real database path', () => {
+  it('migrates legacy account schemas before the first query', async () => {
+    const store = await createNeonAuthStore(DB_URL);
+    const transaction = vi.spyOn(db.sql, 'transaction');
+
+    await store!.findAccount('missing-user');
+
+    const statements = transaction.mock.calls.flatMap(([queries]) =>
+      queries.map((query) => query.__pending.text.replace(/\s+/g, ' ').trim()),
+    );
+    expect(statements).toEqual(expect.arrayContaining([
+      'ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS recovery_verifiers text',
+      'ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS totp_secret text',
+      'ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS totp_confirmed_at timestamptz',
+      'ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS totp_last_step bigint',
+      'ALTER TABLE planner_links ADD COLUMN IF NOT EXISTS code_expires_at timestamptz',
+    ]));
+    expect(statements.some((statement) => statement.startsWith('CREATE TABLE IF NOT EXISTS planner_login_challenges'))).toBe(true);
+    expect(statements.some((statement) => statement.startsWith('CREATE TABLE IF NOT EXISTS planner_auth_events'))).toBe(true);
+  });
+
   it('creates every row a sign-in will later need', async () => {
     const store = await createNeonAuthStore(DB_URL);
     const response = await handleSignup(post('/api/auth/signup', ACCOUNT), store);

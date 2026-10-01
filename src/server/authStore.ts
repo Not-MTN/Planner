@@ -19,7 +19,7 @@ const scrypt = promisify(scryptCallback) as (
   options: { N: number; r: number; p: number; maxmem: number },
 ) => Promise<Buffer>;
 
-/** Kept for `db/auth.sql`; the store runs it statement by statement. */
+/** Reference schema; keep `db/auth.sql` and the Neon bootstrap below in sync. */
 export const AUTH_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS planner_users (
   id             text PRIMARY KEY CHECK (id ~ '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'),
@@ -129,6 +129,8 @@ CREATE TABLE IF NOT EXISTS planner_links (
   updated_at             timestamptz NOT NULL DEFAULT now(),
   UNIQUE (guardian_id, student_username_lower)
 );
+
+ALTER TABLE planner_links ADD COLUMN IF NOT EXISTS code_expires_at timestamptz;
 
 CREATE INDEX IF NOT EXISTS planner_links_student_idx ON planner_links (student_username_lower);
 CREATE INDEX IF NOT EXISTS planner_links_student_id_idx ON planner_links (student_id);
@@ -1137,6 +1139,10 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
         )`,
         sql`ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS recovery_hash text`,
         sql`ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS recovery_hash_salt text`,
+        sql`ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS recovery_verifiers text`,
+        sql`ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS totp_secret text`,
+        sql`ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS totp_confirmed_at timestamptz`,
+        sql`ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS totp_last_step bigint`,
         sql`CREATE TABLE IF NOT EXISTS planner_vaults (
           user_id          text PRIMARY KEY REFERENCES planner_users(id) ON DELETE CASCADE,
           version          integer NOT NULL CHECK (version > 0),
@@ -1155,6 +1161,22 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
           expires_at   timestamptz NOT NULL
         )`,
         sql`CREATE INDEX IF NOT EXISTS planner_sessions_user_idx ON planner_sessions (user_id)`,
+        sql`CREATE TABLE IF NOT EXISTS planner_login_challenges (
+          token_hash text PRIMARY KEY,
+          user_id    text NOT NULL REFERENCES planner_users(id) ON DELETE CASCADE,
+          expires_at timestamptz NOT NULL
+        )`,
+        sql`CREATE INDEX IF NOT EXISTS planner_login_challenges_user_idx ON planner_login_challenges (user_id)`,
+        sql`CREATE TABLE IF NOT EXISTS planner_auth_events (
+          id           text PRIMARY KEY,
+          user_id      text NOT NULL REFERENCES planner_users(id) ON DELETE CASCADE,
+          kind         text NOT NULL,
+          device_label text NOT NULL DEFAULT '',
+          network      text,
+          new_network  boolean NOT NULL DEFAULT false,
+          created_at   timestamptz NOT NULL DEFAULT now()
+        )`,
+        sql`CREATE INDEX IF NOT EXISTS planner_auth_events_user_idx ON planner_auth_events (user_id, created_at DESC)`,
         sql`CREATE TABLE IF NOT EXISTS planner_links (
           id                     text PRIMARY KEY,
           guardian_id            text NOT NULL REFERENCES planner_users(id) ON DELETE CASCADE,
@@ -1174,6 +1196,7 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
           updated_at             timestamptz NOT NULL DEFAULT now(),
           UNIQUE (guardian_id, student_username_lower)
         )`,
+        sql`ALTER TABLE planner_links ADD COLUMN IF NOT EXISTS code_expires_at timestamptz`,
         sql`CREATE INDEX IF NOT EXISTS planner_links_student_idx ON planner_links (student_username_lower)`,
         sql`CREATE INDEX IF NOT EXISTS planner_links_student_id_idx ON planner_links (student_id)`,
         sql`CREATE TABLE IF NOT EXISTS planner_passkeys (
