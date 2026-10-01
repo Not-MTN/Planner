@@ -2,6 +2,7 @@ import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { formatWeekdayShort } from '../dates';
 import { focusSummary, habitLinks, hourLabel, productiveHours, weeklyReport } from '../insights';
+import { downloadBlob } from '../download';
 import { DownloadIcon } from '../icons';
 import { t } from '../i18n';
 
@@ -9,7 +10,7 @@ function formatMinutes(total: number): string {
   if (total < 60) return t("{0} min", { 0: total });
   const hours = Math.floor(total / 60);
   const rest = total % 60;
-  return rest ? t("{0} h {1} min", { 0: hours, 1: rest }) : `${hours} h`;
+  return rest ? t("{0} h {1} min", { 0: hours, 1: rest }) : t("{0} h", { 0: hours });
 }
 
 export function RhythmCard({ today }: { today: string }) {
@@ -26,13 +27,7 @@ export function RhythmCard({ today }: { today: string }) {
       await navigator.clipboard.writeText(text);
       flash(t("Weekly report copied — paste it anywhere."));
     } catch {
-      const blob = new Blob([text], { type: 'text/markdown' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `week-${today}.md`;
-      link.click();
-      URL.revokeObjectURL(url);
+      downloadBlob(new Blob([text], { type: 'text/markdown' }), `week-${today}.md`);
       flash(t("Weekly report downloaded."));
     }
   };

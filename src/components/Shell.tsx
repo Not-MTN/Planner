@@ -161,10 +161,13 @@ export function Shell() {
     return () => window.removeEventListener('keydown', onEsc);
   }, []);
 
+  // Derived during render so the effect below depends on a string: retitling
+  // then tracks the title itself, not the identity of the route object.
+  const documentTitle = route.name === 'today' ? t("Planner — today") : t("{0} · Planner", { 0: routeTitle(route) });
   useEffect(() => {
-    document.title = route.name === 'today' ? t("Planner — today") : t("{0} · Planner", { 0: routeTitle(route) });
+    document.title = documentTitle;
     setMoreOpen(false);
-  }, [key, route.name]);
+  }, [documentTitle]);
 
   useEffect(() => {
     window.scrollTo({

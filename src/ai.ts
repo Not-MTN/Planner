@@ -281,7 +281,7 @@ function parseFrequency(value: unknown): HabitFrequency {
 
 function normalizePlan(rawValue: unknown, state: PlannerState, range: PlanRange): AIDraft {
   const raw = asRecord(rawValue);
-  if (!raw) throw new Error(t(t("Groq returned a plan in an unexpected format. Try again.")));
+  if (!raw) throw new Error(t("Groq returned a plan in an unexpected format. Try again."));
   const tasks: TaskInput[] = [];
   const existingTaskKeys = new Set(
     state.tasks.map((task) => `${task.dueDate ?? ''}|${task.title.toLowerCase().trim()}`),
@@ -367,7 +367,7 @@ function normalizePlan(rawValue: unknown, state: PlannerState, range: PlanRange)
   }
 
   return {
-    summary: cleanText(raw.summary, 400) || t(t("A first draft for the days ahead.")),
+    summary: cleanText(raw.summary, 400) || t("A first draft for the days ahead."),
     tasks,
     events,
     habits,
@@ -389,7 +389,7 @@ function extractContent(payload: unknown): string {
       return typeof text === 'string' ? [text] : [];
     }).join('\n');
   }
-  throw new Error(t(t("Groq did not return a response. Check the server configuration and try again.")));
+  throw new Error(t("Groq did not return a response. Check the server configuration and try again."));
 }
 
 function parseJson(text: string): unknown {
@@ -397,7 +397,7 @@ function parseJson(text: string): unknown {
   try {
     return JSON.parse(cleaned) as unknown;
   } catch {
-    throw new Error(t(t("The AI response was not valid JSON. Please try again.")));
+    throw new Error(t("The AI response was not valid JSON. Please try again."));
   }
 }
 
@@ -431,7 +431,7 @@ async function groqJsonInternal(system: string, user: string, imageDataUrl?: str
     });
   } catch (cause) {
     if (cause instanceof Error && cause.name === 'AbortError') throw cause;
-    throw new Error(t(t("Could not reach the Groq proxy. Check the server and try again.")));
+    throw new Error(t("Could not reach the Groq proxy. Check the server and try again."));
   }
   // Read the body once: prefer text (so a non-JSON error can be reported), and
   // fall back to json() for callers that only provide that.
@@ -500,6 +500,17 @@ export function normalizeDraftPlan(rawValue: unknown, state: PlannerState, range
 }
 
 /**
+ * Why a draft item could not be kept. Naming the thing it collided with is the
+ * whole point — "protected time" for a clash with the dentist is a lie.
+ */
+function overlapReason(item: { title: string; kind: 'fixed' | 'event' | 'task' | 'draft' }): string {
+  if (item.kind === 'fixed') return t("overlaps protected time: {0}", { 0: item.title });
+  if (item.kind === 'event') return t("overlaps your existing event: {0}", { 0: item.title });
+  if (item.kind === 'task') return t("overlaps your timed task: {0}", { 0: item.title });
+  return t("overlaps another suggested plan: {0}", { 0: item.title });
+}
+
+/**
  * Re-check a stored or fresh draft against the CURRENT planner state. Time
  * passes between drafting and adding, so overlaps and duplicates that were
  * clear at draft time may exist now; anything that now collides is skipped
@@ -514,16 +525,16 @@ export function filterDraftAgainstState(draft: AIDraft, state: PlannerState): AI
   for (const candidate of draft.events) {
     const candidateStart = timeToMinutes(candidate.startTime);
     const candidateEnd = candidate.endTime ? timeToMinutes(candidate.endTime) : candidateStart + 60;
-    const existing = state.events.filter((event) => event.date === candidate.date).map((event) => ({ start: event.startTime, end: event.endTime ?? addMinutes(event.startTime, 60), title: event.title }));
-    const fixed = state.fixedCommitments.filter((item) => item.weekday === weekdayIndex(candidate.date)).map((item) => ({ start: item.startTime, end: item.endTime, title: item.title }));
-    const timedTasks = state.tasks.filter((task) => task.dueDate === candidate.date && task.dueTime).map((task) => ({ start: task.dueTime as string, end: addMinutes(task.dueTime as string, 30), title: task.title }));
-    const accepted = events.filter((event) => event.date === candidate.date).map((event) => ({ start: event.startTime, end: event.endTime ?? addMinutes(event.startTime, 60), title: event.title }));
+    const existing = state.events.filter((event) => event.date === candidate.date).map((event) => ({ start: event.startTime, end: event.endTime ?? addMinutes(event.startTime, 60), title: event.title, kind: 'event' as const }));
+    const fixed = state.fixedCommitments.filter((item) => item.weekday === weekdayIndex(candidate.date)).map((item) => ({ start: item.startTime, end: item.endTime, title: item.title, kind: 'fixed' as const }));
+    const timedTasks = state.tasks.filter((task) => task.dueDate === candidate.date && task.dueTime).map((task) => ({ start: task.dueTime as string, end: addMinutes(task.dueTime as string, 30), title: task.title, kind: 'task' as const }));
+    const accepted = events.filter((event) => event.date === candidate.date).map((event) => ({ start: event.startTime, end: event.endTime ?? addMinutes(event.startTime, 60), title: event.title, kind: 'draft' as const }));
     const overlap = [...existing, ...fixed, ...timedTasks, ...accepted].find((item) => {
       const start = timeToMinutes(item.start);
       const end = timeToMinutes(item.end);
       return candidateStart < end && start < candidateEnd;
     });
-    if (overlap) skippedEvents.push({ title: candidate.title, date: candidate.date, reason: t("overlaps protected time: {0}", { 0: overlap.title }) });
+    if (overlap) skippedEvents.push({ title: candidate.title, date: candidate.date, reason: overlapReason(overlap) });
     else events.push(candidate);
   }
   const habits = draft.habits.filter((candidate) => !state.habits.some((habit) => habit.name.toLowerCase().trim() === candidate.name.toLowerCase().trim()));
@@ -662,8 +673,8 @@ export async function generateAIPlan(options: {
   imageDataUrl?: string;
 }): Promise<AIDraft> {
   const { prompt, range, state, imageDataUrl } = options;
-  if (!isValidISODate(range.startDate) || range.days < 1 || range.days > MAX_PLAN_DAYS) throw new Error(t(t("Choose a valid planning date range.")));
-  if (!prompt.trim() && !imageDataUrl) throw new Error(t(t("Tell the AI what you want to do, or upload a plan image.")));
+  if (!isValidISODate(range.startDate) || range.days < 1 || range.days > MAX_PLAN_DAYS) throw new Error(t("Choose a valid planning date range."));
+  if (!prompt.trim() && !imageDataUrl) throw new Error(t("Tell the AI what you want to do, or upload a plan image."));
   const currentPlans = buildPlanningContext(state, range);
   const system = `You are a supportive, practical planning assistant inside a personal planner. Create a realistic plan, not a packed schedule. ${planSafetyRules(range)} ${spanGuidance(range.days)} ${PLAN_JSON_SHAPE}. Tasks must have a date inside the range. Use events only when a time is useful. Habits should be repeatable and few; do not add a habit that already exists. Avoid duplicating the user's current tasks and events. If the user uploaded a handwritten or printed plan, transcribe what is clear, preserve dates/times, and put unclear details in the summary rather than guessing.`;
   const user = `Planning request: ${prompt.trim() || 'Read the uploaded image and turn the plan into planner tasks, timed events, and a few repeatable habits where appropriate.'}\n\nCurrent schedule and constraints (do not add over existing times):\n${JSON.stringify(currentPlans)}`;
@@ -694,8 +705,8 @@ export async function refineAIPlan(options: {
   state: PlannerState;
 }): Promise<AIDraft> {
   const { draft, request, range, state } = options;
-  if (!isValidISODate(range.startDate) || range.days < 1 || range.days > MAX_PLAN_DAYS) throw new Error(t(t("Choose a valid planning date range.")));
-  if (!request.trim()) throw new Error(t(t("Say what to change first.")));
+  if (!isValidISODate(range.startDate) || range.days < 1 || range.days > MAX_PLAN_DAYS) throw new Error(t("Choose a valid planning date range."));
+  if (!request.trim()) throw new Error(t("Say what to change first."));
   const currentPlans = buildPlanningContext(state, range);
   const system = `You are a supportive, practical planning assistant inside a personal planner, now EDITING an existing draft plan. ${planSafetyRules(range)} Apply the user's change request precisely and minimally: keep every item they did not ask to change (same title, date, time), modify/move/remove only what the request affects, and add new items only when the request needs them. ${spanGuidance(range.days)} ${PLAN_JSON_SHAPE}. Return the FULL revised plan — not just the changed parts. Keep the summary accurate for the revised plan. Never re-add items the user already deleted from the draft; the currentDraft is the source of truth, not the planner history.`;
   const user = `Change request: ${request.trim()}\n\nCurrent draft to revise:\n${JSON.stringify(draftForModel(draft))}\n\nCurrent schedule and constraints (do not add over existing times):\n${JSON.stringify(currentPlans)}`;
@@ -778,7 +789,7 @@ function reviewCarryForward(raw: unknown, candidates: PlannerState['tasks'], tod
     const taskId = cleanText(item?.taskId, 80);
     const date = cleanText(item?.date, 10);
     if (!candidateById.has(taskId) || !isValidISODate(date) || date <= today || date > addDays(today, 30) || suggested.has(taskId)) continue;
-    suggested.set(taskId, { date, reason: cleanText(item?.reason, 200) || t(t("A little more room to finish this.")) });
+    suggested.set(taskId, { date, reason: cleanText(item?.reason, 200) || t("A little more room to finish this.") });
   }
   const defaultDate = addDays(today, 1);
   return candidates.map((task) => {
@@ -788,7 +799,7 @@ function reviewCarryForward(raw: unknown, candidates: PlannerState['tasks'], tod
       title: task.title,
       fromDate: task.dueDate ?? today,
       date: choice?.date ?? defaultDate,
-      reason: choice?.reason ?? t(t("Move it forward only if it still matters to you.")),
+      reason: choice?.reason ?? t("Move it forward only if it still matters to you."),
     };
   });
 }
@@ -799,7 +810,7 @@ export async function generateAIReview(options: {
   today: string;
 }): Promise<AIReview> {
   const { state, range, today } = options;
-  if (!isValidISODate(range.startDate) || range.days < 1 || range.days > MAX_PLAN_DAYS) throw new Error(t(t("Choose a valid review date range.")));
+  if (!isValidISODate(range.startDate) || range.days < 1 || range.days > MAX_PLAN_DAYS) throw new Error(t("Choose a valid review date range."));
   const lastDate = addDays(range.startDate, range.days - 1);
   const dates = Array.from({ length: range.days }, (_, index) => addDays(range.startDate, index));
   const plannerContext = buildAIPlannerContext(state);
@@ -840,12 +851,12 @@ export async function generateAIReview(options: {
   };
   const system = `You are a kind, honest planning coach. Review the planner data for ${range.startDate} through ${lastDate}. Be specific, balanced, and non-judgmental; never shame the user or equate productivity with self-worth. Point out concrete wins and one or two realistic improvements. Always include one gentle, broadly safe wellbeing idea without diagnosing or prescribing. The memory section contains facts and preferences the user explicitly chose to save; use it only when relevant, do not infer sensitive facts, and never invent or change memories. Learned patterns are weak activity signals, not certain truths. Return ONLY JSON: {"summary":"2-4 sentences","wins":["..."],"improvements":["..."],"wellness":"one optional, gentle wellbeing idea","carryForward":[{"taskId":"an exact supplied task id","date":"YYYY-MM-DD after ${today} and within the next 30 days","reason":"short reason"}]}. Carry forward each unfinished task only if it still appears useful, use only supplied IDs, and choose practical future dates that leave space. Never invent, delete, or mark tasks complete. This is reflective coaching, not medical advice.`;
   const raw = asRecord(await groqJsonInternal(system, `Here is the user's logged activity. Do not treat empty days as failures.\n${JSON.stringify(payload)}`));
-  if (!raw) throw new Error(t(t("Groq returned a review in an unexpected format. Try again.")));
+  if (!raw) throw new Error(t("Groq returned a review in an unexpected format. Try again."));
   return {
-    summary: cleanText(raw.summary, 700) || t(t("You showed up for some of the things that mattered. Let’s make the next plan a little easier to keep.")),
+    summary: cleanText(raw.summary, 700) || t("You showed up for some of the things that mattered. Let’s make the next plan a little easier to keep."),
     wins: stringList(raw.wins, 5),
     improvements: stringList(raw.improvements, 5),
-    wellness: cleanText(raw.wellness, 300) || t(t("Leave a little room for rest and a short stretch or walk if that feels good.")),
+    wellness: cleanText(raw.wellness, 300) || t("Leave a little room for rest and a short stretch or walk if that feels good."),
     carryForward: reviewCarryForward(raw.carryForward, openTasks, today),
   };
 }
@@ -1020,5 +1031,5 @@ export function hasReviewActivity(state: PlannerState, range: PlanRange): boolea
 
 export function friendlyGroqError(error: unknown): string {
   if (error instanceof Error) return error.message;
-  return t(t("The AI could not complete that request. Please try again."));
+  return t("The AI could not complete that request. Please try again.");
 }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { analyzeDraft, buildPlanningContext, draftForModel, refineAIPlan, type AIDraft, type PlanRange } from './ai';
+import { analyzeDraft, buildPlanningContext, draftForModel, filterDraftAgainstState, refineAIPlan, type AIDraft, type PlanRange } from './ai';
 import { addEvent, addFixedCommitment, addTask, saveAIPlan, setMood, updateAIPlan } from './mutate';
 import { weekdayIndex } from './dates';
 import { createEmptyState } from './types';
@@ -31,6 +31,75 @@ function makeDraft(): AIDraft {
     skippedEvents: [],
   };
 }
+
+describe('filterDraftAgainstState', () => {
+  const draftWith = (event: AIDraft['events'][number]): AIDraft => ({
+    summary: '',
+    tasks: [],
+    events: [event],
+    habits: [],
+    suggestions: [],
+    skippedEvents: [],
+  });
+
+  it('says "protected time" only for a protected weekly block', () => {
+    const date = '2026-09-29';
+    const state = addFixedCommitment(
+      createEmptyState(),
+      { title: 'Class', weekday: weekdayIndex(date), startTime: '08:00', endTime: '10:00', category: 'learning', note: '' },
+      'class',
+      '2026-09-27T08:00:00.000Z',
+    );
+    const result = filterDraftAgainstState(
+      draftWith({ title: 'Reading', date, startTime: '09:00', endTime: '09:45', category: 'personal', note: '', important: false }),
+      state,
+    );
+    expect(result.events).toHaveLength(0);
+    expect(result.skippedEvents[0].reason).toBe('overlaps protected time: Class');
+  });
+
+  it('says "existing event" for a clash with an event, not "protected time"', () => {
+    const date = '2026-09-28';
+    const state = addEvent(
+      createEmptyState(),
+      { title: 'Dentist', date, startTime: '18:00', endTime: '19:00', category: 'health', note: '', important: false },
+      'dentist',
+      '2026-09-27T08:00:00.000Z',
+    );
+    const result = filterDraftAgainstState(
+      draftWith({ title: 'Walk', date, startTime: '18:15', endTime: '18:45', category: 'health', note: '', important: false }),
+      state,
+    );
+    expect(result.events).toHaveLength(0);
+    expect(result.skippedEvents[0].reason).toBe('overlaps your existing event: Dentist');
+    expect(result.skippedEvents[0].reason).not.toContain('protected');
+  });
+
+  it('says "timed task" for a clash with a task that has a time', () => {
+    const date = '2026-09-30';
+    const state = addTask(
+      createEmptyState(),
+      { title: 'Send invoice', priority: 'high', dueDate: date, dueTime: '09:00', category: 'work', note: '', goalId: null },
+      'invoice',
+      '2026-09-27T08:00:00.000Z',
+    );
+    const result = filterDraftAgainstState(
+      draftWith({ title: 'Standup', date, startTime: '09:15', endTime: '09:30', category: 'work', note: '', important: false }),
+      state,
+    );
+    expect(result.events).toHaveLength(0);
+    expect(result.skippedEvents[0].reason).toBe('overlaps your timed task: Send invoice');
+  });
+
+  it('keeps events that collide with nothing', () => {
+    const result = filterDraftAgainstState(
+      draftWith({ title: 'Walk', date: '2026-09-28', startTime: '06:00', endTime: '06:30', category: 'health', note: '', important: false }),
+      createEmptyState(),
+    );
+    expect(result.events).toHaveLength(1);
+    expect(result.skippedEvents).toHaveLength(0);
+  });
+});
 
 describe('refineAIPlan', () => {
   it('refuses to run without a change request', async () => {

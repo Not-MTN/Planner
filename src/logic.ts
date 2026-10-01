@@ -267,7 +267,7 @@ export function frequencyLabel(habit: Pick<Habit, 'frequency'>): string {
   if (frequency.type === 'daily') return t("Every day");
   if (frequency.type === 'weekdays') return t("Weekdays");
   if (frequency.type === 'weekly') return t("{0}× a week", { 0: frequency.times });
-  const names = [t("Sun"), 'Mon', t("Tue"), t("Wed"), t("Thu"), t("Fri"), t("Sat")];
+  const names = [t("Sun"), t("Mon"), t("Tue"), t("Wed"), t("Thu"), t("Fri"), t("Sat")];
   const labels = [...frequency.days].sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map((day) => names[day]);
   return labels.join(', ');
 }

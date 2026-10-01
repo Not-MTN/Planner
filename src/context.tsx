@@ -61,6 +61,7 @@ import {
   updateTask as updateTaskIn,
   uid,
 } from './mutate';
+import type { TaskPatch } from './mutate';
 import { loadDisplayPrefs, loadWeekStart, setDisplayPrefs as storeDisplayPrefs, setWeekStart as storeWeekStart, todayISO, type DisplayPrefs, type WeekStart } from './dates';
 import { dueReminders, loadFired, loadReminderSettings, saveFired, saveReminderSettings, showNotification, type ReminderSettings } from './reminders';
 import { appendNotifications } from './notificationCenter';
@@ -194,12 +195,12 @@ interface PlannerContextValue {
   celebrate: () => void;
   addTask: (input: TaskInput) => void;
   duplicateTask: (id: string) => void;
-  updateTask: (id: string, patch: Partial<TaskInput>) => void;
+  updateTask: (id: string, patch: TaskPatch) => void;
   deleteTask: (id: string) => void;
   clearCompletedTasks: () => void;
   toggleTask: (id: string) => void;
   completeTasksByIds: (ids: string[], complete?: boolean) => void;
-  updateTasksByIds: (ids: string[], patch: Partial<TaskInput>) => void;
+  updateTasksByIds: (ids: string[], patch: TaskPatch) => void;
   deleteTasksByIds: (ids: string[]) => void;
   moveTasksByIds: (ids: string[], date: string | null) => void;
   toggleSubtask: (taskId: string, subtaskId: string) => void;
@@ -270,6 +271,20 @@ const HISTORY_LIMIT = 60;
 const HISTORY_PERSIST_LIMIT = 8;
 const HISTORY_IDB_KEY = 'history';
 
+/**
+ * A small, rotating bit of applause when something gets ticked off — the reward
+ * after the effort, on purpose. Never fires on un-checking. Built once at module
+ * scope: the provider re-renders on every planner change.
+ */
+const PRAISES = [
+  () => t("Done. Beautifully ticked. ✨"),
+  () => t("One more off the list. 🎉"),
+  () => t("That counts. Well done. 💛"),
+  () => t("Checked, finished, gone. 🙌"),
+  () => t("Forward motion. Keep it. 🌱"),
+  () => t("You did the thing. ⭐"),
+];
+
 export function PlannerProvider({ children, initialState }: { children: ReactNode; initialState?: PlannerState | null }) {
   // `initialState` wins when the planner was opened from an encrypted vault.
   const [boot] = useState(() =>
@@ -321,21 +336,10 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     noticeTimer.current = window.setTimeout(() => setNotice(null), action ? 5200 : 2800);
   }, []);
 
-  // A small, rotating bit of applause when something gets ticked off — the
-  // reward after the effort, on purpose. Never fires on un-checking.
-  const PRAISES = [
-    () => t("Done. Beautifully ticked. ✨"),
-    () => t("One more off the list. 🎉"),
-    () => t("That counts. Well done. 💛"),
-    () => t("Checked, finished, gone. 🙌"),
-    () => t("Forward motion. Keep it. 🌱"),
-    () => t("You did the thing. ⭐"),
-  ];
   const praiseStep = useRef(0);
   const praise = useCallback(() => {
     flash(PRAISES[praiseStep.current % PRAISES.length]());
     praiseStep.current += 1;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flash]);
 
 
@@ -436,7 +440,7 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     return () => {
       cancelled = true;
     };
-  }, [boot]);
+  }, [boot, initialState]);
 
   // ── Persisted undo stack (IndexedDB, capped; restored at the bottom of boot) ─
   const historyPersistTimer = useRef<number | null>(null);
@@ -680,7 +684,7 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
         window.setTimeout(() => void runSync(), 400);
       }
     }
-  }, [trySave, syncHistoryFlags, updateSync]);
+  }, [trySave, syncHistoryFlags, updateSync, flash]);
 
   const scheduleSync = useCallback((delay = 1500) => {
     if (!syncRef.current.code) return;
@@ -888,7 +892,6 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     void refreshFeeds(false);
     const id = window.setInterval(() => void refreshFeeds(false), 30 * 60 * 1000);
     return () => window.clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [feeds.length, refreshFeeds]);
 
   const addFeed = useCallback(async (input: string): Promise<string | null> => {
@@ -1019,7 +1022,7 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     setSaveBlocked(false);
     const saved = trySave(empty);
     if (saved) flash(t("Planner cleared."));
-  }, [flash, syncHistoryFlags]);
+  }, [flash, syncHistoryFlags, trySave]);
 
   const importText = useCallback((text: string) => {
     const parsed = parseBackup(text);
@@ -1276,7 +1279,7 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     },
     setIntention: (date, text) => commit((current) => setIntentionIn(current, date, text)),
     logMood: (date, value, taskId) => commit((current) => setMoodIn(current, date, value, taskId)),
-  }), [state, ready, error, notice, saveBlocked, route, navigate, composer, confirm, startFresh, exportData, importText, loadSample, flash, dismissNotice, praise, undo, redo, canUndo, canRedo, themeMode, accent, paletteOpen, settingsOpen, focus, confettiSeed, celebrate, clearCompletedTasks, commit, reminders, setReminders, weekStart, setWeekStart, display, setDisplay, sync, syncStatus, syncMessage, syncAvailable, startSync, stopSync, runSync, deleteCloudCopy, shared, sharedStatus, sharedMessage, startShared, stopShared, runSharedSync, feeds, addFeed, removeFeed, refreshFeeds, weather, setWeather, recordTombstone]);
+  }), [state, ready, error, notice, saveBlocked, route, navigate, composer, confirm, startFresh, exportData, importText, loadSample, flash, dismissNotice, praise, undo, redo, canUndo, canRedo, themeMode, accent, paletteOpen, settingsOpen, focus, confettiSeed, celebrate, clearCompletedTasks, commit, reminders, setReminders, weekStart, setWeekStart, display, setDisplay, sync, syncStatus, syncMessage, syncAvailable, startSync, stopSync, runSync, deleteCloudCopy, shared, sharedStatus, sharedMessage, startShared, stopShared, runSharedSync, feeds, addFeed, removeFeed, refreshFeeds, weather, setWeather, recordTombstone, updatePanels, setPanelEnabled]);
 
   return <PlannerContext.Provider value={value}>{children}</PlannerContext.Provider>;
 }

@@ -318,7 +318,7 @@ export function isWeekend(iso: string): boolean {
 export function nextWeekend(iso: string, saturday = 6): string {
   const date = parseISODate(iso);
   const diff = (saturday - date.getDay() + 7) % 7;
-  return addDays(iso, diff === 0 && date.getDay() !== saturday ? 7 : diff);
+  return addDays(iso, diff);
 }
 
 /** The 1st of the month after the month containing `iso`. */

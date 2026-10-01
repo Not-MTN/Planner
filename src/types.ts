@@ -38,6 +38,12 @@ export interface Task {
   waiting: string | null;
   /** Planned effort in minutes; used by Plan my day, the board, and plan-vs-focus insights. */
   estimatedMinutes: number | null;
+  /**
+   * The next occurrence this task created when it was last completed.
+   * Completing again replaces it; un-completing takes it back, so ticking a
+   * repeating task on and off can never double the series up.
+   */
+  spawnedId?: string | null;
 }
 
 export interface FocusLog {

@@ -10,6 +10,6 @@ try {
   var lang = localStorage.getItem('planner-lang') === 'fa' ? 'fa' : 'en';
   root.lang = lang;
   root.dir = lang === 'fa' ? 'rtl' : 'ltr';
-} catch (error) {
+} catch {
   /* storage can be blocked; the light default is fine */
 }

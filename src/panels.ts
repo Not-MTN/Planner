@@ -107,37 +107,25 @@ export function daysUntil(iso: string | null, from = todayISO()): number | null 
   return Math.round((target - start) / 86_400_000);
 }
 
+/**
+ * The grade list, and the only place its wording lives. Labels are getters so
+ * they follow the language chosen at load time rather than being frozen in
+ * English at module load — the same trick `constants.ts` uses.
+ */
 export const GRADE_LABELS: Array<{ id: string; label: string }> = [
-  { id: 'school-9', label: 'Grade 9' },
-  { id: 'school-10', label: 'Grade 10' },
-  { id: 'school-11', label: 'Grade 11' },
-  { id: 'school-12', label: 'Grade 12' },
-  { id: 'university', label: 'University' },
-  { id: 'postgrad', label: 'Masters or PhD' },
-  { id: 'other', label: 'Something else' },
+  { id: 'school-9', get label() { return t('Grade 9'); } },
+  { id: 'school-10', get label() { return t('Grade 10'); } },
+  { id: 'school-11', get label() { return t('Grade 11'); } },
+  { id: 'school-12', get label() { return t('Grade 12'); } },
+  { id: 'university', get label() { return t('University'); } },
+  { id: 'postgrad', get label() { return t('Masters or PhD'); } },
+  { id: 'other', get label() { return t('Something else'); } },
 ];
 
 /** Human label for a stored grade id, or null when nothing is chosen. */
 export function gradeLabel(grade: string | null): string | null {
   if (!grade) return null;
-  switch (grade) {
-    case 'school-9':
-      return t('Grade 9');
-    case 'school-10':
-      return t('Grade 10');
-    case 'school-11':
-      return t('Grade 11');
-    case 'school-12':
-      return t('Grade 12');
-    case 'university':
-      return t('University');
-    case 'postgrad':
-      return t('Masters or PhD');
-    case 'other':
-      return t('Something else');
-    default:
-      return grade;
-  }
+  return GRADE_LABELS.find((item) => item.id === grade)?.label ?? grade;
 }
 
 export function newId(prefix: string): string {

@@ -12,7 +12,6 @@ import { Site } from './Site';
 import { resetRateLimits } from '../server/security';
 
 declare global {
-  // eslint-disable-next-line no-var
   var IS_REACT_ACT_ENVIRONMENT: boolean;
 }
 

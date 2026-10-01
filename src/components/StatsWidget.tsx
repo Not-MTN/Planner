@@ -9,9 +9,9 @@ export function StatsWidget({ state }: { state: PlannerState }) {
     const tasksToday = state.tasks.filter((t) => !t.completed && t.dueDate === today).length;
     const tasksDone = state.tasks.filter((t) => t.completed).length;
     const total = state.tasks.length;
-    const habitsActive = state.habits.filter((h) => !(h as any).archived).length;
+    const habitsActive = state.habits.filter((h) => !h.archived).length;
     const streakSum = state.habits.length; // simple proxy
-    const focusToday = (state.focusLog ?? []).filter((s) => s.date === today).reduce((sum: number, s: any) => sum + s.minutes, 0);
+    const focusToday = state.focusLog.filter((s) => s.date === today).reduce((sum, s) => sum + s.minutes, 0);
     return { tasksToday, tasksDone, total, habitsActive, streakSum, focusToday };
   }, [state]);
 

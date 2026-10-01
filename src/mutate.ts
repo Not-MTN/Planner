@@ -2,6 +2,7 @@ import { addDays, isValidISODate, isValidTime, timeToMinutes, todayISO, weekDate
 import { nextDueAfterCompletion, REPEAT_SET } from './recurrence';
 import { MAX_PLAN_DAYS } from './duration';
 import { AI_PLAN_LIMIT } from './types';
+import { t } from './i18n';
 import type {
   AIMemoryCategory,
   AIMemoryInput,
@@ -18,6 +19,7 @@ import type {
   PlannerState,
   SavedAIPlan,
   SavedAIPlanInput,
+  Task,
   TaskInput,
 } from './types';
 
@@ -112,7 +114,16 @@ function cleanUnit(value: HabitInput['unit']): Habit['unit'] {
   return { label, target };
 }
 
-export function updateTask(state: PlannerState, id: string, patch: Partial<TaskInput>, now = nowIso()): PlannerState {
+/**
+ * What a patch may carry. `completed` lives on `Task`, not on `TaskInput`, so a
+ * caller that only knew the input shape had its "done" flag dropped without a
+ * word. Named here so the board and the bulk editor can use it honestly.
+ */
+export interface TaskPatch extends Partial<TaskInput> {
+  completed?: boolean;
+}
+
+export function updateTask(state: PlannerState, id: string, patch: TaskPatch, now = nowIso()): PlannerState {
   return {
     ...state,
     tasks: state.tasks.map((task) => {
@@ -121,12 +132,18 @@ export function updateTask(state: PlannerState, id: string, patch: Partial<TaskI
       if (!title) return task;
       const dueDate = patch.dueDate === undefined ? task.dueDate : patch.dueDate && isValidISODate(patch.dueDate) ? patch.dueDate : null;
       const dueTime = patch.dueTime === undefined ? task.dueTime : patch.dueTime && isValidTime(patch.dueTime) ? patch.dueTime : null;
+      // Ticking a task off through a patch has to stamp the moment as well,
+      // or insights and streaks quietly lose the day it happened.
+      const completed = patch.completed === undefined ? task.completed : patch.completed;
+      const completedAt = patch.completed === undefined ? task.completedAt : completed ? task.completedAt ?? now : null;
       return {
         ...task,
         ...patch,
         title,
         dueDate,
         dueTime,
+        completed,
+        completedAt,
         note: patch.note === undefined ? task.note : patch.note.trim().slice(0, 4000),
         repeat: patch.repeat === undefined ? task.repeat : cleanRepeat(patch.repeat),
         subtasks: patch.subtasks === undefined ? task.subtasks : cleanSubtasks(patch.subtasks),
@@ -139,7 +156,7 @@ export function updateTask(state: PlannerState, id: string, patch: Partial<TaskI
 }
 
 /** Apply the same patch to many tasks at once. Single undo covers the whole batch. */
-export function updateTasks(state: PlannerState, ids: string[], patch: Partial<TaskInput>, now = nowIso()): PlannerState {
+export function updateTasks(state: PlannerState, ids: string[], patch: TaskPatch, now = nowIso()): PlannerState {
   return ids.reduce((next, id) => updateTask(next, id, patch, now), state);
 }
 
@@ -194,15 +211,45 @@ export function clearCompletedTasks(state: PlannerState): PlannerState {
   return { ...state, tasks: state.tasks.filter((task) => !task.completed) };
 }
 
+/**
+ * The next occurrence `id` created when it was completed — but only while
+ * nobody has worked on it. Anything the user has ticked, stepped through or
+ * carried forward again is their work now, so it is left alone.
+ */
+function removableSpawn(state: PlannerState, id: string | null | undefined): Task | null {
+  if (!id) return null;
+  const spawn = state.tasks.find((task) => task.id === id);
+  if (!spawn) return null;
+  if (spawn.completed || spawn.completedAt || spawn.spawnedId) return null;
+  if (spawn.subtasks.some((item) => item.completed)) return null;
+  return spawn;
+}
+
 export function toggleTask(state: PlannerState, id: string, now = nowIso(), today = todayISO(), nextId = uid()): PlannerState {
   const target = state.tasks.find((task) => task.id === id);
   if (!target) return state;
   const completing = !target.completed;
-  const tasks = state.tasks.map((task) =>
-    task.id === id
-      ? { ...task, completed: completing, completedAt: completing ? now : null, repeat: completing ? null : task.repeat, updatedAt: now }
-      : task,
-  );
+  // The copy this task made the last time it was completed. Completing again
+  // replaces it so the date moves on; un-completing takes it back so a series
+  // can never double up.
+  const spawn = completing
+    ? (target.repeat ? removableSpawn(state, target.spawnedId) : null)
+    : removableSpawn(state, target.spawnedId);
+  const tasks = state.tasks
+    .filter((task) => task.id !== spawn?.id)
+    .map((task) =>
+      task.id === id
+        ? {
+            ...task,
+            completed: completing,
+            completedAt: completing ? now : null,
+            // The rule stays on the finished copy on purpose: nulling it here
+            // meant un-checking the task ended the series for good.
+            spawnedId: completing && target.repeat ? nextId : null,
+            updatedAt: now,
+          }
+        : task,
+    );
   if (completing && target.repeat) {
     // The finished copy stays in history; a fresh copy carries the rule forward.
     tasks.push({
@@ -210,6 +257,7 @@ export function toggleTask(state: PlannerState, id: string, now = nowIso(), toda
       id: nextId,
       completed: false,
       completedAt: null,
+      spawnedId: null,
       dueDate: nextDueAfterCompletion(target.dueDate, target.repeat, today),
       subtasks: target.subtasks.map((item) => ({ ...item, completed: false })),
       sortOrder: nextOrder(state.tasks),
@@ -758,7 +806,7 @@ export function addNote(state: PlannerState, input: NoteInput, id = uid(), now =
     notes: [
       {
         id,
-        title: title || 'Untitled note',
+        title: title || t("Untitled note"),
         body,
         kind: input.kind,
         date: input.date && isValidISODate(input.date) ? input.date : null,
@@ -777,7 +825,7 @@ export function updateNote(state: PlannerState, id: string, patch: Partial<NoteI
     ...state,
     notes: state.notes.map((note) => {
       if (note.id !== id) return note;
-      const title = patch.title === undefined ? note.title : clean(patch.title, 140) || 'Untitled note';
+      const title = patch.title === undefined ? note.title : clean(patch.title, 140) || t("Untitled note");
       const body = patch.body === undefined ? note.body : patch.body.trim().slice(0, 20000);
       return {
         ...note,
@@ -852,6 +900,7 @@ export function copyWeek(state: PlannerState, fromDate: string, now = nowIso()):
         goalId: task.goalId,
         subtasks: task.subtasks.map((step) => ({ ...step, id: '', completed: false })),
         waiting: task.waiting,
+        estimatedMinutes: task.estimatedMinutes,
       },
       uid(),
       now,

@@ -5,6 +5,7 @@ import { REPEAT_SET } from './recurrence';
 import { MAX_PLAN_DAYS } from './duration';
 import { AI_PLAN_LIMIT, createEmptyPanels, createEmptyState, isGradeLevel, type AIMemory, type AttachmentRef, type AIMemoryCategory, type ChangeNote, type EventInput, type FixedCommitment, type FocusLog, type GuardianKind, type GuardianLink, type GuardianNotice, type GuardianPlan, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Panels, type PlanCadence, type PlanItem, type StudentGuardian, type StudentInbox, type StudentSubject, type Subtask, type TaskInput, type TaskRepeat, type WeekResults, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task } from './types';
 import { t } from './i18n';
+import { downloadBlob } from './download';
 
 export const STORAGE_KEY = 'personal-planner.v1';
 export const STORAGE_FULL = t("Browser storage is full, so that change was not saved.");
@@ -72,6 +73,7 @@ function sanitizeTask(value: unknown): Task | null {
     completedAt: asString(raw.completedAt, 40) || null,
     waiting: asString(raw.waiting, 140)?.trim() || null,
     estimatedMinutes: sanitizeMinutes(raw.estimatedMinutes),
+    spawnedId: asString(raw.spawnedId, 80),
   };
 }
 
@@ -688,7 +690,7 @@ function sanitizeStudentGuardian(value: unknown): StudentGuardian | null {
 /** Panels are opt-in and additive: turning one off never touches the planner itself. */
 export function sanitizePanels(value: unknown): Panels {
   const empty = createEmptyPanels();
-  if (!value || typeof value === 'object' === false) return empty;
+  if (!value || typeof value !== 'object') return empty;
   const raw = value as Record<string, unknown>;
   const student = (raw.student ?? {}) as Record<string, unknown>;
   const guardian = (raw.guardian ?? {}) as Record<string, unknown>;
@@ -801,13 +803,5 @@ export function saveTo(storage: Pick<Storage, 'setItem'>, state: PlannerState): 
 }
 
 export function downloadState(state: PlannerState, date: string): void {
-  const blob = new Blob([serialize(state)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `planner-${date}.json`;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+  downloadBlob(new Blob([serialize(state)], { type: 'application/json' }), `planner-${date}.json`);
 }

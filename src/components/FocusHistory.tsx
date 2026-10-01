@@ -5,14 +5,14 @@ import { todayISO } from '../dates';
 
 export function FocusHistory({ state }: { state: PlannerState }) {
   const history = useMemo(() => {
-    const sessions = (state as any).focusLog ?? [];
+    const sessions = state.focusLog ?? [];
     // Last 7 days
     const days: { date: string; minutes: number }[] = [];
     const now = new Date();
     for (let i = 6; i >= 0; i--) {
       const d = new Date(now.getTime() - i * 86400000);
       const iso = todayISO(d);
-      const mins = sessions.filter((s: any) => s.date === iso).reduce((sum: number, s: any) => sum + s.minutes, 0);
+      const mins = sessions.filter((s) => s.date === iso).reduce((sum, s) => sum + s.minutes, 0);
       days.push({ date: iso, minutes: mins });
     }
     return days;

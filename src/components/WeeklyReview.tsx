@@ -8,7 +8,7 @@ export function WeeklyReview({ state, onClose }: { state: PlannerState; onClose?
     const tasksDone = state.tasks.filter((t) => t.completed).length;
     const tasksTotal = state.tasks.length;
     const habitsDone = state.completions?.length ?? 0;
-    const focusTotal = (state.focusLog ?? []).reduce((s: number, sess: any) => s + sess.minutes, 0);
+    const focusTotal = state.focusLog.reduce((s, sess) => s + sess.minutes, 0);
     return { tasksDone, tasksTotal, habitsDone, focusTotal };
   }, [state]);
 

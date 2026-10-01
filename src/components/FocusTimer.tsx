@@ -105,13 +105,16 @@ function FocusOverlay({ sessionId, title, initialMinutes }: { sessionId: string 
   };
 
   useEffect(() => {
+    // Read the ref now: by the time the cleanup runs, `.current` may point
+    // somewhere else. The title is captured once per entry, never rewritten.
+    const restore = titleRef.current;
     if (phase === 'running' || phase === 'paused') {
       document.title = t("{0} · Focus — Planner", { 0: formatRemaining(remaining) });
     } else if (phase === 'setup') {
-      document.title = titleRef.current;
+      document.title = restore;
     }
     return () => {
-      document.title = titleRef.current;
+      document.title = restore;
     };
   }, [phase, remaining]);
 

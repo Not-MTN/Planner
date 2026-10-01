@@ -156,7 +156,7 @@ export function parseTaskCSV(text: string): TaskListImport {
       priority: priorityCol >= 0 ? (isTodoist ? todoistPriority(row[priorityCol] ?? '') : isTickTick ? ticktickPriority(row[priorityCol] ?? '') : 'medium') : 'medium',
       dueDate: due?.date ?? null,
       dueTime: due?.time ?? null,
-      category: isTickTick || listCol >= 0 ? 'personal' : 'personal',
+      category: 'personal',
       note: noteParts.join('\n').trim().slice(0, 4000),
       goalId: null,
     });

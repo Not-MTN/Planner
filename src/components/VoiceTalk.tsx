@@ -20,8 +20,16 @@ import { displayTime, formatFullDate, todayISO } from '../dates';
 type Phase = 'idle' | 'listening' | 'thinking' | 'speaking';
 
 interface Bubble {
+  /** Stable identity: a retry replaces a bubble, and index keys reused the DOM. */
+  id: string;
   role: 'user' | 'assistant';
   text: string;
+}
+
+let bubbleSeq = 0;
+function newBubble(role: Bubble['role'], text: string): Bubble {
+  bubbleSeq += 1;
+  return { id: `bubble-${bubbleSeq}`, role, text };
 }
 
 function speechErrorMessage(error: SpeechError): string {
@@ -96,7 +104,7 @@ export function VoiceTalk({ onDraft, currentDraft = null }: {
           3: displayTime(conflict.endTime),
           4: displayTime(conflict.requestedTime),
         });
-        setBubbles((current) => [...current, ...(echo ? [{ role: 'user' as const, text: utterance }] : []), { role: 'assistant', text: reply }]);
+        setBubbles((current) => [...current, ...(echo ? [newBubble('user', utterance)] : []), newBubble('assistant', reply)]);
         scrollLog();
         const spoken = !mutedRef.current && speakText(reply, { lang: replyLang(reply), onend: () => settle('idle') });
         setPhase(spoken ? 'speaking' : 'idle');
@@ -106,7 +114,7 @@ export function VoiceTalk({ onDraft, currentDraft = null }: {
     busyRef.current = true;
     setPendingConflict(null);
     setPhase('thinking');
-    if (echo) setBubbles((current) => [...current, { role: 'user', text: utterance }]);
+    if (echo) setBubbles((current) => [...current, newBubble('user', utterance)]);
     scrollLog();
     try {
       const history: VoiceTurn[] = bubbles.slice(-10).map((bubble) => ({ role: bubble.role, text: bubble.text }));
@@ -116,7 +124,7 @@ export function VoiceTalk({ onDraft, currentDraft = null }: {
       const result = await voiceTurn({ utterance: requestText, history, state, currentDraft });
       if (!mountedRef.current) return;
       const replyText = result.followUp ? `${result.reply} ${result.followUp}` : result.reply;
-      setBubbles((current) => [...current, { role: 'assistant', text: replyText }]);
+      setBubbles((current) => [...current, newBubble('assistant', replyText)]);
       scrollLog();
       if (result.draft) onDraft(result.draft, result.range);
       // The voice follows the reply's own language, not the app's: a Persian
@@ -223,8 +231,8 @@ export function VoiceTalk({ onDraft, currentDraft = null }: {
             </ul>
           </div>
         ) : (
-          bubbles.map((bubble, index) => (
-            <p key={index} className={cx('voice-bubble', bubble.role)} dir="auto">
+          bubbles.map((bubble) => (
+            <p key={bubble.id} className={cx('voice-bubble', bubble.role)} dir="auto">
               {bubble.text}
             </p>
           ))
