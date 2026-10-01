@@ -1155,3 +1155,32 @@
   letter-spacing: 0.02em;
   white-space: nowrap;
 }
+
+/* --- Two-step sign-in (Settings → Two-step sign-in) ------------------- */
+.totp-secret {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-small);
+  background: var(--surface-2);
+}
+
+.totp-secret code {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  user-select: all;
+}
+
+/* A six-digit code reads better spaced out and centred than as a number. */
+.input-totp {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 20px;
+  letter-spacing: 0.4em;
+  text-align: center;
+}

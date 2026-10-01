@@ -91,6 +91,11 @@ describe('marketing site', () => {
   it('renders sign in and the recovery ladder', async () => {
     await renderAt('/login');
     expect(container.textContent).toContain('Welcome back');
+    // The heading is easy to drop when the form gains a branch (a second-step
+    // step, say) — check the heading element itself, not just stray text.
+    expect(container.querySelector('.auth-head h1')?.textContent).toBe('Welcome back');
+    // The sign-in form is still the one on screen, not a second-step panel.
+    expect(container.querySelector('form.auth-fields input[type="password"]')).toBeTruthy();
 
     await act(async () => {
       root.render(

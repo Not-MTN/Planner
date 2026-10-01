@@ -95,6 +95,10 @@ export type AuthErrorCode =
   | 'deployment_gate'
   /** Nothing serves the accounts API at this address: the route or function is missing. */
   | 'api_missing'
+  /** The password was accepted, and a code from the authenticator app is owed. */
+  | 'totp_required'
+  /** A code typed during set-up or removal did not match. */
+  | 'totp_invalid'
   | 'unknown';
 
 /**
@@ -336,6 +340,24 @@ export async function signUp(input: SignUpInput): Promise<{ recoveryCodes: strin
   return { recoveryCodes, session: active };
 }
 
+/**
+ * A sign-in that got as far as a correct password and stopped there.
+ *
+ * The key derived from the password is held only until the six-digit code
+ * arrives, and is dropped the moment it is used or the attempt is abandoned.
+ */
+let pendingSecondFactor: { kek: CryptoKey | null; remember: boolean } | null = null;
+
+/** True while a sign-in is waiting on a code from the authenticator app. */
+export function awaitingSecondFactor(): boolean {
+  return pendingSecondFactor !== null;
+}
+
+/** Abandons a half-finished sign-in, dropping the key derived from the password. */
+export function abandonSecondFactor(): void {
+  pendingSecondFactor = null;
+}
+
 export async function signIn(identifier: string, password: string, remember = true): Promise<ActiveSession> {
   // The salt is stored with the account, so fetch it before stretching. Unknown
   // accounts receive a decoy salt and simply fail the next step.
@@ -345,10 +367,17 @@ export async function signIn(identifier: string, password: string, remember = tr
   });
   const { authToken, kek } = await deriveFromPassword(password, kdfSalt);
 
-  const result = await request<LoginResponse>('/api/auth/login', {
+  const result = await request<LoginResponse & { secondFactor?: 'totp' }>('/api/auth/login', {
     method: 'POST',
     body: JSON.stringify({ username: identifier.trim(), authToken }),
   });
+
+  // The account has an authenticator app: nothing is signed in yet, and the
+  // session does not exist until the code arrives.
+  if (result.secondFactor === 'totp') {
+    pendingSecondFactor = { kek, remember };
+    throw new AuthError('totp_required', 'Enter the code from your authenticator app.');
+  }
 
   const raw = await unwrapKeyRaw(result.wrappedDek, kek);
   if (remember) await rememberOnDevice(result.user.id, raw);
@@ -580,6 +609,116 @@ export async function revokeOtherDeviceSessions(): Promise<number> {
     body: JSON.stringify({ others: true }),
   });
   return result.removed;
+}
+
+/**
+ * Finishes a password sign-in with a code from the authenticator app.
+ *
+ * Throws `totp_required` again when the code is wrong or already used, so the
+ * caller can simply ask for another one.
+ */
+export async function completeTotpSignIn(code: string): Promise<ActiveSession> {
+  const pending = pendingSecondFactor;
+  if (!pending?.kek) throw new AuthError('unauthenticated', 'Start signing in again.');
+
+  let result: LoginResponse;
+  try {
+    result = await request<LoginResponse>('/api/auth/totp/login', {
+      method: 'POST',
+      body: JSON.stringify({ code: code.trim() }),
+    });
+  } catch (error) {
+    if (error instanceof AuthError && error.code === 'bad_credentials') {
+      throw new AuthError('totp_required', 'That code is not right, or has already been used. Wait for the next one.');
+    }
+    throw error;
+  }
+  // Spent either way: the challenge is single-use on the server.
+  pendingSecondFactor = null;
+
+  const raw = await unwrapKeyRaw(result.wrappedDek, pending.kek);
+  if (pending.remember) await rememberOnDevice(result.user.id, raw);
+  else {
+    try {
+      const last = getLastUserId();
+      if (last && last !== result.user.id) await forgetDevice(last);
+    } catch {}
+  }
+  const dekRaw = new Uint8Array(raw);
+  const dek = await importDek(raw, false);
+  active = { user: result.user, dek, dekRaw, vault: result.vault };
+  persistAuth(result.user.id);
+  return active;
+}
+
+/** Finishes a passkey sign-in with a code. The vault opens on the gate as usual. */
+export async function completePasskeyTotpSignIn(code: string): Promise<void> {
+  try {
+    await request<LoginResponse>('/api/auth/totp/login', {
+      method: 'POST',
+      body: JSON.stringify({ code: code.trim() }),
+    });
+  } catch (error) {
+    if (error instanceof AuthError && error.code === 'bad_credentials') {
+      throw new AuthError('totp_required', 'That code is not right, or has already been used. Wait for the next one.');
+    }
+    throw error;
+  }
+  pendingSecondFactor = null;
+}
+
+export interface TotpSetup {
+  secret: string;
+  formatted: string;
+  uri: string;
+  confirmed: boolean;
+}
+
+/** The account's authenticator app, if it has one. */
+export async function fetchTotpStatus(): Promise<TotpSetup | null> {
+  const result = await request<{ enrolled: boolean } & Partial<TotpSetup>>('/api/auth/totp/setup');
+  if (!result.enrolled || !result.secret) return null;
+  return {
+    secret: result.secret,
+    formatted: result.formatted ?? result.secret,
+    uri: result.uri ?? '',
+    confirmed: Boolean(result.confirmed),
+  };
+}
+
+/** Issues a new secret. It does nothing until a code from it is accepted. */
+export async function startTotpSetup(): Promise<TotpSetup> {
+  return request<TotpSetup>('/api/auth/totp/setup', { method: 'POST' });
+}
+
+/** Proves the app is set up by accepting one code from it. */
+export async function confirmTotpSetup(code: string): Promise<void> {
+  try {
+    await request<{ ok: true }>('/api/auth/totp/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ code: code.trim() }),
+    });
+  } catch (error) {
+    if (error instanceof AuthError && error.code === 'bad_credentials') {
+      throw new AuthError('totp_invalid', 'That code is not right, or has already been used. Wait for the next one.');
+    }
+    throw error;
+  }
+}
+
+/** Turns the second step off. A current code is required. */
+export async function disableTotp(code: string): Promise<void> {
+  try {
+    await request<{ ok: true }>('/api/auth/totp/disable', {
+      method: 'POST',
+      body: JSON.stringify({ code: code.trim() }),
+    });
+  } catch (error) {
+    if (error instanceof AuthError && error.code === 'bad_credentials') {
+      throw new AuthError('totp_invalid', 'That code is not right, or has already been used. Wait for the next one.');
+    }
+    throw error;
+  }
 }
 
 export interface ApiStatus {

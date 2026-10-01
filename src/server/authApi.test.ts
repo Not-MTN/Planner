@@ -11,9 +11,15 @@ import {
   handleSession,
   handleSessions,
   handleSignup,
+  handleTotpConfirm,
+  handleTotpDisable,
+  handleTotpLogin,
+  handleTotpSetup,
   deviceLabel,
+  readTwoStepToken,
   readSessionToken,
 } from './authApi';
+import { currentTotpCode } from './totp';
 import { createMemoryAuthStore } from './authStore';
 import { resetRateLimits } from './security';
 import type { LoginResponse, PublicUser } from '../shared/authContract';
@@ -499,6 +505,98 @@ describe('account API', () => {
     // A malformed id is refused before it reaches the database.
     resetRateLimits();
     expect((await handleSessions(del('/api/auth/sessions', { id: 'not-a-uuid' }, cookie), store)).status).toBe(400);
+  });
+
+  it('makes an authenticator app a second step, and signs nobody in without it', async () => {
+    resetRateLimits();
+    const store = STORE();
+    const signup = await handleSignup(post('/api/auth/signup', ACCOUNT), store);
+    const cookie = cookieFrom(signup);
+
+    // Setting up needs a session, and hands out a secret that does nothing yet.
+    const anon = await handleTotpSetup(post('/api/auth/totp/setup', undefined), store);
+    expect(anon.status).toBe(401);
+
+    const started = await handleTotpSetup(post('/api/auth/totp/setup', undefined, cookie), store);
+    expect(started.status).toBe(200);
+    const setup = (await started.json()) as { secret: string; formatted: string; uri: string; confirmed: boolean };
+    expect(setup.secret).toMatch(/^[A-Z2-7]{32}$/);
+    expect(setup.confirmed).toBe(false);
+    expect(setup.uri).toContain('otpauth://totp/');
+
+    // An unconfirmed secret must not change how sign-in behaves.
+    resetRateLimits();
+    const stillOpen = await handleLogin(post('/api/auth/login', { username: 'sara', authToken: ACCOUNT.authToken }), store);
+    expect(stillOpen.status).toBe(200);
+    expect('wrappedDek' in (await stillOpen.json() as object)).toBe(true);
+
+    // Confirming needs a real code from that secret.
+    resetRateLimits();
+    const wrong = await handleTotpConfirm(post('/api/auth/totp/confirm', { code: '000000' }, cookie), store);
+    expect(wrong.status).toBe(401);
+
+    resetRateLimits();
+    const confirmed = await handleTotpConfirm(
+      post('/api/auth/totp/confirm', { code: currentTotpCode(setup.secret)! }, cookie),
+      store,
+    );
+    expect(confirmed.status).toBe(200);
+
+    // Now the password alone is not enough: no session, just a challenge.
+    resetRateLimits();
+    const gated = await handleLogin(post('/api/auth/login', { username: 'sara', authToken: ACCOUNT.authToken }), store);
+    expect(gated.status).toBe(200);
+    expect(await gated.json()).toEqual({ secondFactor: 'totp' });
+    const challenge = cookieFrom(gated);
+    expect(readTwoStepToken(get('/api/auth/session', challenge))).toBeTruthy();
+    // But it is not a session: it opens nothing.
+    resetRateLimits();
+    expect((await handleSession(get('/api/auth/session', challenge), store)).status).toBe(401);
+
+    // A code is what finishes the sign-in.
+    resetRateLimits();
+    const badCode = await handleTotpLogin(post('/api/auth/totp/login', { code: '000000' }, challenge), store);
+    expect(badCode.status).toBe(401);
+
+    resetRateLimits();
+    const finished = await handleTotpLogin(
+      post('/api/auth/totp/login', { code: currentTotpCode(setup.secret)! }, challenge),
+      store,
+    );
+    expect(finished.status).toBe(200);
+    const session = cookieFrom(finished);
+    expect(session).toContain('planner_session=');
+    resetRateLimits();
+    expect((await handleSession(get('/api/auth/session', session), store)).status).toBe(200);
+
+    // The one code cannot be spent twice.
+    resetRateLimits();
+    expect((await handleTotpLogin(post('/api/auth/totp/login', { code: currentTotpCode(setup.secret)! }, challenge), store)).status).toBe(401);
+  });
+
+  it('turns the second step off only with a current code', async () => {
+    resetRateLimits();
+    const store = STORE();
+    const cookie = cookieFrom(await handleSignup(post('/api/auth/signup', ACCOUNT), store));
+    const { secret } = (await (await handleTotpSetup(post('/api/auth/totp/setup', undefined, cookie), store)).json()) as { secret: string };
+
+    resetRateLimits();
+    await handleTotpConfirm(post('/api/auth/totp/confirm', { code: currentTotpCode(secret)! }, cookie), store);
+
+    resetRateLimits();
+    expect((await handleTotpDisable(post('/api/auth/totp/disable', { code: '000000' }, cookie), store)).status).toBe(401);
+
+    // Turning it off straight away must work with the code still on screen.
+    // The replay guard belongs to sign-in alone: here you already hold a
+    // session, so refusing the current step would only make people wait.
+    resetRateLimits();
+    expect((await handleTotpDisable(post('/api/auth/totp/disable', { code: currentTotpCode(secret)! }, cookie), store)).status).toBe(200);
+
+    // Sign-in is back to the password alone.
+    resetRateLimits();
+    const plain = await handleLogin(post('/api/auth/login', { username: 'sara', authToken: ACCOUNT.authToken }), store);
+    expect(plain.status).toBe(200);
+    expect('wrappedDek' in (await plain.json() as object)).toBe(true);
   });
 
   it('reports 503 when no database is configured', async () => {

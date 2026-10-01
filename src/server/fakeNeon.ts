@@ -41,6 +41,7 @@ export function createFakeNeon(): FakeDb {
     planner_links: [],
     planner_passkeys: [],
     planner_sync: [],
+    planner_login_challenges: [],
   };
 
   const now = () => new Date().toISOString();
@@ -160,7 +161,73 @@ export function createFakeNeon(): FakeDb {
       return [{ user_id }];
     }
 
-    if (/^UPDATE planner_credentials SET /i.test(q)) {
+    if (/^SELECT totp_secret AS secret/i.test(q)) {
+      const row = tables.planner_credentials.find((item) => item.user_id === values[0]);
+      if (!row) return [];
+      return [{
+        secret: row.totp_secret ?? null,
+        confirmedAt: row.totp_confirmed_at ?? null,
+        lastStep: row.totp_last_step ?? null,
+      }];
+    }
+
+    if (/^UPDATE planner_credentials SET totp_secret = /i.test(q)) {
+      const [secret, user_id] = values;
+      const row = tables.planner_credentials.find((item) => item.user_id === user_id);
+      if (!row) return [];
+      row.totp_secret = secret;
+      row.totp_confirmed_at = null;
+      row.totp_last_step = null;
+      return [];
+    }
+
+    if (/^UPDATE planner_credentials SET totp_confirmed_at = now\(\)/i.test(q)) {
+      const row = tables.planner_credentials.find((item) => item.user_id === values[0]);
+      if (row) row.totp_confirmed_at = now();
+      return [];
+    }
+
+    if (/^UPDATE planner_credentials SET totp_last_step = /i.test(q)) {
+      const [step, user_id] = values;
+      const row = tables.planner_credentials.find((item) => item.user_id === user_id);
+      if (row) row.totp_last_step = step;
+      return [];
+    }
+
+    if (/^INSERT INTO planner_login_challenges /i.test(q)) {
+      const [token_hash, user_id, expires_at] = values;
+      // Mirrors the real statement: one live challenge per account, and the
+      // expired rows go while we are here.
+      tables.planner_login_challenges = tables.planner_login_challenges.filter(
+        (row) => row.user_id !== user_id && new Date(String(row.expires_at)).getTime() > Date.now(),
+      );
+      tables.planner_login_challenges.push({ token_hash, user_id, expires_at });
+      return [];
+    }
+
+    if (/^SELECT c\.user_id, u\.id/i.test(q)) {
+      const session = tables.planner_login_challenges.find(
+        (row) => row.token_hash === values[0] && new Date(String(row.expires_at)).getTime() > Date.now(),
+      );
+      if (!session) return [];
+      const user = tables.planner_users.find((row) => row.id === session.user_id);
+      if (!user) return [];
+      return [{ ...user, user_id: session.user_id }];
+    }
+
+    if (/^DELETE FROM planner_login_challenges WHERE token_hash = /i.test(q)) {
+      tables.planner_login_challenges = tables.planner_login_challenges.filter((row) => row.token_hash !== values[0]);
+      return [];
+    }
+
+    if (/^DELETE FROM planner_login_challenges WHERE user_id = /i.test(q)) {
+      tables.planner_login_challenges = tables.planner_login_challenges.filter(
+        (row) => row.user_id !== values[0] && new Date(String(row.expires_at)).getTime() > Date.now(),
+      );
+      return [];
+    }
+
+    if (/^UPDATE planner_credentials SET kdf_salt = /i.test(q)) {
       const [kdf_salt, auth_hash, hash_salt, user_id] = values;
       const row = tables.planner_credentials.find((item) => item.user_id === user_id);
       if (!row) return [];

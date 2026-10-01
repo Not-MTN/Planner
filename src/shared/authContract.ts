@@ -59,6 +59,28 @@ export interface LoginResponse {
   vault: { version: number; ciphertext: string };
 }
 
+/**
+ * The password was right, but a second step is still owed.
+ *
+ * No session exists yet. The caller holds a short-lived challenge in a cookie
+ * and must answer with a code from the account's authenticator app.
+ */
+export interface SecondFactorResponse {
+  secondFactor: 'totp';
+}
+
+/** An authenticator app being set up, or already set up. */
+export interface TotpSetupResponse {
+  /** Base32 secret, grouped in fours for reading aloud or typing. */
+  secret: string;
+  /** The same secret, grouped, for display. */
+  formatted: string;
+  /** `otpauth://` URI, for apps that import by link. */
+  uri: string;
+  /** True once a code from this secret has been accepted. */
+  confirmed: boolean;
+}
+
 /** Challenge for a WebAuthn ceremony; allowCredentials narrows the chooser
  *  when the account is known, and is empty for a discoverable-credential flow. */
 export interface PasskeyOptionsResponse {

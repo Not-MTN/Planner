@@ -39,6 +39,10 @@ import {
   handleSession,
   handleSessions,
   handleShare,
+  handleTotpConfirm,
+  handleTotpDisable,
+  handleTotpLogin,
+  handleTotpSetup,
   handleSignup,
 } from './authApi.js';
 import { authStore } from './authStore.js';
@@ -144,6 +148,14 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
       return (request) => authStore(env.DATABASE_URL).then((store) => handleShare(request, store));
     case '/api/auth/signup':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleSignup(request, store));
+    case '/api/auth/totp/login':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleTotpLogin(request, store));
+    case '/api/auth/totp/setup':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleTotpSetup(request, store));
+    case '/api/auth/totp/confirm':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleTotpConfirm(request, store));
+    case '/api/auth/totp/disable':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleTotpDisable(request, store));
     case '/api/auth/status':
       return (request) => handleAuthStatus(request, env.DATABASE_URL);
     case '/api/auth/vault':

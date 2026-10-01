@@ -13,13 +13,18 @@ import { useSignOut } from './useSignOut';
 import { accountUser, forgetAccountUser } from '../auth/vault';
 import { deviceCacheSupported, forgetDevice, listTrustedUserIds } from '../auth/device';
 import {
+  confirmTotpSetup,
   deleteAccount,
+  disableTotp,
+  fetchTotpStatus,
   getActiveSession,
   listDeviceSessions,
   regenerateRecoveryCodes,
   revokeDeviceSession,
   revokeOtherDeviceSessions,
+  startTotpSetup,
   type DeviceSession,
+  type TotpSetup,
 } from '../auth/session';
 import { DATE_LANGUAGES, todayISO, type DateLanguage } from '../dates';
 import { downloadBusyICS, downloadICS, parseICS } from '../ics';
@@ -867,6 +872,181 @@ function DevicesSection() {
   );
 }
 
+/**
+ * A second step at sign-in, for anyone without a passkey.
+ *
+ * A stolen password is the whole disaster in an app like this: it opens the
+ * encrypted planner anywhere. A passkey is the better answer, but not every
+ * browser has one. An authenticator app works everywhere and costs nothing.
+ *
+ * The secret is only shown once, and it does nothing until a code from it has
+ * been accepted — so a half-finished set-up can never lock anybody out.
+ */
+function TwoFactorSection() {
+  const { flash, requestConfirm } = usePlanner();
+  const [setup, setSetup] = useState<TotpSetup | null>(null);
+  const [enrolled, setEnrolled] = useState(false);
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  /** Turning it off needs a current code, so it is a second small step. */
+  const [turningOff, setTurningOff] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    void fetchTotpStatus()
+      .then((status) => {
+        if (!live) return;
+        setEnrolled(Boolean(status?.confirmed));
+        // A set-up that was started but never confirmed is shown again, so it
+        // can be finished rather than silently half-done.
+        if (status && !status.confirmed) setSetup(status);
+      })
+      .catch(() => undefined);
+    return () => { live = false; };
+  }, []);
+
+  const start = () => {
+    setBusy(true);
+    setError('');
+    void startTotpSetup()
+      .then((next) => { setSetup(next); setCode(''); })
+      .catch(() => setError(t("The set-up could not be started. Try again.")))
+      .finally(() => setBusy(false));
+  };
+
+  const confirm = () => {
+    if (busy || code.length !== 6) return;
+    setBusy(true);
+    setError('');
+    void confirmTotpSetup(code)
+      .then(() => {
+        setEnrolled(true);
+        setSetup(null);
+        setCode('');
+        flash(t("Two-step sign-in is on. Keep your recovery codes safe: they are the other way back in if you lose the app."));
+      })
+      .catch(() => setError(t("That code is not right, or has already been used. Wait for the next one.")))
+      .finally(() => setBusy(false));
+  };
+
+  const turnOff = () => {
+    if (code.length !== 6) return;
+    requestConfirm({
+      title: t("Turn off two-step sign-in?"),
+      body: t("Signing in will need only your password again. Enter the code from your app to confirm."),
+      confirmLabel: t("Turn off two-step sign-in"),
+      onConfirm: () => {
+        setBusy(true);
+        setError('');
+        void disableTotp(code)
+          .then(() => {
+            setEnrolled(false);
+            setSetup(null);
+            setCode('');
+            flash(t("Two-step sign-in is off."));
+          })
+          .catch(() => setError(t("That code is not right, or has already been used. Wait for the next one.")))
+          .finally(() => setBusy(false));
+      },
+    });
+  };
+
+  return (
+    <section className="set-section">
+      <h3 className="kicker">{t("Two-step sign-in")}</h3>
+
+      {!getActiveSession() ? (
+        <p className="set-hint">{t("Sign in to add an authenticator app. It asks for a code as well as your password.")}</p>
+      ) : enrolled ? (
+        turningOff ? (
+          <>
+            <label className="field">
+              <span>{t("Enter a code from your app to turn this off")}</span>
+              <input
+                className="input input-totp"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                dir="ltr"
+                maxLength={6}
+                value={code}
+                onChange={(event) => setCode(event.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+              />
+            </label>
+            {error ? <p className="set-hint is-error" role="alert">{error}</p> : null}
+            <div className="set-actions">
+              <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => { setTurningOff(false); setCode(''); setError(''); }}>
+                {t("Cancel")}
+              </button>
+              <button type="button" className="btn btn-danger" disabled={busy || code.length !== 6} onClick={turnOff}>
+                {t("Turn off two-step sign-in")}
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="set-row">
+            <div>
+              <p className="set-label">{t("On — a code from your app is asked for at every sign-in")}</p>
+              <p className="set-hint">{t("Keep your recovery codes safe: they are the other way back in if you lose the app.")}</p>
+            </div>
+            <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => { setTurningOff(true); setCode(''); setError(''); }}>
+              {t("Turn off")}
+            </button>
+          </div>
+        )
+      ) : setup ? (
+        <>
+          <p className="set-hint">{t("Add this to your authenticator app, then type the code it shows.")}</p>
+          <div className="totp-secret">
+            <code dir="ltr">{setup.formatted}</code>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => { void navigator.clipboard?.writeText(setup.secret); }}
+            >
+              {t("Copy")}
+            </button>
+          </div>
+          <p className="set-hint">
+            <Rich
+              text={t("If your app can take a link, {link} instead of typing the secret.")}
+              values={{ link: <a className="link" href={setup.uri}>{t("open it in your app")}</a> }}
+            />
+          </p>
+          <label className="field">
+            <span>{t("Code from your app")}</span>
+            <input
+              className="input input-totp"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              dir="ltr"
+              maxLength={6}
+              value={code}
+              onChange={(event) => setCode(event.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+            />
+          </label>
+          {error ? <p className="set-hint is-error" role="alert">{error}</p> : null}
+          <div className="set-actions">
+            <button type="button" className="btn btn-primary" disabled={busy || code.length !== 6} onClick={confirm}>
+              {t("Turn on two-step sign-in")}
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="set-row">
+          <div>
+            <p className="set-label">{t("Off — your password alone opens your planner")}</p>
+            <p className="set-hint">{t("An authenticator app asks for a six-digit code as well as your password, so a stolen password on its own cannot open your planner.")}</p>
+          </div>
+          <button type="button" className="btn btn-soft" disabled={busy} onClick={start}>
+            {t("Add an authenticator app")}
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function SettingsSheet() {
   const planner = usePlanner();
   const {
@@ -889,6 +1069,7 @@ export function SettingsSheet() {
     <Modal title={t("Settings")} onClose={closeSettings} className="sheet-settings">
       <AccountSection />
       <DevicesSection />
+      <TwoFactorSection />
       <section className="set-section">
         <h3 className="kicker">{t("Appearance")}</h3>
         <div className="set-row">

@@ -10,6 +10,7 @@
 import { createHash } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { isSameOriginRequest } from './groqProxy.js';
+import { formatTotpSecret, newTotpSecret, totpUri, verifyTotp } from './totp.js';
 import { WebAuthnError, fromBase64Url, verifyAssertion, verifyRegistration } from './webauthn.js';
 import { API_SECURITY_HEADERS, BodyTooLargeError, rateLimitResponse, readLimitedBody } from './security.js';
 import {
@@ -34,6 +35,8 @@ import {
   type LoginResponse,
   type OutgoingLink,
   type PasskeyLoginResponse,
+  type SecondFactorResponse,
+  type TotpSetupResponse,
   type PasskeyOptionsResponse,
   type PublicUser,
   type SessionResponse,
@@ -114,6 +117,36 @@ function sessionCookie(token: string, secure: boolean): string {
 
 function clearedCookie(secure: boolean): string {
   return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure ? '; Secure' : ''}`;
+}
+
+/** The half-signed-in state: password accepted, second step still owed. */
+const TWO_STEP_COOKIE = 'planner_two_step';
+const TWO_STEP_TTL_SECONDS = 300;
+
+function twoStepCookie(token: string, secure: boolean): string {
+  const parts = [
+    `${TWO_STEP_COOKIE}=${token}`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    `Max-Age=${TWO_STEP_TTL_SECONDS}`,
+  ];
+  if (secure) parts.push('Secure');
+  return parts.join('; ');
+}
+
+function clearedTwoStepCookie(secure: boolean): string {
+  return `${TWO_STEP_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure ? '; Secure' : ''}`;
+}
+
+export function readTwoStepToken(request: Request): string | null {
+  const header = request.headers.get('cookie');
+  if (!header) return null;
+  for (const part of header.split(';')) {
+    const [name, ...rest] = part.trim().split('=');
+    if (name === TWO_STEP_COOKIE) return decodeURIComponent(rest.join('=')) || null;
+  }
+  return null;
 }
 
 export function readSessionToken(request: Request): string | null {
@@ -469,6 +502,20 @@ export async function handleLogin(request: Request, store: AuthStore | null): Pr
     const vault = await store!.getVault(account.user.id);
     if (!vault) return error(500, 'This account has no vault. Please contact support.', 'no_vault');
 
+    // A verified authenticator app turns a stolen password into half a key.
+    // No session exists until the code arrives, so nothing is signed in here.
+    const totp = await store!.getTotp(account.user.id);
+    if (totp?.secret && totp.confirmedAt) {
+      const challenge = newToken();
+      await store!.createLoginChallenge(
+        account.user.id,
+        hashToken(challenge),
+        new Date(Date.now() + TWO_STEP_TTL_SECONDS * 1000),
+      );
+      const payload: SecondFactorResponse = { secondFactor: 'totp' };
+      return json(200, payload, { 'Set-Cookie': twoStepCookie(challenge, isHttps(request)) });
+    }
+
     const token = newToken();
     const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * DAY_MS);
     await store!.createSession(account.user.id, hashToken(token), deviceLabel(request), expiresAt);
@@ -480,6 +527,176 @@ export async function handleLogin(request: Request, store: AuthStore | null): Pr
       vault: { version: vault.version, ciphertext: vault.ciphertext },
     };
     return json(200, payload, { 'Set-Cookie': sessionCookie(token, isHttps(request)) });
+  } catch {
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
+}
+
+/* ------------------------------------------------------- second step (TOTP) */
+
+/**
+ * Finishing a sign-in with a code from the authenticator app.
+ *
+ * The challenge cookie is the only thing that says the password already passed,
+ * and it is spent the moment a code is accepted — so this endpoint cannot be
+ * used to try codes against an account whose password you do not have.
+ */
+export async function handleTotpLogin(request: Request, store: AuthStore | null): Promise<Response> {
+  // Tight: there are a million six-digit codes, and this is the only place one
+  // can be tried against a password that has already been accepted.
+  const blocked = guard(request, 'auth-totp-login', 10) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'POST') return error(405, 'Method not allowed.', undefined);
+
+  const challenge = readTwoStepToken(request);
+  if (!challenge) return error(401, 'That sign-in has expired. Please start again.', 'unauthenticated');
+
+  const body = await readJsonBody(request);
+  const code = typeof body?.code === 'string' ? body.code : '';
+  if (!/^\d{6}$/.test(code)) return error(400, 'Enter the six-digit code from your authenticator app.');
+
+  try {
+    const pending = await store!.findLoginChallenge(hashToken(challenge));
+    // A missing or expired challenge is the same answer: it stops an old
+    // cookie, or a made-up one, from being a way in.
+    if (!pending) return error(401, 'That sign-in has expired. Please start again.', 'unauthenticated');
+
+    const totp = await store!.getTotp(pending.user.id);
+    if (!totp?.secret || !totp.confirmedAt) {
+      return error(500, 'This account has no confirmed authenticator. Please contact support.', 'no_vault');
+    }
+    // The one place replay matters: this code is what opens the vault, so the
+    // step it belongs to is spent.
+    const checked = verifyTotp(totp.secret, code, { afterCounter: totp.lastStep ?? -1 });
+    if (!checked.ok) return error(401, 'That code is not right, or has already been used. Wait for the next one.', 'bad_credentials');
+    await store!.recordTotpStep(pending.user.id, checked.counter);
+
+    const vault = await store!.getVault(pending.user.id);
+    if (!vault) return error(500, 'This account has no vault. Please contact support.', 'no_vault');
+
+    const token = newToken();
+    const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * DAY_MS);
+    await store!.createSession(pending.user.id, hashToken(token), deviceLabel(request), expiresAt);
+    await store!.deleteLoginChallenge(hashToken(challenge));
+
+    // The salt travels again so the client can re-derive the key here the
+    // same way it does on an ordinary sign-in.
+    const account = await store!.findAccount(pending.user.username);
+    const payload: LoginResponse = {
+      user: toPublicUser(pending.user),
+      kdfSalt: account?.kdfSalt ?? '',
+      wrappedDek: vault.wrappedDek,
+      vault: { version: vault.version, ciphertext: vault.ciphertext },
+    };
+    return json(200, payload, {
+      'Set-Cookie': [sessionCookie(token, isHttps(request)), clearedTwoStepCookie(isHttps(request))].join(', '),
+    });
+  } catch {
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
+}
+
+/**
+ * Start (or restart) setting up an authenticator app, and read back the current
+ * state. The secret is not live until a code from it has been accepted, so a
+ * half-finished set-up cannot lock anybody out.
+ */
+export async function handleTotpSetup(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'auth-totp-setup', 12) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+
+  const token = readSessionToken(request);
+  if (!token) return error(401, 'Sign in first.', 'unauthenticated');
+
+  try {
+    const found = await store!.findSession(hashToken(token));
+    if (!found) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+
+    if (request.method === 'GET') {
+      const totp = await store!.getTotp(found.user.id);
+      if (!totp?.secret) return json(200, { enrolled: false } satisfies { enrolled: false });
+      const payload: TotpSetupResponse = {
+        secret: totp.secret,
+        formatted: formatTotpSecret(totp.secret),
+        uri: totpUri(found.user.username, totp.secret),
+        confirmed: Boolean(totp.confirmedAt),
+      };
+      return json(200, { enrolled: true, ...payload });
+    }
+
+    if (request.method === 'POST') {
+      const secret = newTotpSecret();
+      await store!.setTotpSecret(found.user.id, secret);
+      const payload: TotpSetupResponse = {
+        secret,
+        formatted: formatTotpSecret(secret),
+        uri: totpUri(found.user.username, secret),
+        confirmed: false,
+      };
+      return json(200, payload);
+    }
+
+    return error(405, 'Method not allowed.', undefined);
+  } catch {
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
+}
+
+/** Confirms a new secret, or turns the existing one off. */
+export async function handleTotpConfirm(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'auth-totp-confirm', 10) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'POST') return error(405, 'Method not allowed.', undefined);
+
+  const token = readSessionToken(request);
+  if (!token) return error(401, 'Sign in first.', 'unauthenticated');
+
+  const body = await readJsonBody(request);
+  const code = typeof body?.code === 'string' ? body.code : '';
+  if (!/^\d{6}$/.test(code)) return error(400, 'Enter the six-digit code from your authenticator app.');
+
+  try {
+    const found = await store!.findSession(hashToken(token));
+    if (!found) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+    const totp = await store!.getTotp(found.user.id);
+    if (!totp?.secret) return error(400, 'Start set-up first.', 'not_found');
+
+    const checked = verifyTotp(totp.secret, code);
+    if (!checked.ok) return error(401, 'That code is not right, or has already been used. Wait for the next one.', 'bad_credentials');
+    await store!.confirmTotp(found.user.id);
+    return json(200, { ok: true });
+  } catch {
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
+}
+
+/**
+ * Turns the second step off. The code is required: without it, anyone who
+ * finds an unlocked laptop could switch off the only thing standing between a
+ * stolen password and the vault.
+ */
+export async function handleTotpDisable(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'auth-totp-disable', 8) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'POST') return error(405, 'Method not allowed.', undefined);
+
+  const token = readSessionToken(request);
+  if (!token) return error(401, 'Sign in first.', 'unauthenticated');
+
+  const body = await readJsonBody(request);
+  const code = typeof body?.code === 'string' ? body.code : '';
+  if (!/^\d{6}$/.test(code)) return error(400, 'Enter the six-digit code from your authenticator app.');
+
+  try {
+    const found = await store!.findSession(hashToken(token));
+    if (!found) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+    const totp = await store!.getTotp(found.user.id);
+    if (!totp?.secret) return error(400, 'There is no authenticator to turn off.', 'not_found');
+
+    const checked = verifyTotp(totp.secret, code);
+    if (!checked.ok) return error(401, 'That code is not right, or has already been used. Wait for the next one.', 'bad_credentials');
+    await store!.setTotpSecret(found.user.id, null);
+    return json(200, { ok: true });
   } catch {
     return error(502, 'The accounts database could not be reached. Try again shortly.');
   }
@@ -749,12 +966,24 @@ export async function handlePasskeyLoginVerify(request: Request, store: AuthStor
     const vault = await store!.getVault(user.id);
     if (!vault) return error(500, 'This account has no vault. Please contact support.', 'no_vault');
 
+    // A passkey is already two factors in one gesture, but an authenticator app
+    // was asked for at sign-up, so it is asked for here too: one rule, not two.
+    await store!.touchPasskey(id, signCount);
+    const totp = await store!.getTotp(user.id);
+    if (totp?.secret && totp.confirmedAt) {
+      const challenge = newToken();
+      await store!.createLoginChallenge(
+        user.id,
+        hashToken(challenge),
+        new Date(Date.now() + TWO_STEP_TTL_SECONDS * 1000),
+      );
+      const pending: SecondFactorResponse = { secondFactor: 'totp' };
+      return json(200, pending, { 'Set-Cookie': twoStepCookie(challenge, isHttps(request)) });
+    }
+
     const token = newToken();
     const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * DAY_MS);
-    await Promise.all([
-      store!.createSession(user.id, hashToken(token), `${deviceLabel(request)} · passkey`.slice(0, 60), expiresAt),
-      store!.touchPasskey(id, signCount),
-    ]);
+    await store!.createSession(user.id, hashToken(token), `${deviceLabel(request)} · passkey`.slice(0, 60), expiresAt);
 
     const payload: PasskeyLoginResponse = {
       user: toPublicUser(user),

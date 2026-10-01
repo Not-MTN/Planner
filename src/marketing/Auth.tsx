@@ -1,6 +1,15 @@
 import { useEffect, useState } from 'react';
 import { COPY, type Lang } from './copy';
-import { AuthError, fetchApiStatus, resetPasswordWithRecovery, signIn, signUp, type AuthErrorCode } from '../auth/session';
+import {
+  AuthError,
+  completePasskeyTotpSignIn,
+  completeTotpSignIn,
+  fetchApiStatus,
+  resetPasswordWithRecovery,
+  signIn,
+  signUp,
+  type AuthErrorCode,
+} from '../auth/session';
 import { PasskeyError, passkeySignIn, passkeysSupported, registerPasskey } from '../auth/passkey';
 import { RecoveryCodes } from '../components/RecoveryCodes';
 import { EMAIL_PATTERN, USERNAME_PATTERN } from '../shared/authContract';
@@ -219,6 +228,9 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  /** Set when the password was accepted and a code is owed before signing in. */
+  const [totpReason, setTotpReason] = useState<'password' | 'passkey' | null>(null);
+  const [code, setCode] = useState('');
   const server = useServerNotice(c, lang);
 
   // If already signed in, go straight to app
@@ -242,6 +254,15 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
       await signIn(identifier, password, remember);
       navigate('/app');
     } catch (caught) {
+      // Half a sign-in: the password was right, and an authenticator app is
+      // owed. Nothing is signed in yet, so stay here and ask for the code.
+      if (caught instanceof AuthError && caught.code === 'totp_required') {
+        setTotpReason('password');
+        setCode('');
+        setError(null);
+        setBusy(false);
+        return;
+      }
       setError(errorText(caught instanceof AuthError ? caught.code : null, caught instanceof AuthError ? caught.detail : null, c, lang));
       setErrorDetail(errorDetailText(caught));
       setBusy(false);
@@ -256,10 +277,41 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
     setError(null);
     setErrorDetail(null);
     try {
-      await passkeySignIn(identifier);
+      const result = await passkeySignIn(identifier);
+      if (result.totpRequired) {
+        setTotpReason('passkey');
+        setCode('');
+        setBusy(false);
+        return;
+      }
       navigate('/app');
     } catch (caught) {
       setError(passkeyErrorText(caught, c, lang));
+      setErrorDetail(errorDetailText(caught));
+      setBusy(false);
+    }
+  };
+
+  const submitCode = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (busy || !totpReason) return;
+    setBusy(true);
+    setError(null);
+    setErrorDetail(null);
+    try {
+      if (totpReason === 'password') await completeTotpSignIn(code);
+      else await completePasskeyTotpSignIn(code);
+      setTotpReason(null);
+      setCode('');
+      navigate('/app');
+    } catch (caught) {
+      if (caught instanceof AuthError && caught.code === 'totp_required') {
+        setError(c.authTotpWrong);
+        setCode('');
+        setBusy(false);
+        return;
+      }
+      setError(errorText(caught instanceof AuthError ? caught.code : null, caught instanceof AuthError ? caught.detail : null, c, lang));
       setErrorDetail(errorDetailText(caught));
       setBusy(false);
     }
@@ -270,6 +322,62 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
       <Aside lang={lang} />
       <section className="auth-panel">
         <div className="auth-form">
+          {totpReason ? (
+            <form
+              className="auth-fields reveal-in"
+              onSubmit={submitCode}
+              aria-busy={busy}
+              aria-describedby={error ? 'signin-error' : undefined}
+            >
+              <header className="auth-head">
+                <h1>{c.authTotpTitle}</h1>
+                <p>{c.authTotpSub}</p>
+              </header>
+
+              <label className="field">
+                <span>{c.authTotpLabel}</span>
+                <input
+                  id="signin-totp"
+                  className="input-totp"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  dir="ltr"
+                  maxLength={7}
+                  value={code}
+                  onChange={(event) => setCode(event.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+                  placeholder="000000"
+                  autoFocus
+                  required
+                />
+              </label>
+
+              {error ? (
+                <p id="signin-error" className="auth-error" role="alert">
+                  {error}
+                </p>
+              ) : null}
+
+              <button type="submit" className="btn btn-primary btn-block" disabled={busy || code.length !== 6}>
+                {busy ? c.authBusy : c.authTotpContinue}
+              </button>
+
+              <p className="auth-note">
+                <button
+                  type="button"
+                  className="link"
+                  onClick={() => {
+                    setTotpReason(null);
+                    setCode('');
+                    setError(null);
+                  }}
+                >
+                  {c.authTotpBack}
+                </button>
+              </p>
+            </form>
+          ) : (
+          <>
           <header className="auth-head reveal-in">
             <h1>{c.authSignInTitle}</h1>
             <p>{c.authSignInSub}</p>
@@ -352,8 +460,10 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
               {busy ? c.authBusy : c.authSignInAction}
             </button>
           </form>
+          </>
+          )}
 
-          {passkeysSupported() ? (
+          {!totpReason && passkeysSupported() ? (
             <>
               <div className="auth-or reveal-in" style={{ animationDelay: '120ms' }}>
                 <span>{c.authOr}</span>
@@ -375,6 +485,7 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
             </>
           ) : null}
 
+          {totpReason ? null : (
           <footer className="auth-foot reveal-in" style={{ animationDelay: '220ms' }}>
             <button type="button" className="link" onClick={() => navigate('/recover')}>
               {c.authForgot}
@@ -383,6 +494,7 @@ function SignIn({ lang, navigate }: { lang: Lang; navigate: Nav }) {
               {c.authNoAccount} <button type="button" className="link" onClick={() => navigate('/signup')}>{c.authCreate}</button>
             </p>
           </footer>
+          )}
         </div>
       </section>
     </div>

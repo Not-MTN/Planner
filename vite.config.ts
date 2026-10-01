@@ -180,6 +180,14 @@ function authHandler(databaseUrl: string | undefined): NextHandleFunction {
             ? (webRequest) => authStore(databaseUrl).then((store) => handleRecoveryComplete(webRequest, store))
           : pathname === '/recovery/update'
             ? (webRequest) => authStore(databaseUrl).then((store) => handleRecoveryUpdate(webRequest, store))
+        : pathname === '/totp/login'
+          ? (webRequest) => authStore(databaseUrl).then((store) => handleTotpLogin(webRequest, store))
+        : pathname === '/totp/setup'
+          ? (webRequest) => authStore(databaseUrl).then((store) => handleTotpSetup(webRequest, store))
+        : pathname === '/totp/confirm'
+          ? (webRequest) => authStore(databaseUrl).then((store) => handleTotpConfirm(webRequest, store))
+        : pathname === '/totp/disable'
+          ? (webRequest) => authStore(databaseUrl).then((store) => handleTotpDisable(webRequest, store))
         : pathname === '/salt'
           ? (webRequest) => authStore(databaseUrl).then((store) => handleSalt(webRequest, store))
           : pathname === '/login'

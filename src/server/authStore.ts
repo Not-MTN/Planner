@@ -50,6 +50,13 @@ ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS recovery_hash_salt text
 -- accounts that predate sets, and is honoured while this array is empty.
 ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS recovery_verifiers text;
 
+-- Second step at sign-in. The secret has to sit here: verifying a code means
+-- recomputing it, and only this server can do that. It is not the vault key,
+-- and it opens nothing on its own.
+ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS totp_secret text;
+ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS totp_confirmed_at timestamptz;
+ALTER TABLE planner_credentials ADD COLUMN IF NOT EXISTS totp_last_step bigint;
+
 CREATE TABLE IF NOT EXISTS planner_vaults (
   user_id          text PRIMARY KEY REFERENCES planner_users(id) ON DELETE CASCADE,
   version          integer NOT NULL CHECK (version > 0),
@@ -70,6 +77,17 @@ CREATE TABLE IF NOT EXISTS planner_sessions (
 );
 
 CREATE INDEX IF NOT EXISTS planner_sessions_user_idx ON planner_sessions (user_id);
+
+-- A half-finished sign-in: password right, second step still owed. It is a
+-- token hash and a deadline and nothing else, and it is spent the moment the
+-- right code arrives.
+CREATE TABLE IF NOT EXISTS planner_login_challenges (
+  token_hash text PRIMARY KEY,
+  user_id    text NOT NULL REFERENCES planner_users(id) ON DELETE CASCADE,
+  expires_at timestamptz NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS planner_login_challenges_user_idx ON planner_login_challenges (user_id);
 
 -- A guardian's request to follow a student. code_hash is all the server ever
 -- sees of the pairing code; wrapped_share is the results key sealed by a key
@@ -192,6 +210,16 @@ export function parseRecoveryWraps(stored: string | string[] | null | undefined)
   return [];
 }
 
+/** The account's authenticator-app second step, if it has one. */
+export interface TotpRecord {
+  /** Base32 secret. Null until set-up starts, and cleared when it is removed. */
+  secret: string | null;
+  /** Set only once a code from the app has been accepted. */
+  confirmedAt: string | null;
+  /** The last accepted 30-second step, so one code cannot be used twice. */
+  lastStep: number | null;
+}
+
 export interface NewAccount {
   username: string;
   email: string | null;
@@ -306,6 +334,29 @@ export interface AuthStore {
   createSession(userId: string, tokenHash: string, label: string, expiresAt: Date): Promise<void>;
   findSession(tokenHash: string): Promise<{ session: SessionRow; user: UserRow } | null>;
   deleteSession(id: string): Promise<void>;
+  /** The account's authenticator-app second step, or null when it has none. */
+  getTotp(userId: string): Promise<TotpRecord | null>;
+  /** Starts (or restarts) set-up. Not confirmed until a code is accepted. */
+  setTotpSecret(userId: string, secret: string | null): Promise<void>;
+  /**
+   * Marks set-up finished. The secret is live from here on.
+   *
+   * No step is recorded: confirming and removing only happen inside an existing
+   * session, where replaying a code gains nobody anything.
+   */
+  confirmTotp(userId: string): Promise<void>;
+  /**
+   * Records the step of a code accepted at sign-in, so the same 30-second code
+   * cannot open the account twice.
+   */
+  recordTotpStep(userId: string, step: number): Promise<void>;
+  /**
+   * A password that checked out, waiting on a second step. The account is not
+   * signed in yet: this only remembers that the first half passed.
+   */
+  createLoginChallenge(userId: string, tokenHash: string, expiresAt: Date): Promise<void>;
+  findLoginChallenge(tokenHash: string): Promise<{ user: UserRow } | null>;
+  deleteLoginChallenge(tokenHash: string): Promise<void>;
   /** Every live session for this account, most recently used first. */
   listSessions(userId: string): Promise<SessionInfo[]>;
   /** Ends one of this account's own sessions. Other accounts are untouched. */
@@ -500,9 +551,13 @@ export function createMemoryAuthStore(): AuthStore {
     recoveryHashSalt: string | null;
     /** One verifier per recovery code; the legacy pair above is kept in sync. */
     recoveryVerifiers: RecoveryVerifier[];
+    totpSecret: string | null;
+    totpConfirmedAt: string | null;
+    totpLastStep: number | null;
   }>();
   const vaults = new Map<string, VaultRow>();
   const sessions = new Map<string, SessionRow & { label: string; createdAt: string; lastSeenAt: string }>();
+  const loginChallenges = new Map<string, { userId: string; expiresAt: string }>();
   const links: LinkRow[] = [];
   const passkeys: PasskeyRow[] = [];
 
@@ -536,6 +591,9 @@ export function createMemoryAuthStore(): AuthStore {
         recoveryHash: first?.hash ?? null,
         recoveryHashSalt: first?.salt ?? null,
         recoveryVerifiers: verifiers,
+        totpSecret: null,
+        totpConfirmedAt: null,
+        totpLastStep: null,
       });
       vaults.set(user.id, {
         version: 1,
@@ -584,6 +642,11 @@ export function createMemoryAuthStore(): AuthStore {
         recoveryHash: nextFirst?.hash ?? null,
         recoveryHashSalt: nextFirst?.salt ?? null,
         recoveryVerifiers: nextVerifiers,
+        // A password reset is the moment someone is most likely to have lost
+        // their phone along with it, so the second step starts over too.
+        totpSecret: null,
+        totpConfirmedAt: null,
+        totpLastStep: null,
       });
       vaults.set(user.id, {
         ...vault,
@@ -618,6 +681,9 @@ export function createMemoryAuthStore(): AuthStore {
         recoveryHash: prior?.recoveryHash ?? null,
         recoveryHashSalt: prior?.recoveryHashSalt ?? null,
         recoveryVerifiers: prior?.recoveryVerifiers ?? [],
+        totpSecret: prior?.totpSecret ?? null,
+        totpConfirmedAt: prior?.totpConfirmedAt ?? null,
+        totpLastStep: prior?.totpLastStep ?? null,
         ...(await hashCredential(authToken)),
       });
     },
@@ -669,6 +735,54 @@ export function createMemoryAuthStore(): AuthStore {
         if (session.id === id) sessions.delete(hash);
       }
     },
+    async getTotp(userId) {
+      const credential = credentials.get(userId);
+      if (!credential) return null;
+      return {
+        secret: credential.totpSecret,
+        confirmedAt: credential.totpConfirmedAt,
+        lastStep: credential.totpLastStep,
+      };
+    },
+    async setTotpSecret(userId, secret) {
+      const credential = credentials.get(userId);
+      if (!credential) return;
+      credential.totpSecret = secret;
+      // A new secret is unproven, so it must not stand in for the old one
+      // until a code from it has been accepted.
+      credential.totpConfirmedAt = null;
+      credential.totpLastStep = null;
+    },
+    async confirmTotp(userId) {
+      const credential = credentials.get(userId);
+      if (!credential) return;
+      credential.totpConfirmedAt = new Date().toISOString();
+    },
+    async recordTotpStep(userId, step) {
+      const credential = credentials.get(userId);
+      if (!credential) return;
+      credential.totpLastStep = step;
+    },
+    async createLoginChallenge(userId, tokenHash, expiresAt) {
+      // One live challenge per account; stale ones are dead weight.
+      for (const [hash, row] of loginChallenges) {
+        if (row.userId === userId || new Date(row.expiresAt).getTime() <= Date.now()) loginChallenges.delete(hash);
+      }
+      loginChallenges.set(tokenHash, { userId, expiresAt: expiresAt.toISOString() });
+    },
+    async findLoginChallenge(tokenHash) {
+      const row = loginChallenges.get(tokenHash);
+      if (!row) return null;
+      if (new Date(row.expiresAt).getTime() <= Date.now()) {
+        loginChallenges.delete(tokenHash);
+        return null;
+      }
+      const user = users.get(row.userId);
+      return user ? { user } : null;
+    },
+    async deleteLoginChallenge(tokenHash) {
+      loginChallenges.delete(tokenHash);
+    },
     async listSessions(userId) {
       const now = Date.now();
       return [...sessions.values()]
@@ -706,6 +820,9 @@ export function createMemoryAuthStore(): AuthStore {
       users.delete(userId);
       credentials.delete(userId);
       vaults.delete(userId);
+      for (const [hash, row] of loginChallenges) {
+        if (row.userId === userId) loginChallenges.delete(hash);
+      }
       for (const [hash, session] of sessions) {
         if (session.user_id === userId) sessions.delete(hash);
       }
@@ -1059,7 +1176,8 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
           SET kdf_salt = ${update.kdfSalt}, auth_hash = ${credential.authHash},
               hash_salt = ${credential.hashSalt}, recovery_hash = ${nextFirst?.hash ?? null},
               recovery_hash_salt = ${nextFirst?.salt ?? null},
-              recovery_verifiers = ${JSON.stringify(nextVerifiers)}, updated_at = now()
+              recovery_verifiers = ${JSON.stringify(nextVerifiers)},
+              totp_secret = NULL, totp_confirmed_at = NULL, totp_last_step = NULL, updated_at = now()
           WHERE user_id = ${row.id}
             AND recovery_verifiers IS NOT DISTINCT FROM ${row.recovery_verifiers}
           RETURNING user_id
@@ -1187,6 +1305,72 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
     async deleteSession(id) {
       await ensure();
       await sql`DELETE FROM planner_sessions WHERE id = ${id}`;
+    },
+
+    async getTotp(userId) {
+      await ensure();
+      const rows = (await sql`
+        SELECT totp_secret AS secret, totp_confirmed_at AS "confirmedAt", totp_last_step AS "lastStep"
+        FROM planner_credentials WHERE user_id = ${userId}
+      `) as { secret: string | null; confirmedAt: string | Date | null; lastStep: number | string | null }[];
+      const row = rows[0];
+      if (!row) return null;
+      return {
+        secret: row.secret ?? null,
+        confirmedAt: row.confirmedAt ? new Date(row.confirmedAt).toISOString() : null,
+        // bigint comes back from the driver as a string.
+        lastStep: row.lastStep === null || row.lastStep === undefined ? null : Number(row.lastStep),
+      };
+    },
+
+    async setTotpSecret(userId, secret) {
+      await ensure();
+      await sql`UPDATE planner_credentials
+        SET totp_secret = ${secret}, totp_confirmed_at = NULL, totp_last_step = NULL, updated_at = now()
+        WHERE user_id = ${userId}`;
+    },
+
+    async confirmTotp(userId) {
+      await ensure();
+      await sql`UPDATE planner_credentials
+        SET totp_confirmed_at = now(), updated_at = now()
+        WHERE user_id = ${userId}`;
+    },
+
+    async recordTotpStep(userId, step) {
+      await ensure();
+      await sql`UPDATE planner_credentials
+        SET totp_last_step = ${step}, updated_at = now()
+        WHERE user_id = ${userId}`;
+    },
+
+    async createLoginChallenge(userId, tokenHash, expiresAt) {
+      await ensure();
+      // One live challenge per account; anything expired is dead weight, and
+      // this keeps the table bounded without a cron job.
+      await sql`DELETE FROM planner_login_challenges
+        WHERE user_id = ${userId} OR expires_at < now()`;
+      await sql`INSERT INTO planner_login_challenges (token_hash, user_id, expires_at)
+        VALUES (${tokenHash}, ${userId}, ${expiresAt.toISOString()})`;
+    },
+
+    async findLoginChallenge(tokenHash) {
+      await ensure();
+      const rows = (await sql`
+        SELECT c.user_id, u.id, u.username, u.username_lower, u.email_lower, u.display_name, u.role, u.created_at
+        FROM planner_login_challenges c
+        JOIN planner_users u ON u.id = c.user_id
+        WHERE c.token_hash = ${tokenHash} AND c.expires_at > now()
+        LIMIT 1
+      `) as (UserRow & { user_id: string })[];
+      const row = rows[0];
+      if (!row) return null;
+      return { user: { id: row.id, username: row.username, username_lower: row.username_lower, email_lower: row.email_lower, display_name: row.display_name, role: row.role, created_at: row.created_at } };
+    },
+
+    async deleteLoginChallenge(tokenHash) {
+      await ensure();
+      await sql`DELETE FROM planner_login_challenges WHERE token_hash = ${tokenHash}`;
     },
 
     async listSessions(userId) {
