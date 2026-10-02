@@ -12,6 +12,8 @@
  *   npm run desktop:dev                 build and start, bundled and local-only
  *   PLANNER_APP_URL=https://… npm run desktop:dist
  *   PLANNER_API_ORIGIN=https://… npm run desktop:dist:win
+ *   PLANNER_VERSION_NAME=1.2.0 npm run desktop:dist
+ *                                       version the installers (default 1.0.0)
  *
  * Extra arguments are passed to electron-builder, so `--win`, `--mac`,
  * `--linux`, `--dir` and friends all work.
@@ -24,7 +26,13 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
 const args = process.argv.slice(2);
 const run = args.includes('--run');
-const forwarded = args.filter((arg) => arg !== '--run');
+// A release build carries the version it was tagged with, so the installer in
+// the release page says `Planner-1.2.0-windows-x64.exe` rather than `1.0.0`.
+const version = (process.env.PLANNER_VERSION_NAME ?? '').trim().replace(/^v/, '');
+const forwarded = [
+  ...args.filter((arg) => arg !== '--run'),
+  ...(version && !run ? ['-c.extraMetadata.version=' + version] : []),
+];
 
 function runStep(command, commandArgs, cwd = root) {
   return new Promise((resolve, reject) => {

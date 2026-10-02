@@ -33,6 +33,12 @@ permissions:
 env:
   APP_URL: ${{ inputs.app_url || vars.PLANNER_APP_URL || '' }}
   API_ORIGIN: ${{ inputs.api_origin || vars.PLANNER_API_ORIGIN || '' }}
+  # A version tag (`v1.2.0`) names the build; a manual run has no tag and
+  # falls back to the defaults in app/build.gradle and desktop/package.json.
+  VERSION_NAME: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+  # Play requires versionCode to increase with every upload. The run number
+  # always increases, so a tag build is uploadable as-is.
+  VERSION_CODE: ${{ github.run_number }}
 
 jobs:
   desktop:
@@ -68,6 +74,7 @@ jobs:
         env:
           PLANNER_APP_URL: ${{ env.APP_URL }}
           PLANNER_API_ORIGIN: ${{ env.API_ORIGIN }}
+          PLANNER_VERSION_NAME: ${{ env.VERSION_NAME }}
       - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
@@ -93,6 +100,9 @@ jobs:
       KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      # Read by android/app/build.gradle.
+      PLANNER_VERSION_NAME: ${{ env.VERSION_NAME }}
+      PLANNER_VERSION_CODE: ${{ env.VERSION_CODE }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

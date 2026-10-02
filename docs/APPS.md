@@ -147,8 +147,12 @@ Without them the workflow still builds, signed with the debug key.
 | Your own site / GitHub releases | `app-release.apk` | Sideloading requires "install unknown apps" on the device; the CI workflow attaches the APK to each release so a download link always exists. |
 | F-Droid | source build | F-Droid builds it themselves from the repository; the app has no proprietary dependencies. |
 
-Bump `versionCode` (integer, must increase) and `versionName` for each upload,
-in `android/app/build.gradle`.
+Version numbers come from `versionCode` / `versionName` in
+`android/app/build.gradle` (both `1` by default). The Apps workflow overrides
+them on a version tag: tag `v1.2.0` builds `versionName 1.2.0`, and
+`versionCode` becomes the workflow run number, which always increases — so a
+tagged build can go straight to Play without editing anything. A store upload
+made by hand needs `versionCode` bumped yourself; it must never repeat.
 
 ## 4. iOS
 
@@ -203,6 +207,13 @@ Set the repository variables `PLANNER_APP_URL` or `PLANNER_API_ORIGIN` once
 (Settings → Secrets and variables → Actions → Variables) and every future app
 build is already pointed at your deployment; the workflow inputs override them
 per run.
+
+Tagged builds are versioned from the tag: `v1.2.0` produces
+`Planner-1.2.0-windows-x64.exe`, an Android `versionName` of 1.2.0 with the run
+number as `versionCode`, and the same 1.2.0 in the iOS archive. Installer and
+bundle file names carry the version, so nothing has to be renamed before an
+upload. Write the tag as `vMAJOR.MINOR.PATCH` — `v1.2.0`, not `v1.2` — because
+the desktop installers need a full semantic version.
 
 ## 7. What the shells do not do yet
 

@@ -16,7 +16,8 @@ PLANNER_API_ORIGIN=https://your-app.example.com npm run desktop:dist
 
 `npm run desktop:dist -- --win` (or `--mac`, `--linux`, `--dir`) narrows the
 build; `npm run desktop:pack` produces an unpacked app directory for a quick
-look.
+look. `PLANNER_VERSION_NAME=1.2.0 npm run desktop:dist` versions the installer
+files (the Apps workflow passes the release tag automatically).
 
 ## Two ways to run it
 

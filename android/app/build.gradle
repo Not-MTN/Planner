@@ -10,6 +10,12 @@ if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
 }
 
+// Version numbers default to the values below and are overridden by the Apps
+// workflow on a version tag (`v1.2.0` → versionName 1.2.0), so an upload never
+// ships with a stale version. Bump the defaults for a store upload made by hand.
+def appVersionName = (System.getenv('PLANNER_VERSION_NAME') ?: '').replaceFirst(/^v/, '')
+def appVersionCode = (System.getenv('PLANNER_VERSION_CODE') ?: '1') as Integer
+
 android {
     namespace = "com.notmtn.planner"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -17,8 +23,9 @@ android {
         applicationId "com.notmtn.planner"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // Bump these for every store upload (versionCode has to increase).
+        versionCode appVersionCode
+        versionName appVersionName ?: '1.0'
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
