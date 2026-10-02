@@ -23,6 +23,7 @@ export function InlineTitle({
   className,
   maxLength = 140,
   disabled = false,
+  onDisabledClick,
 }: {
   value: string;
   /** Called with the trimmed title, only when it actually changed. */
@@ -33,8 +34,9 @@ export function InlineTitle({
   onEditingChange?: (editing: boolean) => void;
   className?: string;
   maxLength?: number;
-  /** Read-only rows (a repeat projection) keep the caller's own handler. */
+  /** Read-only rows (a repeat projection) hand the click back to the caller. */
   disabled?: boolean;
+  onDisabledClick?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -95,9 +97,14 @@ export function InlineTitle({
         type="button"
         dir="auto"
         className={cx('item-title', 'inline-title', className)}
-        title={t("Click to edit the title")}
+        title={disabled ? undefined : t("Click to edit the title")}
         onClick={() => {
-          if (disabled) return;
+          // Nothing stored here to rename — let the row decide (usually: open
+          // the real item behind the projection).
+          if (disabled) {
+            onDisabledClick?.();
+            return;
+          }
           setDraft(value);
           setEditing(true);
         }}

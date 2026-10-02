@@ -67,8 +67,10 @@
 .study-task-row:last-child { border-block-end: 0; }
 .study-task-row > input { flex-shrink: 0; width: 18px; height: 18px; margin: 0; accent-color: var(--accent); cursor: pointer; }
 .study-task-copy { flex: 1; min-width: 0; }
-.study-task-title { border: 0; padding: 0; background: transparent; font-size: 13.5px; line-height: 1.5; font-weight: 600; color: var(--ink); text-align: start; overflow-wrap: anywhere; cursor: pointer; }
-.study-task-title:hover { color: var(--accent); }
+/* `:not(.inline-title-input)` — the row's bare-text look belongs to the resting
+   title only; the box you type in keeps its own frame and padding. */
+.study-task-title:not(.inline-title-input) { border: 0; padding: 0; background: transparent; font-size: 13.5px; line-height: 1.5; font-weight: 600; color: var(--ink); text-align: start; overflow-wrap: anywhere; cursor: pointer; }
+.study-task-title:not(.inline-title-input):hover { color: var(--accent); }
 .study-task-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 4px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--muted); }
 .study-task-meta .study-overdue { color: var(--cat-peach-text); }
 .study-task-row > .btn { flex-shrink: 0; }

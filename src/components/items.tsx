@@ -87,9 +87,14 @@ export function EventRow({ event, onDropSwap }: { event: PlannerEvent; onDropSwa
         />
       </label>
       <div className="item-body">
-        <button type="button" className="item-title" dir="auto" onClick={() => openComposer({ mode: 'edit', type: 'event', id: editId })}>
-          {event.title}
-        </button>
+        <InlineTitle
+          value={event.title}
+          onCommit={(title) => {
+            // A repeat's occurrence is generated, so the series itself is renamed.
+            updateEvent(editId, { title });
+            flash(t("Title updated."), { label: t("Undo"), run: undo });
+          }}
+        />
         <p className="meta">
           <i className={cx('dot-inline', `accent-${accent}`)} aria-hidden="true" />
           {t("{category}{duration}{important}", {
@@ -224,20 +229,16 @@ export function TaskRow({
         {task.completed ? <TickIcon size={14} /> : null}
       </button>
       <div className="item-body">
-        {/* A projection has no stored copy to rename — it opens the real task. */}
-        {projected ? (
-          <button type="button" className="item-title" dir="auto" onClick={() => openComposer({ mode: 'edit', type: 'task', id: editId })}>
-            {task.title}
-          </button>
-        ) : (
-          <InlineTitle
-            value={task.title}
-            onCommit={(title) => {
-              updateTask(task.id, { title });
-              flash(t("Title updated."), { label: t("Undo"), run: undo });
-            }}
-          />
-        )}
+        <InlineTitle
+          value={task.title}
+          // A projection has no stored copy to rename — open the real task.
+          disabled={projected}
+          onDisabledClick={() => openComposer({ mode: 'edit', type: 'task', id: editId })}
+          onCommit={(title) => {
+            updateTask(task.id, { title });
+            flash(t("Title updated."), { label: t("Undo"), run: undo });
+          }}
+        />
         <p className="meta">
           <span className={cx('prio', `prio-${task.priority}`)}>
             <i aria-hidden="true" />

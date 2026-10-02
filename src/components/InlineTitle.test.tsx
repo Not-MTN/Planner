@@ -5,6 +5,10 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { App } from '../App';
 import { InlineTitle } from './InlineTitle';
+import { addEvent } from '../mutate';
+import { createEmptyState } from '../types';
+import { serialize, STORAGE_KEY } from '../storage';
+import { todayISO } from '../dates';
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
@@ -179,23 +183,34 @@ describe('InlineTitle', () => {
   });
 });
 
-describe('inline task titles in the app', () => {
+describe('inline titles in the app', () => {
   function text(): string {
     return document.body.textContent ?? '';
   }
 
-  it('renames a quick-added task without touching the rest of it', async () => {
+  /** Views are lazy-loaded, so the render is polled rather than slept on. */
+  async function mountApp(hash: string, ready: () => unknown): Promise<void> {
+    window.history.replaceState(null, '', hash);
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
     await act(async () => {
       root?.render(<App />);
     });
-    for (let index = 0; index < 5; index += 1) {
+    for (let index = 0; index < 40 && !ready(); index += 1) {
       await act(async () => {
         await new Promise((resolve) => setTimeout(resolve, 30));
       });
     }
+    expect(ready(), hash).toBeTruthy();
+  }
+
+  function stored(): { tasks?: Record<string, unknown>[]; events?: Record<string, unknown>[] } {
+    return JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? '{}');
+  }
+
+  it('renames a quick-added task without touching the rest of it', async () => {
+    await mountApp('#/today', () => document.querySelector('.quick-add input'));
 
     const input = document.querySelector<HTMLInputElement>('.quick-add input') as HTMLInputElement;
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
@@ -218,11 +233,72 @@ describe('inline task titles in the app', () => {
     expect(text()).not.toContain('Buy milc');
     // Date, time and priority came from the parsed line and stay put.
     expect(text()).toContain('High');
-    const stored = JSON.parse(window.localStorage.getItem('personal-planner.v1') ?? '{}');
-    const task = stored.tasks?.[0];
+    const task = stored().tasks?.[0];
     expect(task?.title).toBe('Buy milk');
     expect(task?.priority).toBe('high');
     expect(task?.dueTime).toBe('17:00');
     expect(task).toHaveProperty('subtasks');
+  });
+
+  it('renames an event in Today, keeping its time, note and flag', async () => {
+    const today = todayISO();
+    const seeded = addEvent(createEmptyState(), {
+      title: 'Dentist',
+      date: today,
+      startTime: '09:30',
+      endTime: '10:00',
+      category: 'health',
+      note: 'bring the card',
+      important: true,
+      repeat: null,
+    });
+    window.localStorage.setItem(STORAGE_KEY, serialize(seeded));
+    await mountApp('#/today', () => document.querySelector('.event .inline-title'));
+
+    act(() => document.querySelector<HTMLButtonElement>('.event .inline-title')?.click());
+    const area = document.querySelector<HTMLTextAreaElement>('.event .inline-title-input') as HTMLTextAreaElement;
+    expect(area).toBeTruthy();
+    type(area, 'Dentist check-up');
+    press(area, 'Enter');
+
+    expect(text()).toContain('Dentist check-up');
+    const event = stored().events?.[0];
+    expect(event?.title).toBe('Dentist check-up');
+    expect(event?.startTime).toBe('09:30');
+    expect(event?.endTime).toBe('10:00');
+    expect(event?.important).toBe(true);
+    expect(event?.note).toBe('bring the card');
+  });
+
+  it('renames a chip on the calendar week board, and still opens the full form', async () => {
+    const today = todayISO();
+    const seeded = addEvent(createEmptyState(), {
+      title: 'Standup',
+      date: today,
+      startTime: '09:15',
+      endTime: '09:30',
+      category: 'work',
+      note: '',
+      important: false,
+      repeat: null,
+    });
+    window.localStorage.setItem(STORAGE_KEY, serialize(seeded));
+    await mountApp(`#/calendar/week/${today}`, () => document.querySelector('.week-chip-title'));
+
+    const chip = document.querySelector<HTMLElement>('.week-chip');
+    act(() => chip?.querySelector<HTMLButtonElement>('.week-chip-title')?.click());
+    const area = chip?.querySelector<HTMLTextAreaElement>('.inline-title-input') as HTMLTextAreaElement;
+    expect(area).toBeTruthy();
+    type(area, 'Team standup');
+    press(area, 'Enter');
+    expect(stored().events?.[0]?.title).toBe('Team standup');
+
+    // The chip is no longer one button, so the pencil is how you reach the form.
+    act(() => chip?.querySelector<HTMLButtonElement>('.week-chip-title')?.click());
+    const pencil = chip?.querySelector<HTMLButtonElement>('.inline-title-details');
+    expect(pencil).toBeTruthy();
+    act(() => pencil?.click());
+    expect(document.querySelector('[role="dialog"]')).toBeTruthy();
+    expect(text()).toContain('Edit event');
   });
 });
