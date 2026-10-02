@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { CheckIcon, CloseIcon, StopwatchIcon } from '../icons';
-import { t, tn } from '../i18n';
+import { faDigits, faNum, t, tn } from '../i18n';
 
 const DURATIONS = [15, 25, 45, 60];
 
@@ -38,7 +38,7 @@ function chime() {
 function formatRemaining(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   const rest = seconds % 60;
-  return `${String(minutes).padStart(2, '0')}:${String(rest).padStart(2, '0')}`;
+  return faDigits(`${String(minutes).padStart(2, '0')}:${String(rest).padStart(2, '0')}`);
 }
 
 export function FocusTimer() {
@@ -194,7 +194,7 @@ function FocusOverlay({ sessionId, title, initialMinutes }: { sessionId: string 
           <div className="focus-ring-copy">
             {phase === 'setup' ? (
               <>
-                <strong>{minutes}</strong>
+                <strong>{faNum(minutes)}</strong>
                 <span>{t('minutes')}</span>
               </>
             ) : phase === 'done' ? (
@@ -225,7 +225,7 @@ function FocusOverlay({ sessionId, title, initialMinutes }: { sessionId: string 
                   className={cx('day-pill-btn', minutes === option && 'on')}
                   onClick={() => setMinutes(option)}
                 >
-                  {option} {t('min')}
+                  {faNum(option)} {t('min')}
                 </button>
               ))}
             </div>

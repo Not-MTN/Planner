@@ -37,7 +37,7 @@ import { Empty, Meter, Ring } from '../components/ui';
 import { ChevronLeftIcon, ChevronRightIcon, PlusIcon, SparklesIcon, StopwatchIcon } from '../icons';
 import type { Habit, MoodValue } from '../types';
 import { autoSchedule } from '../scheduler';
-import { t } from '../i18n';
+import { faNum, t } from '../i18n';
 
 export function DayView({ date }: { date: string }) {
   const planner = usePlanner();
@@ -136,9 +136,6 @@ export function DayView({ date }: { date: string }) {
               </button>
             </div>
           ) : null}
-          {/* The glance strip fills the headline column beside the progress
-              card, so the numbers are above the fold instead of six cards down. */}
-          {isToday ? <StatsWidget state={state} /> : null}
           {!isToday ? (
             <div className="pager hero-pager">
               <button type="button" className="icon-btn round" aria-label={t("Previous day")} onClick={() => navigate({ name: 'day', date: addDays(date, -1) })}>
@@ -157,13 +154,13 @@ export function DayView({ date }: { date: string }) {
         <aside className="card hero-panel">
           {!fresh ? <img className="postcard" src="/img/hero-day.jpg" alt="" loading="lazy" /> : null}
           <p className="kicker">{t("Progress")}</p>
-          <Ring value={score.ratio ?? 0} label={score.total ? `${score.done}/${score.total}` : t("Open")} caption={t("done today")} />
+          <Ring value={score.ratio ?? 0} label={score.total ? `${faNum(score.done)}/${faNum(score.total)}` : t("Open")} caption={t("done today")} />
           <p className="progress-phrase">{progressPhrase(score.ratio)}</p>
           <p className="meta">
             {t("{events} events · {tasks} tasks · {habits} habits", {
-              events: `${score.eventsDone}/${score.eventsTotal}`,
-              tasks: `${score.tasksDone}/${score.tasksTotal}`,
-              habits: `${score.habitsDone}/${score.habitsTotal}`,
+              events: `${faNum(score.eventsDone)}/${faNum(score.eventsTotal)}`,
+              tasks: `${faNum(score.tasksDone)}/${faNum(score.tasksTotal)}`,
+              habits: `${faNum(score.habitsDone)}/${faNum(score.habitsTotal)}`,
             })}
           </p>
           <div className="qa-row">
@@ -184,35 +181,36 @@ export function DayView({ date }: { date: string }) {
               {t("Focus")}
             </button>
           </div>
-          <div className="plan-row">
-            <button
-              type="button"
-              className="btn btn-soft btn-small"
-              title={t("Fit untimed, overdue, and urgent tasks into today’s free time")}
-              disabled={date < today}
-              onClick={() => {
-                const plan = autoSchedule(state, date, { from: isToday ? nowMin + 10 : 9 * 60 });
-                if (plan.length === 0) {
-                  flash(t("Nothing to fit in — no untimed tasks, or no free time left."));
-                  return;
-                }
-                planner.applySchedule(plan);
-                flash(t("Planned {0} {1}: {2}{3}", { 0: plan.length, 1: plan.length === 1 ? t("task") : t("tasks"), 2: plan.slice(0, 3).map((item) => t("{0} {1}", { 0: item.time, 1: item.title })).join(', '), 3: plan.length > 3 ? '…' : '' }), { label: t("Undo"), run: planner.undo });
-              }}
-            >
-              <StopwatchIcon size={15} /> {t("Plan my day")}
-            </button>
-            <button type="button" className="btn btn-soft btn-small" onClick={() => navigate({ name: 'ai', tab: 'plan' })}>
-              <SparklesIcon size={15} /> {t("Plan with AI")}
-            </button>
-          </div>
+          <details className="plan-options">
+            <summary>{t("More planning options")}</summary>
+            <div className="plan-row">
+              <button
+                type="button"
+                className="btn btn-soft btn-small"
+                title={t("Fit untimed, overdue, and urgent tasks into today’s free time")}
+                disabled={date < today}
+                onClick={() => {
+                  const plan = autoSchedule(state, date, { from: isToday ? nowMin + 10 : 9 * 60 });
+                  if (plan.length === 0) {
+                    flash(t("Nothing to fit in — no untimed tasks, or no free time left."));
+                    return;
+                  }
+                  planner.applySchedule(plan);
+                  flash(t("Planned {0} {1}: {2}{3}", { 0: plan.length, 1: plan.length === 1 ? t("task") : t("tasks"), 2: plan.slice(0, 3).map((item) => t("{0} {1}", { 0: item.time, 1: item.title })).join(', '), 3: plan.length > 3 ? '…' : '' }), { label: t("Undo"), run: planner.undo });
+                }}
+              >
+                <StopwatchIcon size={15} /> {t("Plan my day")}
+              </button>
+              <button type="button" className="btn btn-soft btn-small" onClick={() => navigate({ name: 'ai', tab: 'plan' })}>
+                <SparklesIcon size={15} /> {t("Plan with AI")}
+              </button>
+            </div>
+          </details>
         </aside>
       </header>
 
-      {/* The day's working area comes first: intention, then the schedule and
-          its checklists. Promos and check-ins follow, never ahead of the plan. */}
-      {isToday ? <IntentionField key={date} date={date} /> : null}
-
+      {/* The day's work comes first on small screens: timeline, checklist, then
+          intention and secondary metrics. Nothing useful is removed. */}
       <div className="today-grid">
         <section className="card timeline-card">
           <header className="card-head">
@@ -380,6 +378,8 @@ export function DayView({ date }: { date: string }) {
         </div>
       </div>
 
+      {isToday ? <IntentionField key={date} date={date} /> : null}
+      {isToday ? <StatsWidget state={state} date={date} /> : null}
       {fresh && isToday ? <WelcomeCard /> : null}
       {isToday ? <BackupReminder onExport={planner.exportData} /> : null}
       {isToday ? <PanelHub /> : null}
@@ -596,7 +596,7 @@ function EssentialsCard({ date, habits }: { date: string; habits: Habit[] }) {
           <span className="chip essentials-done">{t("All done ✓")}</span>
         ) : (
           <div className="essentials-progress">
-            <span className="essentials-count">{done}/{habits.length}</span>
+            <span className="essentials-count">{faNum(done)}/{faNum(habits.length)}</span>
             <Meter value={habits.length === 0 ? 0 : done / habits.length} label={t("Daily essentials progress")} />
           </div>
         )}

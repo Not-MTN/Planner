@@ -103,6 +103,52 @@ describe('app smoke', () => {
     expect(document.querySelector('.hero-panel')).toBeTruthy();
   });
 
+  it('shows mobile favorites first without duplicate tiles or repeated utilities', () => {
+    localStorage.setItem('planner-mobile-favorites', JSON.stringify(['ai', 'tasks']));
+    mountApp();
+    const more = [...document.querySelectorAll<HTMLButtonElement>('.tabbar .tab')].find((button) => button.textContent?.includes('More'));
+    expect(more).toBeTruthy();
+    act(() => more?.click());
+
+    const list = document.querySelector<HTMLElement>('.more-list');
+    expect(list?.querySelector('.more-section-favorites')?.textContent).toContain('AI coach');
+    expect(list?.querySelector('.more-section-favorites')?.textContent).toContain('Tasks');
+    const buttons = [...(list?.querySelectorAll<HTMLButtonElement>('button') ?? [])];
+    expect(buttons.filter((button) => button.textContent?.includes('AI coach'))).toHaveLength(1);
+    expect(buttons.filter((button) => button.textContent?.trim() === 'Settings')).toHaveLength(1);
+    expect(buttons.filter((button) => button.textContent?.trim() === 'How it works')).toHaveLength(1);
+  });
+
+  it('exposes accessible controls to reorder mobile favorites and persists their order', async () => {
+    localStorage.setItem('planner-mobile-favorites', JSON.stringify(['calendar', 'tasks', 'habits']));
+    mountApp();
+    await openSettingsTab('Appearance');
+
+    const moveHabitsUp = document.querySelector<HTMLButtonElement>('button[aria-label="Move Habits up"]');
+    expect(moveHabitsUp).toBeTruthy();
+    expect(moveHabitsUp?.disabled).toBe(false);
+    click(moveHabitsUp);
+    expect(JSON.parse(localStorage.getItem('planner-mobile-favorites') ?? '[]')).toEqual(['calendar', 'habits', 'tasks']);
+    expect(document.querySelector('.mobile-favorite-announcement')?.textContent).toBe('Habits moved to position 2');
+  });
+
+  it('opens the tablet flyout as a labelled modal and restores focus on close', () => {
+    mountApp();
+    const planButton = document.querySelector<HTMLButtonElement>('.side-nav-rail .rail-btn[aria-label="Plan"]');
+    expect(planButton).toBeTruthy();
+    act(() => planButton?.click());
+    const flyout = document.querySelector<HTMLElement>('#tablet-flyout');
+    expect(planButton?.getAttribute('aria-expanded')).toBe('true');
+    expect(flyout?.getAttribute('role')).toBe('dialog');
+    expect(flyout?.getAttribute('aria-modal')).toBe('true');
+    expect(document.activeElement).toBe(flyout?.querySelector('.tablet-flyout-close'));
+
+    act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(document.querySelector('#tablet-flyout')).toBeFalsy();
+    expect(planButton?.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(planButton);
+  });
+
   it('opens the notification center from the top-bar bell', () => {
     mountApp();
     const bell = document.querySelector<HTMLButtonElement>('.mobile-bar-actions .notification-trigger');
@@ -110,6 +156,31 @@ describe('app smoke', () => {
     act(() => bell?.click());
     expect(text()).toContain('No notifications yet');
     expect(document.querySelector('[role="dialog"]')).toBeTruthy();
+  });
+
+  it('reveals short, tappable smart-add examples on narrow screens', () => {
+    window.matchMedia = ((query: string) => ({
+      matches: query === '(max-width: 480px)',
+      media: query,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+    mountApp();
+    const input = document.querySelector<HTMLInputElement>('.quick-add input');
+    expect(input?.placeholder).toBe('Add anything…');
+    act(() => input?.focus());
+    expect(document.querySelector('.quick-add-examples')).toBeTruthy();
+    const example = [...document.querySelectorAll<HTMLButtonElement>('.quick-add-example')].find((button) =>
+      button.textContent?.includes('Call mom tomorrow'),
+    );
+    expect(example).toBeTruthy();
+    act(() => example?.click());
+    expect(input?.value).toBe('Call mom tomorrow 5pm #work !high');
+    expect(document.querySelector('.quick-add-examples')).toBeFalsy();
   });
 
   it('adds a task through smart quick add and undoes it', () => {

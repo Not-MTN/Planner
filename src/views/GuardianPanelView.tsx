@@ -16,7 +16,7 @@ import {
   UserIcon,
 } from '../icons';
 import { friendlyGroqError, generateGuardianGuidance, type GuardianGuidance } from '../ai';
-import { t } from '../i18n';
+import { faNum, t } from '../i18n';
 import { Field, Empty } from '../components/ui';
 import { CompletionRing, FocusTrend, SubjectSplit, SubjectTrend, WeekBars, minutesLabel } from '../components/charts';
 import { GuardianGoalForm } from '../components/GuardianGoalForm';
@@ -347,7 +347,7 @@ export function GuardianPanelView() {
             <UserIcon size={18} />
           </span>
           <p>{t('Linked students')}</p>
-          <strong>{linked}</strong>
+          <strong>{faNum(linked)}</strong>
           <span>{t('Connected with their consent')}</span>
         </div>
         <div className="panel-stat">
@@ -355,7 +355,7 @@ export function GuardianPanelView() {
             <CheckIcon size={18} />
           </span>
           <p>{t('Updated this week')}</p>
-          <strong>{current}</strong>
+          <strong>{faNum(current)}</strong>
           <span>{t('Weekly results available')}</span>
         </div>
         <div className="panel-stat">
@@ -363,7 +363,7 @@ export function GuardianPanelView() {
             <BookIcon size={18} />
           </span>
           <p>{t('Waiting for results')}</p>
-          <strong>{waiting}</strong>
+          <strong>{faNum(waiting)}</strong>
           <span>{t('Invitations or first shares')}</span>
         </div>
         <div className="panel-stat">
@@ -371,7 +371,7 @@ export function GuardianPanelView() {
             <BellIcon size={18} />
           </span>
           <p>{t('Unread notes')}</p>
-          <strong>{unread}</strong>
+          <strong>{faNum(unread)}</strong>
           <span>{t('From your shared circle')}</span>
         </div>
       </section>
@@ -971,7 +971,7 @@ export function GuardianPanelView() {
               <p className="kicker">{t('From your shared circle')}</p>
               <h2 className="card-title">
                 {t('Shared updates')}
-                {unread > 0 ? <span className="badge-count"> {unread}</span> : null}
+                {unread > 0 ? <span className="badge-count"> {faNum(unread)}</span> : null}
               </h2>
             </div>
             {unread > 0 ? (

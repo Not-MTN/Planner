@@ -9,7 +9,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { CheckIcon, FlagIcon, SlidersIcon, StopwatchIcon, StudyIcon, TrashIcon } from '../icons';
-import { t } from '../i18n';
+import { faNum, t } from '../i18n';
 import { GRADE_LABELS, gradeLabel, markInboxRead, newId, openGoalSuggestions, planPeriodLabel, planProgress, splitExplanations, subjectMinutes, weeklyHistory, weekOf, weekResults, withExplanation, withPlanItemToggled, withoutExplanation } from '../panels';
 import { CompletionRing, FocusTrend, SubjectSplit, SubjectTrend, WeekBars, minutesLabel } from '../components/charts';
 import { normalizeLinkCode } from '../auth/crypto';
@@ -209,7 +209,6 @@ export function StudentPanelView() {
     flash(t("Saved. Only the headline is included in shared results."));
   };
 
-  const hours = (minutes: number) => (minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`);
 
   // Someone bookmarked the panel, or turned it off on another device.
   if (!panels.student.enabled) {
@@ -300,9 +299,9 @@ export function StudentPanelView() {
       )}
 
       <section className="panel-overview" aria-label={t("This week")}>
-        <div className="panel-stat"><span className="panel-stat-icon"><CheckIcon size={18} /></span><p>{t("Done")}</p><strong>{results.done}<small> / {results.planned}</small></strong><span>{t("Whole planner this week")}</span></div>
+        <div className="panel-stat"><span className="panel-stat-icon"><CheckIcon size={18} /></span><p>{t("Done")}</p><strong>{faNum(results.done)}<small> / {faNum(results.planned)}</small></strong><span>{t("Whole planner this week")}</span></div>
         <div className="panel-stat"><span className="panel-stat-icon"><StopwatchIcon size={18} /></span><p>{t("Focused")}</p><strong>{minutesLabel(results.focusMinutes)}</strong><span>{t("Every focus session counts")}</span></div>
-        <div className="panel-stat"><span className="panel-stat-icon"><StudyIcon size={18} /></span><p>{t("Study targets")}</p><strong>{targets.length ? <>{targetsReached}<small> / {targets.length}</small></> : '—'}</strong><span>{targets.length ? t("Weekly targets reached") : t("Set a weekly target below")}</span></div>
+        <div className="panel-stat"><span className="panel-stat-icon"><StudyIcon size={18} /></span><p>{t("Study targets")}</p><strong>{targets.length ? <>{faNum(targetsReached)}<small> / {faNum(targets.length)}</small></> : '—'}</strong><span>{targets.length ? t("Weekly targets reached") : t("Set a weekly target below")}</span></div>
         <div className="panel-stat"><span className="panel-stat-icon"><FlagIcon size={18} /></span><p>{t("Next exam")}</p><strong>{exams[0] ? exams[0].days === 0 ? t("Today") : t("{0} days", { 0: exams[0].days }) : '—'}</strong><span>{exams[0]?.subject.name ?? t("No upcoming exams")}</span></div>
       </section>
 
@@ -347,7 +346,7 @@ export function StudentPanelView() {
               <p className="kicker">{t("From your guardians")}</p>
               <h2 className="card-title">
                 {t("Plans and notes for you")}
-                {unreadInbox > 0 ? <span className="badge-count"> {unreadInbox}</span> : null}
+                {unreadInbox > 0 ? <span className="badge-count"> {faNum(unreadInbox)}</span> : null}
               </h2>
             </div>
             {unreadInbox > 0 ? (
@@ -440,8 +439,8 @@ export function StudentPanelView() {
                         <p className="gplan-title">{plan.title}</p>
                       </div>
                       <div className="gplan-progress" aria-label={t("{0} of {1} done", { 0: progress.done, 1: progress.total })}>
-                        <strong>{progress.done}</strong>
-                        <span>/{progress.total}</span>
+                        <strong>{faNum(progress.done)}</strong>
+                        <span>/{faNum(progress.total)}</span>
                       </div>
                     </div>
                     {plan.note ? <p className="gplan-note">{plan.note}</p> : null}
@@ -494,7 +493,7 @@ export function StudentPanelView() {
               <div className="result-stack">
                 <div className="result">
                   <p className="kicker">{t("Focused")}</p>
-                  <p className="result-num">{hours(results.focusMinutes)}</p>
+                  <p className="result-num">{minutesLabel(results.focusMinutes)}</p>
                 </div>
                 <div className="result">
                   <p className="kicker">{t("Peak week")}</p>
@@ -567,8 +566,8 @@ export function StudentPanelView() {
             <p className="hint">{t("This is the weekly snapshot guardians receive. Task details, exam dates, targets, reasons, and personal notes are not sent automatically.")}</p>
             <p className="student-week">{t("Week of {0}", { 0: results.weekOf })}</p>
             <dl className="sharing-preview-values">
-              <div><dt>{t("Planned")}</dt><dd>{results.planned}</dd></div>
-              <div><dt>{t("Done")}</dt><dd>{results.done}</dd></div>
+              <div><dt>{t("Planned")}</dt><dd>{faNum(results.planned)}</dd></div>
+              <div><dt>{t("Done")}</dt><dd>{faNum(results.done)}</dd></div>
               <div><dt>{t("Focused")}</dt><dd>{minutesLabel(results.focusMinutes)}</dd></div>
             </dl>
             {results.subjects.length > 0 ? <SubjectSplit subjects={results.subjects} /> : null}

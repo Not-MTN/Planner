@@ -12,7 +12,7 @@ import { DraftRefine } from '../components/DraftRefine';
 import { CalendarIcon, CheckIcon, LeafIcon, MicIcon, PlusIcon, SparklesIcon, UploadIcon } from '../icons';
 import type { AIDeclined, AIDeclinedKind, AIMemory, AIMemoryCategory, FixedCommitmentInput } from '../types';
 import { markAIVisited } from '../tour';
-import { t } from '../i18n';
+import { faNum, t } from '../i18n';
 
 const WEEKDAYS = [
   { value: 1, label: t("Monday") },
@@ -1092,7 +1092,7 @@ function PlanDraft({ draft, warnings, working, onRefine, onAdd, onDiscard, isKep
           <p className="kicker">{t("Review before adding")}</p>
           <h2 className="card-title">{t("Your AI draft")}</h2>
         </div>
-        <span className="chip">{allKept ? `${total} ${t('suggestions')}` : `${keptCount} ${t('of')} ${total}`}</span>
+        <span className="chip">{allKept ? `${faNum(total)} ${t('suggestions')}` : `${faNum(keptCount)} ${t('of')} ${faNum(total)}`}</span>
       </header>
       <p className="ai-draft-summary">{draft.summary}</p>
       {warnings.length > 0 ? (
@@ -1203,7 +1203,7 @@ function TimetableCard({ timetable, isKept, onToggle, onAdd, onDiscard }: {
         <div className="draft-group">
           <div className="draft-group-head">
             <strong>{t("Every week")}</strong>
-            <span>{timetable.blocks.length}</span>
+            <span>{faNum(timetable.blocks.length)}</span>
           </div>
           <ul>
             {timetable.blocks.map((block, index) => (
@@ -1252,7 +1252,7 @@ function TimetableCard({ timetable, isKept, onToggle, onAdd, onDiscard }: {
 function DraftGroup({ title, count, children }: { title: string; count: number; children: ReactNode }) {
   return (
     <div className="draft-group">
-      <div className="draft-group-head"><strong>{title}</strong><span>{count}</span></div>
+      <div className="draft-group-head"><strong>{title}</strong><span>{faNum(count)}</span></div>
       <ul>{children}</ul>
     </div>
   );

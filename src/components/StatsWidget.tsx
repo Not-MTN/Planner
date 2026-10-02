@@ -1,50 +1,69 @@
 import { useMemo } from 'react';
-import { t } from '../i18n';
-import type { PlannerState } from '../types';
+import { faNum, t, tn } from '../i18n';
+import { habitStreaks } from '../logic';
+import { formatEstimate } from '../quickAdd';
 import { todayISO } from '../dates';
+import type { PlannerState } from '../types';
 
-export function StatsWidget({ state }: { state: PlannerState }) {
-  const stats = useMemo(() => {
-    const today = todayISO();
-    const tasksToday = state.tasks.filter((t) => !t.completed && t.dueDate === today).length;
-    const tasksDone = state.tasks.filter((t) => t.completed).length;
-    const total = state.tasks.length;
-    const habitsActive = state.habits.filter((h) => !h.archived).length;
-    const streakSum = state.habits.length; // simple proxy
-    const focusToday = state.focusLog.filter((s) => s.date === today).reduce((sum, s) => sum + s.minutes, 0);
-    return { tasksToday, tasksDone, total, habitsActive, streakSum, focusToday };
-  }, [state]);
+export function getGlanceStats(state: PlannerState, today: string) {
+  const tasksDueToday = state.tasks.filter((task) => !task.completed && task.dueDate === today).length;
+  const completedTasks = state.tasks.filter((task) => task.completed).length;
+  const totalTasks = state.tasks.length;
+  const activeHabits = state.habits.filter((habit) => !habit.archived);
+  const focusMinutesToday = state.focusLog
+    .filter((session) => session.date === today)
+    .reduce((sum, session) => sum + session.minutes, 0);
+  const longestHabitStreak = activeHabits.reduce(
+    (longest, habit) => Math.max(longest, habitStreaks(state, habit, today).current),
+    0,
+  );
+
+  return {
+    tasksDueToday,
+    completedTasks,
+    totalTasks,
+    activeHabits: activeHabits.length,
+    focusMinutesToday,
+    longestHabitStreak,
+  };
+}
+
+export function StatsWidget({ state, date = todayISO() }: { state: PlannerState; date?: string }) {
+  const stats = useMemo(() => getGlanceStats(state, date), [state, date]);
 
   return (
-    <div className="stats-widget">
-      <div className="stats-widget-head">
-        <h3 className="stats-widget-title">{t('At a glance')}</h3>
+    <details className="stats-widget">
+      <summary className="stats-widget-head">
+        <span className="stats-widget-title">{t('At a glance')}</span>
+        <span className="stats-widget-preview">{faNum(stats.tasksDueToday)} {t('due today')}</span>
         <span className="stats-widget-badge">{t('Live')}</span>
-      </div>
+      </summary>
       <div className="stats-grid">
         <div className="stat-card">
-          <span className="stat-num">{stats.tasksToday}</span>
+          <span className="stat-num">{faNum(stats.tasksDueToday)}</span>
           <span className="stat-label">{t('due today')}</span>
         </div>
         <div className="stat-card">
-          <span className="stat-num">{stats.tasksDone}/{stats.total}</span>
-          <span className="stat-label">{t('completed')}</span>
+          <span className="stat-num">{faNum(stats.completedTasks)}/{faNum(stats.totalTasks)}</span>
+          <span className="stat-label">{t('all-time completed')}</span>
         </div>
         <div className="stat-card">
-          <span className="stat-num">{stats.habitsActive}</span>
+          <span className="stat-num">{faNum(stats.activeHabits)}</span>
           <span className="stat-label">{t('habits')}</span>
         </div>
         <div className="stat-card">
-          <span className="stat-num">{stats.focusToday}m</span>
+          <span className="stat-num">{formatEstimate(stats.focusMinutesToday)}</span>
           <span className="stat-label">{t('focus today')}</span>
         </div>
       </div>
-      {stats.streakSum > 0 && (
+      {stats.longestHabitStreak > 0 ? (
         <div className="stats-streak">
-          <span className="streak-icon">🔥</span>
-          <span>{t('{0} day streak across all habits', { 0: stats.streakSum })}</span>
+          <span className="streak-icon" aria-hidden="true">🔥</span>
+          <span>
+            {t('Longest habit streak')}: {tn(stats.longestHabitStreak, '{count} day', '{count} days')}
+          </span>
         </div>
-      )}
-    </div>
+      ) : null}
+    </details>
   );
 }

@@ -6,7 +6,7 @@ import { addDays, dayNumber, formatMonthShort, formatWeekdayShort, displayTime }
 import { TickIcon } from '../icons';
 import type { Task, TaskInput } from '../types';
 import { InlineTitle } from '../components/InlineTitle';
-import { t } from '../i18n';
+import { faNum, t } from '../i18n';
 
 export type BoardGroup = 'when' | 'priority' | 'category';
 
@@ -177,7 +177,7 @@ export function TaskBoard({ tasks, group, today }: { tasks: Task[]; group: Board
                       {task.dueDate ? `${formatWeekdayShort(task.dueDate)} ${dayNumber(task.dueDate)} ${formatMonthShort(task.dueDate)}` : t("No date")}
                       {task.dueTime ? ` · ${displayTime(task.dueTime)}` : ''}
                       {task.repeat ? ' · ↻' : ''}
-                      {steps ? ` · ${stepsDone}/${steps}` : ''}
+                      {steps ? ` · ${faNum(stepsDone)}/${faNum(steps)}` : ''}
                     </small>
                   </div>
                 </li>

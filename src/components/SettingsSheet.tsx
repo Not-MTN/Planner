@@ -35,8 +35,8 @@ import { requestTour } from '../tour';
 import { requestAbout } from '../about';
 import { LEAD_CHOICES } from '../reminders';
 import { loadSpeechLocaleId, saveSpeechLocaleId, speechAvailable, SPEECH_LOCALES } from '../speech';
-import { t, tn, getLang, setLang, LANGUAGES, type Lang } from '../i18n';
-import { loadNavigationPages, NAVIGATION_PAGES, saveNavigationPages, type NavigationPage } from '../navigationPrefs';
+import { faNum, t, tn, getLang, setLang, LANGUAGES, type Lang } from '../i18n';
+import { loadMobileFavorites, loadNavigationPages, MAX_MOBILE_FAVORITES, moveMobileFavorite, NAVIGATION_PAGES, saveMobileFavorites, saveNavigationPages, type NavigationPage } from '../navigationPrefs';
 import { backgroundPushEnabled, configureBackgroundPush, refreshBackgroundPushSchedule } from '../push';
 
 const NAV_LABELS: Record<NavigationPage, string> = {
@@ -46,10 +46,26 @@ const NAV_LABELS: Record<NavigationPage, string> = {
 
 function NavigationSection() {
   const [pages, setPages] = useState(loadNavigationPages);
+  const [mobileFavorites, setMobileFavorites] = useState(loadMobileFavorites);
+  const [favoriteAnnouncement, setFavoriteAnnouncement] = useState('');
   const toggle = (page: NavigationPage, enabled: boolean) => {
     const next = enabled ? [...pages, page] : pages.filter((item) => item !== page);
     setPages(next);
     saveNavigationPages(next);
+  };
+  const toggleMobileFavorite = (page: NavigationPage, enabled: boolean) => {
+    const next = enabled
+      ? [...mobileFavorites, page].slice(0, MAX_MOBILE_FAVORITES)
+      : mobileFavorites.filter((item) => item !== page);
+    setMobileFavorites(next);
+    saveMobileFavorites(next);
+  };
+  const reorderMobileFavorite = (page: NavigationPage, direction: 'up' | 'down') => {
+    const next = moveMobileFavorite(mobileFavorites, page, direction);
+    setMobileFavorites(next);
+    saveMobileFavorites(next);
+    const position = next.indexOf(page) + 1;
+    setFavoriteAnnouncement(t("{0} moved to position {1}", { 0: NAV_LABELS[page], 1: faNum(position) }));
   };
   return (
     <section className="set-section">
@@ -64,6 +80,53 @@ function NavigationSection() {
           </label>
         ))}
       </div>
+      <h4 className="navigation-subhead">{t("Mobile favorites")}</h4>
+      <p className="set-hint">{t("Pin up to four pages to the top of the mobile More menu. Use the arrows to change their order.")}</p>
+      <div className="navigation-preferences">
+        {NAVIGATION_PAGES.map((page) => {
+          const order = mobileFavorites.indexOf(page);
+          const selected = order >= 0;
+          return (
+            <div key={page} className="navigation-preference navigation-preference-mobile">
+              <label className="mobile-favorite-pick">
+                <input
+                  type="checkbox"
+                  checked={selected}
+                  disabled={!selected && mobileFavorites.length >= MAX_MOBILE_FAVORITES}
+                  onChange={(event) => toggleMobileFavorite(page, event.target.checked)}
+                />
+                <span>{NAV_LABELS[page]}</span>
+              </label>
+              {selected ? (
+                <span className="mobile-favorite-order">
+                  <small title={t("Position {0}", { 0: faNum(order + 1) })}>{faNum(order + 1)}</small>
+                  <button
+                    type="button"
+                    className="mobile-favorite-move"
+                    aria-label={t("Move {0} up", { 0: NAV_LABELS[page] })}
+                    title={t("Move {0} up", { 0: NAV_LABELS[page] })}
+                    disabled={order === 0}
+                    onClick={() => reorderMobileFavorite(page, 'up')}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    className="mobile-favorite-move"
+                    aria-label={t("Move {0} down", { 0: NAV_LABELS[page] })}
+                    title={t("Move {0} down", { 0: NAV_LABELS[page] })}
+                    disabled={order === mobileFavorites.length - 1}
+                    onClick={() => reorderMobileFavorite(page, 'down')}
+                  >
+                    ↓
+                  </button>
+                </span>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+      <p className="visually-hidden mobile-favorite-announcement" role="status" aria-live="polite" aria-atomic="true">{favoriteAnnouncement}</p>
     </section>
   );
 }

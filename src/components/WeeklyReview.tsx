@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { todayISO } from '../dates';
 import { downloadBlob } from '../download';
 import { printDocument } from '../printDocument';
-import { t } from '../i18n';
+import { faNum, t } from '../i18n';
+import { formatEstimate } from '../quickAdd';
 import { PrinterIcon } from '../icons';
 import { buildWeeklyReport, weeklyReportHtml } from '../weeklyReport';
 import type { PlannerState } from '../types';
@@ -43,16 +44,16 @@ export function WeeklyReview({ state, onClose }: { state: PlannerState; onClose?
       <div className="weekly-stats">
         <div className="weekly-stat">
           <span className="weekly-stat-num">
-            {report.done}/{report.planned}
+            {faNum(report.done)}/{faNum(report.planned)}
           </span>
           <span className="weekly-stat-label">{t('planned items done')}</span>
         </div>
         <div className="weekly-stat">
-          <span className="weekly-stat-num">{checkIns}</span>
+          <span className="weekly-stat-num">{faNum(checkIns)}</span>
           <span className="weekly-stat-label">{t('habit check-ins')}</span>
         </div>
         <div className="weekly-stat">
-          <span className="weekly-stat-num">{report.focusMinutes}m</span>
+          <span className="weekly-stat-num">{formatEstimate(report.focusMinutes)}</span>
           <span className="weekly-stat-label">{t('focused')}</span>
         </div>
       </div>
