@@ -321,6 +321,12 @@ export default defineConfig(({ mode }) => {
   // so their build carries the address. Empty for the website and for local
   // development, where `/api/...` stays relative.
   const apiOrigin = normalizeAppApiOrigin(env.PLANNER_API_ORIGIN || fileEnv.PLANNER_API_ORIGIN);
+  // The API handlers read this one straight from `process.env`, exactly as the
+  // deployed function does — so a value in `.env.local` has to be put there,
+  // or a shell pointed at a local dev server would be refused as cross-origin.
+  if (!env.PLANNER_APP_ORIGINS && fileEnv.PLANNER_APP_ORIGINS) {
+    process.env.PLANNER_APP_ORIGINS = fileEnv.PLANNER_APP_ORIGINS;
+  }
   const pushEnv = {
     DATABASE_URL: databaseUrl,
     VAPID_PUBLIC_KEY: env.VAPID_PUBLIC_KEY || fileEnv.VAPID_PUBLIC_KEY,
