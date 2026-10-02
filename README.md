@@ -35,6 +35,12 @@ npm run desktop:dist         # Windows, macOS and Linux installers
 - **Windows, macOS, Linux** (`desktop/`): an NSIS installer, a `.dmg` and
   `.zip`, and AppImage/`.deb`/`.rpm` — see [docs/DESKTOP.md](docs/DESKTOP.md).
 
+Two one-off commands make a release complete: `npm run android:keystore`
+creates the Android signing key and prints the four GitHub secrets that let
+future APKs install over earlier ones, and every build runs
+`npm run check:deployment` against your server first, so an app that could not
+sign in fails the build instead of shipping.
+
 The website downloads them directly — the buttons in the "Get the app" section
 save the file instead of sending people to a page of links. They point at
 GitHub's stable address for the newest release,

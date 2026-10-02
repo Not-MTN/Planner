@@ -170,7 +170,20 @@ warning in the run summary when no keystore is configured.
 
 Generate the keystore once, keep it, and use it for every release. It cannot be
 regenerated later without breaking updates for everyone who already installed
-the app — that is what "upload key" means.
+the app — that is what "upload key" means. One command does all of it:
+
+```bash
+npm run android:keystore
+```
+
+It creates `android/app/keystore/release.jks` and `android/keystore.properties`
+(both git-ignored), then prints the four secret values ready to paste, with the
+base64 also written to a file so a long string does not have to be copied out of
+a terminal. It refuses to overwrite an existing key unless you pass `--force`,
+because replacing one strands every installed copy.
+
+Run it on your own machine, not in CI: it is your key, and the point of the
+script is that nothing has to be sent anywhere.
 
 ### Where to publish
 
@@ -236,6 +249,25 @@ workflow) and on every `v*` tag, attaching the files to that release:
 - Windows `.exe`, macOS `.dmg`/`.zip`, Linux `.AppImage`/`.deb`/`.rpm`
 - Android `.apk` and `.aab`
 - iOS `.xcarchive.zip` and the packaged `.app.zip` (unsigned)
+
+### Every build checks the deployment first
+
+The `preflight` job runs before the builds and asks the deployment whether it
+accepts the origins the apps run from — the same questions
+`npm run check:deployment` asks. Only when `PLANNER_API_ORIGIN` is set, because
+an offline-only build has no server to be refused by.
+
+- Deployment answers and refuses the app origins → **the build fails**, with the
+  exact `PLANNER_APP_ORIGINS` value and where to put it in the run summary. A
+  build that produces an app which cannot sign in is not a build worth having.
+- Deployment cannot be reached → **a warning**, and the build continues. An
+  outage or a wrong address says nothing either way, and it must not fail
+  somebody's work.
+- Everything answers → nothing to see.
+
+This runs on CI rather than locally because CI can reach the deployment. It is
+also the only moment the two halves — a server that must allow the apps, and
+apps about to be built — are known together.
 
 ### Artifact names are a public interface
 

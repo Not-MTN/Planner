@@ -44,8 +44,61 @@ env:
   VERSION_CODE: ${{ github.run_number }}
 
 jobs:
+  # Runs where the network is: this is the only place a build can ask the
+  # deployment whether it accepts the packaged apps, so it is the one place a
+  # misconfigured server is caught before an app that cannot sign in is built.
+  preflight:
+    name: The apps could sign in
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check the deployment the apps will talk to
+        if: ${{ env.API_ORIGIN != '' }}
+        run: |
+          code=0
+          node scripts/check-deployment.mjs "$API_ORIGIN" || code=$?
+          case "$code" in
+            0)
+              exit 0
+              ;;
+            2)
+              # A wrong address, an outage, a network problem: says nothing
+              # either way, so it must not fail somebody's build.
+              echo "::warning title=Could not check the deployment::${API_ORIGIN} could not be reached, so it was not verified. The app builds, but sign-in is unproven."
+              exit 0
+              ;;
+            3)
+              echo "::error title=API_ORIGIN is not a URL::Set it to a bare origin such as https://your-app.example.com, without a path."
+              exit 1
+              ;;
+          esac
+          {
+            echo "## ✗ The apps this build makes could not sign in"
+            echo ""
+            echo "\`${API_ORIGIN}\` answers, but it refuses the origins the apps run from."
+            echo "Every account, sync and AI request would come back 403, and the app can"
+            echo "only show that as \"offline\"."
+            echo ""
+            echo "Set this in the deployment's environment variables and redeploy:"
+            echo ""
+            echo '```'
+            echo "PLANNER_APP_ORIGINS=https://localhost,capacitor://localhost,app://planner"
+            echo '```'
+            echo ""
+            echo "Then run this workflow again. docs/APPS.md §2 explains what it does."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::error title=The apps could not sign in::${API_ORIGIN} refuses the packaged apps' origins. Set PLANNER_APP_ORIGINS on the deployment (see the run summary) and run this again."
+          exit 1
+        env:
+          API_ORIGIN: ${{ env.API_ORIGIN }}
+
   desktop:
     name: Desktop installers (${{ matrix.target }})
+    needs: preflight
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -106,6 +159,7 @@ jobs:
 
   android:
     name: Android APK and Play bundle
+    needs: preflight
     runs-on: ubuntu-latest
     timeout-minutes: 40
     # Secrets cannot be read inside an `if:` directly; carrying them in the
@@ -223,6 +277,7 @@ jobs:
 
   ios:
     name: iOS archive (unsigned)
+    needs: preflight
     runs-on: macos-latest
     timeout-minutes: 40
     steps:

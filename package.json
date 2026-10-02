@@ -19,7 +19,8 @@
     "desktop:dist": "node scripts/desktop-build.mjs",
     "check:deployment": "node scripts/check-deployment.mjs",
     "lint:workflows": "node scripts/lint-workflows.mjs",
-    "check:downloads": "node scripts/check-downloads.mjs"
+    "check:downloads": "node scripts/check-downloads.mjs",
+    "android:keystore": "node scripts/android-keystore.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.2",
