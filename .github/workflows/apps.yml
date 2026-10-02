@@ -238,6 +238,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -252,3 +253,13 @@ jobs:
           gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
             || gh release create "$tag" --repo "$GITHUB_REPOSITORY" --title "Planner $tag" --generate-notes
           gh release upload "$tag" artifacts/* --repo "$GITHUB_REPOSITORY" --clobber
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check the website's download buttons resolve
+        # The site links to /releases/latest/download/<name>. If an artifact is
+        # named differently from what src/marketing/downloads.ts expects, every
+        # download button on the site 404s and nothing else would notice — the
+        # site ships links, not files. This is the only moment the two exist
+        # together, so it is the moment to compare them.
+        run: node scripts/check-downloads.mjs

@@ -3533,6 +3533,26 @@
   padding-top: 14px;
 }
 
+/* Ways in that are not downloads (all releases, source) — present, but they
+   must not compete with the button that actually gets the app. */
+.platform-actions-quiet {
+  margin-top: 0;
+  padding-top: 4px;
+}
+
+/* Where the download came from: written once, not repeated under every card. */
+.platforms-foot-quiet {
+  margin-top: 10px;
+  font-size: 0.85rem;
+}
+
+/* Five downloads on the Linux card would otherwise push the notes below it
+   around as the grid stretches. */
+.platform-card .platform-actions .btn-sm {
+  padding: 9px 14px;
+  font-size: 14px;
+}
+
 .platform-here {
   margin: 0;
   font-size: 0.72rem;

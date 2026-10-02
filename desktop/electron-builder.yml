@@ -28,7 +28,13 @@ win:
     - target: nsis
       arch: [x64, arm64]
   icon: build/icon.ico
-  artifactName: Planner-${version}-windows-${arch}.${ext}
+  # No ${version} and no ${arch}: the name has to stay the same from release to
+  # release, because the website links to
+  # /releases/latest/download/<name> — a name that changes every release would
+  # break every download button on the site. Leaving ${arch} out also makes
+  # electron-builder build a single installer holding both x64 and arm64,
+  # instead of that installer plus a redundant one per architecture.
+  artifactName: Planner-windows.${ext}
 
 nsis:
   # A normal installer with a directory choice, not a one-click mystery.
@@ -50,14 +56,14 @@ mac:
       arch: [x64, arm64]
   icon: build/icon.icns
   category: public.app-category.productivity
-  artifactName: Planner-${version}-macos-${arch}.${ext}
+  artifactName: Planner-macos-${arch}.${ext}
   # Signing and notarising happen in CI with the maintainer's Apple
   # credentials; an unsigned build still runs from the downloaded file.
   hardenedRuntime: true
   gatekeeperAssess: false
 
 dmg:
-  artifactName: Planner-${version}-macos-${arch}.${ext}
+  artifactName: Planner-macos-${arch}.${ext}
   contents:
     - x: 130
       y: 220
@@ -83,4 +89,4 @@ linux:
       Name: Planner
       Comment: A calm, local-first planner for your day, week and goals
       Keywords: planner;tasks;habits;goals;notes;calendar;
-  artifactName: Planner-${version}-linux-${arch}.${ext}
+  artifactName: Planner-linux-${arch}.${ext}

@@ -35,6 +35,14 @@ npm run desktop:dist         # Windows, macOS and Linux installers
 - **Windows, macOS, Linux** (`desktop/`): an NSIS installer, a `.dmg` and
   `.zip`, and AppImage/`.deb`/`.rpm` — see [docs/DESKTOP.md](docs/DESKTOP.md).
 
+The website downloads them directly — the buttons in the "Get the app" section
+save the file instead of sending people to a page of links. They point at
+GitHub's stable address for the newest release,
+`.../releases/latest/download/<file>`, which keeps working as long as an
+artifact name never changes; that is why none of them contains a version
+number. `npm run check:downloads` asks the live release whether every name
+still exists, and the release job runs it before a tagged build is done.
+
 With no server address configured, every one of these is a complete **offline**
 planner: no account, no network, everything on the device. Point them at your
 deployment with one variable and accounts, sync and AI work too:

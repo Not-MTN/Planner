@@ -3,7 +3,7 @@ import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Platforms } from './Platforms';
-import { RELEASES_PAGE, SOURCE_PAGE, detectPlatform } from './downloads';
+import { DOWNLOADS, RELEASES_PAGE, RELEASE_DOWNLOAD_BASE, SOURCE_PAGE, detectPlatform, downloadsFor } from './downloads';
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -79,6 +79,57 @@ describe('the "get the app" section', () => {
   it('marks the reader\'s own device, and only that one', () => {
     const html = render();
     expect(html.querySelectorAll('.platform-card.is-here').length).toBeLessThanOrEqual(1);
+  });
+
+  it('downloads the file from this page, not from a page of links', () => {
+    const html = render();
+    const hrefs = Array.from(html.querySelectorAll('a')).map((a) => a.getAttribute('href') ?? '');
+    for (const item of DOWNLOADS.windows) {
+      expect(hrefs).toContain(item.url);
+    }
+    expect(downloadsFor('windows')[0].url).toBe(`${RELEASE_DOWNLOAD_BASE}/Planner-windows.exe`);
+    // The Android card offers the APK itself, not the releases page.
+    expect(hrefs).toContain(`${RELEASE_DOWNLOAD_BASE}/app-release.apk`);
+    // Every download leaves the page (GitHub serves it as an attachment).
+    const downloads = Array.from(html.querySelectorAll('a')).filter((a) => a.getAttribute('href')?.startsWith(RELEASE_DOWNLOAD_BASE));
+    expect(downloads.length).toBeGreaterThan(0);
+    for (const link of downloads) {
+      expect(link.getAttribute('target')).toBe('_blank');
+      expect(link.getAttribute('rel')).toContain('noreferrer');
+    }
+  });
+
+  it('never names a version in a download link', () => {
+    // These URLs are /releases/latest/download/<file>: a version in the file
+    // name would break every button on the site at the next release.
+    for (const items of Object.values(DOWNLOADS)) {
+      for (const item of items) {
+        expect(item.file).not.toMatch(/\d+\.\d+/);
+        expect(item.url).toBe(`${RELEASE_DOWNLOAD_BASE}/${item.file}`);
+      }
+    }
+  });
+
+  it('highlights one download per card and offers the rest quietly', () => {
+    const html = render();
+    const primary = Array.from(html.querySelectorAll('a.btn-primary')).map((a) => a.getAttribute('href') ?? '');
+    for (const items of Object.values(DOWNLOADS)) {
+      expect(primary).toContain(items.find((item) => item.primary)?.url);
+    }
+    // macOS has two, because guessing a visitor's chip would be wrong half the
+    // time on a platform where the wrong build does not run at all.
+    expect(downloadsFor('macos')).toHaveLength(2);
+    expect(primary.filter((href) => href.includes('Planner-macos')).length).toBe(1);
+  });
+
+  it('does not invent an iOS download', () => {
+    // The only iOS artifact CI produces is unsigned: it cannot be installed by
+    // anyone, so the card must not offer a file.
+    expect(downloadsFor('ios')).toEqual([]);
+    expect(downloadsFor('other')).toEqual([]);
+    const html = render();
+    const hrefs = Array.from(html.querySelectorAll('a')).map((a) => a.getAttribute('href') ?? '');
+    expect(hrefs.filter((href) => href.includes('ios'))).toEqual([]);
   });
 
   it('is translated, not left in English, for Persian readers', () => {

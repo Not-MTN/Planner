@@ -18,7 +18,8 @@
     "desktop:pack": "node scripts/desktop-build.mjs --dir",
     "desktop:dist": "node scripts/desktop-build.mjs",
     "check:deployment": "node scripts/check-deployment.mjs",
-    "lint:workflows": "node scripts/lint-workflows.mjs"
+    "lint:workflows": "node scripts/lint-workflows.mjs",
+    "check:downloads": "node scripts/check-downloads.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.2",

@@ -1,13 +1,23 @@
 /**
  * "Get the app" — one card per kind of device, with the honest state of each.
  *
- * Nothing here invents a download: the installers come from the release page
- * this repository publishes, the Android card offers the APK until the store
- * listings are live (see downloads.ts), and the iPhone card points at the web
- * app installing to the home screen, because that is what works today.
+ * Clicking a download here saves the file: the link is the release asset
+ * itself (see downloads.ts), so nobody has to find the right file on a release
+ * page. The iPhone card offers the web app instead, because the only iOS build
+ * that exists is unsigned and would not install on anyone's phone.
  */
 import { COPY, type CopyKey, type Lang } from './copy';
-import { APP_STORE_URL, ANDROID_STORES, PLAY_STORE_URL, RELEASES_PAGE, SOURCE_PAGE, currentPlatform, type Platform } from './downloads';
+import {
+  APP_STORE_URL,
+  ANDROID_STORES,
+  PLAY_STORE_URL,
+  RELEASES_PAGE,
+  SOURCE_PAGE,
+  currentPlatform,
+  downloadsFor,
+  type Download,
+  type Platform,
+} from './downloads';
 import { pointerLeave, pointerMove } from './effects';
 
 const SPOT = {
@@ -32,19 +42,28 @@ const CARDS: Card[] = [
   { platform: 'linux', icon: '🐧', titleKey: 'platformsLinux', noteKey: 'platformsLinuxNote' },
 ];
 
-function actionsFor(platform: Platform, c: Record<CopyKey, string>): Action[] {
-  const releases = { label: c.platformsDownload, href: RELEASES_PAGE, external: true };
+/**
+ * The buttons under a card: the downloads this platform really has, then the
+ * always-available ways to get it. Nothing appears here that does not work —
+ * `downloadsFor` returns an empty list rather than a link to a guess.
+ */
+function actionsFor(platform: Platform, c: Record<CopyKey, string>): { downloads: Download[]; actions: Action[] } {
+  const downloads = downloadsFor(platform);
+  const releases = { label: c.platformsAllReleases, href: RELEASES_PAGE, external: true };
   const source = { label: c.platformsSource, href: SOURCE_PAGE, external: true };
   if (platform === 'ios') {
+    const webApp = { label: c.platformsWebInstead, href: '/app', external: false };
     return APP_STORE_URL
-      ? [{ label: c.platformsAppStore, href: APP_STORE_URL, external: true }, { label: c.platformsWebInstead, href: '/app', external: false }]
-      : [{ label: c.platformsWebInstead, href: '/app', external: false }, source];
+      ? { downloads, actions: [{ label: c.platformsAppStore, href: APP_STORE_URL, external: true }, webApp] }
+      : { downloads, actions: [webApp, source] };
   }
   if (platform === 'android') {
     const play = PLAY_STORE_URL ? [{ label: c.platformsPlayStore, href: PLAY_STORE_URL, external: true }] : [];
-    return [...play, releases, source];
+    return { downloads, actions: [...play, releases, source] };
   }
-  return [releases, source];
+  // Downloads are the point of these cards, so the releases page is only a
+  // footnote: everything on it is reachable from the buttons above.
+  return { downloads, actions: [releases, source] };
 }
 
 export function Platforms({ lang }: { lang: Lang }) {
@@ -62,42 +81,66 @@ export function Platforms({ lang }: { lang: Lang }) {
         </header>
 
         <div className="platforms">
-          {CARDS.map((card, index) => (
-            <article
-              key={card.platform}
-              className={`platform-card spot reveal ${card.platform === here ? 'is-here' : ''}`}
-              data-reveal
-              style={{ transitionDelay: `${index * 70}ms` }}
-              {...SPOT}
-            >
-              <span className="platform-icon" aria-hidden="true">
-                {card.icon}
-              </span>
-              <h3>{c[card.titleKey]}</h3>
-              <p className="platform-note">{c[card.noteKey]}</p>
-              <div className="platform-actions">
-                {actionsFor(card.platform, c).map((action) => (
-                  <a
-                    key={action.label + action.href}
-                    className="btn btn-outline btn-sm"
-                    href={action.href}
-                    {...(action.external ? { target: '_blank', rel: 'noreferrer' } : {})}
-                  >
-                    {action.label}
-                  </a>
-                ))}
-              </div>
-              {card.platform === here ? <p className="platform-here">{c.platformsHere}</p> : null}
-              {card.platform === 'android' && androidStores.length > 0 ? (
-                <p className="platform-note platform-stores">
-                  {c.platformsAlsoOn} {androidStores.map((store) => store.name).join(' · ')}
-                </p>
-              ) : null}
-            </article>
-          ))}
+          {CARDS.map((card, index) => {
+            const { downloads, actions } = actionsFor(card.platform, c);
+            return (
+              <article
+                key={card.platform}
+                className={`platform-card spot reveal ${card.platform === here ? 'is-here' : ''}`}
+                data-reveal
+                style={{ transitionDelay: `${index * 70}ms` }}
+                {...SPOT}
+              >
+                <span className="platform-icon" aria-hidden="true">
+                  {card.icon}
+                </span>
+                <h3>{c[card.titleKey]}</h3>
+                <p className="platform-note">{c[card.noteKey]}</p>
+                <div className="platform-actions">
+                  {downloads.map((item) => (
+                    <a
+                      key={item.file}
+                      className={`btn btn-sm ${item.primary ? 'btn-primary' : 'btn-outline'}`}
+                      href={item.url}
+                      // A cross-origin link: the file is served by GitHub with
+                      // `Content-Disposition: attachment`, so it saves rather
+                      // than navigating. `download` would be ignored here.
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {c[item.labelKey]}
+                    </a>
+                  ))}
+                </div>
+                {actions.length > 0 ? (
+                  <div className="platform-actions platform-actions-quiet">
+                    {actions.map((action) => (
+                      <a
+                        key={action.label + action.href}
+                        className="btn btn-quiet btn-sm"
+                        href={action.href}
+                        {...(action.external ? { target: '_blank', rel: 'noreferrer' } : {})}
+                      >
+                        {action.label}
+                      </a>
+                    ))}
+                  </div>
+                ) : null}
+                {card.platform === here ? <p className="platform-here">{c.platformsHere}</p> : null}
+                {card.platform === 'android' && androidStores.length > 0 ? (
+                  <p className="platform-note platform-stores">
+                    {c.platformsAlsoOn} {androidStores.map((store) => store.name).join(' · ')}
+                  </p>
+                ) : null}
+              </article>
+            );
+          })}
         </div>
 
         <p className="platforms-foot">{c.platformsFoot}</p>
+        {CARDS.some((card) => downloadsFor(card.platform).length > 0) ? (
+          <p className="platforms-foot platforms-foot-quiet">{c.platformsDownloadFoot}</p>
+        ) : null}
       </div>
     </section>
   );

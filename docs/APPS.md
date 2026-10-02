@@ -225,6 +225,32 @@ workflow) and on every `v*` tag, attaching the files to that release:
 - Android `.apk` and `.aab`
 - iOS `.xcarchive.zip` and the packaged `.app.zip` (unsigned)
 
+### Artifact names are a public interface
+
+The website downloads the builds itself: each button on the landing page links
+to `https://github.com/Not-MTN/Planner/releases/latest/download/<file>`, the
+address GitHub keeps pointing at the newest release that has that file. It is
+written once and survives every future release — **provided the file name never
+changes**. So:
+
+- **no version number in an artifact name.** `Planner-1.2.0-windows-x64.exe`
+  would break every button on the site at the next release. The names are
+  `Planner-windows.exe`, `Planner-macos-<arch>.dmg`, `Planner-linux-<arch>.*`
+  and `app-release.apk`, and the version lives on the release, not in the file.
+- **the names are listed in `src/marketing/downloads.ts`.** Rename an artifact
+  in `desktop/electron-builder.yml` (or change the APK's name in `apps.yml`) and
+  you have to change it there too.
+- `npm run check:downloads` asks the live release whether every one of those
+  names still exists, and the release job runs it right after uploading — so a
+  mismatch fails the build that created it, not a visitor's click.
+
+Windows is deliberately a single installer for both architectures:
+electron-builder only produces a separate installer per architecture when the
+artifact name asks for `${arch}`, and nothing about a visitor's browser reliably
+says whether their PC is x64 or ARM. macOS cannot be solved the same way, so it
+ships both and the site names them after the chip: an Intel Mac cannot run an
+Apple-silicon build at all.
+
 Where the builds point is decided in this order, first match wins:
 
 1. the `api_origin` input when you run the workflow by hand,
