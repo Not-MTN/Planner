@@ -36,6 +36,7 @@ import {
   type AgendaDay,
 } from '../logic';
 import { Meter } from '../components/ui';
+import { InlineTitle } from '../components/InlineTitle';
 import type { CalendarTab } from '../route';
 import type { PlannerEvent } from '../types';
 import { t, tn } from '../i18n';
@@ -757,7 +758,7 @@ function DayCard({
   onAddEvent: () => void;
   onAddTask: () => void;
 }) {
-  const { toggleEvent, toggleTask, openComposer } = usePlanner();
+  const { toggleEvent, toggleTask, openComposer, updateTask, flash, undo } = usePlanner();
   const open = !hasAgendaPlans(day);
   const habits = fixedHabits(day);
   return (
@@ -805,7 +806,14 @@ function DayCard({
                 {task.completed ? <TickIcon size={12} /> : null}
               </button>
               <time>{task.dueTime ?? ''}</time>
-              <button type="button" className="item-title" dir="auto" onClick={() => openComposer({ mode: 'edit', type: 'task', id: task.id })}>{task.title}</button>
+              <InlineTitle
+                value={task.title}
+                onCommit={(title) => {
+                  updateTask(task.id, { title });
+                  flash(t("Title updated."), { label: t("Undo"), run: undo });
+                }}
+                onOpenDetails={() => openComposer({ mode: 'edit', type: 'task', id: task.id })}
+              />
             </li>
           ))}
           {day.notes.map((note) => (

@@ -113,6 +113,7 @@ Settings → **Language** switches the whole interface to Persian with a right-t
 - **Habit library** — a shelf of classic habits and routines (body, mind, home, connection) you can add in one tap, with "Add all" per group.
 - **Hand-painted illustrations** — warm gouache artwork on the Today panel, empty states, insights, and the habit library, drawn in the app's own palette.
 - **Smart quick add** — type the way you think: `Call mom tomorrow 5pm #personal !high` becomes a task with the date, time, category, and priority filled in. A time range like `Deep work 9:30-11:30` becomes an event. Live chips show what will happen before you press Enter.
+- **Rename in place** — click any task title (Today, Tasks list, Board cards, Calendar → What's ahead) and fix the wording right there: Enter saves, Esc cancels, clicking away saves. Only the title is written, so the date, time, priority, checklist and note stay as they were, and the rename is one undo away. The pencil on the row (or beside the box on a board card) still opens the full editor for everything else.
 - **Command palette** (`⌘K` / `Ctrl+K` or `/`) — search everything, jump anywhere, add anything, toggle dark mode, start a focus session.
 - **Undo & redo** — every change is undoable (`⌘Z` / `⌘⇧Z`), and removals show a toast with an Undo button. No more confirm dialogs for small mistakes.
 - **Focus timer** — pick a task (or don't), choose 15–60 minutes, and get a full-screen breathing timer with a soft chime at the end.

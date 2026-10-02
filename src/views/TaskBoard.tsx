@@ -5,6 +5,7 @@ import { cx } from '../cx';
 import { addDays, dayNumber, formatMonthShort, formatWeekdayShort, displayTime } from '../dates';
 import { TickIcon } from '../icons';
 import type { Task, TaskInput } from '../types';
+import { InlineTitle } from '../components/InlineTitle';
 import { t } from '../i18n';
 
 export type BoardGroup = 'when' | 'priority' | 'category';
@@ -72,8 +73,10 @@ function sortForBoard(tasks: Task[]): Task[] {
 }
 
 export function TaskBoard({ tasks, group, today }: { tasks: Task[]; group: BoardGroup; today: string }) {
-  const { state, toggleTask, updateTask, openComposer } = usePlanner();
+  const { state, toggleTask, updateTask, openComposer, flash, undo } = usePlanner();
   const [over, setOver] = useState<string | null>(null);
+  // Dragging a card that is being renamed would fight with selecting text.
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [announce, setAnnounce] = useState('');
   const columns = boardColumns(tasks, group, today);
 
@@ -125,7 +128,7 @@ export function TaskBoard({ tasks, group, today }: { tasks: Task[]; group: Board
                 <li
                   key={task.id}
                   className={cx('board-card', `accent-${categoryById(task.category).accent}`, task.completed && 'is-done', `prio-card-${task.priority}`)}
-                  draggable
+                  draggable={editingId !== task.id}
                   tabIndex={0}
                   aria-keyshortcuts="ArrowLeft ArrowRight"
                   aria-label={`${task.title}. Press left or right arrow to move between columns.`}
@@ -159,15 +162,24 @@ export function TaskBoard({ tasks, group, today }: { tasks: Task[]; group: Board
                   >
                     {task.completed ? <TickIcon size={12} /> : null}
                   </button>
-                  <button type="button" className="board-card-body" onClick={() => openComposer({ mode: 'edit', type: 'task', id: task.id })}>
-                    <strong>{task.title}</strong>
+                  <div className="board-card-body">
+                    <InlineTitle
+                      className="board-card-title"
+                      value={task.title}
+                      onEditingChange={(editing) => setEditingId(editing ? task.id : null)}
+                      onCommit={(title) => {
+                        updateTask(task.id, { title });
+                        flash(t("Title updated."), { label: t("Undo"), run: undo });
+                      }}
+                      onOpenDetails={() => openComposer({ mode: 'edit', type: 'task', id: task.id })}
+                    />
                     <small>
                       {task.dueDate ? `${formatWeekdayShort(task.dueDate)} ${dayNumber(task.dueDate)} ${formatMonthShort(task.dueDate)}` : t("No date")}
                       {task.dueTime ? ` · ${displayTime(task.dueTime)}` : ''}
                       {task.repeat ? ' · ↻' : ''}
                       {steps ? ` · ${stepsDone}/${steps}` : ''}
                     </small>
-                  </button>
+                  </div>
                 </li>
               );
             })}

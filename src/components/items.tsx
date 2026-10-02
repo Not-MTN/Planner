@@ -6,6 +6,7 @@ import { addDays, dayNumber, formatDuration, formatMonthShort, formatWeekdayShor
 import { frequencyLabel, habitProgress, habitStreaks, isSkipped } from '../logic';
 import { formatEstimate } from '../quickAdd';
 import { FlameIcon, GripIcon, HabitGlyph, PencilIcon, StopwatchIcon, TickIcon, TrashIcon } from '../icons';
+import { InlineTitle } from './InlineTitle';
 import { repeatLabel } from '../recurrence';
 import type { Habit, PlannerEvent, Task } from '../types';
 import { t } from '../i18n';
@@ -173,7 +174,7 @@ export function TaskRow({
   /** Bulk-select mode: shows a checkbox instead of nothing. */
   selection?: { selected: boolean; onToggle: () => void };
 }) {
-  const { toggleTask, toggleSubtask, openComposer, deleteTask, flash, undo, startFocus, duplicateTask, moveTask } = usePlanner();
+  const { toggleTask, toggleSubtask, openComposer, deleteTask, updateTask, flash, undo, startFocus, duplicateTask, moveTask } = usePlanner();
   const accent = categoryById(task.category).accent;
   const [open, setOpen] = useState(false);
   const [picking, setPicking] = useState(false);
@@ -223,9 +224,20 @@ export function TaskRow({
         {task.completed ? <TickIcon size={14} /> : null}
       </button>
       <div className="item-body">
-        <button type="button" className="item-title" dir="auto" onClick={() => openComposer({ mode: 'edit', type: 'task', id: editId })}>
-          {task.title}
-        </button>
+        {/* A projection has no stored copy to rename — it opens the real task. */}
+        {projected ? (
+          <button type="button" className="item-title" dir="auto" onClick={() => openComposer({ mode: 'edit', type: 'task', id: editId })}>
+            {task.title}
+          </button>
+        ) : (
+          <InlineTitle
+            value={task.title}
+            onCommit={(title) => {
+              updateTask(task.id, { title });
+              flash(t("Title updated."), { label: t("Undo"), run: undo });
+            }}
+          />
+        )}
         <p className="meta">
           <span className={cx('prio', `prio-${task.priority}`)}>
             <i aria-hidden="true" />
@@ -346,6 +358,16 @@ export function TaskRow({
               <StopwatchIcon size={16} />
             </button>
           ) : null}
+          {/* The title edits in place now, so the full form needs its own door. */}
+          <button
+            type="button"
+            className="icon-btn row-edit"
+            aria-label={t("Edit details of {0}", { 0: task.title })}
+            title={t("Edit details")}
+            onClick={() => openComposer({ mode: 'edit', type: 'task', id: editId })}
+          >
+            <PencilIcon size={16} />
+          </button>
           <button
             type="button"
             className="icon-btn row-delete"
