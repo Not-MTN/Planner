@@ -32,6 +32,11 @@ const version = (process.env.PLANNER_VERSION_NAME ?? '').trim().replace(/^v/, ''
 const forwarded = [
   ...args.filter((arg) => arg !== '--run'),
   ...(version && !run ? ['-c.extraMetadata.version=' + version] : []),
+  // Never publish from here. electron-builder publishes on its own when it
+  // runs on a git tag and the app's package.json points at a repository — it
+  // then demands a GitHub token and fails the build. Uploading is deliberate:
+  // the Apps workflow collects the files and the release job attaches them.
+  ...(run ? [] : ['--publish', 'never']),
 ];
 
 function runStep(command, commandArgs, cwd = root) {

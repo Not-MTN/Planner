@@ -19,6 +19,12 @@ build; `npm run desktop:pack` produces an unpacked app directory for a quick
 look. `PLANNER_VERSION_NAME=1.2.0 npm run desktop:dist` versions the installer
 files (the Apps workflow passes the release tag automatically).
 
+Packaging never publishes. `desktop-build.mjs` passes `--publish never` on
+purpose: on a git tag electron-builder publishes on its own when the app's
+`package.json` names a repository, and then fails the build asking for a GitHub
+token. Uploading is a separate, deliberate step — the Apps workflow collects
+the files and the release job attaches them.
+
 ## Two ways to run it
 
 `npm run desktop:dist` writes `desktop/config.json`, and the app reads it at
