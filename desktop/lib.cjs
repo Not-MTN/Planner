@@ -79,7 +79,15 @@ function contentType(file) {
  * configured with one.
  */
 function contentSecurityPolicy(apiOrigin = '') {
-  const connect = ["'self'", normalizeAddress(apiOrigin), 'https://api.open-meteo.com', 'https://geocoding-api.open-meteo.com']
+  // api.github.com is where the app asks whether a newer release exists
+  // (src/shared/updates.ts). Nothing is sent there but the request itself.
+  const connect = [
+    "'self'",
+    normalizeAddress(apiOrigin),
+    'https://api.open-meteo.com',
+    'https://geocoding-api.open-meteo.com',
+    'https://api.github.com',
+  ]
     .filter(Boolean)
     .join(' ');
   return [

@@ -29,6 +29,8 @@ export const fa: Record<string, string> = {
   "A little, every day.": "کمی، هر روز.",
   "A must-do for every day — pinned to Today": "کاری ضروری برای هر روز — سنجاق‌شده به امروز",
   "A new version of Planner is ready.": "نسخه‌ی جدید برنامه‌ریز آماده است.",
+  "Planner {0} is available to download.": "نسخه‌ی {0} برنامه‌ریز برای بارگیری آماده است.",
+  Download: "بارگیری",
   "A person, a reply, a delivery…": "یک نفر، یک پاسخ، یک تحویل…",
   "A quick note, an idea, a reminder, or a short journal entry.": "یک یادداشت سریع، یک ایده، یک یادآوری یا یک خاطرهٔ کوتاه.",
   "A quiet place for thoughts.": "جایی آرام برای افکار.",

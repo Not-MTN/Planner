@@ -158,7 +158,19 @@ keytool -genkey -v -keystore android/app/keystore/release.jks \
 For CI, add these repository secrets and the workflow writes the same files
 itself: `ANDROID_KEYSTORE_BASE64` (`base64 -w0 release.jks`),
 `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`.
-Without them the workflow still builds, signed with the debug key.
+
+**Without those secrets, the APK you publish cannot be updated.** The workflow
+still builds and the APK installs — but it is signed with a debug key, and
+Android generates that key per machine. A CI job runs on a fresh machine every
+time, so each release is signed with a different key, and Android refuses to
+install an app whose signature does not match the installed one. Anyone who
+installed the earlier APK has to uninstall it first, which deletes their planner
+data on that device unless it was synced. Tagged builds therefore print a
+warning in the run summary when no keystore is configured.
+
+Generate the keystore once, keep it, and use it for every release. It cannot be
+regenerated later without breaking updates for everyone who already installed
+the app — that is what "upload key" means.
 
 ### Where to publish
 
@@ -276,7 +288,35 @@ bundle file names carry the version, so nothing has to be renamed before an
 upload. Write the tag as `vMAJOR.MINOR.PATCH` — `v1.2.0`, not `v1.2` — because
 the desktop installers need a full semantic version.
 
-## 7. What the shells do not do yet
+## 7. Updates
+
+A packaged app carries the planner inside it, so the service-worker prompt the
+website shows can never fire there — the code cannot change under the app. What
+happens instead: on launch, the app asks GitHub for the newest published release
+(`src/shared/updates.ts`) and, when that is newer than the build it is running,
+shows one toast — "Planner 1.2.0 is available to download", with a Download
+link to the releases page and a Later button. Dismissing a version keeps it
+quiet until the next one exists.
+
+It is deliberately quiet, and it never breaks anything:
+
+- no network, a rate limit, a malformed answer or a blocked request all mean
+  "we do not know", which is not worth interrupting anyone about;
+- a draft or pre-release is never offered, and a pre-release sorts below the
+  release it leads to (`1.2.0-beta` is not newer than `1.2.0`);
+- it only runs inside a packaged app. A browser tab updates itself through the
+  service worker, so it never sees this toast.
+
+The version a build reports comes from `PLANNER_VERSION_NAME`, which the Apps
+workflow sets from the tag — a `v1.2.0` build of any platform knows it is 1.2.0.
+
+**It tells people; it does not update them.** Installing the newer build stays
+their choice, and on Android that install only succeeds if the app is signed
+with the same key as before (see §3, Release signing). A real
+install-it-yourself update would mean `electron-updater` on the desktop
+targets, with a signing certificate to match.
+
+## 8. What the shells do not do yet
 
 Named plainly, because each one is a real feature and none of them is hidden:
 
@@ -296,7 +336,7 @@ Named plainly, because each one is a real feature and none of them is hidden:
 
 Everything else — the entire planner — works, because it is the same code.
 
-## 8. Store listing copy, ready to paste
+## 9. Store listing copy, ready to paste
 
 **Title:** Planner — calm daily planning
 **Short description (Play, ≤80):** Tasks, habits, goals and notes — encrypted, offline-first, no account needed.

@@ -2,6 +2,8 @@ import { loadEnv, type Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import { Buffer } from 'node:buffer';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { cwd, env } from 'node:process';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -356,6 +358,13 @@ function normalizeAppApiOrigin(value: string | undefined): string {
 export default defineConfig(({ mode }) => {
   // Read the secret only inside the Vite/Node process. It is never defined into the browser bundle.
   const fileEnv = loadEnv(mode, cwd(), '');
+  // The version this build is. `PLANNER_VERSION_NAME` is what the Apps workflow
+  // sets from a release tag, so an installed app and the release it came from
+  // agree; otherwise the package version is the answer. src/shared/updates.ts
+  // compares this with the newest published release.
+  const appVersion = (env.PLANNER_VERSION_NAME || fileEnv.PLANNER_VERSION_NAME || '').trim().replace(/^v/, '')
+    || JSON.parse(readFileSync(join(cwd(), 'package.json'), 'utf8')).version
+    || '0.0.0';
   const apiKey = env.GROQ_API_KEY || fileEnv.GROQ_API_KEY;
   const model = env.GROQ_MODEL || fileEnv.GROQ_MODEL;
   const visionModel = env.GROQ_VISION_MODEL ?? fileEnv.GROQ_VISION_MODEL;
@@ -383,7 +392,7 @@ export default defineConfig(({ mode }) => {
     // `__PLANNER_API_ORIGIN__` is read by src/shared/nativeShell.ts. Defining it
     // (rather than a VITE_ variable) keeps the name identical in the app, in
     // this config, and in the server-side allow-list docs.
-    define: { __PLANNER_API_ORIGIN__: JSON.stringify(apiOrigin) },
+    define: { __PLANNER_API_ORIGIN__: JSON.stringify(apiOrigin), __APP_VERSION__: JSON.stringify(appVersion) },
     plugins: [appOrigins(), react(), groqProxyPlugin(apiKey, model, visionModel), syncApi(databaseUrl), authApi(databaseUrl), icsApi(), pushApi(pushEnv), apiFallback()],
     build: {
       rollupOptions: {

@@ -173,6 +173,40 @@ jobs:
           bash "$GITHUB_WORKSPACE/scripts/ci-annotate.sh" "$RUNNER_TEMP/gradle.log" \
             "Gradle failed" 60
           exit 1
+      - name: Say it out loud when this APK cannot be updated later
+        # Not a failure: a debug-signed APK is fine for trying the app on a
+        # phone. It is not fine to hand to other people, and the reason is not
+        # obvious, so it goes in the run summary where it cannot be missed.
+        if: ${{ startsWith(github.ref, 'refs/tags/v') && env.KEYSTORE_BASE64 == '' }}
+        run: |
+          {
+            echo "## ⚠️ This APK cannot be installed over the previous one"
+            echo ""
+            echo "No upload keystore is configured, so Gradle signed this release with a"
+            echo "debug key. Android generates that key per machine, and this job runs on a"
+            echo "fresh machine every time — so every release is signed with a *different*"
+            echo "key, and Android refuses to install an app whose signature does not match"
+            echo "the installed one."
+            echo ""
+            echo "The practical effect: anyone who installs this APK cannot install the next"
+            echo "release. They would have to uninstall first, which deletes their planner"
+            echo "data on that device unless it was synced."
+            echo ""
+            echo "Fix it once by adding four repository secrets"
+            echo "(Settings → Secrets and variables → Actions):"
+            echo ""
+            echo '```'
+            echo "ANDROID_KEYSTORE_BASE64        base64 -w0 release.jks"
+            echo "ANDROID_KEYSTORE_PASSWORD"
+            echo "ANDROID_KEY_ALIAS"
+            echo "ANDROID_KEY_PASSWORD"
+            echo '```'
+            echo ""
+            echo "See docs/APPS.md → Release signing. Keep that keystore: it is what makes"
+            echo "future updates install, and it cannot be regenerated without breaking them."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::warning title=This APK cannot be updated::No upload keystore is configured, so this APK is signed with a per-run debug key. Android will refuse to install a future release over it. See the run summary, or docs/APPS.md → Release signing."
+
       - name: Collect the builds
         run: |
           mkdir -p artifacts
