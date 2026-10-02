@@ -73,7 +73,19 @@ jobs:
       - name: Fetch Electron
         run: node desktop/node_modules/electron/install.js
       - name: Build installers
-        run: npm run desktop:dist -- --${{ matrix.target }}
+        # bash on every runner on purpose: Windows defaults to pwsh, and this
+        # needs the same shell semantics as the other two.
+        shell: bash
+        run: |
+          set -o pipefail
+          if npm run desktop:dist -- --${{ matrix.target }} 2>&1 | tee "$RUNNER_TEMP/build.log"; then
+            exit 0
+          fi
+          # The job log sits behind signed blob storage, so put the part that
+          # matters where it can be read without opening the run in a browser.
+          bash "$GITHUB_WORKSPACE/scripts/ci-annotate.sh" "$RUNNER_TEMP/build.log" \
+            "electron-builder failed (${{ matrix.target }})"
+          exit 1
         env:
           PLANNER_APP_URL: ${{ env.APP_URL }}
           PLANNER_API_ORIGIN: ${{ env.API_ORIGIN }}
@@ -120,7 +132,12 @@ jobs:
           distribution: temurin
           java-version: 21
           cache: gradle
-      - uses: android-actions/setup-android@v3
+      # No android-actions/setup-android here on purpose: the ubuntu-latest
+      # image already ships the SDK at ANDROID_HOME with the licences accepted
+      # (command-line tools 12, platform android-36, build-tools 36.0.0/36.1.0
+      # as of writing), which is everything compileSdk/targetSdk 36 needs. That
+      # action added a third-party dependency that failed the build while doing
+      # nothing the image had not already done.
       - name: Install dependencies
         run: npm ci --ignore-scripts
       - name: Build the web app into the Android project
@@ -144,11 +161,18 @@ jobs:
           } > android/keystore.properties
       - name: Build APK and AAB
         working-directory: android
+        shell: bash
         run: |
+          set -o pipefail
           chmod +x ./gradlew
           # Signed with the upload key when the secrets above exist; otherwise
           # the debug key signs it, which is enough to install and try the app.
-          ./gradlew --no-daemon assembleRelease bundleRelease
+          if ./gradlew --no-daemon assembleRelease bundleRelease 2>&1 | tee "$RUNNER_TEMP/gradle.log"; then
+            exit 0
+          fi
+          bash "$GITHUB_WORKSPACE/scripts/ci-annotate.sh" "$RUNNER_TEMP/gradle.log" \
+            "Gradle failed" 60
+          exit 1
       - name: Collect the builds
         run: |
           mkdir -p artifacts
