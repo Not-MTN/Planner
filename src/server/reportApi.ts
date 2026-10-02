@@ -32,16 +32,22 @@ function clamp(value: string, limit: number): string {
 
 /** Second pass over the client's redaction: the client is not trusted. */
 export function redactReportText(value: string, limit = FIELD): string {
-  return clamp(
-    value
-      .replace(/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.?[A-Za-z0-9_-]*/g, '<token>')
-      .replace(/(?:bearer|basic|token)\s+[A-Za-z0-9._~+/=-]{8,}/gi, '<token>')
-      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '<email>')
-      .replace(OPAQUE, '<data>')
-      .replace(/\s+/g, ' ')
-      .trim(),
-    limit,
-  );
+  // Nothing past `limit` can survive the clamp, so nothing past it is scanned.
+  // The patterns below backtrack quadratically on a long run of one character
+  // (`'y'.repeat(50_000)` through the email pattern is seconds of CPU), and
+  // this endpoint is unauthenticated: scanning the body cap instead of the
+  // kept window would let one report pay for a 32 KB run of single characters.
+  const truncated = value.length > limit;
+  const redacted = (truncated ? value.slice(0, limit) : value)
+    .replace(/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.?[A-Za-z0-9_-]*/g, '<token>')
+    .replace(/(?:bearer|basic|token)\s+[A-Za-z0-9._~+/=-]{8,}/gi, '<token>')
+    .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '<email>')
+    .replace(OPAQUE, '<data>')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const clipped = clamp(redacted, limit);
+  // Redaction shortens text, so say plainly when the original was cut.
+  return truncated && !clipped.endsWith('…') ? `${clipped}…` : clipped;
 }
 
 export interface StoredReport {
