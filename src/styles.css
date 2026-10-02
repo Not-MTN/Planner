@@ -883,6 +883,34 @@ h1, .page-head h1 {
 }
 .item-title:hover { color: var(--accent-deep); }
 .is-done .item-title { text-decoration: line-through; text-decoration-thickness: 1.5px; color: var(--muted); }
+
+/* ---------- Inline title editing (fix a typo without the whole form) ---------- */
+.inline-title { cursor: text; }
+.inline-title:hover { text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.inline-title-edit { display: flex; align-items: flex-start; gap: 6px; flex-wrap: wrap; width: 100%; }
+.inline-title-input {
+  flex: 1 1 140px;
+  min-width: 0;
+  width: 100%;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+  border-radius: 9px;
+  background: var(--surface-2);
+  color: var(--ink);
+  padding: 3px 7px;
+  resize: none;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+.inline-title-input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent); outline-offset: 1px; }
+/* A done task keeps its strike on the row, never inside the box being typed in. */
+.is-done .inline-title-input { text-decoration: none; color: var(--ink); }
+.inline-title-details { flex: none; margin-top: -2px; }
+.inline-title-hint { flex: 1 1 100%; margin: 0; font-size: 11px; color: var(--muted); }
+/* Match the app-wide rule that keeps iOS from zooming into a focused field.
+   Two classes so it also wins over a row's own title size (chips, cards). */
+@media (pointer: coarse) {
+  .item-title.inline-title-input { font-size: 16px; }
+}
 .meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 3px; }
 .dot-inline {
   width: 7px;
@@ -924,10 +952,10 @@ h1, .page-head h1 {
 }
 .task:hover .grip, .event:hover .grip, .grip.dragging { opacity: 0.7; }
 .grip.dragging { opacity: 1; cursor: grabbing; }
-.row-delete, .row-focus { opacity: 0; }
-.task:hover .row-delete, .event:hover .row-delete, .task:hover .row-focus, .event:hover .row-focus { opacity: 1; }
+.row-delete, .row-focus, .row-edit { opacity: 0; }
+.task:hover .row-delete, .event:hover .row-delete, .task:hover .row-focus, .event:hover .row-focus, .task:hover .row-edit, .event:hover .row-edit { opacity: 1; }
 @media (hover: none) {
-  .row-delete, .row-focus, .grip { opacity: 0.55; }
+  .row-delete, .row-focus, .row-edit, .grip { opacity: 0.55; }
 }
 .row-delete:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); background: var(--danger-soft); }
 .habit-row { align-items: center; border-radius: 14px; padding: 10px 8px; border-bottom: 0; margin-bottom: 2px; background: transparent; transition: background 0.15s; }
@@ -1523,8 +1551,15 @@ h1, .page-head h1 {
 .week-chip-main time { font-size: 10.5px; font-weight: 700; color: var(--item-text, var(--accent-deep)); font-variant-numeric: tabular-nums; }
 .week-chip-main span { font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .week-chip.is-done .week-chip-main span { text-decoration: line-through; color: var(--muted); }
+/* Chips are one line until you edit them: the title truncates, the box wraps. */
+.week-chip-title { font-size: 12.5px; font-weight: 600; }
+.week-chip .inline-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.week-chip.is-done .week-chip-title:not(.inline-title-input) { text-decoration: line-through; color: var(--muted); }
 .week-task { display: flex; align-items: flex-start; gap: 7px; padding: 1px 2px; }
-.week-task-title {
+.week-task .inline-title-edit { flex: 1; min-width: 0; }
+/* No room for the keyboard hint inside a chip — clicking away saves too. */
+.week-chip .inline-title-hint, .week-task .inline-title-hint { display: none; }
+.week-task-title:not(.inline-title-input) {
   border: 0;
   background: transparent;
   text-align: start;
@@ -1533,7 +1568,7 @@ h1, .page-head h1 {
   padding: 2px 0;
   line-height: 1.35;
 }
-.week-task.is-done .week-task-title { text-decoration: line-through; color: var(--muted); }
+.week-task.is-done .week-task-title:not(.inline-title-input) { text-decoration: line-through; color: var(--muted); }
 /* An upcoming repetition: visible so the week has its shape, quiet so it is
    never mistaken for the copy you can tick today. */
 .week-task.is-projected .week-task-title { color: var(--muted); font-weight: 500; }
@@ -1658,7 +1693,11 @@ h1, .page-head h1 {
 }
 .panel-list time { font-variant-numeric: tabular-nums; font-size: 12.5px; font-weight: 700; color: var(--item-text, var(--accent-deep)); min-width: 44px; }
 .panel-list.tasks button { padding-inline-start: 2px; }
-.panel-list li.is-done span { text-decoration: line-through; color: var(--muted); }
+.panel-list li.is-done span, .panel-list li.is-done .panel-row-title:not(.inline-title-input) { text-decoration: line-through; color: var(--muted); }
+/* A row whose title is editable in place is a layout, not one big button. */
+.panel-row { display: flex; gap: 12px; align-items: baseline; padding: 9px 2px; }
+.panel-list.tasks .panel-row { padding-inline-start: 2px; }
+.panel-row-title { flex: 1; min-width: 0; }
 .panel-actions { margin-top: 12px; }
 
 /* ---------- Calendar: agenda ---------- */
@@ -2247,7 +2286,6 @@ h1, .page-head h1 {
 .fixed-tag { margin-inline-start: 7px; vertical-align: 1px; }
 .week-chip.is-fixed { border: 1px dashed color-mix(in srgb, var(--item, var(--accent)) 55%, transparent); }
 .week-chip.is-fixed .week-chip-main { cursor: default; opacity: 1; }
-.week-chip.is-fixed .week-chip-main:disabled { opacity: 1; }
 .fixed-chip-tag { margin-inline-end: 3px; font-size: 9px; padding: 2px 5px; }
 .fixed-panel-item { opacity: 1 !important; cursor: default; }
 .fixed-panel-item small { color: var(--accent-deep); background: var(--accent-soft); border-radius: 999px; padding: 2px 6px; font-size: 10px; }
@@ -2569,10 +2607,10 @@ h1, .page-head h1 {
   cursor: grab;
 }
 .board-card.is-done { opacity: 0.6; }
-.board-card.is-done strong { text-decoration: line-through; }
+.board-card.is-done .board-card-title:not(.inline-title-input) { text-decoration: line-through; }
 .board-card.prio-card-high { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 35%, transparent); }
-.board-card-body { flex: 1; min-width: 0; border: 0; background: transparent; text-align: start; color: var(--ink); font: inherit; padding: 0; cursor: pointer; display: grid; gap: 2px; }
-.board-card-body strong { font-weight: 600; font-size: 0.92rem; overflow-wrap: anywhere; }
+.board-card-body { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.board-card-title { font-weight: 600; font-size: 0.92rem; overflow-wrap: anywhere; }
 .board-card-body small { color: var(--muted); font-size: 0.76rem; }
 .board-empty { color: var(--muted); font-size: 0.82rem; text-align: center; padding: 18px 6px; border: 1px dashed var(--line-strong); border-radius: 12px; }
 

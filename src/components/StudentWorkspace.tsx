@@ -9,6 +9,7 @@ import { daysUntil, newId, subjectMinutes, subjectProgress, weekOf, withoutSubje
 import { studyQueue, subjectDraftError, upcomingExams, type StudyWindow, type SubjectDraft } from '../panelFeatures';
 import type { StudentSubject } from '../types';
 import { Empty, Field } from './ui';
+import { InlineTitle } from './InlineTitle';
 import { minutesLabel } from './charts';
 
 const emptySubject: SubjectDraft = { name: '', examDate: '', targetHours: '' };
@@ -18,7 +19,7 @@ function dateLabel(date: string): string {
 }
 
 export function StudentWorkspace() {
-  const { state, panels, addTask, toggleTask, startFocus, openComposer, flash } = usePlanner();
+  const { state, panels, addTask, toggleTask, updateTask, startFocus, openComposer, flash, undo } = usePlanner();
   const today = todayISO();
   const subjects = panels.student.subjects;
   const [window, setWindow] = useState<StudyWindow>('week');
@@ -230,13 +231,15 @@ export function StudentWorkspace() {
                       onChange={() => toggleTask(task.id)}
                     />
                     <div className="study-task-copy">
-                      <button
-                        type="button"
+                      <InlineTitle
                         className="study-task-title"
-                        onClick={() => openComposer({ mode: 'edit', type: 'task', id: task.id })}
-                      >
-                        {task.title}
-                      </button>
+                        value={task.title}
+                        onCommit={(title) => {
+                          updateTask(task.id, { title });
+                          flash(t('Title updated.'), { label: t('Undo'), run: undo });
+                        }}
+                        onOpenDetails={() => openComposer({ mode: 'edit', type: 'task', id: task.id })}
+                      />
                       <p className="study-task-meta">
                         <span>{task.category}</span>
                         <span className={cx(task.dueDate && task.dueDate < today && 'study-overdue')}>

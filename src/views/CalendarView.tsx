@@ -36,6 +36,7 @@ import {
   type AgendaDay,
 } from '../logic';
 import { Meter } from '../components/ui';
+import { InlineTitle } from '../components/InlineTitle';
 import type { CalendarTab } from '../route';
 import type { PlannerEvent } from '../types';
 import { t, tn } from '../i18n';
@@ -95,12 +96,24 @@ export function CalendarView() {
 }
 
 function WeekBoard({ anchor, today }: { anchor: string; today: string }) {
-  const { navigate, state, openComposer, moveEvent, moveTask, resizeEvent, swapEventTimes, toggleTask, toggleEvent, toggleHabit, copyWeek, flash, undo } = usePlanner();
+  const { navigate, state, openComposer, moveEvent, moveTask, resizeEvent, swapEventTimes, toggleTask, toggleEvent, toggleHabit, copyWeek, updateEvent, updateTask, flash, undo } = usePlanner();
   const days = weekDates(anchor);
   const showingThisWeek = days.includes(today);
   const [picked, setPicked] = useState(anchor);
   const [over, setOver] = useState<string | null>(null);
+  // A chip being renamed must not also be draggable — selecting text would
+  // pick the whole card up instead.
+  const [editingId, setEditingId] = useState<string | null>(null);
   const selected = days.includes(picked) ? picked : days[0];
+
+  const renameEvent = (id: string) => (title: string) => {
+    updateEvent(id, { title });
+    flash(t("Title updated."), { label: t("Undo"), run: undo });
+  };
+  const renameTask = (id: string) => (title: string) => {
+    updateTask(id, { title });
+    flash(t("Title updated."), { label: t("Undo"), run: undo });
+  };
 
   const shift = (amount: number) => navigate({ name: 'calendar', tab: 'week', date: addDays(selected, amount) });
 
@@ -203,7 +216,7 @@ function WeekBoard({ anchor, today }: { anchor: string; today: string }) {
                     <div
                       key={item.id}
                       className={cx('week-chip', `accent-${categoryById(item.category).accent}`, item.completed && 'is-done', item.important && 'is-important', fixed && 'is-fixed')}
-                      draggable={!fixed}
+                      draggable={!fixed && editingId !== item.id}
                       onDragStart={(event) => {
                         if (fixed) return;
                         event.dataTransfer.setData('text/plain', `event:${item.id}`);
@@ -234,18 +247,18 @@ function WeekBoard({ anchor, today }: { anchor: string; today: string }) {
                         else moveEvent(sourceId, item.date);
                       }}
                     >
-                      <button
-                        type="button"
-                        className="week-chip-main"
-                        disabled={fixed}
-                        title={fixed ? t("Protected weekly time") : undefined}
-                        onClick={() => {
-                          if (!item.fixedCommitmentId) openComposer({ mode: 'edit', type: 'event', id: item.seriesEventId ?? item.id });
-                        }}
-                      >
+                      <div className="week-chip-main" title={item.fixedCommitmentId ? t("Protected weekly time") : undefined}>
                         <time>{displayTime(item.startTime)}{item.endTime ? `–${displayTime(item.endTime)}` : ''}</time>
-                        <span dir="auto">{item.title}</span>
-                      </button>
+                        <InlineTitle
+                          className="week-chip-title"
+                          value={item.title}
+                          // Protected weekly time is generated from a commitment: it cannot be renamed here.
+                          disabled={Boolean(item.fixedCommitmentId)}
+                          onEditingChange={(editing) => setEditingId(editing ? item.id : null)}
+                          onCommit={renameEvent(item.seriesEventId ?? item.id)}
+                          onOpenDetails={() => openComposer({ mode: 'edit', type: 'event', id: item.seriesEventId ?? item.id })}
+                        />
+                      </div>
                       {!fixed ? <ResizeHandle startTime={item.startTime} endTime={item.endTime} title={item.title} onResize={(end) => resizeEvent(item.id, end)} /> : null}
                       {item.fixedCommitmentId ? <span className="fixed-chip-tag">{t("Fixed")}</span> : item.seriesEventId ? <span className="fixed-chip-tag">{t("Repeats")}</span> : (
                         <button
@@ -271,7 +284,7 @@ function WeekBoard({ anchor, today }: { anchor: string; today: string }) {
                     <div
                       key={task.id}
                       className={cx('week-task', task.completed && 'is-done', projected && 'is-projected')}
-                      draggable={!projected}
+                      draggable={!projected && editingId !== task.id}
                       title={projected ? t("Upcoming repeat") : t("Drag to another day")}
                       onDragStart={(event) => {
                         if (projected) return;
@@ -288,13 +301,16 @@ function WeekBoard({ anchor, today }: { anchor: string; today: string }) {
                       >
                         {task.completed ? <TickIcon size={12} /> : null}
                       </button>
-                      <button
-                        type="button"
+                      <InlineTitle
                         className="week-task-title"
-                        onClick={() => openComposer({ mode: 'edit', type: 'task', id: task.seriesTaskId ?? task.id })}
-                      >
-                        {task.title}
-                      </button>
+                        value={task.title}
+                        // A projected repeat has no stored copy: open the real task instead.
+                        disabled={projected}
+                        onDisabledClick={() => openComposer({ mode: 'edit', type: 'task', id: task.seriesTaskId ?? task.id })}
+                        onEditingChange={(editing) => setEditingId(editing ? task.id : null)}
+                        onCommit={renameTask(task.seriesTaskId ?? task.id)}
+                        onOpenDetails={() => openComposer({ mode: 'edit', type: 'task', id: task.seriesTaskId ?? task.id })}
+                      />
                       {projected ? <span className="fixed-chip-tag">{t("Repeats")}</span> : null}
                     </div>
                   );
@@ -403,7 +419,7 @@ function ResizeHandle({ startTime, endTime, title, onResize }: { startTime: stri
 }
 
 function MonthBoard({ anchor, today }: { anchor: string; today: string }) {
-  const { navigate, state, openComposer } = usePlanner();
+  const { navigate, state, openComposer, updateEvent, updateTask, flash, undo } = usePlanner();
   const year = Number(anchor.slice(0, 4));
   const month = Number(anchor.slice(5, 7));
   const cells = monthGrid(year, month);
@@ -500,19 +516,20 @@ function MonthBoard({ anchor, today }: { anchor: string; today: string }) {
             {events.length > 0 ? (
               <ul className="panel-list">
                 {events.map((event) => (
-                  <li key={event.id}>
-                    <button
-                      type="button"
+                  <li key={event.id} className={cx('panel-row', event.fixedCommitmentId && 'fixed-panel-item')}>
+                    <time>{displayTime(event.startTime)}</time>
+                    <InlineTitle
+                      className="panel-row-title"
+                      value={event.title}
+                      // Protected weekly time is generated from a commitment: read-only here.
                       disabled={Boolean(event.fixedCommitmentId)}
-                      className={event.fixedCommitmentId ? 'fixed-panel-item' : undefined}
-                      onClick={() => {
-                        if (!event.fixedCommitmentId) openComposer({ mode: 'edit', type: 'event', id: event.seriesEventId ?? event.id });
+                      onCommit={(title) => {
+                        updateEvent(event.seriesEventId ?? event.id, { title });
+                        flash(t("Title updated."), { label: t("Undo"), run: undo });
                       }}
-                    >
-                      <time>{displayTime(event.startTime)}</time>
-                      <span>{event.title}</span>
-                      {event.fixedCommitmentId ? <small>{t("Fixed")}</small> : null}
-                    </button>
+                      onOpenDetails={() => openComposer({ mode: 'edit', type: 'event', id: event.seriesEventId ?? event.id })}
+                    />
+                    {event.fixedCommitmentId ? <small>{t("Fixed")}</small> : null}
                   </li>
                 ))}
               </ul>
@@ -520,10 +537,18 @@ function MonthBoard({ anchor, today }: { anchor: string; today: string }) {
             {tasks.length > 0 ? (
               <ul className="panel-list tasks">
                 {tasks.map((task) => (
-                  <li key={task.id} className={task.completed ? 'is-done' : undefined}>
-                    <button type="button" onClick={() => openComposer({ mode: 'edit', type: 'task', id: task.id })}>
-                      <span>{task.title}</span>
-                    </button>
+                  <li key={task.id} className={cx('panel-row', task.completed && 'is-done')}>
+                    <InlineTitle
+                      className="panel-row-title"
+                      value={task.title}
+                      disabled={Boolean(task.seriesTaskId)}
+                      onDisabledClick={() => openComposer({ mode: 'edit', type: 'task', id: task.seriesTaskId ?? task.id })}
+                      onCommit={(title) => {
+                        updateTask(task.seriesTaskId ?? task.id, { title });
+                        flash(t("Title updated."), { label: t("Undo"), run: undo });
+                      }}
+                      onOpenDetails={() => openComposer({ mode: 'edit', type: 'task', id: task.seriesTaskId ?? task.id })}
+                    />
                   </li>
                 ))}
               </ul>
@@ -590,7 +615,7 @@ function WeekReview({ today }: { today: string }) {
 }
 
 function AgendaBoard({ today }: { today: string }) {
-  const { state, navigate, openComposer, moveTask, flash, undo } = usePlanner();
+  const { state, navigate, openComposer, moveTask, updateEvent, updateTask, flash, undo } = usePlanner();
   const [horizon, setHorizon] = useState<(typeof HORIZONS)[number]>(14);
   const days = agendaWindow(state, today, horizon);
   const later = laterAgenda(state, today, horizon);
@@ -682,10 +707,16 @@ function AgendaBoard({ today }: { today: string }) {
           </header>
           <ul className="panel-list">
             {someday.slice(0, 12).map((task) => (
-              <li key={task.id} className="plain someday-row">
-                <button type="button" onClick={() => openComposer({ mode: 'edit', type: 'task', id: task.id })}>
-                  <span>{task.title}</span>
-                </button>
+              <li key={task.id} className="panel-row someday-row">
+                <InlineTitle
+                  className="panel-row-title"
+                  value={task.title}
+                  onCommit={(title) => {
+                    updateTask(task.id, { title });
+                    flash(t("Title updated."), { label: t("Undo"), run: undo });
+                  }}
+                  onOpenDetails={() => openComposer({ mode: 'edit', type: 'task', id: task.id })}
+                />
                 {quiet ? (
                   <button
                     type="button"
@@ -710,19 +741,31 @@ function AgendaBoard({ today }: { today: string }) {
           </header>
           <ul className="panel-list">
             {later.events.map((event: PlannerEvent) => (
-              <li key={event.id}>
-                <button type="button" onClick={() => openComposer({ mode: 'edit', type: 'event', id: event.seriesEventId ?? event.id })}>
-                  <time>{event.date.slice(5)}</time>
-                  <span>{event.title}</span>
-                </button>
+              <li key={event.id} className="panel-row">
+                <time>{event.date.slice(5)}</time>
+                <InlineTitle
+                  className="panel-row-title"
+                  value={event.title}
+                  onCommit={(title) => {
+                    updateEvent(event.seriesEventId ?? event.id, { title });
+                    flash(t("Title updated."), { label: t("Undo"), run: undo });
+                  }}
+                  onOpenDetails={() => openComposer({ mode: 'edit', type: 'event', id: event.seriesEventId ?? event.id })}
+                />
               </li>
             ))}
             {later.tasks.map((task) => (
-              <li key={task.id} className={cx('plain', task.completed && 'is-done')}>
-                <button type="button" onClick={() => openComposer({ mode: 'edit', type: 'task', id: task.id })}>
-                  <time>{(task.dueDate ?? '').slice(5)}</time>
-                  <span>{task.title}</span>
-                </button>
+              <li key={task.id} className={cx('panel-row', task.completed && 'is-done')}>
+                <time>{(task.dueDate ?? '').slice(5)}</time>
+                <InlineTitle
+                  className="panel-row-title"
+                  value={task.title}
+                  onCommit={(title) => {
+                    updateTask(task.id, { title });
+                    flash(t("Title updated."), { label: t("Undo"), run: undo });
+                  }}
+                  onOpenDetails={() => openComposer({ mode: 'edit', type: 'task', id: task.id })}
+                />
               </li>
             ))}
             {later.deadlines.map((goal) => (
@@ -757,7 +800,7 @@ function DayCard({
   onAddEvent: () => void;
   onAddTask: () => void;
 }) {
-  const { toggleEvent, toggleTask, openComposer } = usePlanner();
+  const { toggleEvent, toggleTask, openComposer, updateEvent, updateTask, flash, undo } = usePlanner();
   const open = !hasAgendaPlans(day);
   const habits = fixedHabits(day);
   return (
@@ -788,7 +831,14 @@ function DayCard({
               )}
               <time>{displayTime(event.startTime)}</time>
               {event.fixedCommitmentId ? <span className="item-title" dir="auto">{event.title}</span> : (
-                <button type="button" className="item-title" dir="auto" onClick={() => openComposer({ mode: 'edit', type: 'event', id: event.seriesEventId ?? event.id })}>{event.title}</button>
+                <InlineTitle
+                  value={event.title}
+                  onCommit={(title) => {
+                    updateEvent(event.seriesEventId ?? event.id, { title });
+                    flash(t("Title updated."), { label: t("Undo"), run: undo });
+                  }}
+                  onOpenDetails={() => openComposer({ mode: 'edit', type: 'event', id: event.seriesEventId ?? event.id })}
+                />
               )}
               {event.fixedCommitmentId ? <small className="fixed-plan-tag">{t("Fixed")}</small> : event.seriesEventId ? <small className="fixed-plan-tag">{t("Repeats")}</small> : null}
             </li>
@@ -805,7 +855,14 @@ function DayCard({
                 {task.completed ? <TickIcon size={12} /> : null}
               </button>
               <time>{task.dueTime ?? ''}</time>
-              <button type="button" className="item-title" dir="auto" onClick={() => openComposer({ mode: 'edit', type: 'task', id: task.id })}>{task.title}</button>
+              <InlineTitle
+                value={task.title}
+                onCommit={(title) => {
+                  updateTask(task.id, { title });
+                  flash(t("Title updated."), { label: t("Undo"), run: undo });
+                }}
+                onOpenDetails={() => openComposer({ mode: 'edit', type: 'task', id: task.id })}
+              />
             </li>
           ))}
           {day.notes.map((note) => (
