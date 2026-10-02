@@ -1,6 +1,7 @@
 /** Service worker registration and the "Install app" prompt. */
 
 import { snoozeReminder } from './reminders';
+import { isNativeShell } from './shared/nativeShell';
 
 interface InstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -31,6 +32,12 @@ export function applyUpdate(): void {
 
 export function registerPWA(): void {
   if (typeof window === 'undefined') return;
+  // Packaged apps ship their own copy of every asset, so there is nothing for
+  // a service worker to cache — and its "new version available, reload" flow
+  // has no meaning when the update arrives through the app store. Reminders
+  // inside those builds run while the app is open; native local notifications
+  // are the documented next step (docs/APPS.md).
+  if (isNativeShell()) return;
   // "Snooze 10 min" pressed on a system notification. The worker cannot
   // reschedule anything itself, so it asks an open tab to do it.
   navigator.serviceWorker?.addEventListener('message', (event) => {
@@ -77,12 +84,20 @@ export function registerPWA(): void {
   });
 }
 
+/**
+ * Inside a packaged app (Android, iOS, desktop) "install" is not a thing the
+ * browser offers: the app is already installed, and the browser's install
+ * prompt never fires. Settings asks these two instead of guessing.
+ */
 export function canInstall(): boolean {
+  if (isNativeShell()) return false;
   return deferred !== null;
 }
 
 export function isInstalled(): boolean {
-  return typeof window !== 'undefined' && window.matchMedia?.('(display-mode: standalone)').matches === true;
+  if (typeof window === 'undefined') return false;
+  if (isNativeShell()) return true;
+  return window.matchMedia?.('(display-mode: standalone)').matches === true;
 }
 
 export function onInstallChange(listener: () => void): () => void {

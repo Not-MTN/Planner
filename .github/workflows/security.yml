@@ -28,6 +28,8 @@ jobs:
         run: npm run typecheck
       - name: Lint
         run: npm run lint
+      - name: Check the desktop shell parses
+        run: node --check desktop/main.cjs && node --check desktop/preload.cjs && node --check desktop/lib.cjs
       - name: Run tests
         run: npm test
       - name: Build production bundle

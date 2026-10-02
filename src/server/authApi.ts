@@ -10,6 +10,7 @@
 import { createHash } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { isSameOriginRequest } from './groqProxy.js';
+import { isTrustedAppOriginRequest } from './appOrigins.js';
 import { formatTotpSecret, newTotpSecret, totpUri, verifyTotp } from './totp.js';
 import { WebAuthnError, fromBase64Url, verifyAssertion, verifyRegistration } from './webauthn.js';
 import { API_SECURITY_HEADERS, BodyTooLargeError, rateLimitResponse, readLimitedBody } from './security.js';
@@ -104,40 +105,62 @@ function isHttps(request: Request): boolean {
   }
 }
 
-function sessionCookie(token: string, secure: boolean): string {
+/**
+ * How the session cookie may travel.
+ *
+ * A browser tab is same-origin, so `Lax` is both enough and the safer default.
+ * The packaged apps (Android, iOS, desktop) are cross-origin by design and are
+ * only served when the operator allow-lists their origin, so their session
+ * cookie has to be `None` — which browsers and WebViews only accept together
+ * with `Secure`. `requestCookieMode` therefore reports `none` only over https;
+ * an http API origin would silently drop the cookie, so we keep `Lax` there
+ * and let the shell fail visibly instead of half-working.
+ */
+type CookieMode = 'lax' | 'none';
+
+function requestCookieMode(request: Request): CookieMode {
+  if (!isTrustedAppOriginRequest(request)) return 'lax';
+  return isHttps(request) ? 'none' : 'lax';
+}
+
+function sameSiteAttribute(mode: CookieMode): string {
+  return mode === 'none' ? 'SameSite=None' : 'SameSite=Lax';
+}
+
+function sessionCookie(token: string, secure: boolean, mode: CookieMode = 'lax'): string {
   const parts = [
     `${SESSION_COOKIE}=${token}`,
     'Path=/',
     'HttpOnly',
-    'SameSite=Lax',
+    sameSiteAttribute(mode),
     `Max-Age=${SESSION_TTL_DAYS * 24 * 60 * 60}`,
   ];
   if (secure) parts.push('Secure');
   return parts.join('; ');
 }
 
-function clearedCookie(secure: boolean): string {
-  return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure ? '; Secure' : ''}`;
+function clearedCookie(secure: boolean, mode: CookieMode = 'lax'): string {
+  return `${SESSION_COOKIE}=; Path=/; HttpOnly; ${sameSiteAttribute(mode)}; Max-Age=0${secure ? '; Secure' : ''}`;
 }
 
 /** The half-signed-in state: password accepted, second step still owed. */
 const TWO_STEP_COOKIE = 'planner_two_step';
 const TWO_STEP_TTL_SECONDS = 300;
 
-function twoStepCookie(token: string, secure: boolean): string {
+function twoStepCookie(token: string, secure: boolean, mode: CookieMode = 'lax'): string {
   const parts = [
     `${TWO_STEP_COOKIE}=${token}`,
     'Path=/',
     'HttpOnly',
-    'SameSite=Lax',
+    sameSiteAttribute(mode),
     `Max-Age=${TWO_STEP_TTL_SECONDS}`,
   ];
   if (secure) parts.push('Secure');
   return parts.join('; ');
 }
 
-function clearedTwoStepCookie(secure: boolean): string {
-  return `${TWO_STEP_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure ? '; Secure' : ''}`;
+function clearedTwoStepCookie(secure: boolean, mode: CookieMode = 'lax'): string {
+  return `${TWO_STEP_COOKIE}=; Path=/; HttpOnly; ${sameSiteAttribute(mode)}; Max-Age=0${secure ? '; Secure' : ''}`;
 }
 
 export function readTwoStepToken(request: Request): string | null {
@@ -346,7 +369,7 @@ export async function handleSignup(request: Request, store: AuthStore | null): P
     await store!.createSession(result.user.id, hashToken(token), deviceLabel(request), expiresAt);
     await recordEvent(store!, request, result.user.id, 'created');
 
-    return json(201, { user: toPublicUser(result.user) }, { 'Set-Cookie': sessionCookie(token, isHttps(request)) });
+    return json(201, { user: toPublicUser(result.user) }, { 'Set-Cookie': sessionCookie(token, isHttps(request), requestCookieMode(request)) });
   } catch {
     return error(502, 'The accounts database could not be reached. Try again shortly.');
   }
@@ -564,7 +587,7 @@ export async function handleLogin(request: Request, store: AuthStore | null): Pr
         new Date(Date.now() + TWO_STEP_TTL_SECONDS * 1000),
       );
       const payload: SecondFactorResponse = { secondFactor: 'totp' };
-      return json(200, payload, { 'Set-Cookie': twoStepCookie(challenge, isHttps(request)) });
+      return json(200, payload, { 'Set-Cookie': twoStepCookie(challenge, isHttps(request), requestCookieMode(request)) });
     }
 
     const token = newToken();
@@ -578,7 +601,7 @@ export async function handleLogin(request: Request, store: AuthStore | null): Pr
       wrappedDek: vault.wrappedDek,
       vault: { version: vault.version, ciphertext: vault.ciphertext },
     };
-    return json(200, payload, { 'Set-Cookie': sessionCookie(token, isHttps(request)) });
+    return json(200, payload, { 'Set-Cookie': sessionCookie(token, isHttps(request), requestCookieMode(request)) });
   } catch {
     return error(502, 'The accounts database could not be reached. Try again shortly.');
   }
@@ -642,7 +665,7 @@ export async function handleTotpLogin(request: Request, store: AuthStore | null)
       vault: { version: vault.version, ciphertext: vault.ciphertext },
     };
     return json(200, payload, {
-      'Set-Cookie': [sessionCookie(token, isHttps(request)), clearedTwoStepCookie(isHttps(request))].join(', '),
+      'Set-Cookie': [sessionCookie(token, isHttps(request), requestCookieMode(request)), clearedTwoStepCookie(isHttps(request), requestCookieMode(request))].join(', '),
     });
   } catch {
     return error(502, 'The accounts database could not be reached. Try again shortly.');
@@ -775,7 +798,7 @@ export async function handleSession(request: Request, store: AuthStore | null): 
     // An expired cookie is cleared, so the browser stops sending it.
     if (!found) {
       return json(401, { user: null } as SessionResponse, {
-        'Set-Cookie': clearedCookie(isHttps(request)),
+        'Set-Cookie': clearedCookie(isHttps(request), requestCookieMode(request)),
       });
     }
     return json(200, { user: toPublicUser(found.user) });
@@ -800,7 +823,7 @@ export async function handleLogout(request: Request, store: AuthStore | null): P
       /* clearing the cookie is still the right outcome */
     }
   }
-  return json(200, { ok: true }, { 'Set-Cookie': clearedCookie(isHttps(request)) });
+  return json(200, { ok: true }, { 'Set-Cookie': clearedCookie(isHttps(request), requestCookieMode(request)) });
 }
 
 /* ---------------------------------------------------------------- passkeys */
@@ -1033,7 +1056,7 @@ export async function handlePasskeyLoginVerify(request: Request, store: AuthStor
         new Date(Date.now() + TWO_STEP_TTL_SECONDS * 1000),
       );
       const pending: SecondFactorResponse = { secondFactor: 'totp' };
-      return json(200, pending, { 'Set-Cookie': twoStepCookie(challenge, isHttps(request)) });
+      return json(200, pending, { 'Set-Cookie': twoStepCookie(challenge, isHttps(request), requestCookieMode(request)) });
     }
 
     const token = newToken();
@@ -1046,7 +1069,7 @@ export async function handlePasskeyLoginVerify(request: Request, store: AuthStor
       vault: { version: vault.version, ciphertext: vault.ciphertext },
       wrappedDek: passkey.prf_wrapped_dek,
     };
-    return json(200, payload, { 'Set-Cookie': sessionCookie(token, isHttps(request)) });
+    return json(200, payload, { 'Set-Cookie': sessionCookie(token, isHttps(request), requestCookieMode(request)) });
   } catch (caught) {
     const message = caught instanceof WebAuthnError ? caught.message : 'That sign-in could not be verified. Try again.';
     return json(400, { error: { message } }, { 'Set-Cookie': clearedChallengeCookie(isHttps(request)) });
@@ -1098,7 +1121,7 @@ export async function handleAccountDelete(request: Request, store: AuthStore | n
     if (!safeEqual(candidate, account.authHash)) return error(401, 'That password did not match.', 'bad_credentials');
     const removed = await store.deleteAccount(session.user.id);
     if (!removed) return error(404, 'This account is already gone.', 'not_found');
-    return json(200, { ok: true }, { 'Set-Cookie': clearedCookie(isHttps(request)) });
+    return json(200, { ok: true }, { 'Set-Cookie': clearedCookie(isHttps(request), requestCookieMode(request)) });
   } catch {
     return error(502, 'The accounts database could not be reached. Try again shortly.');
   }

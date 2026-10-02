@@ -13,6 +13,48 @@ Other scripts: `npm run typecheck`, `npm test`, `npm run build`, `npm run test:e
 
 See [SECURITY.md](SECURITY.md) for the threat model, deployment hardening, privacy boundaries, and vulnerability reporting process. No app can be guaranteed unhackable; protect the device, browser profile, sync code, and server secrets too.
 
+## Install it as an app
+
+The same code ships as a real app on phones and desktops — the Android and iOS
+projects are Capacitor shells around this repository's own build, and the
+Windows/macOS/Linux builds are Electron shells around it. Nothing is
+reimplemented per platform: it is the identical planner, with the identical
+local-first storage.
+
+```bash
+npm run native:sync          # build once, copy into android/ and ios/
+npm run desktop:dist         # Windows, macOS and Linux installers
+```
+
+- **Android** (`android/`, `com.notmtn.planner`): an APK for sideloading and
+  for Xiaomi GetApps, Samsung Galaxy Store and Huawei AppGallery, plus an `.aab`
+  for Google Play. Requirements: JDK 21 and the Android SDK.
+- **iPhone and iPad** (`ios/`): an Xcode project with Swift Package Manager, so
+  no CocoaPods. TestFlight and App Store uploads need an Apple Developer
+  account; the CI build stops at an unsigned archive.
+- **Windows, macOS, Linux** (`desktop/`): an NSIS installer, a `.dmg` and
+  `.zip`, and AppImage/`.deb`/`.rpm` — see [docs/DESKTOP.md](docs/DESKTOP.md).
+
+With no server address configured, every one of these is a complete **offline**
+planner: no account, no network, everything on the device. Point them at your
+deployment with one variable and accounts, sync and AI work too:
+
+```bash
+PLANNER_API_ORIGIN=https://your-app.example.com npm run native:sync
+```
+
+That build talks to your deployment cross-origin, so the server has to be told
+those app origins are yours (and nothing is trusted unless you say so):
+
+```bash
+PLANNER_APP_ORIGINS=capacitor://localhost,https://localhost,app://planner
+```
+
+The full guide — build, signing, keystores, stores, CI, and what the shells do
+not do yet — is in [docs/APPS.md](docs/APPS.md). The marketing site's "Apps"
+section (`src/marketing/Platforms.tsx`) links to the release downloads; paste
+your store URLs into `src/marketing/downloads.ts` when the listings are live.
+
 ## Sync across devices (Neon)
 
 1. Create a project at [neon.tech](https://neon.tech) and copy the connection string (Dashboard → **Connect**).

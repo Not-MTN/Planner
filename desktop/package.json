@@ -1,0 +1,21 @@
+{
+  "name": "planner-desktop",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Planner for Windows, macOS and Linux — the same local-first planner, in a window of its own.",
+  "author": "Planner",
+  "license": "MIT",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
+  },
+  "devDependencies": {
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3"
+  }
+}

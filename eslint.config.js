@@ -21,7 +21,20 @@ import jsxA11y from 'eslint-plugin-jsx-a11y';
  */
 export default tseslint.config(
   {
-    ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'playwright-report/**', 'test-results/**'],
+    ignores: [
+      'dist/**',
+      'node_modules/**',
+      'coverage/**',
+      'playwright-report/**',
+      'test-results/**',
+      // The native and desktop projects each carry a copy of the built web app
+      // (android/…/assets/public, ios/App/App/public, desktop/dist) plus their
+      // own toolchain output. Nothing in them is hand-written source.
+      'android/**',
+      'ios/**',
+      'desktop/dist/**',
+      'desktop/release/**',
+    ],
   },
 
   // ── Plain browser scripts (service worker, pre-paint theme) ───────────────
@@ -71,6 +84,33 @@ export default tseslint.config(
     files: ['**/*.test.{ts,tsx}', 'e2e/**/*.ts'],
     rules: {
       'no-console': 'off',
+    },
+  },
+
+  // ── Build scripts and the desktop shell (Node, not bundled) ───────────────
+  // Kept last: the TypeScript presets above apply to every file, and would
+  // otherwise forbid `require()` in the very files Node loads as CommonJS.
+  {
+    files: ['scripts/**/*.mjs', 'desktop/**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: { ...globals.node },
+    },
+    rules: { ...js.configs.recommended.rules },
+  },
+  {
+    files: ['desktop/**/*.cjs'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'commonjs',
+      globals: { ...globals.node },
+    },
+    rules: {
+      ...js.configs.recommended.rules,
+      'no-empty': ['error', { allowEmptyCatch: true }],
+      // CommonJS has exactly one way to import.
+      '@typescript-eslint/no-require-imports': 'off',
     },
   },
 );

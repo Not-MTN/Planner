@@ -10,9 +10,20 @@
     "lint": "eslint .",
     "test": "vitest run",
     "preview": "vite preview --host 0.0.0.0 --port 5173",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "native:sync": "node scripts/native-sync.mjs",
+    "android:open": "cap open android",
+    "ios:open": "cap open ios",
+    "desktop:dev": "node scripts/desktop-build.mjs --run",
+    "desktop:pack": "node scripts/desktop-build.mjs --dir",
+    "desktop:dist": "node scripts/desktop-build.mjs"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/ios": "^8.5.2",
+    "@capacitor/splash-screen": "^8.0.2",
+    "@capacitor/status-bar": "^8.0.4",
     "@fontsource-variable/estedad": "^5.3.0",
     "@neondatabase/serverless": "^1.1.0",
     "@noble/hashes": "^1.8.0",
@@ -21,6 +32,8 @@
     "web-push": "^3.6.7"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
     "@eslint/js": "^9.39.5",
     "@playwright/test": "^1.63.0",
     "@types/connect": "^3.4.38",

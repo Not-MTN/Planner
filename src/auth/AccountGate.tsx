@@ -35,6 +35,11 @@ function blockedReason(error: AuthError): string {
   if (error.code === 'not_configured') {
     return t('Accounts are not set up on this server yet. Add DATABASE_URL to the deployment, then reload.');
   }
+  if (error.code === 'local_only_build') {
+    return t(
+      'This copy of Planner was built for offline use, with no server address, so there is nothing to sign in to. Your planner still works on this device. Install a build made with PLANNER_API_ORIGIN or PLANNER_APP_URL to use accounts, sync and AI.',
+    );
+  }
   return t('Something went wrong while opening your planner.');
 }
 

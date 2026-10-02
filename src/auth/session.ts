@@ -4,6 +4,7 @@
  * trusted-device flow (phase 2) is built.
  */
 import type { AuthEvent, AuthEventsResponse, LoginResponse, PublicUser, SessionResponse, VaultResponse } from '../shared/authContract';
+import { hasConfiguredApi, isNativeShell } from '../shared/nativeShell';
 import {
   createVaultKeys,
   decryptState,
@@ -95,6 +96,12 @@ export type AuthErrorCode =
   | 'deployment_gate'
   /** Nothing serves the accounts API at this address: the route or function is missing. */
   | 'api_missing'
+  /**
+   * A packaged app built with no server address. The shell answers every
+   * unknown path with the app's own HTML, so nothing of ours is ever reached;
+   * the planner still works, and saying so beats blaming the deployment.
+   */
+  | 'local_only_build'
   /** The password was accepted, and a code from the authenticator app is owed. */
   | 'totp_required'
   /** An invitation code was right, but sat unused until it stopped working. */
@@ -113,6 +120,14 @@ export const DEPLOYMENT_GATE_MESSAGE =
 /** Shown when the API route itself is missing (functions not deployed, alias pointing nowhere). */
 export const API_MISSING_MESSAGE =
   'The accounts API did not answer at this address, so signing in cannot work. Redeploy the app so its api/ functions are included, then try again.';
+
+/**
+ * Shown by the packaged apps when they were built without a server address.
+ * The planner is perfectly usable there — everything stays on the device —
+ * so the sentence leads with that, then says what signing in would need.
+ */
+export const LOCAL_ONLY_MESSAGE =
+  'This copy of Planner is built for offline use, with no server address, so accounts, sync and AI are unavailable — the planner itself still works, and everything you write is saved on this device. To sign in, install a build made with a server address (PLANNER_API_ORIGIN or PLANNER_APP_URL), or use the website.';
 
 /** Text a hosting gate leaves in the body, so a plain "not JSON" can be named. */
 const GATE_MARKERS =
@@ -136,6 +151,10 @@ function describeResponse(response: Response, raw: string): string {
 
 /** Classifies a response that carried no JSON error of ours. */
 function unexpectedBody(response: Response, raw: string): AuthErrorCode {
+  // A packaged app with no server address answers every path with its own
+  // HTML — that is the app's shell, not a broken deployment, and it is worth
+  // naming precisely. Checked first: it is the most specific cause.
+  if (isNativeShell() && !hasConfiguredApi()) return 'local_only_build';
   if (looksLikeGate(raw)) return 'deployment_gate';
   const type = (response.headers.get('content-type') ?? '').toLowerCase();
   // A 404 with nothing in it, or the app's own HTML shell, means the route is
@@ -145,6 +164,7 @@ function unexpectedBody(response: Response, raw: string): AuthErrorCode {
 }
 
 function unexpectedMessage(code: AuthErrorCode, response: Response): string {
+  if (code === 'local_only_build') return LOCAL_ONLY_MESSAGE;
   if (code === 'deployment_gate') return DEPLOYMENT_GATE_MESSAGE;
   if (code === 'api_missing') return API_MISSING_MESSAGE;
   return `The server answered with ${response.status} instead of JSON.`;

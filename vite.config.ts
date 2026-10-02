@@ -291,6 +291,25 @@ function pushApi(pushEnv: { DATABASE_URL?: string; VAPID_PUBLIC_KEY?: string; VA
   };
 }
 
+/**
+ * `PLANNER_API_ORIGIN` names the API for a packaged app build. Only a bare
+ * http(s) origin is accepted — a path or a wildcard would make the built app
+ * talk to something other than the deployment the operator meant.
+ */
+function normalizeAppApiOrigin(value: string | undefined): string {
+  const trimmed = (value ?? '').trim().replace(/\/+$/, '');
+  if (!trimmed) return '';
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return '';
+    if (url.pathname !== '' && url.pathname !== '/') return '';
+    if (!url.hostname) return '';
+    return url.origin;
+  } catch {
+    return '';
+  }
+}
+
 export default defineConfig(({ mode }) => {
   // Read the secret only inside the Vite/Node process. It is never defined into the browser bundle.
   const fileEnv = loadEnv(mode, cwd(), '');
@@ -298,6 +317,10 @@ export default defineConfig(({ mode }) => {
   const model = env.GROQ_MODEL || fileEnv.GROQ_MODEL;
   const visionModel = env.GROQ_VISION_MODEL ?? fileEnv.GROQ_VISION_MODEL;
   const databaseUrl = env.DATABASE_URL || fileEnv.DATABASE_URL;
+  // Packaged apps (Android, iOS, desktop) are a different origin from the API,
+  // so their build carries the address. Empty for the website and for local
+  // development, where `/api/...` stays relative.
+  const apiOrigin = normalizeAppApiOrigin(env.PLANNER_API_ORIGIN || fileEnv.PLANNER_API_ORIGIN);
   const pushEnv = {
     DATABASE_URL: databaseUrl,
     VAPID_PUBLIC_KEY: env.VAPID_PUBLIC_KEY || fileEnv.VAPID_PUBLIC_KEY,
@@ -308,6 +331,10 @@ export default defineConfig(({ mode }) => {
     AI_ENV: { ...env, ...fileEnv } as Record<string, string | undefined>,
   };
   return {
+    // `__PLANNER_API_ORIGIN__` is read by src/shared/nativeShell.ts. Defining it
+    // (rather than a VITE_ variable) keeps the name identical in the app, in
+    // this config, and in the server-side allow-list docs.
+    define: { __PLANNER_API_ORIGIN__: JSON.stringify(apiOrigin) },
     plugins: [react(), groqProxyPlugin(apiKey, model, visionModel), syncApi(databaseUrl), authApi(databaseUrl), icsApi(), pushApi(pushEnv), apiFallback()],
     build: {
       rollupOptions: {
@@ -334,7 +361,7 @@ export default defineConfig(({ mode }) => {
     },
     test: {
       environment: 'node',
-      include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+      include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'desktop/*.test.mjs'],
     },
   };
 });

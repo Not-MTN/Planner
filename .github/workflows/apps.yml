@@ -1,0 +1,214 @@
+name: Apps
+
+# Builds the things people install: the Windows/macOS/Linux installers, the
+# Android APK + Play bundle, and an unsigned iOS archive. Nothing is published
+# anywhere by this workflow — every job uploads its output as a build artifact,
+# and on a version tag the files are also attached to that GitHub release.
+#
+# Signing is deliberately out of the way: Android picks up a keystore when the
+# repository has the secrets below, and the Apple build stays unsigned until a
+# maintainer adds their certificates (see docs/APPS.md).
+#
+# The API address is baked in at build time. Set the optional inputs (or the
+# PLANNER_APP_URL / PLANNER_API_ORIGIN repository variables) once, and every
+# future build of every app is already pointed at your deployment.
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_url:
+        description: 'Load this deployment in the shells (blank = bundled, offline build)'
+        required: false
+        type: string
+      api_origin:
+        description: 'API origin for the bundled builds, e.g. https://planner.example.com'
+        required: false
+        type: string
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+env:
+  APP_URL: ${{ inputs.app_url || vars.PLANNER_APP_URL || '' }}
+  API_ORIGIN: ${{ inputs.api_origin || vars.PLANNER_API_ORIGIN || '' }}
+
+jobs:
+  desktop:
+    name: Desktop installers (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: win
+          - os: macos-latest
+            target: mac
+          - os: ubuntu-latest
+            target: linux
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Install desktop dependencies
+        run: npm ci --prefix desktop --ignore-scripts
+        # `--ignore-scripts` skips Electron's own binary download, which the
+        # packaging step below needs, so fetch it explicitly.
+      - name: Fetch Electron
+        run: node desktop/node_modules/electron/install.js
+      - name: Build installers
+        run: npm run desktop:dist -- --${{ matrix.target }}
+        env:
+          PLANNER_APP_URL: ${{ env.APP_URL }}
+          PLANNER_API_ORIGIN: ${{ env.API_ORIGIN }}
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: planner-desktop-${{ matrix.target }}
+          path: |
+            desktop/release/*.exe
+            desktop/release/*.dmg
+            desktop/release/*.zip
+            desktop/release/*.AppImage
+            desktop/release/*.deb
+            desktop/release/*.rpm
+          if-no-files-found: error
+          retention-days: 14
+
+  android:
+    name: Android APK and Play bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    # Secrets cannot be read inside an `if:` directly; carrying them in the
+    # job environment is the supported way to test whether one was set.
+    env:
+      KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+      - uses: android-actions/setup-android@v3
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Build the web app into the Android project
+        run: npm run native:sync -- android
+        env:
+          PLANNER_APP_URL: ${{ env.APP_URL }}
+          PLANNER_API_ORIGIN: ${{ env.API_ORIGIN }}
+      - name: Decode the upload keystore, when the repository has one
+        if: ${{ env.KEYSTORE_BASE64 != '' }}
+        run: |
+          # `storeFile` is resolved against the app module, so the keystore
+          # lives in android/app/keystore/. Both files are git-ignored and the
+          # job's workspace is thrown away after the build.
+          mkdir -p android/app/keystore
+          echo "$KEYSTORE_BASE64" | base64 -d > android/app/keystore/release.jks
+          {
+            echo "storeFile=keystore/release.jks"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > android/keystore.properties
+      - name: Build APK and AAB
+        working-directory: android
+        run: |
+          chmod +x ./gradlew
+          # Signed with the upload key when the secrets above exist; otherwise
+          # the debug key signs it, which is enough to install and try the app.
+          ./gradlew --no-daemon assembleRelease bundleRelease
+      - name: Collect the builds
+        run: |
+          mkdir -p artifacts
+          cp android/app/build/outputs/apk/release/*.apk artifacts/ || true
+          cp android/app/build/outputs/bundle/release/*.aab artifacts/ || true
+          ls -la artifacts
+      - name: Upload Android builds
+        uses: actions/upload-artifact@v4
+        with:
+          name: planner-android
+          path: artifacts/*
+          if-no-files-found: error
+          retention-days: 14
+
+  ios:
+    name: iOS archive (unsigned)
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Build the web app into the iOS project
+        run: npm run native:sync -- ios
+        env:
+          PLANNER_APP_URL: ${{ env.APP_URL }}
+          PLANNER_API_ORIGIN: ${{ env.API_ORIGIN }}
+      - name: Archive the app
+        run: |
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$PWD/build/Planner.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            archive
+      - name: Package the app and its archive
+        run: |
+          cd build
+          ditto -c -k --sequesterRsrc --keepParent Planner.xcarchive/Products/Applications/App.app Planner-ios-app.zip
+          ditto -c -k --sequesterRsrc --keepParent Planner.xcarchive Planner-ios.xcarchive.zip
+          ls -la
+      - name: Upload the iOS build
+        uses: actions/upload-artifact@v4
+        with:
+          name: planner-ios
+          path: |
+            build/Planner-ios-app.zip
+            build/Planner-ios.xcarchive.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Attach the builds to the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [desktop, android, ios]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          # The release may not exist yet (a tag pushed before the release was
+          # written); create it, then attach everything.
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$tag" --repo "$GITHUB_REPOSITORY" --title "Planner $tag" --generate-notes
+          gh release upload "$tag" artifacts/* --repo "$GITHUB_REPOSITORY" --clobber

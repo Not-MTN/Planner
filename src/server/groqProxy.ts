@@ -9,6 +9,7 @@
  */
 
 import { AI_DAILY_REQUESTS_DEFAULT, API_SECURITY_HEADERS, BodyTooLargeError, aiQuotaResponse, rateLimitResponse, readLimitedBody } from './security.js';
+import { isTrustedAppOriginRequest } from './appOrigins.js';
 import {
   describeProviders,
   isRetryableStatus,
@@ -294,10 +295,17 @@ export function hostOf(value: string | null): string {
  * Requests without an Origin (curl, server-to-server, same-origin GET) are allowed;
  * a present Origin must match the Host/URL the request was addressed to. Forwarded
  * host headers are deliberately ignored so a caller cannot spoof an allowlisted host.
+ *
+ * The packaged apps are cross-origin by design, so an Origin that names one of
+ * the operator's own shell origins (`PLANNER_APP_ORIGINS`) is trusted here too
+ * — see `src/server/appOrigins.ts`. Nothing is allowed unless the operator
+ * named it, and the browser policy is unchanged.
  */
 export function isSameOriginRequest(request: Request): boolean {
   const fetchSite = request.headers.get('sec-fetch-site')?.toLowerCase();
-  if (fetchSite && !['same-origin', 'same-site', 'none'].includes(fetchSite)) return false;
+  if (fetchSite && !['same-origin', 'same-site', 'none'].includes(fetchSite)) {
+    return isTrustedAppOriginRequest(request);
+  }
   const origin = request.headers.get('origin');
   if (!origin) return true;
   const originHost = hostOf(origin);
@@ -309,7 +317,8 @@ export function isSameOriginRequest(request: Request): boolean {
     .flatMap((value) => (value ? value.split(',') : []))
     .map((value) => value.trim().toLowerCase())
     .filter(Boolean);
-  return candidates.includes(originHost);
+  if (candidates.includes(originHost)) return true;
+  return isTrustedAppOriginRequest(request);
 }
 
 function crossOriginResponse(): Response {

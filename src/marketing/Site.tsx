@@ -181,6 +181,9 @@ export function Site() {
               <button type="button" onClick={() => goToSection('privacy')}>
                 {c.navPrivacy}
               </button>
+              <button type="button" onClick={() => goToSection('apps')}>
+                {c.navApps}
+              </button>
             </nav>
           ) : null}
 

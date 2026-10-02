@@ -99,7 +99,10 @@ export async function bootAccount(): Promise<AccountBoot> {
     if (err instanceof AuthError && err.code === 'network') throw err;
     // Deployment gate, missing API, not configured — these are blocking errors that
     // must be shown to the user, not swallowed as signed-out.
-    if (err instanceof AuthError && (err.code === 'deployment_gate' || err.code === 'api_missing' || err.code === 'not_configured')) {
+    if (
+      err instanceof AuthError &&
+      (err.code === 'deployment_gate' || err.code === 'api_missing' || err.code === 'not_configured' || err.code === 'local_only_build')
+    ) {
       throw err;
     }
     // Other errors: fall through to trusted-device check
