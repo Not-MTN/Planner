@@ -50,6 +50,12 @@ those app origins are yours (and nothing is trusted unless you say so):
 PLANNER_APP_ORIGINS=capacitor://localhost,https://localhost,app://planner
 ```
 
+Then prove it, before anyone installs anything:
+
+```bash
+npm run check:deployment -- https://your-app.example.com
+```
+
 The full guide — build, signing, keystores, stores, CI, and what the shells do
 not do yet — is in [docs/APPS.md](docs/APPS.md). The marketing site's "Apps"
 section (`src/marketing/Platforms.tsx`) links to the release downloads; paste

@@ -86,6 +86,28 @@ If requests from the app come back `403 Cross-origin requests are not
 allowed.`, this variable is missing or misspelled for that environment — that
 is the whole check.
 
+### Prove it in one command
+
+```bash
+npm run check:deployment -- https://your-app.example.com
+```
+
+That asks the deployment the same questions a phone would — is the site there,
+is the API there, does it allow each of the three shell origins, does the
+preflight answer — and prints the exact fix when one is missing. Run it after
+changing the variable; it exits non-zero, so it also works as a release gate.
+`PLANNER_API_ORIGIN=https://… npm run check:deployment` without the argument
+does the same thing.
+
+The dev server applies the identical CORS layer, so you can check before you
+deploy:
+
+```bash
+PLANNER_APP_ORIGINS=capacitor://localhost,https://localhost,app://planner npm run dev
+# in another terminal:
+npm run check:deployment -- http://localhost:5173
+```
+
 ## 3. Android
 
 ### Build and run

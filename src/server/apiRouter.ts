@@ -251,19 +251,19 @@ export async function handleApiRequest(request: Request, env: ApiEnv): Promise<R
   // (403 unless same-origin) stays exactly as it was, and this is the one
   // place that adds the CORS answer those build-time allow-listed origins need.
   const preflight = request.method === 'OPTIONS' ? preflightResponse(request) : null;
-  if (preflight) return withCors(preflight, request);
+  if (preflight) return withAppCors(preflight, request);
 
   const handler = apiRoute(pathname, env);
-  if (!handler) return withCors(notFoundResponse(), request);
+  if (!handler) return withAppCors(notFoundResponse(), request);
   try {
-    return withCors(await handler(request), request);
+    return withAppCors(await handler(request), request);
   } catch (caught) {
     // Last resort: a crashed handler must never reach the client as the
     // platform's non-JSON 500 — the app can only classify JSON errors, so it
     // would show an opaque "unexpected response". Log the real cause for the
     // Vercel function logs (secrets redacted) and answer in our own envelope.
     console.error(`[planner] ${request.method} ${pathname} failed: ${redactDatabaseError(caught)}`);
-    return withCors(
+    return withAppCors(
       new Response(
         JSON.stringify({ error: { message: 'Something went wrong on the server. The error has been logged — please try again.', code: 'internal_error' } }),
         {
@@ -285,7 +285,7 @@ export async function handleApiRequest(request: Request, env: ApiEnv): Promise<R
  * safe here: the body stream is passed straight through, and `Set-Cookie`
  * entries survive (`Headers` keeps them as a list, not a joined string).
  */
-function withCors(response: Response, request: Request): Response {
+export function withAppCors(response: Response, request: Request): Response {
   const headers = corsHeadersForRequest(request);
   if (!headers) return response;
   const merged = new Headers(response.headers);
