@@ -10,6 +10,7 @@ import { t } from '../i18n';
 export function QuickAddBar({ defaultDate, placeholder }: { defaultDate?: string | null; placeholder?: string }) {
   const { addTask, addEvent, flash, undo } = usePlanner();
   const [text, setText] = useState('');
+  const [inputFocused, setInputFocused] = useState(false);
   const speech = useSpeechInput();
   const inputRef = useRef<HTMLInputElement>(null);
   // The example placeholder is a lesson on wide screens and a wall of
@@ -66,7 +67,13 @@ export function QuickAddBar({ defaultDate, placeholder }: { defaultDate?: string
   };
 
   return (
-    <form className="quick-add" onSubmit={submit}>
+    <form
+      className="quick-add"
+      onSubmit={submit}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setInputFocused(false);
+      }}
+    >
       <div className="quick-add-row">
         <span className="quick-add-icon" aria-hidden="true">
           <PlusIcon size={16} />
@@ -79,6 +86,7 @@ export function QuickAddBar({ defaultDate, placeholder }: { defaultDate?: string
           autoCapitalize="sentences"
           autoCorrect="on"
           spellCheck
+          onFocus={() => setInputFocused(true)}
           onChange={(event) => setText(event.target.value)}
           placeholder={placeholder ?? (narrow ? t("Add anything…") : t("Add anything — try “Call mom tomorrow 5pm #work !high”"))}
           aria-label={t("Quick add")}
@@ -114,6 +122,25 @@ export function QuickAddBar({ defaultDate, placeholder }: { defaultDate?: string
             <span key={chip} className="chip">
               {chip}
             </span>
+          ))}
+        </div>
+      ) : null}
+      {narrow && inputFocused && !text.trim() ? (
+        <div className="quick-add-examples" role="group" aria-label={t("Quick-add examples")}>
+          <span>{t("Try an example")}</span>
+          {[t("Call mom tomorrow 5pm #work !high"), t("Drink water every day")].map((example) => (
+            <button
+              key={example}
+              type="button"
+              className="quick-add-example"
+              onClick={() => {
+                setText(example);
+                inputRef.current?.focus();
+                setInputFocused(false);
+              }}
+            >
+              {example}
+            </button>
           ))}
         </div>
       ) : null}

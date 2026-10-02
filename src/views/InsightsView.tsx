@@ -9,7 +9,7 @@ import { Meter } from '../components/ui';
 import type { PlannerState } from '../types';
 import { RhythmCard } from './RhythmCard';
 import { FocusHistory } from '../components/FocusHistory';
-import { t } from '../i18n';
+import { faDigits, faNum, t } from '../i18n';
 
 export function InsightsView() {
   const { state, navigate } = usePlanner();
@@ -48,7 +48,7 @@ export function InsightsView() {
       <div className="stat-row">
         {stats.map((stat) => (
           <div key={stat.label} className="card stat-tile">
-            <strong className="stat-num">{stat.value}</strong>
+            <strong className="stat-num">{faNum(stat.value)}</strong>
             <span className="stat-label">{stat.label}</span>
             <span className="stat-hint">{stat.hint}</span>
           </div>
@@ -97,7 +97,7 @@ export function InsightsView() {
             const score = dayScore(state, date, false);
             return (
               <li key={date}>
-                {formatWeekdayShort(date)}: {score.total === 0 ? t("nothing planned") : `${score.done} of ${score.total}`}
+                {formatWeekdayShort(date)}: {score.total === 0 ? t("nothing planned") : `${faNum(score.done)} of ${faNum(score.total)}`}
               </li>
             );
           })}
@@ -138,7 +138,7 @@ export function InsightsView() {
                           </span>
                         ) : null}
                       </span>
-                      <small>{stats.expected === 0 ? t("New") : `${stats.done}/${stats.expected}`}</small>
+                      <small>{stats.expected === 0 ? t("New") : `${faNum(stats.done)}/${faNum(stats.expected)}`}</small>
                     </div>
                     <Meter value={stats.ratio} label={t("{0} this week", { 0: habit.name })} />
                   </li>
@@ -274,7 +274,7 @@ function YearPixelsCard({ state, today }: { state: PlannerState; today: string }
       <header className="card-head">
         <div>
           <p className="kicker">{t("Year in pixels")}</p>
-          <h2 className="card-title">{year}</h2>
+          <h2 className="card-title">{faNum(year)}</h2>
         </div>
         <span className="streak-chip big">{t("{0} lived days", { 0: tally })}</span>
       </header>
@@ -286,7 +286,7 @@ function YearPixelsCard({ state, today }: { state: PlannerState; today: string }
               className="year-cell"
               data-level={level(day.score.ratio)}
               style={day.date === firstOfYear ? { gridColumnStart: start + 1 } : undefined}
-              title={`${day.date}${day.score.total ? ` — ${day.score.done}/${day.score.total}` : ''}`}
+              title={`${faDigits(day.date)}${day.score.total ? ` — ${faNum(day.score.done)}/${faNum(day.score.total)}` : ''}`}
             />
           ))}
         </div>
@@ -328,7 +328,7 @@ function TrendChart({
         <div><p className="kicker">{t("Daily rhythm")}</p><h2 className="card-title">{t("Completion trend")}</h2></div>
         <div className="segmented chart-range" role="group" aria-label={t("Chart date range")}>
           {([7, 30, 90] as const).map((amount) => (
-            <button key={amount} type="button" className={cx('seg', days === amount && 'on')} aria-pressed={days === amount} onClick={() => onDaysChange(amount)}>{amount}d</button>
+            <button key={amount} type="button" className={cx('seg', days === amount && 'on')} aria-pressed={days === amount} onClick={() => onDaysChange(amount)}>{faNum(amount)}d</button>
           ))}
         </div>
       </header>
@@ -382,7 +382,7 @@ function CompletionDonut({ state, today, days }: { state: PlannerState; today: s
     <section className="card chart-card">
       <header className="card-head">
         <div><p className="kicker">{t("Small wins")}</p><h2 className="card-title">{t("What you finished")}</h2></div>
-        <span className="chip">{days} {t('days')}</span>
+        <span className="chip">{faNum(days)} {t('days')}</span>
       </header>
       {total === 0 ? <p className="chart-empty">{t("Check off a task, event, or habit to start your completion mix.")}</p> : (
         <div className="donut-layout">
@@ -397,7 +397,7 @@ function CompletionDonut({ state, today, days }: { state: PlannerState; today: s
                   <circle key={segment.label} className={`donut-segment ${segment.className}`} cx="56" cy="56" r={radius} strokeDasharray={`${length} ${circumference - length}`} strokeDashoffset={-offset} transform="rotate(-90 56 56)" />
                 ) : null;
               })}
-              <text className="donut-total" x="56" y="54" textAnchor="middle">{total}</text>
+              <text className="donut-total" x="56" y="54" textAnchor="middle">{faNum(total)}</text>
               <text className="donut-caption" x="56" y="69" textAnchor="middle">{t('completed')}</text>
             </svg>
           </div>

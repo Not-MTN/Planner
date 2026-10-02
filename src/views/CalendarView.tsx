@@ -39,7 +39,7 @@ import { Meter } from '../components/ui';
 import { InlineTitle } from '../components/InlineTitle';
 import type { CalendarTab } from '../route';
 import type { PlannerEvent } from '../types';
-import { t, tn } from '../i18n';
+import { faNum, t, tn } from '../i18n';
 
 const TABS: Array<{ id: CalendarTab; label: string }> = [
   { id: 'week', label: t("Week") },
@@ -647,7 +647,7 @@ function AgendaBoard({ today }: { today: string }) {
               aria-pressed={horizon === daysAhead}
               onClick={() => setHorizon(daysAhead)}
             >
-              {daysAhead} {t('days')}
+              {faNum(daysAhead)} {t('days')}
             </button>
           ))}
         </div>

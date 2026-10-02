@@ -7,7 +7,7 @@ import { printDocument } from '../printDocument';
 import { Rich } from '../components/Rich';
 import { downloadBlob } from '../download';
 import { DownloadIcon, PrinterIcon } from '../icons';
-import { t, tn } from '../i18n';
+import { faDigits, faNum, t, tn } from '../i18n';
 
 function formatMinutes(total: number): string {
   if (total < 60) return t("{0} min", { 0: total });
@@ -102,14 +102,14 @@ export function RhythmCard({ today }: { today: string }) {
           <>
             <div className="hour-strip" aria-hidden="true">
               {profile.hours.slice(6, 24).map((count, index) => (
-                <span key={index} className={cx(index + 6 === profile.bestHour && 'is-best')} style={{ opacity: 0.18 + (count / hourPeak) * 0.82 }} title={`${hourLabel(index + 6)}: ${count}`} />
+                <span key={index} className={cx(index + 6 === profile.bestHour && 'is-best')} style={{ opacity: 0.18 + (count / hourPeak) * 0.82 }} title={faDigits(`${hourLabel(index + 6)}: ${count}`)} />
               ))}
             </div>
-            <div className="hour-axis" aria-hidden="true"><span>6</span><span>12</span><span>18</span><span>24</span></div>
+            <div className="hour-axis" aria-hidden="true"><span>{faNum(6)}</span><span>{faNum(12)}</span><span>{faNum(18)}</span><span>{faNum(24)}</span></div>
             <p className="meta">
               <Rich
                 text={t("You finish the most around {hour}. Try protecting that hour for your hardest task.")}
-                values={{ hour: <strong>{hourLabel(profile.bestHour)}</strong> }}
+                values={{ hour: <strong>{faDigits(hourLabel(profile.bestHour))}</strong> }}
               />
             </p>
           </>

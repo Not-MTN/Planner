@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { COMPLETE_LANGS, missingKeys, t, LANGUAGES } from './i18n';
+import { COMPLETE_LANGS, faDigits, faNum, getLang, missingKeys, setLang, t, LANGUAGES } from './i18n';
 import { fa } from './locales/fa';
 import { fi } from './locales/fi';
 
@@ -35,6 +35,13 @@ describe('i18n', () => {
   });
   it('only offers languages it has a direction for', () => {
     for (const language of LANGUAGES) expect(['ltr', 'rtl']).toContain(language.dir);
+  });
+  it('renders Persian counters and time digits with Eastern Arabic numerals', () => {
+    const previous = getLang();
+    setLang('fa');
+    expect(faNum(1207)).toBe('۱۲۰۷');
+    expect(faDigits('07:15')).toBe('۰۷:۱۵');
+    setLang(previous);
   });
   it('interpolates and falls back to English', () => {
     expect(t('Task “{0}” added.', { 0: 'Run' })).toBe('Task “Run” added.');

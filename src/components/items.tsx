@@ -9,7 +9,7 @@ import { FlameIcon, GripIcon, HabitGlyph, PencilIcon, StopwatchIcon, TickIcon, T
 import { InlineTitle } from './InlineTitle';
 import { repeatLabel } from '../recurrence';
 import type { Habit, PlannerEvent, Task } from '../types';
-import { t } from '../i18n';
+import { faNum, t } from '../i18n';
 
 export function IntentionField({ date }: { date: string }) {
   const { state, setIntention } = usePlanner();
@@ -255,7 +255,7 @@ export function TaskRow({
           {task.subtasks.length ? (
             <button type="button" className="steps-chip" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
               <span className="steps-bar" aria-hidden="true"><i style={{ width: `${(stepsDone / task.subtasks.length) * 100}%` }} /></span>
-              {stepsDone}/{task.subtasks.length} {t('steps')}
+              {faNum(stepsDone)}/{faNum(task.subtasks.length)} {t('steps')}
             </button>
           ) : null}
         </p>
@@ -402,7 +402,7 @@ export function HabitRow({ habit, date }: { habit: Habit; date: string }) {
         <small>
           {frequencyLabel(habit)}
           {habit.unit ? ` · ${habit.unit.label}` : ''}
-          {skipped ? <span className="streak-chip" title={t("Rest day — your streak is safe")}>🌙 {t("rest")}</span> : streak >= 2 ? <span className="streak-chip"><FlameIcon size={12} />{streak}</span> : null}
+          {skipped ? <span className="streak-chip" title={t("Rest day — your streak is safe")}>🌙 {t("rest")}</span> : streak >= 2 ? <span className="streak-chip"><FlameIcon size={12} />{faNum(streak)}</span> : null}
         </small>
       </button>
       {progress && !skipped ? (
@@ -416,7 +416,7 @@ export function HabitRow({ habit, date }: { habit: Habit; date: string }) {
             <span aria-hidden="true">＋</span>
           </button>
           <span className={cx('unit-count', progress.value >= progress.target && 'met')}>
-            {progress.value}/{progress.target}
+            {faNum(progress.value)}/{faNum(progress.target)}
           </span>
         </span>
       ) : null}

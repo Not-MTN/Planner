@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { formatWeekdayShort, todayISO } from '../dates';
@@ -50,7 +50,7 @@ import { WeeklyReview } from './WeeklyReview';
 import { NotificationsSheet } from './NotificationsSheet';
 import { clearNotifications, loadNotifications, markNotificationsRead, subscribeNotifications } from '../notificationCenter';
 import { snoozeReminder } from '../reminders';
-import { loadNavigationPages, subscribeNavigationPages } from '../navigationPrefs';
+import { loadMobileFavorites, loadNavigationPages, subscribeNavigationPages } from '../navigationPrefs';
 
 const CalendarView = lazy(() => import('../views/CalendarView').then((m) => ({ default: m.CalendarView })));
 const InsightsView = lazy(() => import('../views/InsightsView').then((m) => ({ default: m.InsightsView })));
@@ -67,7 +67,7 @@ import { TourSheet } from './TourSheet';
 import { AboutSheet } from './AboutSheet';
 import { useSignOut } from './useSignOut';
 import { accountUser } from '../auth/vault';
-import { t } from '../i18n';
+import { faNum, t } from '../i18n';
 
 /** The signed-in account in one glance — name initial for the avatar. */
 function accountInitial(name: string): string {
@@ -126,9 +126,13 @@ export function Shell() {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notificationItems, setNotificationItems] = useState(loadNotifications);
   const [visiblePages, setVisiblePages] = useState(loadNavigationPages);
+  const [mobileFavorites, setMobileFavorites] = useState(loadMobileFavorites);
   const unreadNotifications = notificationItems.filter((item) => !item.read).length;
   useEffect(() => subscribeNotifications(() => setNotificationItems(loadNotifications())), []);
-  useEffect(() => subscribeNavigationPages(() => setVisiblePages(loadNavigationPages())), []);
+  useEffect(() => subscribeNavigationPages(() => {
+    setVisiblePages(loadNavigationPages());
+    setMobileFavorites(loadMobileFavorites());
+  }), []);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   // Sign-out only appears for an account this device knows: the live vault
@@ -145,23 +149,66 @@ export function Shell() {
   const planNav = NAV.slice(0, 4).filter((item) => visiblePages.includes(item.name));
   const growthNav = NAV.slice(4, 6).filter((item) => visiblePages.includes(item.name));
   const trackNav = NAV.slice(6).filter((item) => visiblePages.includes(item.name));
+  const mobileFavoriteNav = mobileFavorites.flatMap((name) => {
+    const item = NAV.find((candidate) => candidate.name === name);
+    return item ? [item] : [];
+  });
+  const mobilePlanNav = NAV.slice(0, 4).filter((item) => !mobileFavorites.includes(item.name));
+  const mobileGrowthNav = NAV.slice(4, 6).filter((item) => !mobileFavorites.includes(item.name));
+  const mobileTrackNav = NAV.slice(6).filter((item) => !mobileFavorites.includes(item.name));
   const openTasksCount = planner.state.tasks.filter((task) => !task.completed).length;
   const importFile = useImportFile(importText);
   const key = routeKey(route);
   const today = todayISO();
   const [tabletFlyout, setTabletFlyout] = useState<null | 'plan' | 'focus' | 'growth' | 'track' | 'panels'>(null);
+  const tabletFlyoutRef = useRef<HTMLDivElement>(null);
+  const tabletTriggerRef = useRef<HTMLButtonElement>(null);
+  const tabletFlyoutTitleId = useId();
   const launchFocus = () => {
     setMoreOpen(false);
     setTabletFlyout(null);
     startFocus({ taskId: null, title: t("Focus session"), minutes: 25 });
   };
-  // Close tablet flyout when route changes or on Escape
+  // Route changes close the tablet flyout; the focus effect below returns the
+  // keyboard to the rail button that opened it.
   useEffect(() => { setTabletFlyout(null); }, [key]);
   useEffect(() => {
-    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setTabletFlyout(null); };
-    window.addEventListener('keydown', onEsc);
-    return () => window.removeEventListener('keydown', onEsc);
-  }, []);
+    const panel = tabletFlyoutRef.current;
+    if (!tabletFlyout || !panel) {
+      const trigger = tabletTriggerRef.current;
+      tabletTriggerRef.current = null;
+      if (trigger?.isConnected) trigger.focus({ preventScroll: true });
+      return;
+    }
+
+    const focusable = () => [...panel.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )].filter((element) => !element.closest('[hidden]'));
+    focusable()[0]?.focus({ preventScroll: true });
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        setTabletFlyout(null);
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const items = focusable();
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !panel.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !panel.contains(document.activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [tabletFlyout]);
 
   // Derived during render so the effect below depends on a string: retitling
   // then tracks the title itself, not the identity of the route object.
@@ -267,6 +314,35 @@ export function Shell() {
     setMoreOpen(false);
   };
 
+  const toggleTabletFlyout = (name: NonNullable<typeof tabletFlyout>, trigger: HTMLButtonElement) => {
+    if (tabletFlyout === name) {
+      setTabletFlyout(null);
+      return;
+    }
+    tabletTriggerRef.current = trigger;
+    setTabletFlyout(name);
+  };
+
+  const renderMobileTile = (item: (typeof NAV)[number], className = '') => {
+    const Icon = item.icon;
+    return (
+      <button
+        key={item.name}
+        type="button"
+        className={cx('more-tile', className, route.name === item.name && 'on', item.name === 'ai' && 'more-tile-violet')}
+        aria-current={route.name === item.name ? 'page' : undefined}
+        onClick={() => go(item.name)}
+      >
+        <Icon size={18} />
+        <span>
+          {item.label}
+          {item.name === 'tasks' && openTasksCount > 0 ? <span className="notification-badge">{faNum(openTasksCount)}</span> : null}
+          {item.name === 'ai' && !aiSeen ? <i className="nav-attention more-attention" aria-hidden="true" /> : null}
+        </span>
+      </button>
+    );
+  };
+
   const moreActive = ['goals', 'notes', 'insights', 'ai', 'plans', 'matrix', 'review', 'panels', 'student', 'guardian'].includes(route.name);
 
   return (
@@ -295,7 +371,7 @@ export function Shell() {
                   key={item.name}
                   item={item}
                   active={route.name === item.name || (item.name === 'calendar' && route.name === 'calendar')}
-                  badge={item.name === 'tasks' && openTasksCount > 0 ? String(openTasksCount) : undefined}
+                  badge={item.name === 'tasks' && openTasksCount > 0 ? String(faNum(openTasksCount)) : undefined}
                   onClick={() => go(item.name)}
                 />
               ))}
@@ -352,23 +428,23 @@ export function Shell() {
             <button type="button" className="rail-btn rail-search" aria-label={t("Search")} title={t("Search")} onClick={openPalette}>
               <SearchIcon size={18} />
             </button>
-            <button type="button" className={cx('rail-btn', tabletFlyout === 'plan' && 'on', planNav.some((n) => route.name === n.name) && 'active')} aria-label={t("Plan")} title={t("Plan")} onClick={() => setTabletFlyout(tabletFlyout === 'plan' ? null : 'plan')}>
+            <button type="button" className={cx('rail-btn', tabletFlyout === 'plan' && 'on', planNav.some((n) => route.name === n.name) && 'active')} aria-label={t("Plan")} title={t("Plan")} aria-haspopup="dialog" aria-expanded={tabletFlyout === 'plan'} aria-controls="tablet-flyout" onClick={(event) => toggleTabletFlyout('plan', event.currentTarget)}>
               <CalendarIcon size={19} />
               <i className="rail-cat">{t("Plan")}</i>
             </button>
-            <button type="button" className={cx('rail-btn', tabletFlyout === 'focus' && 'on', Boolean(planner.focus) && 'active')} aria-label={t("Focus")} title={t("Focus")} onClick={() => setTabletFlyout(tabletFlyout === 'focus' ? null : 'focus')}>
+            <button type="button" className={cx('rail-btn', tabletFlyout === 'focus' && 'on', Boolean(planner.focus) && 'active')} aria-label={t("Focus")} title={t("Focus")} aria-haspopup="dialog" aria-expanded={tabletFlyout === 'focus'} aria-controls="tablet-flyout" onClick={(event) => toggleTabletFlyout('focus', event.currentTarget)}>
               <StopwatchIcon size={19} />
               <i className="rail-cat">{t("Focus")}</i>
             </button>
-            <button type="button" className={cx('rail-btn', tabletFlyout === 'growth' && 'on', growthNav.some((n) => route.name === n.name) && 'active')} aria-label={t("Growth")} title={t("Growth")} onClick={() => setTabletFlyout(tabletFlyout === 'growth' ? null : 'growth')}>
+            <button type="button" className={cx('rail-btn', tabletFlyout === 'growth' && 'on', growthNav.some((n) => route.name === n.name) && 'active')} aria-label={t("Growth")} title={t("Growth")} aria-haspopup="dialog" aria-expanded={tabletFlyout === 'growth'} aria-controls="tablet-flyout" onClick={(event) => toggleTabletFlyout('growth', event.currentTarget)}>
               <FlameIcon size={19} />
               <i className="rail-cat">{t("Growth")}</i>
             </button>
-            <button type="button" className={cx('rail-btn', tabletFlyout === 'track' && 'on', trackNav.some((n) => route.name === n.name) && 'active')} aria-label={t("Track")} title={t("Track")} onClick={() => setTabletFlyout(tabletFlyout === 'track' ? null : 'track')}>
+            <button type="button" className={cx('rail-btn', tabletFlyout === 'track' && 'on', trackNav.some((n) => route.name === n.name) && 'active')} aria-label={t("Track")} title={t("Track")} aria-haspopup="dialog" aria-expanded={tabletFlyout === 'track'} aria-controls="tablet-flyout" onClick={(event) => toggleTabletFlyout('track', event.currentTarget)}>
               <ArcIcon size={19} />
               <i className="rail-cat">{t("Track")}</i>
             </button>
-            <button type="button" className={cx('rail-btn rail-btn-ws', tabletFlyout === 'panels' && 'on', (panelNav.some((n) => route.name === n.name) || route.name === 'panels') && 'active')} aria-label={t("Panels")} title={t("Panels")} onClick={() => setTabletFlyout(tabletFlyout === 'panels' ? null : 'panels')}>
+            <button type="button" className={cx('rail-btn rail-btn-ws', tabletFlyout === 'panels' && 'on', (panelNav.some((n) => route.name === n.name) || route.name === 'panels') && 'active')} aria-label={t("Panels")} title={t("Panels")} aria-haspopup="dialog" aria-expanded={tabletFlyout === 'panels'} aria-controls="tablet-flyout" onClick={(event) => toggleTabletFlyout('panels', event.currentTarget)}>
               <HorizonIcon size={19} />
               <i className="rail-cat">{t("Panels")}</i>
             </button>
@@ -402,7 +478,7 @@ export function Shell() {
           <button type="button" className="side-tool notification-trigger" onClick={() => setNotificationsOpen(true)}>
             <BellIcon size={16} />
             <span>{t("Notifications")}</span>
-            {unreadNotifications > 0 ? <span className="notification-badge">{unreadNotifications > 9 ? '9+' : unreadNotifications}</span> : null}
+            {unreadNotifications > 0 ? <span className="notification-badge">{unreadNotifications > 9 ? `9+` : faNum(unreadNotifications)}</span> : null}
           </button>
           <button type="button" className="side-tool" data-tour="settings" onClick={openSettings} title={t("Settings")}>
             <SlidersIcon size={16} />
@@ -479,9 +555,9 @@ export function Shell() {
       {tabletFlyout ? (
         <>
           <div className="tablet-scrim" onClick={() => setTabletFlyout(null)} aria-hidden="true" />
-          <div className="tablet-flyout" role="dialog" aria-label={t("Navigation")}>
+          <div id="tablet-flyout" className="tablet-flyout" role="dialog" aria-modal="true" aria-labelledby={tabletFlyoutTitleId} ref={tabletFlyoutRef}>
             <div className="tablet-flyout-head">
-              <strong>
+              <strong id={tabletFlyoutTitleId}>
                 {tabletFlyout === 'plan'
                   ? t("Plan")
                   : tabletFlyout === 'focus'
@@ -492,7 +568,7 @@ export function Shell() {
                         ? t("Track")
                         : t("Panels")}
               </strong>
-              <button type="button" className="icon-btn round" aria-label={t("Close")} onClick={() => setTabletFlyout(null)}>✕</button>
+              <button type="button" className="icon-btn round tablet-flyout-close" aria-label={t("Close")} onClick={() => setTabletFlyout(null)}>✕</button>
             </div>
             <div className="tablet-flyout-body">
               {tabletFlyout === 'plan' && planNav.map((item) => (
@@ -500,7 +576,7 @@ export function Shell() {
                   key={item.name}
                   item={item}
                   active={route.name === item.name || (item.name === 'calendar' && route.name === 'calendar')}
-                  badge={item.name === 'tasks' && openTasksCount > 0 ? String(openTasksCount) : undefined}
+                  badge={item.name === 'tasks' && openTasksCount > 0 ? String(faNum(openTasksCount)) : undefined}
                   onClick={() => { go(item.name); setTabletFlyout(null); }}
                 />
               ))}
@@ -660,28 +736,23 @@ export function Shell() {
                 <div className="more-divider" role="separator" />
               </>
             ) : null}
-            {/* Grouped navigation sheet matching the multi-device design board */}
-            <div className="more-section">
-              <p className="more-group-label">{t("Plan")}</p>
-              <div className="more-grid more-grid-2">
-                <button type="button" className={cx('more-tile', route.name === 'today' && 'on')} onClick={() => go('today')}>
-                  <SunIcon size={18} /> <span>{t("Today")}</span>
-                </button>
-                <button type="button" className={cx('more-tile', route.name === 'calendar' && 'on')} onClick={() => go('calendar')}>
-                  <CalendarIcon size={18} /> <span>{t("Calendar")}</span>
-                </button>
-                <button type="button" className={cx('more-tile', route.name === 'tasks' && 'on')} onClick={() => go('tasks')}>
-                  <CheckIcon size={18} />
-                  <span>
-                    {t("Tasks")}
-                    {openTasksCount > 0 ? <span className="notification-badge">{openTasksCount}</span> : null}
-                  </span>
-                </button>
-                <button type="button" className={cx('more-tile', route.name === 'matrix' && 'on')} onClick={() => go('matrix')}>
-                  <FlagIcon size={18} /> <span>{t("Matrix")}</span>
-                </button>
+            {mobileFavoriteNav.length > 0 ? (
+              <div className="more-section more-section-favorites">
+                <p className="more-group-label">{t("Quick access")}</p>
+                <div className="more-grid more-grid-2">
+                  {mobileFavoriteNav.map((item) => renderMobileTile(item))}
+                </div>
               </div>
-            </div>
+            ) : null}
+
+            {mobilePlanNav.length > 0 ? (
+              <div className="more-section">
+                <p className="more-group-label">{t("Plan")}</p>
+                <div className="more-grid more-grid-2">
+                  {mobilePlanNav.map((item) => renderMobileTile(item))}
+                </div>
+              </div>
+            ) : null}
 
             <div className="more-section">
               <p className="more-group-label">{t("Focus & growth")}</p>
@@ -689,36 +760,18 @@ export function Shell() {
                 <button type="button" className={cx('more-tile', Boolean(planner.focus) && 'on')} onClick={launchFocus}>
                   <StopwatchIcon size={18} /> <span>{t("Focus")}</span>
                 </button>
-                <button type="button" className={cx('more-tile', route.name === 'habits' && 'on')} onClick={() => go('habits')}>
-                  <FlameIcon size={18} /> <span>{t("Habits")}</span>
-                </button>
-                <button type="button" className={cx('more-tile', route.name === 'goals' && 'on')} onClick={() => go('goals')}>
-                  <HorizonIcon size={18} /> <span>{t("Goals")}</span>
-                </button>
+                {mobileGrowthNav.map((item) => renderMobileTile(item))}
               </div>
             </div>
 
-            <div className="more-section">
-              <p className="more-group-label">{t("Track")}</p>
-              <div className="more-grid more-grid-2">
-                <button type="button" className={cx('more-tile', route.name === 'notes' && 'on')} onClick={() => go('notes')}>
-                  <NoteIcon size={18} /> <span>{t("Notes")}</span>
-                </button>
-                <button type="button" className={cx('more-tile', route.name === 'plans' && 'on')} onClick={() => go('plans')}>
-                  <WeekIcon size={18} /> <span>{t("Plans")}</span>
-                </button>
-                <button type="button" className={cx('more-tile', route.name === 'insights' && 'on')} onClick={() => go('insights')}>
-                  <ArcIcon size={18} /> <span>{t("Insights")}</span>
-                </button>
-                <button type="button" className={cx('more-tile more-tile-violet', route.name === 'ai' && 'on')} onClick={() => go('ai')}>
-                  <SparklesIcon size={18} />{' '}
-                  <span>
-                    {t("AI coach")}
-                    {!aiSeen ? <i className="nav-attention more-attention" aria-hidden="true" /> : null}
-                  </span>
-                </button>
+            {mobileTrackNav.length > 0 ? (
+              <div className="more-section">
+                <p className="more-group-label">{t("Track")}</p>
+                <div className="more-grid more-grid-2">
+                  {mobileTrackNav.map((item) => renderMobileTile(item))}
+                </div>
               </div>
-            </div>
+            ) : null}
 
             <div className="more-section more-section-ws">
               <p className="more-group-label">{t("Panels · separate workspace")}</p>
@@ -741,7 +794,7 @@ export function Shell() {
                   <BellIcon size={18} />{' '}
                   <span>
                     {t("Notifications")}
-                    {unreadNotifications > 0 ? <span className="notification-badge">{unreadNotifications}</span> : null}
+                    {unreadNotifications > 0 ? <span className="notification-badge">{faNum(unreadNotifications)}</span> : null}
                   </span>
                 </button>
                 <button type="button" className="more-tile" onClick={() => { setMoreOpen(false); openSettings(); }}>
@@ -757,17 +810,14 @@ export function Shell() {
             </div>
 
             <div className="more-divider" role="separator" />
-            {/* Utilities collapse into a tight two-column row. */}
             <details className="more-tools">
               <summary className="more-tools-summary">
                 <SlidersIcon size={18} />
-                <span>{t("Tools & settings")}</span>
-                <span className="more-tools-hint">{t("Settings, backups and help")}</span>
+                <span>{t("More tools")}</span>
+                <span className="more-tools-hint">{t("Shortcuts, backups and about")}</span>
               </summary>
               <div className="more-actions">
                 <button type="button" onClick={() => { setMoreOpen(false); setShortcutsOpen(true); }}><HelpIcon size={18} /> {t("Keyboard shortcuts")}</button>
-                <button type="button" onClick={() => { setMoreOpen(false); openSettings(); }}><SlidersIcon size={18} /> {t("Settings")}</button>
-                <button type="button" onClick={() => { setMoreOpen(false); requestTour(); }}><HelpIcon size={18} /> {t("How Planner works")}</button>
                 <button type="button" onClick={() => { setMoreOpen(false); window.setTimeout(requestAbout, 60); }}><HeartIcon size={18} /> {t("Why Planner?")}</button>
                 <button type="button" onClick={() => { setMoreOpen(false); exportData(); }}><DownloadIcon size={18} /> {t("Export backup")}</button>
                 <button type="button" onClick={() => { setMoreOpen(false); importFile.open(); }}><UploadIcon size={18} /> {t("Import backup")}</button>

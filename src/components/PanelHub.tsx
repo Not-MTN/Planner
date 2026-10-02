@@ -5,7 +5,7 @@
  */
 import { usePlanner } from '../context';
 import { HeartIcon, PlusIcon, SlidersIcon, StudyIcon } from '../icons';
-import { t } from '../i18n';
+import { faNum, t } from '../i18n';
 
 export function PanelHub() {
   const { panels, navigate } = usePlanner();
@@ -41,7 +41,7 @@ export function PanelHub() {
             </span>
             <span className="hub-label">
               {t("Guardian panel")}
-              {unread > 0 ? <span className="hub-badge">{unread}</span> : null}
+              {unread > 0 ? <span className="hub-badge">{faNum(unread)}</span> : null}
             </span>
             <span className="hub-note">
               {unread > 0

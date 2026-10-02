@@ -429,14 +429,14 @@
   .view { gap: 14px; }
   .hero { gap: 10px; }
   .hero-copy > .quote { display: none; }
-  .hero-copy .stats-widget { margin-top: 10px; }
-  .hero-copy .stats-widget-head { margin-bottom: 7px; }
-  .stats-widget { padding: 10px; border-radius: 14px; }
-  .stats-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; }
-  .stat-card { padding: 8px 3px; border-radius: 10px; }
-  .stat-num { font-size: 17px; }
-  .stat-label { margin-top: 4px; font-size: 8px; letter-spacing: 0; line-height: 1.15; }
-  .stats-streak { margin-top: 7px; padding: 6px 9px; font-size: 10.5px; }
+  .stats-widget { padding: 12px; border-radius: 14px; }
+  .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .stat-card { padding: 10px; border-radius: 10px; }
+  .stat-num { font-size: 18px; }
+  .stat-label { margin-top: 5px; font-size: 10px; letter-spacing: 0; line-height: 1.2; }
+  .stats-streak { margin-top: 8px; padding: 8px 10px; font-size: 11px; }
+  .stats-widget-preview { font-size: 11px; }
+  .stats-widget-badge { display: none; }
 
   .hero-panel { gap: 7px; padding: 10px 12px; }
   .hero-panel .postcard { display: none; }

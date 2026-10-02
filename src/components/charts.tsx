@@ -9,7 +9,7 @@
  * the app's colours, and they work without JavaScript-driven layout.
  */
 import { cx } from '../cx';
-import { t } from '../i18n';
+import { faDigits, faNum, t } from '../i18n';
 import type { WeekResults } from '../types';
 
 /** Monday, shortened: "28 Sep". */
@@ -20,8 +20,10 @@ function shortWeek(weekOf: string): string {
 }
 
 function minutesLabel(minutes: number): string {
-  if (minutes < 60) return `${minutes}m`;
-  return `${Math.floor(minutes / 60)}h${minutes % 60 ? ` ${minutes % 60}m` : ''}`;
+  const label = minutes < 60
+    ? `${minutes}m`
+    : `${Math.floor(minutes / 60)}h${minutes % 60 ? ` ${minutes % 60}m` : ''}`;
+  return faDigits(label);
 }
 
 interface BarsProps {
@@ -219,9 +221,9 @@ export function CompletionRing({ done, planned }: RingProps) {
         />
       </svg>
       <div className="completion-ring-label">
-        <strong>{Math.round(ratio * 100)}%</strong>
+        <strong>{faNum(Math.round(ratio * 100))}%</strong>
         <span>
-          {done}/{planned}
+          {faNum(done)}/{faNum(planned)}
         </span>
       </div>
     </div>

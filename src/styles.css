@@ -748,6 +748,26 @@ h1, .page-head h1 {
 .quick-add input:focus { outline: none; }
 .quick-add input::placeholder { color: var(--muted); }
 .quick-add-chips { display: flex; gap: 6px; flex-wrap: wrap; padding-inline-start: 4px; }
+.quick-add-examples {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-inline-start: 4px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.quick-add-example {
+  min-height: 32px;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--ink-soft);
+  font-size: 11.5px;
+  text-align: start;
+}
+.quick-add-example:hover { border-color: var(--accent); color: var(--accent-deep); }
 
 /* ---------- Intention ---------- */
 .intention {
@@ -2669,6 +2689,38 @@ h1, .page-head h1 {
   text-align: center;
   line-height: 1.25;
   padding-block: 8px;
+}
+.plan-options { width: 100%; margin-top: 2px; }
+.plan-options > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 5px 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+  list-style: none;
+}
+.plan-options > summary::-webkit-details-marker { display: none; }
+.plan-options > summary::before {
+  content: '+';
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--accent-deep);
+  font-size: 16px;
+  line-height: 1;
+}
+.plan-options[open] > summary::before { content: '−'; }
+.plan-options .plan-row { margin-top: 2px; }
+@media (max-width: 600px) {
+  .plan-options > summary { min-height: 44px; }
 }
 
 /* ── Sync ─────────────────────────────────────────────────── */

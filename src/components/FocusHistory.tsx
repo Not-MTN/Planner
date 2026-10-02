@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { t } from '../i18n';
+import { faDigits, faNum, t } from '../i18n';
 import type { PlannerState } from '../types';
 import { todayISO } from '../dates';
 
@@ -26,7 +26,7 @@ export function FocusHistory({ state }: { state: PlannerState }) {
       <div className="focus-bars">
         {history.map((day) => (
           <div key={day.date} className="focus-bar-wrap">
-            <div className="focus-bar" style={{ height: `${(day.minutes / max) * 100}%` }} title={`${day.date}: ${day.minutes}m`} />
+            <div className="focus-bar" style={{ height: `${(day.minutes / max) * 100}%` }} title={`${faDigits(day.date)}: ${faNum(day.minutes)}m`} />
             <span className="focus-bar-label">{day.date.slice(5)}</span>
           </div>
         ))}
