@@ -1,6 +1,7 @@
 import { StrictMode, Suspense, lazy } from 'react';
 import { createRoot } from 'react-dom/client';
 import { registerPWA } from './pwa';
+import { installApiOriginShim, isNativeShell } from './shared/nativeShell';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { installGlobalErrorHandlers } from './reporting';
 import '@fontsource-variable/estedad';
@@ -24,10 +25,17 @@ const AccountGate = lazy(() => import('./auth/AccountGate').then((module) => ({ 
 function bootTarget(): 'app' | 'site' {
   const path = window.location.pathname.replace(/\/+$/, '') || '/';
   if (path === '/app' || path.startsWith('/app/')) return 'app';
+  // The sign-in pages stay sign-in pages everywhere: a signed-out shell lands
+  // on /login, and sending it back to the planner instead would bounce between
+  // the two forever.
+  if (path === '/login' || path === '/signup' || path === '/recover') return 'site';
   if (path === '/' && /^#\/(today|calendar|tasks|habits|goals|notes|insights|plans|ai|day|quickadd)/.test(window.location.hash)) {
     window.history.replaceState({}, '', `/app${window.location.hash}`);
     return 'app';
   }
+  // A packaged app opens the planner itself. The landing page is for the
+  // website; nobody installs an app to read about it.
+  if (path === '/' && isNativeShell()) return 'app';
   try {
     const url = new URL(window.location.href);
     if (path === '/' && !url.searchParams.has('stay')) {
@@ -49,6 +57,10 @@ const target = bootTarget();
 // Loaded on demand: the i18n module pulls the whole Persian dictionary, which
 // the marketing site never needs.
 if (target === 'app') void import('./i18n').then((module) => module.applyDocumentLang());
+// Must run before anything else issues a request: inside a packaged app the
+// API lives on another origin, and every `/api/...` call in the app is
+// rewritten to reach it, session cookie included.
+installApiOriginShim();
 registerPWA();
 // Catches what React cannot: throws in handlers and timers, and promises
 // nobody awaited. Without it a crash in the browser is invisible to us.

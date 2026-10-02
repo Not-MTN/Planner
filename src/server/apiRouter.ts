@@ -16,6 +16,7 @@
 import { Buffer } from 'node:buffer';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { API_SECURITY_HEADERS } from './security.js';
+import { corsHeadersForRequest, preflightResponse } from './appOrigins.js';
 import { redactDatabaseError } from './authStore.js';
 import {
   handleAccountDelete,
@@ -245,28 +246,58 @@ export function resolveApiPathname(url: URL): string {
 export async function handleApiRequest(request: Request, env: ApiEnv): Promise<Response> {
   const url = new URL(request.url, 'https://planner.invalid');
   const pathname = resolveApiPathname(url);
+
+  // The packaged apps are cross-origin; the browser policy in each handler
+  // (403 unless same-origin) stays exactly as it was, and this is the one
+  // place that adds the CORS answer those build-time allow-listed origins need.
+  const preflight = request.method === 'OPTIONS' ? preflightResponse(request) : null;
+  if (preflight) return withAppCors(preflight, request);
+
   const handler = apiRoute(pathname, env);
-  if (!handler) return notFoundResponse();
+  if (!handler) return withAppCors(notFoundResponse(), request);
   try {
-    return await handler(request);
+    return withAppCors(await handler(request), request);
   } catch (caught) {
     // Last resort: a crashed handler must never reach the client as the
     // platform's non-JSON 500 — the app can only classify JSON errors, so it
     // would show an opaque "unexpected response". Log the real cause for the
     // Vercel function logs (secrets redacted) and answer in our own envelope.
     console.error(`[planner] ${request.method} ${pathname} failed: ${redactDatabaseError(caught)}`);
-    return new Response(
-      JSON.stringify({ error: { message: 'Something went wrong on the server. The error has been logged — please try again.', code: 'internal_error' } }),
-      {
-        status: 500,
-        headers: {
-          'Content-Type': 'application/json; charset=utf-8',
-          'Cache-Control': 'no-store',
-          ...API_SECURITY_HEADERS,
+    return withAppCors(
+      new Response(
+        JSON.stringify({ error: { message: 'Something went wrong on the server. The error has been logged — please try again.', code: 'internal_error' } }),
+        {
+          status: 500,
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Cache-Control': 'no-store',
+            ...API_SECURITY_HEADERS,
+          },
         },
-      },
+      ),
+      request,
     );
   }
+}
+
+/**
+ * Add the shell's CORS headers to an already-built response. Re-wrapping is
+ * safe here: the body stream is passed straight through, and `Set-Cookie`
+ * entries survive (`Headers` keeps them as a list, not a joined string).
+ */
+export function withAppCors(response: Response, request: Request): Response {
+  const headers = corsHeadersForRequest(request);
+  if (!headers) return response;
+  const merged = new Headers(response.headers);
+  for (const [name, value] of Object.entries(headers)) {
+    if (name === 'Vary' && merged.has('Vary')) merged.set('Vary', `${merged.get('Vary')}, ${value}`);
+    else merged.set(name, value);
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: merged,
+  });
 }
 
 /** Check whether the runtime passed a standard Web Fetch `Request` vs Node's `IncomingMessage`. */

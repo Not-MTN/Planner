@@ -1,0 +1,7 @@
+node_modules/
+# The web build copied in by scripts/desktop-prepare.mjs
+dist/
+# Installers produced by electron-builder
+release/
+# Written at build time from PLANNER_APP_URL / PLANNER_API_ORIGIN
+config.json

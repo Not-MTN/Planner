@@ -3,6 +3,7 @@ import { COPY, type Lang } from './copy';
 import { DemoStage } from './DemoStage';
 import { AppWindow } from './AppWindow';
 import { AiProposal, DashboardBuild, Quotes, RetentionSlider, RoleSwitcher, Stats, VisibilityMatrix } from './Showcase';
+import { Platforms } from './Platforms';
 import { pointerLeave, pointerMove } from './effects';
 
 type Nav = (to: string) => void;
@@ -471,6 +472,9 @@ export function Landing({ lang, navigate, authed }: { lang: Lang; navigate: Nav;
           </div>
         </div>
       </section>
+
+      {/* -------------------------------- apps ------------------------------- */}
+      <Platforms lang={lang} />
 
       {/* ------------------------------- stats ------------------------------ */}
       <section className="section section-tint">

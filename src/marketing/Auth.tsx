@@ -50,6 +50,7 @@ function errorText(code: AuthErrorCode | null, detail: string | null, c: Record<
   // in front of the app, or a missing deployment, answered instead of the API.
   if (code === 'deployment_gate') return c.errDeploymentGate;
   if (code === 'api_missing') return c.errApiMissing;
+  if (code === 'local_only_build') return c.errLocalOnly;
   if (detail?.toLowerCase().includes('too many requests')) return c.errRateLimited;
   if (lang === 'fa') return c.errUnknown;
   return detail ?? c.errUnknown;
@@ -62,7 +63,14 @@ function errorText(code: AuthErrorCode | null, detail: string | null, c: Record<
  */
 function errorDetailText(caught: unknown): string | null {
   if (!(caught instanceof AuthError)) return null;
-  if (caught.code !== 'deployment_gate' && caught.code !== 'api_missing' && caught.code !== 'unknown') return null;
+  if (
+    caught.code !== 'deployment_gate' &&
+    caught.code !== 'api_missing' &&
+    caught.code !== 'local_only_build' &&
+    caught.code !== 'unknown'
+  ) {
+    return null;
+  }
   // Never echo a credential-shaped server message back into the panel.
   return caught.detail && caught.detail.length <= 200 ? caught.detail : null;
 }

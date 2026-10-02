@@ -1,0 +1,92 @@
+# Installers for Windows, macOS and Linux.
+#
+# Built by `npm run desktop:dist` from the repository root, which first copies
+# the web build into desktop/dist and writes desktop/config.json. See
+# docs/DESKTOP.md for what each target produces and what still needs a
+# signature before it can ship to the public.
+appId: com.notmtn.planner
+productName: Planner
+copyright: Planner
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - main.cjs
+  - preload.cjs
+  - config.json
+  - dist/**/*
+  - package.json
+
+asar: true
+# The app never spawns anything and never needs a shell.
+electronLanguages: [en, fa]
+npmRebuild: false
+
+win:
+  target:
+    - target: nsis
+      arch: [x64, arm64]
+  icon: build/icon.ico
+  # No ${version} and no ${arch}: the name has to stay the same from release to
+  # release, because the website links to
+  # /releases/latest/download/<name> — a name that changes every release would
+  # break every download button on the site. Leaving ${arch} out also makes
+  # electron-builder build a single installer holding both x64 and arm64,
+  # instead of that installer plus a redundant one per architecture.
+  artifactName: Planner-windows.${ext}
+
+nsis:
+  # A normal installer with a directory choice, not a one-click mystery.
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Planner
+  uninstallDisplayName: Planner
+  deleteAppDataOnUninstall: false
+
+mac:
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+    - target: zip
+      arch: [x64, arm64]
+  icon: build/icon.icns
+  category: public.app-category.productivity
+  artifactName: Planner-macos-${arch}.${ext}
+  # Signing and notarising happen in CI with the maintainer's Apple
+  # credentials; an unsigned build still runs from the downloaded file.
+  hardenedRuntime: true
+  gatekeeperAssess: false
+
+dmg:
+  artifactName: Planner-macos-${arch}.${ext}
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64, arm64]
+    - target: deb
+      arch: [x64, arm64]
+    - target: rpm
+      arch: [x64]
+  icon: build/icon.png
+  category: Utility
+  maintainer: Planner
+  synopsis: Calm, local-first planning — tasks, habits, goals and notes
+  desktop:
+    entry:
+      Name: Planner
+      Comment: A calm, local-first planner for your day, week and goals
+      Keywords: planner;tasks;habits;goals;notes;calendar;
+  artifactName: Planner-linux-${arch}.${ext}

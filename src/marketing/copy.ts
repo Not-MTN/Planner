@@ -16,6 +16,7 @@ export const en = {
   navGuardians: 'For parents',
   navPrivacy: 'Privacy',
   navAI: 'AI',
+  navApps: 'Apps',
   navSignIn: 'Sign in',
   navStart: 'Get started',
   navBackHome: 'Back to the site',
@@ -312,6 +313,8 @@ export const en = {
     'This deployment is behind a hosting sign-in page, so the app cannot reach its own API. Turn off Vercel Authentication (Project Settings → Deployment Protection), or open the production domain, then try again.',
   errApiMissing:
     'The accounts API did not answer at this address. Redeploy the app with its api/ functions, or check the domain you are using, then try again.',
+  errLocalOnly:
+    'This copy of Planner was built for offline use, with no server address, so there is nothing to sign in to. Your planner still works on this device.',
   errTemporaryAccounts:
     'Accounts on this server are kept in memory only, so restarting it signs everyone out. Add a DATABASE_URL to keep them.',
   errPasskeyCancelled: 'Passkey sign-in was cancelled.',
@@ -422,6 +425,42 @@ export const en = {
   footContact: 'Contact',
   footGithub: 'Source',
   ctaBadge: 'Free to start',
+  platformsKicker: 'Everywhere you plan',
+  platformsTitle: 'On your phone, your laptop, your desktop',
+  platformsSub:
+    'The same calm planner, installed like an app. Everything stays on the device, and syncs only when you ask it to.',
+  platformsIphone: 'iPhone and iPad',
+  platformsIphoneNote:
+    'In Safari, Share → Add to Home Screen installs the whole planner with its own icon. The App Store listing follows.',
+  platformsAndroid: 'Android',
+  platformsAndroidNote:
+    'The APK installs on any Android phone — Xiaomi, Redmi, Samsung, Pixel, Huawei — and updates from the same place. Store listings follow.',
+  platformsWindows: 'Windows',
+  platformsWindowsNote:
+    'An installer for Windows 10 and 11 with a Start-menu shortcut, for Intel/AMD and ARM PCs alike.',
+  platformsMac: 'macOS',
+  platformsMacNote: 'A disk image for Apple silicon and Intel Macs.',
+  platformsLinux: 'Linux',
+  platformsLinuxNote: 'AppImage, .deb and .rpm — no repository, no root.',
+  platformsDownloadWindows: 'Download for Windows',
+  platformsDownloadMacArm: 'Download for Apple silicon',
+  platformsDownloadMacIntel: 'Download for Intel Macs',
+  platformsDownloadApk: 'Download the APK',
+  platformsDownloadLinuxAppImage: 'AppImage (x86_64)',
+  platformsDownloadLinuxDeb: '.deb (x86_64)',
+  platformsDownloadLinuxRpm: '.rpm (x86_64)',
+  platformsDownloadLinuxArmImage: 'AppImage (ARM64)',
+  platformsDownloadLinuxArmDeb: '.deb (ARM64)',
+  platformsAllReleases: 'All releases',
+  platformsDownloadFoot: 'Saves the file straight from this page. Hosted on GitHub Releases.',
+  platformsSource: 'Build from source',
+  platformsAppStore: 'App Store',
+  platformsPlayStore: 'Google Play',
+  platformsWebInstead: 'Use the web app',
+  platformsHere: 'This device',
+  platformsAlsoOn: 'Also on',
+  platformsFoot:
+    'Every build is the same planner, and the web app always works without installing anything.',
 } as const;
 
 export const fa: Record<keyof typeof en, string> = {
@@ -432,6 +471,7 @@ export const fa: Record<keyof typeof en, string> = {
   navRoles: 'نقش‌ها',
   navGuardians: 'برای والدین',
   navPrivacy: 'حریم خصوصی',
+  navApps: 'برنامه‌ها',
   navAI: 'هوش مصنوعی',
   navSignIn: 'ورود',
   navStart: 'شروع کنید',
@@ -728,6 +768,8 @@ export const fa: Record<keyof typeof en, string> = {
     'این استقرار پشت صفحهٔ ورودِ سرویس میزبانی است و برنامه به API خودش دسترسی ندارد. Vercel Authentication را خاموش کنید (Project Settings ← Deployment Protection) یا دامنهٔ اصلی را باز کنید و دوباره تلاش کنید.',
   errApiMissing:
     'API حساب‌ها در این نشانی پاسخ نمی‌دهد. برنامه را همراه توابع api/ دوباره منتشر کنید یا دامنه‌ای که استفاده می‌کنید را بررسی کنید.',
+  errLocalOnly:
+    'این نسخهٔ برنامه‌ریز برای استفادهٔ آفلاین و بدون نشانی سرور ساخته شده است، پس ورود به حساب ممکن نیست. برنامه‌ریز شما همچنان روی همین دستگاه کار می‌کند.',
   errTemporaryAccounts:
     'حساب‌های این سرور فقط در حافظه نگه داشته می‌شوند، پس با هر بار راه‌اندازی دوباره همه از حساب خارج می‌شوند. برای نگه‌داشتن آن‌ها DATABASE_URL را تنظیم کنید.',
   errPasskeyCancelled: 'ورود با کلید عبور لغو شد.',
@@ -838,6 +880,42 @@ export const fa: Record<keyof typeof en, string> = {
   footContact: 'تماس',
   footGithub: 'کد منبع',
   ctaBadge: 'شروع رایگان',
+  platformsKicker: 'هر‌جا برنامه‌ریزی کنید',
+  platformsTitle: 'روی گوشی، لپ‌تاپ و رایانهٔ رومیزی',
+  platformsSub:
+    'همان برنامه‌ریزِ آرام، نصب‌شده مثل یک برنامه. همه‌چیز روی دستگاه می‌ماند و فقط وقتی بخواهید همگام می‌شود.',
+  platformsIphone: 'آیفون و آیپد',
+  platformsIphoneNote:
+    'در سافاری، «اشتراک‌گذاری ← افزودن به صفحهٔ اصلی» کل برنامه‌ریز را با آیکون خودش نصب می‌کند. نسخهٔ اپ‌استور به‌زودی.',
+  platformsAndroid: 'اندروید',
+  platformsAndroidNote:
+    'فایل APK روی هر گوشی اندرویدی نصب می‌شود — شیائومی، ردمی، سامسونگ، پیکسل، هوآوی — و از همان‌جا به‌روز می‌شود. فروشگاه‌ها به‌زودی.',
+  platformsWindows: 'ویندوز',
+  platformsWindowsNote:
+    'نصب‌کننده‌ای برای ویندوز ۱۰ و ۱۱ با میان‌بر منوی شروع، برای رایانه‌های Intel/AMD و ARM.',
+  platformsMac: 'مک',
+  platformsMacNote: 'فایل تصویری برای مک‌های Apple silicon و Intel.',
+  platformsLinux: 'لینوکس',
+  platformsLinuxNote: 'AppImage، deb. و rpm. — بدون مخزن و بدون دسترسی ریشه.',
+  platformsDownloadWindows: 'بارگیری برای ویندوز',
+  platformsDownloadMacArm: 'بارگیری برای Apple silicon',
+  platformsDownloadMacIntel: 'بارگیری برای مک‌های Intel',
+  platformsDownloadApk: 'بارگیری فایل APK',
+  platformsDownloadLinuxAppImage: 'AppImage (x86_64)',
+  platformsDownloadLinuxDeb: 'deb. (x86_64)',
+  platformsDownloadLinuxRpm: 'rpm. (x86_64)',
+  platformsDownloadLinuxArmImage: 'AppImage (ARM64)',
+  platformsDownloadLinuxArmDeb: 'deb. (ARM64)',
+  platformsAllReleases: 'همهٔ نسخه‌ها',
+  platformsDownloadFoot: 'فایل مستقیم از همین صفحه ذخیره می‌شود. میزبانی: GitHub Releases.',
+  platformsSource: 'ساخت از کد منبع',
+  platformsAppStore: 'اپ استور',
+  platformsPlayStore: 'گوگل‌پلی',
+  platformsWebInstead: 'استفاده از نسخهٔ وب',
+  platformsHere: 'همین دستگاه',
+  platformsAlsoOn: 'همچنین در',
+  platformsFoot:
+    'همهٔ نسخه‌ها یک برنامه‌ریزِ یکسان‌اند و نسخهٔ وب همیشه بدون نصب کار می‌کند.',
 };
 
 export type Lang = 'en' | 'fa';

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The planner's paper colour: the adaptive icon's background layer. -->
+    <color name="ic_launcher_background">#F5F0E7</color>
+</resources>

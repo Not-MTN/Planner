@@ -1,0 +1,354 @@
+name: Apps
+
+# Builds the things people install: the Windows/macOS/Linux installers, the
+# Android APK + Play bundle, and an unsigned iOS archive. Nothing is published
+# anywhere by this workflow — every job uploads its output as a build artifact,
+# and on a version tag the files are also attached to that GitHub release.
+#
+# Signing is deliberately out of the way: Android picks up a keystore when the
+# repository has the secrets below, and the Apple build stays unsigned until a
+# maintainer adds their certificates (see docs/APPS.md).
+#
+# The API address is baked in at build time. Set the optional inputs (or the
+# PLANNER_APP_URL / PLANNER_API_ORIGIN repository variables) once, and every
+# future build of every app is already pointed at your deployment.
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_url:
+        description: 'Load this deployment in the shells (blank = bundled, offline build)'
+        required: false
+        type: string
+      api_origin:
+        description: 'API origin for the bundled builds, e.g. https://planner.example.com'
+        required: false
+        type: string
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+env:
+  APP_URL: ${{ inputs.app_url || vars.PLANNER_APP_URL || '' }}
+  # The deployment the apps talk to. Override per run (the `api_origin` input),
+  # for every run (the PLANNER_API_ORIGIN repository variable), or by editing
+  # this line. Leave it empty to build apps that are local-only.
+  API_ORIGIN: ${{ inputs.api_origin || vars.PLANNER_API_ORIGIN || 'https://matin-habit-tracker.vercel.app' }}
+  # A version tag (`v1.2.0`) names the build; a manual run has no tag and
+  # falls back to the defaults in app/build.gradle and desktop/package.json.
+  VERSION_NAME: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+  # Play requires versionCode to increase with every upload. The run number
+  # always increases, so a tag build is uploadable as-is.
+  VERSION_CODE: ${{ github.run_number }}
+
+jobs:
+  # Runs where the network is: this is the only place a build can ask the
+  # deployment whether it accepts the packaged apps, so it is the one place a
+  # misconfigured server is caught before an app that cannot sign in is built.
+  preflight:
+    name: The apps could sign in
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check the deployment the apps will talk to
+        if: ${{ env.API_ORIGIN != '' }}
+        run: |
+          code=0
+          node scripts/check-deployment.mjs "$API_ORIGIN" || code=$?
+          case "$code" in
+            0)
+              exit 0
+              ;;
+            2)
+              # A wrong address, an outage, a network problem: says nothing
+              # either way, so it must not fail somebody's build.
+              echo "::warning title=Could not check the deployment::${API_ORIGIN} could not be reached, so it was not verified. The app builds, but sign-in is unproven."
+              exit 0
+              ;;
+            3)
+              echo "::error title=API_ORIGIN is not a URL::Set it to a bare origin such as https://your-app.example.com, without a path."
+              exit 1
+              ;;
+          esac
+          {
+            echo "## ✗ The apps this build makes could not sign in"
+            echo ""
+            echo "\`${API_ORIGIN}\` answers, but it refuses the origins the apps run from."
+            echo "Every account, sync and AI request would come back 403, and the app can"
+            echo "only show that as \"offline\"."
+            echo ""
+            echo "Set this in the deployment's environment variables and redeploy:"
+            echo ""
+            echo '```'
+            echo "PLANNER_APP_ORIGINS=https://localhost,capacitor://localhost,app://planner"
+            echo '```'
+            echo ""
+            echo "Then run this workflow again. docs/APPS.md §2 explains what it does."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::error title=The apps could not sign in::${API_ORIGIN} refuses the packaged apps' origins. Set PLANNER_APP_ORIGINS on the deployment (see the run summary) and run this again."
+          exit 1
+        env:
+          API_ORIGIN: ${{ env.API_ORIGIN }}
+
+  desktop:
+    name: Desktop installers (${{ matrix.target }})
+    needs: preflight
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: win
+          - os: macos-latest
+            target: mac
+          - os: ubuntu-latest
+            target: linux
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Install desktop dependencies
+        run: npm ci --prefix desktop --ignore-scripts
+        # `--ignore-scripts` skips Electron's own binary download, which the
+        # packaging step below needs, so fetch it explicitly.
+      - name: Fetch Electron
+        run: node desktop/node_modules/electron/install.js
+      - name: Build installers
+        # bash on every runner on purpose: Windows defaults to pwsh, and this
+        # needs the same shell semantics as the other two.
+        shell: bash
+        run: |
+          set -o pipefail
+          if npm run desktop:dist -- --${{ matrix.target }} 2>&1 | tee "$RUNNER_TEMP/build.log"; then
+            exit 0
+          fi
+          # The job log sits behind signed blob storage, so put the part that
+          # matters where it can be read without opening the run in a browser.
+          bash "$GITHUB_WORKSPACE/scripts/ci-annotate.sh" "$RUNNER_TEMP/build.log" \
+            "electron-builder failed (${{ matrix.target }})"
+          exit 1
+        env:
+          PLANNER_APP_URL: ${{ env.APP_URL }}
+          PLANNER_API_ORIGIN: ${{ env.API_ORIGIN }}
+          PLANNER_VERSION_NAME: ${{ env.VERSION_NAME }}
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: planner-desktop-${{ matrix.target }}
+          path: |
+            desktop/release/*.exe
+            desktop/release/*.dmg
+            desktop/release/*.zip
+            desktop/release/*.AppImage
+            desktop/release/*.deb
+            desktop/release/*.rpm
+          if-no-files-found: error
+          retention-days: 14
+
+  android:
+    name: Android APK and Play bundle
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    # Secrets cannot be read inside an `if:` directly; carrying them in the
+    # job environment is the supported way to test whether one was set.
+    env:
+      KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      # Read by android/app/build.gradle. Spelled with the `github` context
+      # rather than `env.VERSION_NAME`: the `env` context is not available in
+      # `jobs.<job_id>.env`, and using it there makes the whole workflow file
+      # invalid — GitHub then refuses to run any of it.
+      PLANNER_VERSION_NAME: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      PLANNER_VERSION_CODE: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+      # No android-actions/setup-android here on purpose: the ubuntu-latest
+      # image already ships the SDK at ANDROID_HOME with the licences accepted
+      # (command-line tools 12, platform android-36, build-tools 36.0.0/36.1.0
+      # as of writing), which is everything compileSdk/targetSdk 36 needs. That
+      # action added a third-party dependency that failed the build while doing
+      # nothing the image had not already done.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Build the web app into the Android project
+        run: npm run native:sync -- android
+        env:
+          PLANNER_APP_URL: ${{ env.APP_URL }}
+          PLANNER_API_ORIGIN: ${{ env.API_ORIGIN }}
+      - name: Decode the upload keystore, when the repository has one
+        if: ${{ env.KEYSTORE_BASE64 != '' }}
+        run: |
+          # `storeFile` is resolved against the app module, so the keystore
+          # lives in android/app/keystore/. Both files are git-ignored and the
+          # job's workspace is thrown away after the build.
+          mkdir -p android/app/keystore
+          echo "$KEYSTORE_BASE64" | base64 -d > android/app/keystore/release.jks
+          {
+            echo "storeFile=keystore/release.jks"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > android/keystore.properties
+      - name: Build APK and AAB
+        working-directory: android
+        shell: bash
+        run: |
+          set -o pipefail
+          chmod +x ./gradlew
+          # Signed with the upload key when the secrets above exist; otherwise
+          # the debug key signs it, which is enough to install and try the app.
+          if ./gradlew --no-daemon assembleRelease bundleRelease 2>&1 | tee "$RUNNER_TEMP/gradle.log"; then
+            exit 0
+          fi
+          bash "$GITHUB_WORKSPACE/scripts/ci-annotate.sh" "$RUNNER_TEMP/gradle.log" \
+            "Gradle failed" 60
+          exit 1
+      - name: Say it out loud when this APK cannot be updated later
+        # Not a failure: a debug-signed APK is fine for trying the app on a
+        # phone. It is not fine to hand to other people, and the reason is not
+        # obvious, so it goes in the run summary where it cannot be missed.
+        if: ${{ startsWith(github.ref, 'refs/tags/v') && env.KEYSTORE_BASE64 == '' }}
+        run: |
+          {
+            echo "## ⚠️ This APK cannot be installed over the previous one"
+            echo ""
+            echo "No upload keystore is configured, so Gradle signed this release with a"
+            echo "debug key. Android generates that key per machine, and this job runs on a"
+            echo "fresh machine every time — so every release is signed with a *different*"
+            echo "key, and Android refuses to install an app whose signature does not match"
+            echo "the installed one."
+            echo ""
+            echo "The practical effect: anyone who installs this APK cannot install the next"
+            echo "release. They would have to uninstall first, which deletes their planner"
+            echo "data on that device unless it was synced."
+            echo ""
+            echo "Fix it once by adding four repository secrets"
+            echo "(Settings → Secrets and variables → Actions):"
+            echo ""
+            echo '```'
+            echo "ANDROID_KEYSTORE_BASE64        base64 -w0 release.jks"
+            echo "ANDROID_KEYSTORE_PASSWORD"
+            echo "ANDROID_KEY_ALIAS"
+            echo "ANDROID_KEY_PASSWORD"
+            echo '```'
+            echo ""
+            echo "See docs/APPS.md → Release signing. Keep that keystore: it is what makes"
+            echo "future updates install, and it cannot be regenerated without breaking them."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::warning title=This APK cannot be updated::No upload keystore is configured, so this APK is signed with a per-run debug key. Android will refuse to install a future release over it. See the run summary, or docs/APPS.md → Release signing."
+
+      - name: Collect the builds
+        run: |
+          mkdir -p artifacts
+          cp android/app/build/outputs/apk/release/*.apk artifacts/ || true
+          cp android/app/build/outputs/bundle/release/*.aab artifacts/ || true
+          ls -la artifacts
+      - name: Upload Android builds
+        uses: actions/upload-artifact@v4
+        with:
+          name: planner-android
+          path: artifacts/*
+          if-no-files-found: error
+          retention-days: 14
+
+  ios:
+    name: iOS archive (unsigned)
+    needs: preflight
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Build the web app into the iOS project
+        run: npm run native:sync -- ios
+        env:
+          PLANNER_APP_URL: ${{ env.APP_URL }}
+          PLANNER_API_ORIGIN: ${{ env.API_ORIGIN }}
+      - name: Archive the app
+        run: |
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$PWD/build/Planner.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            archive
+      - name: Package the app and its archive
+        run: |
+          cd build
+          ditto -c -k --sequesterRsrc --keepParent Planner.xcarchive/Products/Applications/App.app Planner-ios-app.zip
+          ditto -c -k --sequesterRsrc --keepParent Planner.xcarchive Planner-ios.xcarchive.zip
+          ls -la
+      - name: Upload the iOS build
+        uses: actions/upload-artifact@v4
+        with:
+          name: planner-ios
+          path: |
+            build/Planner-ios-app.zip
+            build/Planner-ios.xcarchive.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Attach the builds to the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [desktop, android, ios]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          # The release may not exist yet (a tag pushed before the release was
+          # written); create it, then attach everything.
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$tag" --repo "$GITHUB_REPOSITORY" --title "Planner $tag" --generate-notes
+          gh release upload "$tag" artifacts/* --repo "$GITHUB_REPOSITORY" --clobber
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check the website's download buttons resolve
+        # The site links to /releases/latest/download/<name>. If an artifact is
+        # named differently from what src/marketing/downloads.ts expects, every
+        # download button on the site 404s and nothing else would notice — the
+        # site ships links, not files. This is the only moment the two exist
+        # together, so it is the moment to compare them.
+        run: node scripts/check-downloads.mjs

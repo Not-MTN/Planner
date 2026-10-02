@@ -61,6 +61,8 @@ const PanelsView = lazy(() => import('../views/PanelsView').then((m) => ({ defau
 const StudentPanelView = lazy(() => import('../views/StudentPanelView').then((m) => ({ default: m.StudentPanelView })));
 const GuardianPanelView = lazy(() => import('../views/GuardianPanelView').then((m) => ({ default: m.GuardianPanelView })));
 import { applyUpdate, onUpdateAvailable } from '../pwa';
+import { RELEASES_PAGE, dismissVersion, findUpdate } from '../shared/updates';
+import { isNativeShell } from '../shared/nativeShell';
 import { isAIVisited, onTourRequest, requestTour, TOUR_STOPS, tourRouteFor, tourStartIndex } from '../tour';
 import { onAboutRequest, requestAbout } from '../about';
 import { TourSheet } from './TourSheet';
@@ -227,6 +229,26 @@ export function Shell() {
 
   const [updateReady, setUpdateReady] = useState(false);
   useEffect(() => onUpdateAvailable(() => setUpdateReady(true)), []);
+
+  // A packaged app cannot update itself: the planner is inside the installer,
+  // so the service-worker prompt above can never fire there. Ask GitHub what
+  // the newest release is and say so, once per version, and only when the
+  // answer is usable. `findUpdate` never throws — no network simply means we
+  // do not know, which is not worth interrupting anyone about.
+  const [newVersion, setNewVersion] = useState<string | null>(null);
+  useEffect(() => {
+    // Only in a packaged app. In a browser tab the service worker above is the
+    // real update path — pointing a website visitor at a download would be
+    // asking them to reinstall something that just updated itself.
+    if (!isNativeShell()) return;
+    let cancelled = false;
+    void findUpdate().then((version) => {
+      if (!cancelled && version) setNewVersion(version);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // First-run tour: opens by itself on the very first boot (and resumes after
   // a language-switch reload); replayable from the (?) side tool or Settings.
@@ -874,6 +896,25 @@ export function Shell() {
             </div>
           </div>
         </Modal>
+      ) : null}
+      {newVersion ? (
+        <div className="toast update-toast" role="status">
+          <span>{t("Planner {0} is available to download.", { 0: newVersion })}</span>
+          <a className="toast-action" href={RELEASES_PAGE} target="_blank" rel="noreferrer">
+            {t("Download")}
+          </a>
+          <button
+            type="button"
+            className="toast-action"
+            onClick={() => {
+              dismissVersion(newVersion);
+              setNewVersion(null);
+            }}
+            aria-label={t("Later")}
+          >
+            {t("Later")}
+          </button>
+        </div>
       ) : null}
       {updateReady ? (
         <div className="toast update-toast" role="status">

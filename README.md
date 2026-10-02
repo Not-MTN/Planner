@@ -13,6 +13,68 @@ Other scripts: `npm run typecheck`, `npm test`, `npm run build`, `npm run test:e
 
 See [SECURITY.md](SECURITY.md) for the threat model, deployment hardening, privacy boundaries, and vulnerability reporting process. No app can be guaranteed unhackable; protect the device, browser profile, sync code, and server secrets too.
 
+## Install it as an app
+
+The same code ships as a real app on phones and desktops — the Android and iOS
+projects are Capacitor shells around this repository's own build, and the
+Windows/macOS/Linux builds are Electron shells around it. Nothing is
+reimplemented per platform: it is the identical planner, with the identical
+local-first storage.
+
+```bash
+npm run native:sync          # build once, copy into android/ and ios/
+npm run desktop:dist         # Windows, macOS and Linux installers
+```
+
+- **Android** (`android/`, `com.notmtn.planner`): an APK for sideloading and
+  for Xiaomi GetApps, Samsung Galaxy Store and Huawei AppGallery, plus an `.aab`
+  for Google Play. Requirements: JDK 21 and the Android SDK.
+- **iPhone and iPad** (`ios/`): an Xcode project with Swift Package Manager, so
+  no CocoaPods. TestFlight and App Store uploads need an Apple Developer
+  account; the CI build stops at an unsigned archive.
+- **Windows, macOS, Linux** (`desktop/`): an NSIS installer, a `.dmg` and
+  `.zip`, and AppImage/`.deb`/`.rpm` — see [docs/DESKTOP.md](docs/DESKTOP.md).
+
+Two one-off commands make a release complete: `npm run android:keystore`
+creates the Android signing key and prints the four GitHub secrets that let
+future APKs install over earlier ones, and every build runs
+`npm run check:deployment` against your server first, so an app that could not
+sign in fails the build instead of shipping.
+
+The website downloads them directly — the buttons in the "Get the app" section
+save the file instead of sending people to a page of links. They point at
+GitHub's stable address for the newest release,
+`.../releases/latest/download/<file>`, which keeps working as long as an
+artifact name never changes; that is why none of them contains a version
+number. `npm run check:downloads` asks the live release whether every name
+still exists, and the release job runs it before a tagged build is done.
+
+With no server address configured, every one of these is a complete **offline**
+planner: no account, no network, everything on the device. Point them at your
+deployment with one variable and accounts, sync and AI work too:
+
+```bash
+PLANNER_API_ORIGIN=https://your-app.example.com npm run native:sync
+```
+
+That build talks to your deployment cross-origin, so the server has to be told
+those app origins are yours (and nothing is trusted unless you say so):
+
+```bash
+PLANNER_APP_ORIGINS=capacitor://localhost,https://localhost,app://planner
+```
+
+Then prove it, before anyone installs anything:
+
+```bash
+npm run check:deployment -- https://your-app.example.com
+```
+
+The full guide — build, signing, keystores, stores, CI, and what the shells do
+not do yet — is in [docs/APPS.md](docs/APPS.md). The marketing site's "Apps"
+section (`src/marketing/Platforms.tsx`) links to the release downloads; paste
+your store URLs into `src/marketing/downloads.ts` when the listings are live.
+
 ## Sync across devices (Neon)
 
 1. Create a project at [neon.tech](https://neon.tech) and copy the connection string (Dashboard → **Connect**).

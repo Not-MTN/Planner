@@ -2,6 +2,8 @@ import { loadEnv, type Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import { Buffer } from 'node:buffer';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { cwd, env } from 'node:process';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -35,7 +37,8 @@ import {
 } from './src/server/authApi';
 import { authStore } from './src/server/authStore';
 import { handleICS } from './src/server/icsProxy';
-import { notFoundResponse } from './src/server/apiRouter';
+import { notFoundResponse, withAppCors } from './src/server/apiRouter';
+import { preflightResponse } from './src/server/appOrigins';
 
 // API responses can use a deny-all CSP; the HTML document needs its own app CSP,
 // which is configured in vercel.json. Do not put the API CSP on Vite's HTML page.
@@ -61,10 +64,59 @@ function toWebRequest(request: IncomingMessage, pathname: string): Request {
   } as RequestInit);
 }
 
+/**
+ * A local API failure, with the same CORS answer a successful response gets.
+ * Without them an installed app reads a 500 as an opaque network error and
+ * tells the user it is offline, which is the wrong problem.
+ */
+function devApiError(message: string, webRequest: Request): Response {
+  return withAppCors(
+    new Response(JSON.stringify({ error: { message } }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    }),
+    webRequest,
+  );
+}
+
 async function sendWebResponse(webResponse: Response, response: ServerResponse): Promise<void> {
   response.statusCode = webResponse.status;
   webResponse.headers.forEach((value, name) => response.setHeader(name, value));
   response.end(Buffer.from(await webResponse.arrayBuffer()));
+}
+
+/**
+ * Answer a shell's preflight the way the deployed router does.
+ *
+ * The other dev middlewares dispatch straight to their handlers, which is fine
+ * for a browser (same origin, no preflight) but useless to an installed app:
+ * it runs from `https://localhost` / `capacitor://localhost` / `app://planner`,
+ * so its JSON POSTs are preflighted first. Registered before them, this answers
+ * that preflight for the origins the operator named in PLANNER_APP_ORIGINS and
+ * passes everything else through untouched.
+ */
+function appOrigins(): Plugin {
+  const middleware: NextHandleFunction = (request, response, next) => {
+    if (request.method !== 'OPTIONS' || !request.url?.startsWith('/api')) {
+      next();
+      return;
+    }
+    const preflight = preflightResponse(toWebRequest(request, request.url));
+    if (!preflight) {
+      next();
+      return;
+    }
+    void sendWebResponse(preflight, response);
+  };
+  return {
+    name: 'planner-app-origins',
+    configureServer(server) {
+      server.middlewares.use(middleware);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(middleware);
+    },
+  };
 }
 
 function groqProxyHandler(apiKey: string | undefined, model: string | undefined, visionModel: string | undefined): NextHandleFunction {
@@ -80,13 +132,11 @@ function groqProxyHandler(apiKey: string | undefined, model: string | undefined,
       next();
       return;
     }
-    void Promise.resolve(handler(toWebRequest(request, `/api/groq${pathname}`)))
-      .then((webResponse) => sendWebResponse(webResponse, response))
+    const webRequest = toWebRequest(request, `/api/groq${pathname}`);
+    void Promise.resolve(handler(webRequest))
+      .then((webResponse) => sendWebResponse(withAppCors(webResponse, webRequest), response))
       .catch(() => {
-        if (response.headersSent) return;
-        response.statusCode = 500;
-        response.setHeader('Content-Type', 'application/json');
-        response.end(JSON.stringify({ error: { message: 'The local Groq proxy failed. Please try again.' } }));
+        if (!response.headersSent) void sendWebResponse(devApiError('The local Groq proxy failed. Please try again.', webRequest), response);
       });
   };
 }
@@ -114,13 +164,11 @@ function syncHandler(databaseUrl: string | undefined): NextHandleFunction {
       next();
       return;
     }
-    void Promise.resolve(run(toWebRequest(request, `/api/sync${pathname}`)))
-      .then((webResponse) => sendWebResponse(webResponse, response))
+    const webRequest = toWebRequest(request, `/api/sync${pathname}`);
+    void Promise.resolve(run(webRequest))
+      .then((webResponse) => sendWebResponse(withAppCors(webResponse, webRequest), response))
       .catch(() => {
-        if (response.headersSent) return;
-        response.statusCode = 500;
-        response.setHeader('Content-Type', 'application/json');
-        response.end(JSON.stringify({ error: { message: 'The local sync API failed.' } }));
+        if (!response.headersSent) void sendWebResponse(devApiError('The local sync API failed.', webRequest), response);
       });
   };
 }
@@ -145,13 +193,11 @@ function icsHandler(): NextHandleFunction {
       next();
       return;
     }
-    void handleICS(toWebRequest(request, `/api${url}`))
-      .then((webResponse) => sendWebResponse(webResponse, response))
+    const webRequest = toWebRequest(request, `/api${url}`);
+    void handleICS(webRequest)
+      .then((webResponse) => sendWebResponse(withAppCors(webResponse, webRequest), response))
       .catch(() => {
-        if (response.headersSent) return;
-        response.statusCode = 500;
-        response.setHeader('Content-Type', 'application/json');
-        response.end(JSON.stringify({ error: { message: 'The local calendar proxy failed.' } }));
+        if (!response.headersSent) void sendWebResponse(devApiError('The local calendar proxy failed.', webRequest), response);
       });
   };
 }
@@ -230,13 +276,11 @@ function authHandler(databaseUrl: string | undefined): NextHandleFunction {
       next();
       return;
     }
-    void run(toWebRequest(request, `/api/auth${request.url ?? pathname}`))
-      .then((webResponse) => sendWebResponse(webResponse, response))
+    const webRequest = toWebRequest(request, `/api/auth${request.url ?? pathname}`);
+    void run(webRequest)
+      .then((webResponse) => sendWebResponse(withAppCors(webResponse, webRequest), response))
       .catch(() => {
-        if (response.headersSent) return;
-        response.statusCode = 500;
-        response.setHeader('Content-Type', 'application/json');
-        response.end(JSON.stringify({ error: { message: 'The local accounts API failed.' } }));
+        if (!response.headersSent) void sendWebResponse(devApiError('The local accounts API failed.', webRequest), response);
       });
   };
 }
@@ -280,9 +324,10 @@ function pushApi(pushEnv: { DATABASE_URL?: string; VAPID_PUBLIC_KEY?: string; VA
   const middleware: NextHandleFunction = (request, response, next) => {
     if (!request.url?.startsWith('/push/')) { next(); return; }
     const pathname = `/api${request.url}`;
-    void import('./src/server/pushVite').then(({ handleLocalPush }) => handleLocalPush(toWebRequest(request, pathname), pushEnv))
-      .then((result) => sendWebResponse(result, response))
-      .catch(() => { if (!response.headersSent) { response.statusCode = 500; response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ error: { message: 'The local push API failed.' } })); } });
+    const webRequest = toWebRequest(request, pathname);
+    void import('./src/server/pushVite').then(({ handleLocalPush }) => handleLocalPush(webRequest, pushEnv))
+      .then((result) => sendWebResponse(withAppCors(result, webRequest), response))
+      .catch(() => { if (!response.headersSent) void sendWebResponse(devApiError('The local push API failed.', webRequest), response); });
   };
   return {
     name: 'planner-push-api',
@@ -291,13 +336,49 @@ function pushApi(pushEnv: { DATABASE_URL?: string; VAPID_PUBLIC_KEY?: string; VA
   };
 }
 
+/**
+ * `PLANNER_API_ORIGIN` names the API for a packaged app build. Only a bare
+ * http(s) origin is accepted — a path or a wildcard would make the built app
+ * talk to something other than the deployment the operator meant.
+ */
+function normalizeAppApiOrigin(value: string | undefined): string {
+  const trimmed = (value ?? '').trim().replace(/\/+$/, '');
+  if (!trimmed) return '';
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return '';
+    if (url.pathname !== '' && url.pathname !== '/') return '';
+    if (!url.hostname) return '';
+    return url.origin;
+  } catch {
+    return '';
+  }
+}
+
 export default defineConfig(({ mode }) => {
   // Read the secret only inside the Vite/Node process. It is never defined into the browser bundle.
   const fileEnv = loadEnv(mode, cwd(), '');
+  // The version this build is. `PLANNER_VERSION_NAME` is what the Apps workflow
+  // sets from a release tag, so an installed app and the release it came from
+  // agree; otherwise the package version is the answer. src/shared/updates.ts
+  // compares this with the newest published release.
+  const appVersion = (env.PLANNER_VERSION_NAME || fileEnv.PLANNER_VERSION_NAME || '').trim().replace(/^v/, '')
+    || JSON.parse(readFileSync(join(cwd(), 'package.json'), 'utf8')).version
+    || '0.0.0';
   const apiKey = env.GROQ_API_KEY || fileEnv.GROQ_API_KEY;
   const model = env.GROQ_MODEL || fileEnv.GROQ_MODEL;
   const visionModel = env.GROQ_VISION_MODEL ?? fileEnv.GROQ_VISION_MODEL;
   const databaseUrl = env.DATABASE_URL || fileEnv.DATABASE_URL;
+  // Packaged apps (Android, iOS, desktop) are a different origin from the API,
+  // so their build carries the address. Empty for the website and for local
+  // development, where `/api/...` stays relative.
+  const apiOrigin = normalizeAppApiOrigin(env.PLANNER_API_ORIGIN || fileEnv.PLANNER_API_ORIGIN);
+  // The API handlers read this one straight from `process.env`, exactly as the
+  // deployed function does — so a value in `.env.local` has to be put there,
+  // or a shell pointed at a local dev server would be refused as cross-origin.
+  if (!env.PLANNER_APP_ORIGINS && fileEnv.PLANNER_APP_ORIGINS) {
+    process.env.PLANNER_APP_ORIGINS = fileEnv.PLANNER_APP_ORIGINS;
+  }
   const pushEnv = {
     DATABASE_URL: databaseUrl,
     VAPID_PUBLIC_KEY: env.VAPID_PUBLIC_KEY || fileEnv.VAPID_PUBLIC_KEY,
@@ -308,7 +389,11 @@ export default defineConfig(({ mode }) => {
     AI_ENV: { ...env, ...fileEnv } as Record<string, string | undefined>,
   };
   return {
-    plugins: [react(), groqProxyPlugin(apiKey, model, visionModel), syncApi(databaseUrl), authApi(databaseUrl), icsApi(), pushApi(pushEnv), apiFallback()],
+    // `__PLANNER_API_ORIGIN__` is read by src/shared/nativeShell.ts. Defining it
+    // (rather than a VITE_ variable) keeps the name identical in the app, in
+    // this config, and in the server-side allow-list docs.
+    define: { __PLANNER_API_ORIGIN__: JSON.stringify(apiOrigin), __APP_VERSION__: JSON.stringify(appVersion) },
+    plugins: [appOrigins(), react(), groqProxyPlugin(apiKey, model, visionModel), syncApi(databaseUrl), authApi(databaseUrl), icsApi(), pushApi(pushEnv), apiFallback()],
     build: {
       rollupOptions: {
         output: {
@@ -334,7 +419,7 @@ export default defineConfig(({ mode }) => {
     },
     test: {
       environment: 'node',
-      include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+      include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'desktop/*.test.mjs'],
     },
   };
 });

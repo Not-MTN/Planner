@@ -3474,3 +3474,114 @@
 .mkt[data-lang='fa'] .input-totp {
   letter-spacing: 0.2em;
 }
+
+/* ---------- Get the app: one card per device, honest about each one ---------- */
+
+.platforms {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(232px, 1fr));
+  gap: 18px;
+  margin-top: 34px;
+}
+
+.platform-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 24px;
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-soft);
+  transition: transform 0.35s var(--ease), box-shadow 0.35s var(--ease), border-color 0.35s var(--ease);
+}
+
+.platform-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow);
+}
+
+/* The reader's own device gets a quiet marker, never a louder card. */
+.platform-card.is-here {
+  border-color: var(--accent);
+}
+
+.platform-icon {
+  font-size: 26px;
+  line-height: 1;
+}
+
+.platform-card h3 {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 1.12rem;
+  letter-spacing: -0.01em;
+}
+
+.platform-note {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.94rem;
+  line-height: 1.6;
+}
+
+.platform-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 14px;
+}
+
+/* Ways in that are not downloads (all releases, source) — present, but they
+   must not compete with the button that actually gets the app. */
+.platform-actions-quiet {
+  margin-top: 0;
+  padding-top: 4px;
+}
+
+/* Where the download came from: written once, not repeated under every card. */
+.platforms-foot-quiet {
+  margin-top: 10px;
+  font-size: 0.85rem;
+}
+
+/* Five downloads on the Linux card would otherwise push the notes below it
+   around as the grid stretches. */
+.platform-card .platform-actions .btn-sm {
+  padding: 9px 14px;
+  font-size: 14px;
+}
+
+.platform-here {
+  margin: 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.platform-stores {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.platforms-foot {
+  margin: 24px auto 0;
+  max-width: 46ch;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+@media (max-width: 640px) {
+  .platforms {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .platform-card {
+    padding: 20px;
+  }
+}

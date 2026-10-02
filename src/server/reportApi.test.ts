@@ -86,6 +86,22 @@ describe('normalizeReport', () => {
     expect(report?.breadcrumbs).toHaveLength(30);
     expect(Object.keys(report?.extra ?? {}).length).toBeLessThanOrEqual(10);
   });
+
+  it('never scans the part of a field it throws away', () => {
+    // A report is untrusted input. These two patterns backtrack over a long
+    // run of one character, so redacting the whole body before clamping it
+    // cost the endpoint seconds of CPU for a payload of a few kilobytes —
+    // enough to trip this suite's 5 second timeout on a slow machine.
+    const started = Date.now();
+    const report = normalizeReport({ message: 'y'.repeat(50_000), stack: '-'.repeat(50_000) });
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(report?.message.length).toBeLessThanOrEqual(301);
+    expect(report?.stack?.length ?? 0).toBeLessThanOrEqual(2_001);
+    // A cut field has to say so, even though redaction made it short.
+    expect(report?.message.endsWith('…')).toBe(true);
+    expect(report?.stack?.endsWith('…')).toBe(true);
+    expect(report?.message).not.toContain('yyy');
+  });
 });
 
 describe('handleReport', () => {
