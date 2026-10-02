@@ -225,10 +225,23 @@ workflow) and on every `v*` tag, attaching the files to that release:
 - Android `.apk` and `.aab`
 - iOS `.xcarchive.zip` and the packaged `.app.zip` (unsigned)
 
-Set the repository variables `PLANNER_APP_URL` or `PLANNER_API_ORIGIN` once
-(Settings → Secrets and variables → Actions → Variables) and every future app
-build is already pointed at your deployment; the workflow inputs override them
-per run.
+Where the builds point is decided in this order, first match wins:
+
+1. the `api_origin` input when you run the workflow by hand,
+2. the repository variable `PLANNER_API_ORIGIN` (Settings → Secrets and
+   variables → Actions → Variables),
+3. the `API_ORIGIN` default near the top of `apps.yml` — currently the
+   deployment this repository ships for, so a tagged build is a real
+   online-and-offline app without any setup,
+4. otherwise an empty value, which builds a **local-only** app: the planner
+   works, sign-in and sync have nowhere to go.
+
+`APP_URL` (load a deployment in the shell instead of the bundled copy) follows
+the same order with the `app_url` input and `PLANNER_APP_URL`.
+
+So a build made by pushing a tag is an offline-first app pointed at the
+deployment in step 3, and one of the two things below is all you need to change
+that.
 
 Tagged builds are versioned from the tag: `v1.2.0` produces
 `Planner-1.2.0-windows-x64.exe`, an Android `versionName` of 1.2.0 with the run

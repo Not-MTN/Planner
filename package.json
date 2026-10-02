@@ -17,7 +17,8 @@
     "desktop:dev": "node scripts/desktop-build.mjs --run",
     "desktop:pack": "node scripts/desktop-build.mjs --dir",
     "desktop:dist": "node scripts/desktop-build.mjs",
-    "check:deployment": "node scripts/check-deployment.mjs"
+    "check:deployment": "node scripts/check-deployment.mjs",
+    "lint:workflows": "node scripts/lint-workflows.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.2",
@@ -43,6 +44,7 @@
     "@types/react-dom": "^19.1.0",
     "@types/web-push": "^3.6.4",
     "@vitejs/plugin-react": "^4.4.1",
+    "actionlint": "^2.0.6",
     "eslint": "^9.39.5",
     "eslint-plugin-jsx-a11y": "^6.10.2",
     "eslint-plugin-react-hooks": "^5.2.0",

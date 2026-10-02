@@ -32,7 +32,10 @@ permissions:
 
 env:
   APP_URL: ${{ inputs.app_url || vars.PLANNER_APP_URL || '' }}
-  API_ORIGIN: ${{ inputs.api_origin || vars.PLANNER_API_ORIGIN || '' }}
+  # The deployment the apps talk to. Override per run (the `api_origin` input),
+  # for every run (the PLANNER_API_ORIGIN repository variable), or by editing
+  # this line. Leave it empty to build apps that are local-only.
+  API_ORIGIN: ${{ inputs.api_origin || vars.PLANNER_API_ORIGIN || 'https://matin-habit-tracker.vercel.app' }}
   # A version tag (`v1.2.0`) names the build; a manual run has no tag and
   # falls back to the defaults in app/build.gradle and desktop/package.json.
   VERSION_NAME: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
@@ -100,9 +103,12 @@ jobs:
       KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-      # Read by android/app/build.gradle.
-      PLANNER_VERSION_NAME: ${{ env.VERSION_NAME }}
-      PLANNER_VERSION_CODE: ${{ env.VERSION_CODE }}
+      # Read by android/app/build.gradle. Spelled with the `github` context
+      # rather than `env.VERSION_NAME`: the `env` context is not available in
+      # `jobs.<job_id>.env`, and using it there makes the whole workflow file
+      # invalid — GitHub then refuses to run any of it.
+      PLANNER_VERSION_NAME: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      PLANNER_VERSION_CODE: ${{ github.run_number }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
