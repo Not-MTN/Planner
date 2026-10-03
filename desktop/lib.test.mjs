@@ -2,7 +2,7 @@
  * The desktop shell's own logic: route → file, headers, and what counts as
  * this app. Electron itself is not involved, so these run anywhere.
  */
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -115,5 +115,38 @@ describe('resolveRequestedFile', () => {
       expect(resolved === null || resolved.startsWith(root)).toBe(true);
     }
     expect(resolveRequestedFile('/%00/app', root)).toBeNull();
+  });
+});
+
+// A regression guard for the kind of bug that only appears after installing:
+// main.cjs required ./lib.cjs, but electron-builder.yml did not package it,
+// so every installed copy crashed at launch with "Cannot find module".
+// The dev run never catches that (the file is on disk there), so this test
+// cross-checks the packaging list against what the shell actually requires.
+describe('electron-builder packaging', () => {
+  const here = join(new URL('.', import.meta.url).pathname);
+  const read = (name) => readFileSync(join(here, name), 'utf8');
+
+  const packaged = (() => {
+    const yml = read('electron-builder.yml');
+    const filesBlock = yml.match(/^files:\n((?:[ \t]+-[^\n]*\n)+)/m);
+    if (!filesBlock) return [];
+    return [...filesBlock[1].matchAll(/-\s*([^\s#]+)/g)].map((m) => m[1]);
+  })();
+
+  const localRequires = (name) =>
+    [...read(name).matchAll(/require\((['"])(\.\/[^'"]+)\1\)/g)].map((m) => m[2].slice(2));
+
+  it('found the files list at all', () => {
+    expect(packaged.length).toBeGreaterThan(0);
+    expect(packaged).toContain('main.cjs');
+  });
+
+  it('packages every file main.cjs and preload.cjs require', () => {
+    for (const entry of ['main.cjs', 'preload.cjs']) {
+      for (const required of localRequires(entry)) {
+        expect(packaged, `${entry} requires ./${required}, which electron-builder.yml does not package`).toContain(required);
+      }
+    }
   });
 });
