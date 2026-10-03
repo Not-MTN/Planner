@@ -94,9 +94,33 @@ export function downloadsFor(platform: Platform): Download[] {
   return [];
 }
 
+export interface DeviceInstallAction {
+  href: string;
+  labelKey: CopyKey;
+  /** External release assets open separately; an in-page choice stays here. */
+  external: boolean;
+}
+
 /**
- * The platform this browser is running on, as far as it can be told. Only ever
- * used to highlight the reader's own card — never to hide the others.
+ * The landing-page action for the device someone is using. Only send them
+ * straight to a file when there is a single safe choice: Android's universal
+ * APK or the Windows installer. macOS/Linux have architecture-specific builds,
+ * and iOS uses the web app, so those visitors go to the platform cards to choose
+ * the right install method instead of receiving a guessed, possibly unusable
+ * file.
+ */
+export function deviceInstallActionFor(platform: Platform): DeviceInstallAction {
+  if (platform === 'android' || platform === 'windows') {
+    const item = DOWNLOADS[platform].find((download) => download.primary);
+    if (item) return { href: item.url, labelKey: item.labelKey, external: true };
+  }
+  return { href: '#apps', labelKey: 'platformsSeeOptions', external: false };
+}
+
+/**
+ * The platform this browser is running on, as far as it can be told. Used to
+ * highlight the reader's card and choose a safe hero action — never to hide
+ * other platform options.
  */
 export function detectPlatform(userAgent: string | undefined): Platform {
   const ua = (userAgent ?? '').toLowerCase();

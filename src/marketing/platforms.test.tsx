@@ -3,7 +3,15 @@ import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Platforms } from './Platforms';
-import { DOWNLOADS, RELEASES_PAGE, RELEASE_DOWNLOAD_BASE, SOURCE_PAGE, detectPlatform, downloadsFor } from './downloads';
+import {
+  DOWNLOADS,
+  RELEASES_PAGE,
+  RELEASE_DOWNLOAD_BASE,
+  SOURCE_PAGE,
+  detectPlatform,
+  deviceInstallActionFor,
+  downloadsFor,
+} from './downloads';
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -50,6 +58,31 @@ describe('detectPlatform', () => {
     expect(detectPlatform('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15')).toBe('macos');
     expect(detectPlatform('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36')).toBe('linux');
     expect(detectPlatform(undefined)).toBe('other');
+  });
+});
+
+describe('device-specific app action', () => {
+  it('links straight to the universal Android and Windows downloads', () => {
+    expect(deviceInstallActionFor('android')).toEqual({
+      href: `${RELEASE_DOWNLOAD_BASE}/app-release.apk`,
+      labelKey: 'platformsDownloadApk',
+      external: true,
+    });
+    expect(deviceInstallActionFor('windows')).toEqual({
+      href: `${RELEASE_DOWNLOAD_BASE}/Planner-windows.exe`,
+      labelKey: 'platformsDownloadWindows',
+      external: true,
+    });
+  });
+
+  it('asks for a choice where the right install depends on device architecture or store support', () => {
+    for (const platform of ['macos', 'linux', 'ios', 'other'] as const) {
+      expect(deviceInstallActionFor(platform)).toEqual({
+        href: '#apps',
+        labelKey: 'platformsSeeOptions',
+        external: false,
+      });
+    }
   });
 });
 
