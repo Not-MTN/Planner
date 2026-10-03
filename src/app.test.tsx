@@ -4,7 +4,7 @@ import { StrictMode, act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { App } from './App';
 import { addEvent } from './mutate';
-import { addDays, todayISO } from './dates';
+import { addDays, isWeekend, todayISO } from './dates';
 import { createEmptyState } from './types';
 import { serialize, STORAGE_KEY } from './storage';
 
@@ -229,7 +229,11 @@ describe('app smoke', () => {
     });
     expect(text()).toContain('Finish the report');
     expect(text()).toContain('Read 20 minutes');
-    expect(text()).toContain('Morning walk');
+    // "Read 20 minutes" is a daily habit, so it is the assertion that holds on
+    // every date. "Morning walk" is a *weekday* habit, and asking for it
+    // unconditionally turned this test red every Saturday and Sunday — a
+    // calendar, not a regression.
+    if (!isWeekend(todayISO())) expect(text()).toContain('Morning walk');
   });
 
   it('adds picked suggestions from the welcome card, none pre-set', () => {
