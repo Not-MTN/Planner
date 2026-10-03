@@ -38,6 +38,9 @@ import { loadSpeechLocaleId, saveSpeechLocaleId, speechAvailable, SPEECH_LOCALES
 import { faNum, t, tn, getLang, setLang, LANGUAGES, type Lang } from '../i18n';
 import { loadMobileFavorites, loadNavigationPages, MAX_MOBILE_FAVORITES, moveMobileFavorite, NAVIGATION_PAGES, saveMobileFavorites, saveNavigationPages, type NavigationPage } from '../navigationPrefs';
 import { backgroundPushEnabled, configureBackgroundPush, refreshBackgroundPushSchedule } from '../push';
+import { currentPlatform, deviceInstallActionFor } from '../marketing/downloads';
+import { isNativeShell } from '../shared/nativeShell';
+import { RELEASES_PAGE } from '../shared/updates';
 
 const NAV_LABELS: Record<NavigationPage, string> = {
   today: t("Today"), calendar: t("Calendar"), tasks: t("Tasks"), matrix: t("Matrix"), habits: t("Habits"),
@@ -611,6 +614,12 @@ function InstallSection() {
   const [available, setAvailable] = useState(canInstall());
   useEffect(() => onInstallChange(() => setAvailable(canInstall())), []);
   const installed = isInstalled();
+  const deviceAction = deviceInstallActionFor(currentPlatform());
+  const downloadHref = deviceAction.external
+    ? deviceAction.href
+    : isNativeShell()
+      ? RELEASES_PAGE
+      : `${window.location.origin}/#apps`;
   return (
     <section className="set-section">
       <h3 className="kicker">{t("App")}</h3>
@@ -625,9 +634,14 @@ function InstallSection() {
                 : t("Use your browser’s “Install” or “Add to Home Screen” option. Planner works offline once loaded.")}
           </p>
         </div>
-        {available && !installed ? (
-          <button type="button" className="btn btn-soft" onClick={() => void promptInstall()}>{t("Install")}</button>
-        ) : null}
+        <div className="set-actions">
+          {available && !installed ? (
+            <button type="button" className="btn btn-soft" onClick={() => void promptInstall()}>{t("Install")}</button>
+          ) : null}
+          <a className="btn btn-ghost" href={downloadHref} target="_blank" rel="noreferrer">
+            <DownloadIcon size={16} /> {t("Download")}
+          </a>
+        </div>
       </div>
     </section>
   );

@@ -3,6 +3,7 @@ import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Site } from './Site';
+import { RELEASE_DOWNLOAD_BASE } from './downloads';
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -78,6 +79,30 @@ describe('marketing site', () => {
     expect(container.querySelector('.window')).not.toBeNull();
     expect(container.querySelector('.window-tasks li')).not.toBeNull();
     expect(container.querySelector('.demo')).not.toBeNull();
+  });
+
+  it('offers a direct installer for a detected device from the hero', async () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(window.navigator, 'userAgent');
+    Object.defineProperty(window.navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    });
+
+    try {
+      await renderAt('/');
+      const link = container.querySelector<HTMLAnchorElement>(
+        `.hero-actions a[href="${RELEASE_DOWNLOAD_BASE}/Planner-windows.exe"]`,
+      );
+      expect(link?.textContent).toContain('Download for Windows');
+      expect(link?.target).toBe('_blank');
+      expect(link?.rel).toContain('noreferrer');
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(window.navigator, 'userAgent', originalDescriptor);
+      } else {
+        Reflect.deleteProperty(window.navigator, 'userAgent');
+      }
+    }
   });
 
   it('renders the sign-up flow in three steps', async () => {

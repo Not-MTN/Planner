@@ -4,6 +4,7 @@ import { DemoStage } from './DemoStage';
 import { AppWindow } from './AppWindow';
 import { AiProposal, DashboardBuild, Quotes, RetentionSlider, RoleSwitcher, Stats, VisibilityMatrix } from './Showcase';
 import { Platforms } from './Platforms';
+import { currentPlatform, deviceInstallActionFor } from './downloads';
 import { pointerLeave, pointerMove } from './effects';
 
 type Nav = (to: string) => void;
@@ -107,6 +108,7 @@ function TinyChart({ kind }: { kind: string }) {
 
 export function Landing({ lang, navigate, authed }: { lang: Lang; navigate: Nav; authed?: boolean }) {
   const c = COPY[lang];
+  const deviceInstallAction = deviceInstallActionFor(currentPlatform());
   const [open, setOpen] = useState<number | null>(0);
   const faqs = [
     [c.faq1q, c.faq1a],
@@ -154,6 +156,14 @@ export function Landing({ lang, navigate, authed }: { lang: Lang; navigate: Nav;
                 </a>
               </>
             )}
+            <a
+              className="btn btn-outline btn-lg"
+              href={deviceInstallAction.href}
+              {...(deviceInstallAction.external ? { target: '_blank', rel: 'noreferrer' } : {})}
+            >
+              <span aria-hidden="true">↓</span>
+              {c[deviceInstallAction.labelKey]}
+            </a>
           </div>
           <ul className="hero-trust reveal" data-reveal style={{ transitionDelay: '280ms' }}>
             {[c.trustEncrypted, c.trustOffline, c.trustAds].map((item) => (

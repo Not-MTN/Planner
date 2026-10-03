@@ -7,6 +7,7 @@ import { addEvent } from './mutate';
 import { addDays, isWeekend, todayISO } from './dates';
 import { createEmptyState } from './types';
 import { serialize, STORAGE_KEY } from './storage';
+import { RELEASE_DOWNLOAD_BASE } from './marketing/downloads';
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
@@ -645,6 +646,33 @@ describe('app smoke', () => {
     });
     await waitForText('Make a plan that fits.');
     expect(text()).toContain('I keep Sunday evenings for family.');
+  });
+
+  it('offers a device-aware download from Settings → App', async () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(window.navigator, 'userAgent');
+    Object.defineProperty(window.navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    });
+
+    try {
+      mountApp();
+      await openSettingsTab('App');
+
+      const link = [...document.querySelectorAll<HTMLAnchorElement>('.set-panels a')].find(
+        (anchor) => anchor.href === `${RELEASE_DOWNLOAD_BASE}/Planner-windows.exe`,
+      );
+      expect(link).toBeTruthy();
+      expect(link?.textContent).toContain('Download');
+      expect(link?.target).toBe('_blank');
+      expect(link?.rel).toContain('noreferrer');
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(window.navigator, 'userAgent', originalDescriptor);
+      } else {
+        Reflect.deleteProperty(window.navigator, 'userAgent');
+      }
+    }
   });
 
   it('explains how to configure the server-side Groq key', async () => {
