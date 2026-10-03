@@ -51,6 +51,7 @@ function errorText(code: AuthErrorCode | null, detail: string | null, c: Record<
   if (code === 'deployment_gate') return c.errDeploymentGate;
   if (code === 'api_missing') return c.errApiMissing;
   if (code === 'local_only_build') return c.errLocalOnly;
+  if (code === 'origin_refused') return c.errAppOriginRefused;
   if (detail?.toLowerCase().includes('too many requests')) return c.errRateLimited;
   if (lang === 'fa') return c.errUnknown;
   return detail ?? c.errUnknown;
@@ -67,6 +68,7 @@ function errorDetailText(caught: unknown): string | null {
     caught.code !== 'deployment_gate' &&
     caught.code !== 'api_missing' &&
     caught.code !== 'local_only_build' &&
+    caught.code !== 'origin_refused' &&
     caught.code !== 'unknown'
   ) {
     return null;

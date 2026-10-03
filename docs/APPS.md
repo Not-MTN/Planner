@@ -86,6 +86,20 @@ If requests from the app come back `403 Cross-origin requests are not
 allowed.`, this variable is missing or misspelled for that environment — that
 is the whole check.
 
+**What the app itself sees.** In a shell the browser never shows that 403: the
+response carries no `Access-Control-Allow-Origin`, so `fetch` rejects and
+JavaScript is left with a bare network error. The app asks one extra question
+before naming the failure (`src/auth/reachability.ts` — a `no-cors` request
+that settles whether anything answered at all), so a missing `PLANNER_APP_ORIGINS`
+is reported as *"this server refuses requests from the app's own origin"* on the
+sign-in screens and on the gate, with the setting named, instead of "check your
+connection". Add the variable, redeploy, and **the app you already installed
+starts signing in — nothing has to be reinstalled or rebuilt.**
+
+Until it is set, a downloaded app is not dead: it opens a first screen that
+offers sign-in or the offline planner, rather than silently behaving like a
+local-only build.
+
 ### Prove it in one command
 
 ```bash

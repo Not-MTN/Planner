@@ -1986,4 +1986,9 @@ export const fa: Record<string, string> = {
   "Stop": "توقف",
   "Writing…": "در حال نوشتن…",
   "Stopped.": "متوقف شد.",
+  "Sign in": "ورود",
+  "Sign in to Planner": "ورود به برنامه‌ریز",
+  "Use Planner offline": "استفادهٔ آفلاین از برنامه‌ریز",
+  "This app cannot reach its server right now, so signing in has nowhere to go. Your planner still works on this device, and everything you write is saved here.": "این برنامه همین حالا به سرورش دسترسی ندارد، پس ورود به حساب ممکن نیست. برنامه‌ریز شما همچنان روی همین دستگاه کار می‌کند و هر چه بنویسید همان‌جا ذخیره می‌شود.",
+  "This app reached the server, but the server refused the app’s own origin — so signing in, sync and AI are switched off. The server needs the packaged apps listed in PLANNER_APP_ORIGINS (docs/APPS.md, section 2); once it has them, this app signs in without reinstalling.": "این برنامه به سرور رسید، اما سرور مبدأ خودِ برنامه را نپذیرفت — پس ورود به حساب، همگام‌سازی و هوش مصنوعی غیرفعال‌اند. سرور باید برنامه‌های نصب‌شده را در PLANNER_APP_ORIGINS فهرست کند (docs/APPS.md، بخش ۲)؛ پس از آن، همین برنامه بدون نصب دوباره وارد حساب می‌شود.",
 };

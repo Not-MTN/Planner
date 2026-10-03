@@ -9,8 +9,9 @@
 import { useEffect, useState } from 'react';
 import { t } from '../i18n';
 import { App } from '../App';
-import { bootAccount, signOut, unlockWithPassword, type AccountBoot } from './vault';
-import { AuthError } from './session';
+import { accountUser, bootAccount, signOut, unlockWithPassword, type AccountBoot } from './vault';
+import { AuthError, getLastUserId } from './session';
+import { isNativeShell } from '../shared/nativeShell';
 // The planner's component styles, for the unlock screen and the app behind it.
 // app-polish.css is the final layer: it ships in the same chunk and must load
 // after styles.css so its rules carry the day on every device class.
@@ -40,6 +41,11 @@ function blockedReason(error: AuthError): string {
       'This copy of Planner was built for offline use, with no server address, so there is nothing to sign in to. Your planner still works on this device. Install a build made with PLANNER_API_ORIGIN or PLANNER_APP_URL to use accounts, sync and AI.',
     );
   }
+  if (error.code === 'origin_refused') {
+    return t(
+      'This app reached the server, but the server refused the app’s own origin — so signing in, sync and AI are switched off. The server needs the packaged apps listed in PLANNER_APP_ORIGINS (docs/APPS.md, section 2); once it has them, this app signs in without reinstalling.',
+    );
+  }
   return t('Something went wrong while opening your planner.');
 }
 
@@ -54,6 +60,48 @@ function GateLeaves() {
       <i />
       <i />
     </div>
+  );
+}
+
+/**
+ * True when this device has nothing to unlock and nothing to show: a packaged
+ * app (where accounts are the point of the download) that has never signed in,
+ * with the server out of reach. The planner without an account is a real, good
+ * product — but it is a choice someone makes, not a screen they fall into.
+ */
+function hasNothingToUnlock(): boolean {
+  return isNativeShell() && !accountUser() && !getLastUserId();
+}
+
+/**
+ * The first screen of a downloaded app whose server cannot be reached. Without
+ * it the app opened an anonymous local planner and never mentioned accounts —
+ * the "there is no login page" report this exists to answer.
+ */
+function OfflineStart({ onOffline }: { onOffline: () => void }) {
+  return (
+    <GateFrame>
+      <img className="gate-logo" src="/logo.svg" alt="" width="56" height="56" />
+      <h1 className="gate-title">{t('Sign in to Planner')}</h1>
+      <p className="gate-sub">
+        {t(
+          'This app cannot reach its server right now, so signing in has nowhere to go. Your planner still works on this device, and everything you write is saved here.',
+        )}
+      </p>
+      <div className="gate-actions">
+        <button className="btn btn-primary" type="button" onClick={() => window.location.assign('/login')}>
+          {t('Sign in')}
+        </button>
+        <button className="btn btn-ghost" type="button" onClick={onOffline}>
+          {t('Use Planner offline')}
+        </button>
+      </div>
+      <div className="gate-links">
+        <button type="button" onClick={() => window.location.reload()}>
+          {t('Retry')}
+        </button>
+      </div>
+    </GateFrame>
   );
 }
 
@@ -83,6 +131,10 @@ export function AccountGate() {
   const [showPassword, setShowPassword] = useState(false);
   const [caps, setCaps] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  // Set when someone chooses the local planner from an offline or blocked
+  // first screen. The planner is local-first; refusing to open it because the
+  // account API is unavailable would punish the wrong thing.
+  const [offlineChoice, setOfflineChoice] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -123,7 +175,14 @@ export function AccountGate() {
   }, [boot]);
 
   if (boot?.status === 'ready') return <App initialState={boot.state} />;
-  if (boot?.status === 'offline' || boot?.status === 'offline-trusted') return <App />;
+  if (offlineChoice) return <App />;
+  // A device that signed in before opens its own copy offline, as it always
+  // has. One that never did gets the choice below instead of an anonymous
+  // planner with no way to sign in.
+  if (boot?.status === 'offline-trusted') return <App />;
+  if (boot?.status === 'offline') {
+    return hasNothingToUnlock() ? <OfflineStart onOffline={() => setOfflineChoice(true)} /> : <App />;
+  }
 
   if (boot?.status === 'blocked') {
     const { error } = boot;
@@ -145,9 +204,24 @@ export function AccountGate() {
             </button>
           </div>
           <div className="gate-links">
-            <button type="button" onClick={() => window.location.assign('/')}>
-              {t('Back to the website')}
-            </button>
+            {/* Both of these say, in their own sentence, that the planner on
+                this device still works. Saying that and then refusing to open
+                it is the kind of screen people describe as "the app is broken",
+                so the way in is a button. A hosted-gate or missing-API failure
+                keeps blocking, because that is where somebody's data lives. */}
+            {error.code === 'origin_refused' || error.code === 'local_only_build' ? (
+              <button type="button" onClick={() => setOfflineChoice(true)}>
+                {t('Use Planner offline')}
+              </button>
+            ) : null}
+            {/* A packaged app boots into the planner from every path, so the
+                landing page is not reachable there and the link would bounce
+                back to this screen. */}
+            {isNativeShell() ? null : (
+              <button type="button" onClick={() => window.location.assign('/')}>
+                {t('Back to the website')}
+              </button>
+            )}
           </div>
       </GateFrame>
     );
