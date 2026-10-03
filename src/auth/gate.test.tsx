@@ -35,6 +35,14 @@ async function mount(): Promise<void> {
   }
 }
 
+function clickButton(label: string): void {
+  const button = [...document.querySelectorAll('button')].find((item) => (item.textContent ?? '').includes(label));
+  if (!button) throw new Error(`No button labelled "${label}"`);
+  act(() => {
+    button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+}
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
@@ -61,6 +69,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  delete (window as Window & { Capacitor?: unknown }).Capacitor;
   act(() => {
     root?.unmount();
   });
@@ -118,5 +127,30 @@ describe('account gate', () => {
     expect(document.querySelector('input[type="password"]')).not.toBeNull();
     // The planner itself must not be reachable yet.
     expect(text()).not.toContain('Personal Planner');
+  });
+
+  it('offers sign-in in a downloaded app that cannot reach its server', async () => {
+    // A packaged shell: accounts are the point of the download, and nothing has
+    // been signed in on this device. The old behaviour opened an anonymous
+    // planner and never mentioned accounts — the reported "no login page".
+    (window as Window & { Capacitor?: unknown }).Capacitor = {
+      isNativePlatform: () => true,
+      getPlatform: () => 'android',
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new TypeError('Failed to fetch');
+    }));
+
+    await mount();
+    expect(text()).toContain('Sign in to Planner');
+    expect(text()).toContain('Use Planner offline');
+    expect(text()).not.toContain('Personal Planner');
+
+    // And the choice is real: offline still opens the whole planner.
+    clickButton('Use Planner offline');
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    });
+    expect(text()).toContain('Personal Planner');
   });
 });

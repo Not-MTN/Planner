@@ -315,6 +315,8 @@ export const en = {
     'The accounts API did not answer at this address. Redeploy the app with its api/ functions, or check the domain you are using, then try again.',
   errLocalOnly:
     'This copy of Planner was built for offline use, with no server address, so there is nothing to sign in to. Your planner still works on this device.',
+  errAppOriginRefused:
+    'The server is answering, but it refuses requests from the app’s own origin, so signing in cannot work yet. The deployed server needs the packaged apps in PLANNER_APP_ORIGINS (docs/APPS.md, section 2); nothing on this device is lost meanwhile.',
   errTemporaryAccounts:
     'Accounts on this server are kept in memory only, so restarting it signs everyone out. Add a DATABASE_URL to keep them.',
   errPasskeyCancelled: 'Passkey sign-in was cancelled.',
@@ -770,6 +772,8 @@ export const fa: Record<keyof typeof en, string> = {
     'API حساب‌ها در این نشانی پاسخ نمی‌دهد. برنامه را همراه توابع api/ دوباره منتشر کنید یا دامنه‌ای که استفاده می‌کنید را بررسی کنید.',
   errLocalOnly:
     'این نسخهٔ برنامه‌ریز برای استفادهٔ آفلاین و بدون نشانی سرور ساخته شده است، پس ورود به حساب ممکن نیست. برنامه‌ریز شما همچنان روی همین دستگاه کار می‌کند.',
+  errAppOriginRefused:
+    'سرور پاسخ می‌دهد، اما درخواست‌های مبدأ خودِ برنامه را نمی‌پذیرد، پس ورود به حساب فعلاً ممکن نیست. سرورِ منتشرشده باید برنامه‌های نصب‌شده را در PLANNER_APP_ORIGINS فهرست کند (docs/APPS.md، بخش ۲)؛ در این فاصله چیزی روی این دستگاه از دست نمی‌رود.',
   errTemporaryAccounts:
     'حساب‌های این سرور فقط در حافظه نگه داشته می‌شوند، پس با هر بار راه‌اندازی دوباره همه از حساب خارج می‌شوند. برای نگه‌داشتن آن‌ها DATABASE_URL را تنظیم کنید.',
   errPasskeyCancelled: 'ورود با کلید عبور لغو شد.',

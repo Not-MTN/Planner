@@ -4,7 +4,8 @@
  * trusted-device flow (phase 2) is built.
  */
 import type { AuthEvent, AuthEventsResponse, LoginResponse, PublicUser, SessionResponse, VaultResponse } from '../shared/authContract';
-import { hasConfiguredApi, isNativeShell } from '../shared/nativeShell';
+import { configuredApiOrigin, hasConfiguredApi, isNativeShell } from '../shared/nativeShell';
+import { probeApiReachability } from './reachability';
 import {
   createVaultKeys,
   decryptState,
@@ -102,6 +103,14 @@ export type AuthErrorCode =
    * the planner still works, and saying so beats blaming the deployment.
    */
   | 'local_only_build'
+  /**
+   * Reached the server; the server refused the app's own origin. CORS hides
+   * that answer, so it arrives as a failed `fetch` and used to be reported as
+   * "offline" — see `src/auth/reachability.ts` and `PLANNER_APP_ORIGINS` in
+   * docs/APPS.md §2. Signing in cannot work until the server allows the app,
+   * and nothing needs reinstalling when it does.
+   */
+  | 'origin_refused'
   /** The password was accepted, and a code from the authenticator app is owed. */
   | 'totp_required'
   /** An invitation code was right, but sat unused until it stopped working. */
@@ -120,6 +129,14 @@ export const DEPLOYMENT_GATE_MESSAGE =
 /** Shown when the API route itself is missing (functions not deployed, alias pointing nowhere). */
 export const API_MISSING_MESSAGE =
   'The accounts API did not answer at this address, so signing in cannot work. Redeploy the app so its api/ functions are included, then try again.';
+
+/**
+ * Shown when the server is answering but refuses the origin the packaged app
+ * runs from. The connection is fine, so "check your internet" would be a lie;
+ * the fix is one server setting, and it takes effect without a new download.
+ */
+export const ORIGIN_REFUSED_MESSAGE =
+  'This server refuses requests from the app’s own origin, so signing in, sync and AI are switched off here. The server needs the packaged apps listed in PLANNER_APP_ORIGINS (see docs/APPS.md, section 2) — once it has them, this app signs in without reinstalling.';
 
 /**
  * Shown by the packaged apps when they were built without a server address.
@@ -164,6 +181,7 @@ function unexpectedBody(response: Response, raw: string): AuthErrorCode {
 }
 
 function unexpectedMessage(code: AuthErrorCode, response: Response): string {
+  if (code === 'origin_refused') return ORIGIN_REFUSED_MESSAGE;
   if (code === 'local_only_build') return LOCAL_ONLY_MESSAGE;
   if (code === 'deployment_gate') return DEPLOYMENT_GATE_MESSAGE;
   if (code === 'api_missing') return API_MISSING_MESSAGE;
@@ -227,6 +245,28 @@ export function adoptSession(
 
 const REQUEST_TIMEOUT_MS = 25_000;
 
+/**
+ * A `fetch` that rejected. In a browser tab that means the connection; in a
+ * packaged app it may equally mean the server answered and its CORS policy hid
+ * the answer (see `src/auth/reachability.ts`), so the one question that tells
+ * those apart is asked before the failure is named. Without it, a missing
+ * `PLANNER_APP_ORIGINS` reads as "offline" — which is how a downloaded app
+ * quietly fell back to its local copy with no sign-in anywhere.
+ */
+async function unreachable(method: string, path: string): Promise<AuthError> {
+  if (isNativeShell() && hasConfiguredApi()) {
+    const reachability = await probeApiReachability();
+    if (reachability === 'refused') {
+      return new AuthError(
+        'origin_refused',
+        ORIGIN_REFUSED_MESSAGE,
+        `${method} ${path} → ${configuredApiOrigin()} answered, but refused the app's origin (https://localhost, capacitor://localhost or app://planner).`,
+      );
+    }
+  }
+  return new AuthError('network', 'Could not reach the server. Check your connection and try again.');
+}
+
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const method = (init.method ?? 'GET').toUpperCase();
   const controller = !init.signal && typeof AbortController !== 'undefined' ? new AbortController() : null;
@@ -237,7 +277,8 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
         controller.abort();
       }, REQUEST_TIMEOUT_MS)
     : null;
-  let response: Response;
+  let response: Response | null = null;
+  let failed = false;
   try {
     response = await fetch(path, {
       credentials: 'same-origin',
@@ -250,6 +291,14 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
       ...init,
     });
   } catch {
+    // Classified below, once the abort timer is out of the way: the probe is
+    // its own request and must not race the one that just failed.
+    failed = true;
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+  }
+
+  if (failed || !response) {
     if (timedOut) {
       throw new AuthError(
         'network',
@@ -257,9 +306,7 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
         `${method} ${path} timed out.`,
       );
     }
-    throw new AuthError('network', 'Could not reach the server. Check your connection and try again.');
-  } finally {
-    if (timer !== null) clearTimeout(timer);
+    throw await unreachable(method, path);
   }
 
   // `opaqueredirect` / status 0: something in front of the app redirected this

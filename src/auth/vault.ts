@@ -101,7 +101,13 @@ export async function bootAccount(): Promise<AccountBoot> {
     // must be shown to the user, not swallowed as signed-out.
     if (
       err instanceof AuthError &&
-      (err.code === 'deployment_gate' || err.code === 'api_missing' || err.code === 'not_configured' || err.code === 'local_only_build')
+      (err.code === 'deployment_gate' ||
+        err.code === 'api_missing' ||
+        err.code === 'not_configured' ||
+        err.code === 'local_only_build' ||
+        // The server is there and refusing this app's origin. Falling through
+        // would land on a sign-in page whose calls are refused the same way.
+        err.code === 'origin_refused')
     ) {
       throw err;
     }

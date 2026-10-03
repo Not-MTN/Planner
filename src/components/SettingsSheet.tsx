@@ -776,9 +776,19 @@ function AccountSection() {
       ) : user ? (
         <p className="set-hint">{t("Your account has been deleted. The planner on this device remains available as a local copy.")}</p>
       ) : (
-        <p className="set-hint">
-          {t("No account on this device. Your planner is saved in this browser only; an account keeps it in an encrypted vault you can open anywhere.")}
-        </p>
+        <>
+          <p className="set-hint">
+            {t("No account on this device. Your planner is saved in this browser only; an account keeps it in an encrypted vault you can open anywhere.")}
+          </p>
+          {/* Settings is where people look for an account, so the way to one
+              belongs here — a packaged app has no address bar to type /login
+              into, which left a downloaded app with no sign-in path at all. */}
+          <div className="set-actions">
+            <button type="button" className="btn btn-soft" onClick={() => window.location.assign('/login')}>
+              {t('Sign in')}
+            </button>
+          </div>
+        </>
       )}
       {newCodes ? (
         <Modal
