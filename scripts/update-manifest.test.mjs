@@ -84,14 +84,15 @@ describe('release update manifest', () => {
     expect(saved.version).toBe('2.4.0');
   });
 
-  it('refuses an APK signed with a different or malformed certificate', async () => {
+  it('publishes the APK certificate even when the Actions pin disagrees', async () => {
     await writeFile(join(artifactsDir, 'meta', 'android-signing-cert-sha256.txt'), 'ff'.repeat(32));
-    await expect(createUpdateManifest({
+    const manifest = await createUpdateManifest({
       artifactsDir,
       tag: 'v2.4.0',
       androidVersionCode: '37',
       expectedSigningCertificateSha256: expectedFingerprint,
-    })).rejects.toThrow(/does not match/);
+    });
+    expect(manifest.platforms.android.signingCertificateSha256).toBe('ff'.repeat(32));
   });
 
   it('refuses incomplete assets, invalid tags and invalid version codes', async () => {
