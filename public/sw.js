@@ -65,8 +65,11 @@ self.addEventListener('push', (event) => {
   const title = typeof payload.title === 'string' ? payload.title : 'Planner reminder';
   const options = {
     body: typeof payload.body === 'string' ? payload.body : 'A reminder is due. Open Planner to see your schedule.',
-    icon: '/favicon.svg',
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
     tag: typeof payload.tag === 'string' ? payload.tag : 'planner-reminder',
+    renotify: true,
+    vibrate: [120, 80, 120],
     data: { url: typeof payload.url === 'string' ? payload.url : '/#/today' },
   };
   event.waitUntil(self.registration.showNotification(title, options));

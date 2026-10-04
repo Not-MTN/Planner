@@ -416,4 +416,12 @@ export const fi: Record<string, string> = {
   "Planner will nudge you on the days this habit is due, until you complete or rest it.": "Planner muistuttaa päivinä, jolloin tapa on vuorossa, kunnes merkitset sen tehdyksi tai lepopäiväksi.",
   "Time for {0}": "On aika: {0}",
   "A small step keeps the rhythm going. Check in when you’re ready.": "Pieni askel pitää rytmin yllä. Merkitse tehdyksi, kun olet valmis.",
+  "A few gentle nudges": "Muutama lempeä muistutus",
+  "Your day is clear": "Päiväsi on selkeä",
+  "Recent": "Viimeisimmät",
+  "Daily overview": "Päivän yhteenveto",
+  "Reminder": "Muistutus",
+  "Remind again": "Muistuta uudelleen",
+  "Planner reminders": "Planner-muistutukset",
+  "Gentle nudges for your schedule, tasks, and habits.": "Lempeitä muistutuksia aikataulustasi, tehtävistäsi ja tavoistasi.",
 };

@@ -68,6 +68,10 @@ const config: CapacitorConfig = {
     },
     LocalNotifications: {
       presentationOptions: ['banner', 'list', 'sound'],
+      // Android status-bar notifications use a crisp monochrome mark and the
+      // same warm sage accent as Planner instead of a generic app square.
+      smallIcon: 'ic_stat_planner',
+      iconColor: '#6F846C',
     },
   },
 };

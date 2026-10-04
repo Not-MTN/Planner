@@ -286,7 +286,13 @@ export async function showNotification(reminder: Reminder): Promise<boolean> {
   // The native OS schedule handles background and foreground delivery there;
   // the page-level Notification API is for browsers and installed PWAs only.
   if (isNativeMobileShell() || typeof Notification === 'undefined' || Notification.permission !== 'granted') return false;
-  const options: NotificationOptions = { body: reminder.body, tag: reminder.key, icon: '/favicon.svg' };
+  const options: NotificationOptions = {
+    body: reminder.body,
+    tag: reminder.key,
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
+    lang: document.documentElement.lang || 'en',
+  };
   try {
     const registration = await navigator.serviceWorker?.getRegistration();
     if (registration) {

@@ -1,6 +1,7 @@
 import type { PlannerState } from './types';
-import { isNativeMobileShell } from './shared/nativeShell';
+import { isNativeMobileShell, shellPlatform } from './shared/nativeShell';
 import { upcomingReminders, type ReminderSettings } from './reminders';
+import { t } from './i18n';
 
 export type ReminderPermission = 'granted' | 'prompt' | 'denied';
 
@@ -66,12 +67,30 @@ export async function syncNativeReminders(
   // future app notifications and keep Android's schedule equally lightweight.
   const scheduled = upcomingReminders(state, now, settings).slice(0, 60);
   if (scheduled.length === 0) return;
+  if (shellPlatform() === 'android') {
+    // A named, high-importance channel gives reminders a branded light colour,
+    // sound and vibration while leaving the final controls with the user in
+    // Android Settings. Re-creating an existing channel is safe.
+    await LocalNotifications.createChannel({
+      id: 'planner-reminders',
+      name: t('Planner reminders'),
+      description: t('Gentle nudges for your schedule, tasks, and habits.'),
+      importance: 4,
+      visibility: 1,
+      lights: true,
+      lightColor: '#6F846C',
+      vibration: true,
+    }).catch(() => undefined);
+  }
   await LocalNotifications.schedule({
     notifications: scheduled.map((reminder, index) => ({
       id: index + 1,
       title: reminder.title,
       body: reminder.body,
       schedule: { at: reminder.at },
+      channelId: 'planner-reminders',
+      smallIcon: 'ic_stat_planner',
+      iconColor: '#6F846C',
       // Approximate timing avoids Android's special "Alarms & reminders"
       // settings screen; allow-while-idle still delivers during ordinary Doze.
       isExactNotification: false,

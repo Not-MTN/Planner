@@ -2050,4 +2050,11 @@ export const fa: Record<string, string> = {
   "Planner will nudge you on the days this habit is due, until you complete or rest it.": "برنامه‌ریز در روزهای انجام این عادت، تا وقتی آن را کامل یا استراحت اعلام کنید، به شما یادآوری می‌کند.",
   "Time for {0}": "وقتِ {0} است",
   "A small step keeps the rhythm going. Check in when you’re ready.": "یک قدم کوچک ریتم را حفظ می‌کند. هر وقت آماده بودید ثبتش کنید.",
+  "A few gentle nudges": "چند یادآوری دوستانه",
+  "Your day is clear": "روزتان مرتب است",
+  "Recent": "تازه‌ها",
+  "Daily overview": "نمای کلی روز",
+  "Remind again": "دوباره یادآوری کن",
+  "Planner reminders": "یادآوری‌های برنامه‌ریز",
+  "Gentle nudges for your schedule, tasks, and habits.": "یادآوری‌های دوستانه برای برنامه، کارها و عادت‌های شما.",
 };
