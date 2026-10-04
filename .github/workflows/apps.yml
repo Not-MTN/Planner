@@ -122,7 +122,10 @@ jobs:
     name: Desktop installers (${{ matrix.target }})
     needs: [preflight, release-contract]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    # `compression: maximum` (desktop/electron-builder.yml) is what keeps the
+    # installers small, and it costs real minutes on the Windows and Linux
+    # runners, which build one artefact per architecture. Leave headroom.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
