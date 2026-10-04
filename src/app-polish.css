@@ -914,6 +914,18 @@
   padding: clamp(17px, 2.2vw, 22px) clamp(16px, 2.4vw, 24px);
 }
 
+/* ---------- A heading should outrank an eyebrow ---------- */
+/* Some cards are headed by a kicker alone (Habits, Goals, Review this week) and
+   sit beside cards that carry a kicker and a title. Read identically, the page
+   looks like it lost a heading. A heading-only kicker is a little louder than a
+   label, and still quieter than a card title. */
+.card-head > h2.kicker,
+.card-head > h3.kicker {
+  font-size: 12.5px;
+  letter-spacing: 0.09em;
+  color: var(--ink-soft);
+}
+
 /* ---------- Rows that read the same ---------- */
 /* Lists of options, reminders and saved things all sit on the same row
    height so a long page stops looking hand-drawn. */
@@ -1027,4 +1039,14 @@
   background: var(--surface);
   border-top: 1px solid var(--line);
   box-shadow: 0 -12px 18px -18px color-mix(in srgb, var(--ink) 45%, transparent);
+}
+
+/* ---------- The part of the reveal that was never loaded ---------- */
+/* The recovery codes and their confirmation field stagger in with an inline
+   animation-delay — but .reveal-in was only ever defined in marketing.css, so
+   inside the app the codes appeared instantly and the delay did nothing. Two
+   classes, so this still wins if the marketing page loaded first. */
+.recovery.reveal-in,
+.field.reveal-in {
+  animation: rise 0.42s var(--ease) both;
 }

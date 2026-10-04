@@ -2291,7 +2291,6 @@ h1, .page-head h1 {
 }
 
 /* ---------- AI coach, protected weekly times, and expanded insights ---------- */
-.ai-day-link { width: 100%; margin-top: 10px; }
 .fixed-event { background: color-mix(in srgb, var(--item, var(--accent)) 5%, transparent); }
 .fixed-repeat { width: 22px; height: 22px; display: grid; place-items: center; flex: none; margin-top: 1px; border-radius: 7px; background: color-mix(in srgb, var(--item, var(--accent)) 16%, transparent); color: var(--item-text, var(--accent-deep)); font-size: 18px; line-height: 1; }
 .fixed-time { color: var(--item-text, var(--accent-deep)); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; padding-top: 3px; }
@@ -2529,7 +2528,6 @@ h1, .page-head h1 {
   .donut-layout { gap: 10px; }
   .donut-wrap { width: 47%; }
   .chart-range .seg { padding-inline: 7px; }
-  .ai-review-form { grid-template-columns: 1fr; }
 }
 
 /* ── Repeating tasks & checklists ─────────────────────────── */
@@ -3549,39 +3547,6 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 .draft-warnings ul { margin: 6px 0 0; padding-inline-start: 18px; display: flex; flex-direction: column; gap: 4px; }
 .draft-warnings li { font-size: 13px; color: var(--ink-soft); overflow-wrap: anywhere; }
 
-/* ── AI coach, front and center ─────────────────────────────────────── */
-.ai-coach-card {
-  display: flex; align-items: center; gap: 14px;
-  width: 100%; text-align: start; cursor: pointer;
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
-  background:
-    radial-gradient(130% 220% at 0% 0%, color-mix(in srgb, var(--accent-soft) 80%, transparent) 0%, transparent 55%),
-    var(--surface);
-  transition: transform 0.18s var(--ease), box-shadow 0.18s var(--ease), border-color 0.18s var(--ease);
-}
-.ai-coach-card:hover {
-  transform: translateY(-1px);
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
-  box-shadow: 0 10px 26px -14px color-mix(in srgb, var(--accent) 60%, transparent);
-}
-.ai-coach-orb {
-  flex-shrink: 0; display: grid; place-items: center;
-  width: 46px; height: 46px; border-radius: 14px;
-  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--cat-peach)));
-  color: var(--accent-contrast);
-  box-shadow: 0 6px 16px -6px color-mix(in srgb, var(--accent) 70%, transparent);
-}
-.ai-coach-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
-.ai-coach-kicker { font: 600 11px/1.4 var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--accent-deep); }
-:root:lang(fa) .ai-coach-kicker { letter-spacing: 0; }
-.ai-coach-title { font-size: 16px; color: var(--ink); overflow-wrap: anywhere; }
-.ai-coach-body { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
-.ai-coach-btn { flex-shrink: 0; pointer-events: none; }
-@media (max-width: 620px) {
-  .ai-coach-card { flex-wrap: wrap; }
-  .ai-coach-btn { width: 100%; justify-content: center; }
-}
-
 /* Mobile: the AI coach gets its own glowing orb in the top bar. */
 .ai-orb {
   position: relative;
@@ -3633,7 +3598,7 @@ html, body { overflow-x: clip; }
 
 .panel-hub-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-top: 14px; }
 .hub-tile {
-  display: flex; flex-direction: column; gap: 4px; align-items: flex-start; text-align: left;
+  display: flex; flex-direction: column; gap: 4px; align-items: flex-start; text-align: start;
   padding: 15px 16px; border-radius: var(--radius-small); cursor: pointer;
   border: 1px solid var(--line-strong);
   background: color-mix(in srgb, var(--surface-2) 80%, transparent);
@@ -3666,7 +3631,7 @@ html, body { overflow-x: clip; }
 [data-theme="dark"] .panel-choice-icon.accent-blue { background: #1f2c36; color: #7aa3c8; }
 [data-theme="dark"] .panel-choice-icon.accent-peach { background: #33231a; color: #c99a72; }
 .panel-choice-tag { margin: 2px 0 0; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
-.panel-points { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; line-height: 1.6; color: var(--ink-soft); }
+.panel-points { margin: 0; padding-inline-start: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; line-height: 1.6; color: var(--ink-soft); }
 .panel-choice-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
 .panel-kind-pick { display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: var(--radius-small); background: var(--surface-2); border: 1px solid var(--line); }
 .panel-kind-question { margin: 0; font-size: 13.5px; font-weight: 620; color: var(--ink); }
@@ -3813,7 +3778,7 @@ html, body { overflow-x: clip; }
 }
 
 .spinner {
-  display: inline-block; width: 13px; height: 13px; margin-right: 8px; vertical-align: -1px;
+  display: inline-block; width: 13px; height: 13px; margin-inline-end: 8px; vertical-align: -1px;
   border-radius: 50%; border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
   border-top-color: currentColor; animation: spin 0.7s linear infinite;
 }
@@ -3882,7 +3847,7 @@ html, body { overflow-x: clip; }
 /* ---------- Panel advice (AI) ---------- */
 .advice { margin-top: 12px; }
 .advice-summary { margin: 0 0 10px; font-size: 13.5px; line-height: 1.65; color: var(--ink); }
-.advice-list { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 7px; }
+.advice-list { margin: 0; padding-inline-start: 20px; display: flex; flex-direction: column; gap: 7px; }
 .advice-list li { font-size: 13px; line-height: 1.6; color: var(--ink); }
 .advice-watchout {
   margin: 12px 0 0; padding: 10px 12px; border-radius: var(--radius-small);
