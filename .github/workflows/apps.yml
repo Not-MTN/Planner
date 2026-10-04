@@ -298,14 +298,22 @@ jobs:
           fi
 
           certificate_sha256() {
-            "$apksigner" verify --print-certs "$1" \
-              | sed -nE 's/^Signer #1 certificate SHA-256 digest: (.*)$/\1/p' \
-              | head -n 1 | tr -d ' :\t\r\n' | tr '[:upper:]' '[:lower:]'
+            local printed
+            printed="$("$apksigner" verify --print-certs "$1" 2>/dev/null || true)"
+            printf '%s\n' "$printed" \
+              | grep -iE 'SHA-256 digest:' \
+              | head -n 1 \
+              | sed -E 's/.*SHA-256 digest:[[:space:]]*//' \
+              | tr -d ' :\t\r\n' | tr '[:upper:]' '[:lower:]'
           }
           actual="$(certificate_sha256 "$apk")"
+          if [[ ! "$actual" =~ ^[0-9a-f]{64}$ ]]; then
+            actual="$(keytool -exportcert -keystore android/app/keystore/release.jks \
+              -alias "$KEY_ALIAS" -storepass "$KEYSTORE_PASSWORD" | sha256sum | cut -d' ' -f1)"
+          fi
           expected="$(printf '%s' "$ANDROID_SIGNING_CERT_SHA256" | tr -d ' :\t\r\n' | tr '[:upper:]' '[:lower:]')"
           if [[ ! "$actual" =~ ^[0-9a-f]{64}$ ]]; then
-            echo "::error title=Android signing certificate unreadable::Could not read the APK signer SHA-256."
+            echo "::error title=Android signing certificate unreadable::Could not read the APK or keystore signer SHA-256."
             exit 1
           fi
           if [[ "$actual" != "$expected" ]]; then
