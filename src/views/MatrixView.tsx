@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { todayISO } from '../dates';
-import { t } from '../i18n';
+import { faNum, t } from '../i18n';
 import type { Task } from '../types';
 import { TaskRow } from '../components/items';
 
@@ -54,7 +54,7 @@ export function MatrixView({ tasks }: Props) {
                 <h3 className="matrix-title">{t(q.title)}</h3>
                 <p className="matrix-sub">{t(q.subtitle)}</p>
               </div>
-              <span className="matrix-count">{groups[q.key].length}</span>
+              <span className="matrix-count">{faNum(groups[q.key].length)}</span>
             </div>
             <div className="matrix-list">
               {groups[q.key].length === 0 ? (

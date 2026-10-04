@@ -408,6 +408,8 @@ export const fa: Record<string, string> = {
   "Follows your device when set to System.": "در حالت «سیستم» از دستگاه شما پیروی می‌کند.",
   "Forget": "فراموش کردن",
   "Forget all": "فراموش کردن همه",
+  "Forget all memory": "فراموش کردن همهٔ حافظه",
+  "Forget all suggestions": "فراموش کردن همهٔ پیشنهادها",
   "Forget all AI memory?": "همهٔ حافظهٔ هوش مصنوعی فراموش شود؟",
   "Forget {0}": "فراموش کردن {0}",
   "Forgiving by default": "پیش‌فرضِ بخشش",

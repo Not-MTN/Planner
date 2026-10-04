@@ -291,7 +291,7 @@ export function DayView({ date }: { date: string }) {
                 </ul>
                 {carried.length > 4 ? (
                   <button type="button" className="text-btn" onClick={() => navigate({ name: 'tasks' })}>
-                    {carried.length - 4} {t('more')}
+                    {faNum(carried.length - 4)} {t('more')}
                   </button>
                 ) : null}
               </div>

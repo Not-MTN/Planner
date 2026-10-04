@@ -5,7 +5,7 @@ import { analyzeDraft, checkGroqConfiguration, filterDraftAgainstState, friendly
 import { cx } from '../cx';
 import { DraftRefine } from '../components/DraftRefine';
 import { CalendarIcon, CheckIcon, CloseIcon, LeafIcon, MicIcon, SparklesIcon } from '../icons';
-import { t, tn } from '../i18n';
+import { faNum, t, tn } from '../i18n';
 import type { SavedAIPlan } from '../types';
 
 /** A saved plan back into the AIDraft shape the AI works with. */
@@ -198,7 +198,7 @@ function PlanDetails({ plan, warnings, working, onRefine }: {
       ) : null}
       {plan.events.length > 0 ? (
         <div className="plan-details-group">
-          <strong>{t("Timed plans")} · {plan.events.length}</strong>
+          <strong>{t("Timed plans")} · {faNum(plan.events.length)}</strong>
           <ul>
             {[...plan.events].sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime)).map((item, index) => (
               <li key={`e-${index}`}>
@@ -211,7 +211,7 @@ function PlanDetails({ plan, warnings, working, onRefine }: {
       ) : null}
       {plan.tasks.length > 0 ? (
         <div className="plan-details-group">
-          <strong>{t("Tasks")} · {plan.tasks.length}</strong>
+          <strong>{t("Tasks")} · {faNum(plan.tasks.length)}</strong>
           <ul>
             {[...plan.tasks].sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? '')).map((item, index) => (
               <li key={`t-${index}`}>
@@ -224,7 +224,7 @@ function PlanDetails({ plan, warnings, working, onRefine }: {
       ) : null}
       {plan.habits.length > 0 ? (
         <div className="plan-details-group">
-          <strong>{t("Habits")} · {plan.habits.length}</strong>
+          <strong>{t("Habits")} · {faNum(plan.habits.length)}</strong>
           <ul>
             {plan.habits.map((item, index) => (
               <li key={`h-${index}`}>

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { usePlanner } from '../context';
 import { postPraise } from '../auth/links';
-import { t } from '../i18n';
+import { faNum, t } from '../i18n';
 import { minutesLabel } from './charts';
 import type { GuardianLink } from '../types';
 
@@ -90,7 +90,7 @@ export function PraiseComposer({ link }: { link: GuardianLink }) {
           {sending ? <span className="spinner" aria-hidden="true" /> : null}
           {t('Send')}
         </button>
-        <span className="note-character-count">{text.length}/160</span>
+        <span className="note-character-count">{faNum(text.length)}/160</span>
       </div>
     </form>
   );

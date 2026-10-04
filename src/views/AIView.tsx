@@ -1058,7 +1058,7 @@ function MemoryCard({
             <p className="meta">{t("Save the parts of your life you want future plans to understand. Write them in your own words; you stay in control.")}</p>
             <p className="ai-memory-safety">{t("Only save details you are comfortable sending to Groq when you ask for help.")}</p>
           </div>
-          <span className="ai-memory-count">{memories.length} {t("remembered")}</span>
+          <span className="ai-memory-count">{faNum(memories.length)} {t("remembered")}</span>
         </header>
       )}
       <form className="ai-memory-form" onSubmit={submit}>
@@ -1103,7 +1103,9 @@ function MemoryCard({
           </ul>
           <div className="ai-memory-foot">
             <span>{t("Only these saved memories are added to AI planning and reviews. They are stored with your planner.")}</span>
-            <button type="button" className="text-btn danger-text" onClick={forgetAll}>{t("Forget all")}</button>
+            {/* Named for its scope: with turned-down suggestions listed below,
+                a second bare "Forget all" on the same card is a coin toss. */}
+            <button type="button" className="text-btn danger-text" onClick={forgetAll}>{t("Forget all memory")}</button>
           </div>
         </>
       ) : (
@@ -1115,7 +1117,7 @@ function MemoryCard({
             <strong>{t("Suggestions you turned down")}</strong>
             {/* Visible on purpose: a preference the AI learned on its own and
                 then acted on silently is a guess nobody can correct. */}
-            <button type="button" className="text-btn danger-text" onClick={forgetAllDeclined}>{t("Forget all")}</button>
+            <button type="button" className="text-btn danger-text" onClick={forgetAllDeclined}>{t("Forget all suggestions")}</button>
           </div>
           <p className="meta">{t("The AI will not suggest these again. They are forgotten on their own after a while. Remove one if you would like to hear it again.")}</p>
           <ul className="ai-memory-list">
@@ -1337,7 +1339,7 @@ function TimetableCard({ timetable, isKept, onToggle, onAdd, onDiscard }: {
           <p className="kicker">{t("Review before protecting")}</p>
           <h2 className="card-title">{t("Your weekly timetable")}</h2>
         </div>
-        <span className="chip">{allKept ? `${timetable.blocks.length} ${t("times")}` : `${keptCount} ${t("of")} ${timetable.blocks.length}`}</span>
+        <span className="chip">{allKept ? `${faNum(timetable.blocks.length)} ${t("times")}` : `${faNum(keptCount)} ${t("of")} ${faNum(timetable.blocks.length)}`}</span>
       </header>
       <p className="ai-draft-summary">{timetable.summary}</p>
 

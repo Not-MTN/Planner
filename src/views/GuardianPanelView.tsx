@@ -781,7 +781,7 @@ export function GuardianPanelView() {
                                 {sending === link.id ? <span className="spinner" aria-hidden="true" /> : null}
                                 {t('Send note')}
                               </button>
-                              <span className="note-character-count">{(notes[link.id] ?? '').length}/160</span>
+                              <span className="note-character-count">{faNum((notes[link.id] ?? '').length)}/160</span>
                             </div>
                           </form>
                           {link.status === 'linked' ? (
