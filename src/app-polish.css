@@ -551,30 +551,326 @@
   .event .row-focus { opacity: 1; }
 }
 
-/* In-app package updater: keep progress text and controls inside the phone viewport. */
+/* In-app updater — a little jewel of a card, rather than another toast. */
 .update-toast {
-  width: min(720px, calc(100vw - 24px));
-  max-width: calc(100vw - 24px);
-  flex-wrap: wrap;
+  z-index: 60;
+  isolation: isolate;
+  position: fixed;
+  display: grid;
+  grid-template-columns: 50px minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: flex-start;
-  gap: 8px 10px;
-  border-radius: 18px;
-  padding: 12px 14px;
+  justify-content: initial;
+  gap: 12px 15px;
+  width: min(850px, calc(100vw - 36px));
+  max-width: min(850px, calc(100vw - 24px));
+  min-width: 0;
+  padding: 15px 18px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line-strong));
+  border-radius: 23px;
+  background:
+    radial-gradient(220px 150px at 100% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 76%),
+    linear-gradient(140deg, color-mix(in srgb, var(--surface) 97%, var(--accent) 3%), var(--surface));
+  color: var(--ink);
+  box-shadow:
+    0 1px 0 color-mix(in srgb, var(--bg) 72%, transparent) inset,
+    var(--shadow-lift),
+    0 10px 28px color-mix(in srgb, var(--accent) 13%, transparent);
+  backdrop-filter: blur(20px) saturate(1.18);
+  animation: update-toast-arrive 0.42s var(--ease) both;
+  font-size: 14px;
+}
+.update-toast::before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  inset: 0 22px auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 65%, transparent), transparent);
+  pointer-events: none;
+}
+.update-toast::after {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  top: -112px;
+  inset-inline-end: -70px;
+  width: 250px;
+  height: 190px;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 15%, transparent), transparent 70%);
+  filter: blur(5px);
+  pointer-events: none;
+}
+.update-toast > * { position: relative; z-index: 2; }
+.update-toast-emblem {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 50px;
+  height: 50px;
+  flex: none;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent) 58%, transparent);
+  border-radius: 17px;
+  background:
+    radial-gradient(circle at 27% 21%, color-mix(in srgb, var(--accent-contrast) 26%, transparent), transparent 44%),
+    linear-gradient(145deg, color-mix(in srgb, var(--accent) 90%, white 10%), var(--accent));
+  color: var(--accent-contrast);
+  box-shadow:
+    0 8px 18px color-mix(in srgb, var(--accent) 23%, transparent),
+    0 1px 0 color-mix(in srgb, var(--accent-contrast) 30%, transparent) inset;
+}
+.update-toast-emblem svg { position: relative; z-index: 1; filter: drop-shadow(0 1px 2px color-mix(in srgb, var(--accent-contrast) 24%, transparent)); }
+.update-toast-emblem-glint {
+  position: absolute;
+  top: 10px;
+  inset-inline-end: 10px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent-contrast);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent-contrast) 75%, transparent);
+  opacity: .78;
 }
 .update-toast-copy {
   display: grid;
-  flex: 1 1 100%;
-  gap: 4px;
+  align-content: center;
+  gap: 5px;
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.update-download-status { display: grid; gap: 4px; font-size: 12px; opacity: .88; }
-.update-download-progress { width: min(100%, 440px); height: 7px; accent-color: var(--accent, #8dbb8e); }
-.update-error { color: #ffc4b8; }
-.update-release-link { color: var(--bg); text-decoration: none; white-space: nowrap; }
-.update-toast .toast-action { min-height: 36px; }
-@media (min-width: 768px) {
-  .update-toast { width: max-content; max-width: min(720px, calc(100vw - 32px)); }
-  .update-toast-copy { flex-basis: 100%; }
+.update-toast-kicker {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1.2;
+  letter-spacing: .095em;
+  text-transform: uppercase;
+}
+.update-toast-signal {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 13%, transparent), 0 0 12px color-mix(in srgb, var(--accent) 44%, transparent);
+  animation: update-signal 2.4s ease-in-out infinite;
+}
+.update-toast-version {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  margin-inline-start: 2px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 82%, var(--accent) 18%);
+  color: var(--accent-deep);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+}
+.update-toast-title {
+  display: block;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 720;
+  line-height: 1.35;
+  letter-spacing: -.012em;
+  overflow-wrap: anywhere;
+}
+.update-download-status {
+  display: grid;
+  gap: 7px;
+  width: min(100%, 440px);
+  min-width: 0;
+  margin-top: 1px;
+}
+.update-toast-state {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 560;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.update-toast-state-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 36%, transparent);
+}
+.update-toast-state--ready,
+.update-toast-state--complete { color: var(--accent-deep); }
+.update-toast-state--error { color: var(--danger); }
+.update-toast-state--error .update-toast-state-dot { background: var(--danger); box-shadow: 0 0 8px color-mix(in srgb, var(--danger) 36%, transparent); }
+.update-download-progress {
+  display: block;
+  width: 100%;
+  height: 6px;
+  appearance: none;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 8%, var(--surface));
+  accent-color: var(--accent);
+}
+.update-download-progress::-webkit-progress-bar { border-radius: inherit; background: color-mix(in srgb, var(--ink) 8%, var(--surface)); }
+.update-download-progress::-webkit-progress-value {
+  border-radius: inherit;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 65%, var(--surface)), var(--accent));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 45%, transparent);
+  transition: width .32s var(--ease);
+}
+.update-download-progress::-moz-progress-bar {
+  border-radius: inherit;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 65%, var(--surface)), var(--accent));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.update-toast-actions {
+  display: flex;
+  grid-column: 3;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 100%;
+}
+.update-toast .toast-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  flex: none;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  font: 700 12px/1.1 var(--sans);
+  white-space: nowrap;
+  cursor: pointer;
+  text-decoration: none;
+  transition: transform .18s var(--ease), background .18s var(--ease), border-color .18s var(--ease), box-shadow .18s var(--ease), color .18s var(--ease);
+}
+.update-toast .update-toast-primary {
+  min-width: 112px;
+  border-color: color-mix(in srgb, var(--accent) 74%, transparent);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 92%, white 8%), var(--accent));
+  color: var(--accent-contrast);
+  box-shadow:
+    0 7px 15px color-mix(in srgb, var(--accent) 18%, transparent),
+    0 1px 0 color-mix(in srgb, var(--accent-contrast) 34%, transparent) inset;
+}
+.update-toast .update-toast-primary:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 9px 18px color-mix(in srgb, var(--accent) 24%, transparent),
+    0 1px 0 color-mix(in srgb, var(--accent-contrast) 38%, transparent) inset;
+  filter: brightness(1.04);
+}
+.update-toast .update-toast-primary:active { transform: translateY(0); }
+.update-toast .update-toast-secondary {
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--surface) 90%, var(--ink) 10%);
+  color: var(--ink-soft);
+}
+.update-toast .update-toast-secondary:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+  color: var(--ink);
+}
+.update-toast .update-toast-link {
+  gap: 5px;
+  padding-inline: 8px;
+  color: var(--muted);
+}
+.update-toast .update-toast-link::after { content: "↗"; font-size: 11px; opacity: .72; }
+.update-toast .update-toast-link:hover { color: var(--accent-deep); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+
+@keyframes update-toast-arrive {
+  from { transform: translate(-50%, 12px) scale(.985); opacity: 0; }
+  to { transform: translate(-50%, 0) scale(1); opacity: 1; }
+}
+@keyframes update-signal {
+  0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 11%, transparent), 0 0 8px color-mix(in srgb, var(--accent) 32%, transparent); }
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 5%, transparent), 0 0 14px color-mix(in srgb, var(--accent) 55%, transparent); }
+}
+@media (max-width: 1023px) {
+  .update-toast + .toast { bottom: calc(224px + env(safe-area-inset-bottom, 0px)); }
+}
+@media (min-width: 1024px) {
+  .update-toast + .toast { bottom: 150px; }
+}
+@media (max-width: 700px) {
+  .update-toast {
+    grid-template-columns: 44px minmax(0, 1fr);
+    gap: 11px 12px;
+    width: min(620px, calc(100vw - 20px));
+    max-width: calc(100vw - 20px);
+    padding: 14px;
+    border-radius: 21px;
+  }
+  .update-toast-emblem { width: 44px; height: 44px; border-radius: 15px; }
+  .update-toast-actions { grid-column: 1 / -1; justify-content: flex-start; }
+}
+@media (max-width: 420px) {
+  .update-toast {
+    grid-template-columns: 40px minmax(0, 1fr);
+    gap: 10px;
+    width: min(620px, calc(100vw - 16px));
+    max-width: calc(100vw - 16px);
+    padding: 12px;
+    border-radius: 19px;
+  }
+  .update-toast-emblem { width: 40px; height: 40px; border-radius: 14px; }
+  .update-toast-actions { gap: 5px; }
+  .update-toast .update-toast-primary { flex: 1 0 100%; }
+  .update-toast .update-toast-secondary,
+  .update-toast .update-toast-link { flex: 1 1 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .update-toast { animation: none; }
+  .update-toast-signal { animation: none; }
+  .update-toast .toast-action { transition: none; }
+}
+@media (pointer: coarse) {
+  .update-toast .toast-action { min-height: 44px; }
+}
+@media (forced-colors: active) {
+  .update-toast {
+    border-color: CanvasText;
+    background: Canvas;
+    color: CanvasText;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+  .update-toast::before,
+  .update-toast::after { display: none; }
+  .update-toast-emblem,
+  .update-toast-version {
+    border-color: CanvasText;
+    background: Canvas;
+    color: CanvasText;
+    box-shadow: none;
+  }
+  .update-toast .toast-action { border-color: CanvasText; }
+  .update-toast .update-toast-primary {
+    border-color: Highlight;
+    background: Highlight;
+    color: HighlightText;
+    box-shadow: none;
+  }
+  .update-download-progress { accent-color: Highlight; }
 }

@@ -890,14 +890,26 @@ export function Shell() {
         </Modal>
       ) : null}
       {showUpdateNotice && startup && updateState && updateOffer ? (
-        <div className="toast update-toast" role="status" aria-live="polite">
+        <div className={`toast update-toast update-toast--${updateState.phase}`} role="status" aria-live="polite">
+          <div className="update-toast-emblem" aria-hidden="true">
+            <SparklesIcon size={24} />
+            <span className="update-toast-emblem-glint" />
+          </div>
           <div className="update-toast-copy">
-            <span>
-              {t('Planner {0} is available to update.', { 0: updateOffer.version })}
-            </span>
+            <div className="update-toast-kicker">
+              <span className="update-toast-signal" aria-hidden="true" />
+              <span>{t('Software update')}</span>
+              <span className="update-toast-version">{t('Version {0}', { 0: updateOffer.version })}</span>
+            </div>
+            <strong className="update-toast-title">
+              {updateState.phase === 'complete'
+                ? t('Update installed. Opening Planner…')
+                : t('Planner {0} is available to update.', { 0: updateOffer.version })}
+            </strong>
             {updateState.phase === 'downloading' || updateState.phase === 'verifying' ? (
               <div className="update-download-status">
-                <span>
+                <span className={`update-toast-state update-toast-state--${updateState.phase}`}>
+                  <span className="update-toast-state-dot" aria-hidden="true" />
                   {updateState.phase === 'verifying'
                     ? t('Verifying update…')
                     : updateState.progress?.totalBytes
@@ -912,87 +924,113 @@ export function Shell() {
                 />
               </div>
             ) : null}
-            {updateState.phase === 'ready-to-apply' ? <span>{t('Update ready to install')}</span> : null}
-            {updateState.phase === 'applying' ? <span>{t('Installing update…')}</span> : null}
-            {updateState.phase === 'complete' ? <span>{t('Update installed. Opening Planner…')}</span> : null}
+            {updateState.phase === 'ready-to-apply' ? (
+              <span className="update-toast-state update-toast-state--ready">
+                <span className="update-toast-state-dot" aria-hidden="true" />
+                {t('Update ready to install')}
+              </span>
+            ) : null}
+            {updateState.phase === 'applying' ? (
+              <span className="update-toast-state update-toast-state--applying">
+                <span className="update-toast-state-dot" aria-hidden="true" />
+                {t('Installing update…')}
+              </span>
+            ) : null}
             {updateState.phase === 'error' && updateState.error ? (
-              <span className="update-error">{t('Update failed: {0}', { 0: updateState.error })}</span>
+              <span className="update-toast-state update-toast-state--error">
+                <span className="update-toast-state-dot" aria-hidden="true" />
+                {t('Update failed: {0}', { 0: updateState.error })}
+              </span>
             ) : null}
           </div>
-          {updateState.phase === 'available' || updateState.phase === 'error' ? (
-            <button
-              type="button"
-              className="toast-action update-download-action"
-              onClick={() => {
-                startup.setState((current) => withUpdateProgress(current, 'downloading', { bytesReceived: 0, totalBytes: updateOffer.sizeBytes }));
-                void downloadPackagedUpdate(updateOffer, (progress) => {
-                  const phase = progress.bytesReceived >= progress.totalBytes ? 'verifying' : 'downloading';
-                  startup.setState((current) => withUpdateProgress(current, phase, progress));
-                }).then(
-                  () => startup.setState((current) => withUpdateProgress(
-                    current,
-                    'ready-to-apply',
-                    { bytesReceived: updateOffer.sizeBytes, totalBytes: updateOffer.sizeBytes },
-                  )),
-                  (error: unknown) => startup.setState((current) => withUpdateProgress(
-                    current,
-                    'error',
-                    null,
-                    error instanceof Error ? error.message : t('The update could not be downloaded.'),
-                  )),
-                );
-              }}
-            >
-              {updateState.phase === 'error' ? t('Try again') : t('Download update')}
-            </button>
-          ) : null}
-          {updateState.phase === 'ready-to-apply' ? (
-            <button
-              type="button"
-              className="toast-action"
-              onClick={() => {
-                startup.setState((current) => withUpdateProgress(current, 'applying', current.update.progress));
-                void applyPackagedUpdate(updateOffer).then(
-                  () => startup.setState((current) => withUpdateProgress(current, 'complete', current.update.progress)),
-                  (error: unknown) => startup.setState((current) => withUpdateProgress(
-                    current,
-                    'error',
-                    current.update.progress,
-                    error instanceof Error ? error.message : t('The update could not be installed.'),
-                  )),
-                );
-              }}
-            >
-              {t('Install and reopen')}
-            </button>
-          ) : null}
-          {updateState.phase === 'available' || updateState.phase === 'ready-to-apply' || updateState.phase === 'error' ? (
-            <button
-              type="button"
-              className="toast-action"
-              onClick={() => {
-                if (updateState.availableVersion) dismissVersion(updateState.availableVersion);
-                startup.setState((current) => dismissStartupUpdate(current));
-              }}
-              aria-label={t('Later')}
-            >
-              {t('Later')}
-            </button>
-          ) : null}
-          <a className="toast-action update-release-link" href={RELEASES_PAGE} target="_blank" rel="noreferrer">
-            {t('Release page')}
-          </a>
+          <div className="update-toast-actions">
+            {updateState.phase === 'available' || updateState.phase === 'error' ? (
+              <button
+                type="button"
+                className="toast-action update-toast-primary update-download-action"
+                onClick={() => {
+                  startup.setState((current) => withUpdateProgress(current, 'downloading', { bytesReceived: 0, totalBytes: updateOffer.sizeBytes }));
+                  void downloadPackagedUpdate(updateOffer, (progress) => {
+                    const phase = progress.bytesReceived >= progress.totalBytes ? 'verifying' : 'downloading';
+                    startup.setState((current) => withUpdateProgress(current, phase, progress));
+                  }).then(
+                    () => startup.setState((current) => withUpdateProgress(
+                      current,
+                      'ready-to-apply',
+                      { bytesReceived: updateOffer.sizeBytes, totalBytes: updateOffer.sizeBytes },
+                    )),
+                    (error: unknown) => startup.setState((current) => withUpdateProgress(
+                      current,
+                      'error',
+                      null,
+                      error instanceof Error ? error.message : t('The update could not be downloaded.'),
+                    )),
+                  );
+                }}
+              >
+                {updateState.phase === 'error' ? t('Try again') : t('Download update')}
+              </button>
+            ) : null}
+            {updateState.phase === 'ready-to-apply' ? (
+              <button
+                type="button"
+                className="toast-action update-toast-primary"
+                onClick={() => {
+                  startup.setState((current) => withUpdateProgress(current, 'applying', current.update.progress));
+                  void applyPackagedUpdate(updateOffer).then(
+                    () => startup.setState((current) => withUpdateProgress(current, 'complete', current.update.progress)),
+                    (error: unknown) => startup.setState((current) => withUpdateProgress(
+                      current,
+                      'error',
+                      current.update.progress,
+                      error instanceof Error ? error.message : t('The update could not be installed.'),
+                    )),
+                  );
+                }}
+              >
+                {t('Install and reopen')}
+              </button>
+            ) : null}
+            {updateState.phase === 'available' || updateState.phase === 'ready-to-apply' || updateState.phase === 'error' ? (
+              <button
+                type="button"
+                className="toast-action update-toast-secondary"
+                onClick={() => {
+                  if (updateState.availableVersion) dismissVersion(updateState.availableVersion);
+                  startup.setState((current) => dismissStartupUpdate(current));
+                }}
+                aria-label={t('Later')}
+              >
+                {t('Later')}
+              </button>
+            ) : null}
+            <a className="toast-action update-toast-link update-release-link" href={RELEASES_PAGE} target="_blank" rel="noreferrer">
+              {t('Release page')}
+            </a>
+          </div>
         </div>
       ) : null}
       {updateReady ? (
-        <div className="toast update-toast" role="status">
-          <span>{t("A new version of Planner is ready.")}</span>
-          <button type="button" className="toast-action" onClick={() => applyUpdate()}>
-            {t("Update now")}
-          </button>
-          <button type="button" className="toast-action" onClick={() => setUpdateReady(false)} aria-label={t("Later")}>
-            {t("Later")}
-          </button>
+        <div className="toast update-toast update-toast--pwa" role="status" aria-live="polite">
+          <div className="update-toast-emblem" aria-hidden="true">
+            <SparklesIcon size={24} />
+            <span className="update-toast-emblem-glint" />
+          </div>
+          <div className="update-toast-copy">
+            <div className="update-toast-kicker">
+              <span className="update-toast-signal" aria-hidden="true" />
+              <span>{t('Software update')}</span>
+            </div>
+            <strong className="update-toast-title">{t("A new version of Planner is ready.")}</strong>
+          </div>
+          <div className="update-toast-actions">
+            <button type="button" className="toast-action update-toast-primary" onClick={() => applyUpdate()}>
+              {t("Update now")}
+            </button>
+            <button type="button" className="toast-action update-toast-secondary" onClick={() => setUpdateReady(false)} aria-label={t("Later")}>
+              {t("Later")}
+            </button>
+          </div>
         </div>
       ) : null}
       {notice ? (
