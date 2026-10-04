@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest';
 import { clearSnoozes, dueReminders, loadSnoozes, snoozeReminder, upcomingReminders, DEFAULT_REMINDERS, type ReminderSettings } from './reminders';
-import { addTask } from './mutate';
+import { addHabit, addTask, toggleHabit } from './mutate';
 import { createEmptyState, type PlannerState } from './types';
 
 /**
@@ -102,6 +102,38 @@ describe('native background reminder schedule', () => {
     const beforeDigest = upcomingReminders(state, new Date(2026, 8, 30, 9, 0, 0), settings);
     const digest = beforeDigest.find((reminder) => reminder.key.endsWith('|digest'));
     expect(digest?.body).toContain('1 event and 1 open task ahead');
+  });
+
+  it('schedules habit nudges only on due, unfinished days', () => {
+    const now = new Date(2026, 8, 30, 8, 0, 0);
+    let state = addHabit(createEmptyState(), {
+      name: 'Stay hydrated',
+      icon: 'water',
+      accent: 'sage',
+      frequency: { type: 'daily' },
+      reminderTime: '09:00',
+    }, 'water', now.toISOString(), '2026-09-30');
+
+    const reminder = upcomingReminders(state, now, SETTINGS, 1)[0];
+    expect(reminder).toMatchObject({
+      key: '2026-09-30|habit|water|09:00',
+      title: 'Time for Stay hydrated',
+      at: new Date(2026, 8, 30, 9, 0, 0),
+    });
+    expect(reminder?.body).toContain('small step');
+
+    state = toggleHabit(state, 'water', '2026-09-30');
+    expect(upcomingReminders(state, now, SETTINGS, 1)).toEqual([]);
+  });
+
+  it('fires a habit reminder in-app at its selected time', () => {
+    const at = new Date(2026, 8, 30, 9, 0, 0);
+    const state = addHabit(createEmptyState(), {
+      name: 'Stay hydrated', icon: 'water', accent: 'sage', frequency: { type: 'daily' }, reminderTime: '09:00',
+    }, 'water', at.toISOString(), '2026-09-30');
+    expect(dueReminders(state, at, SETTINGS, new Set()).map((item) => item.key)).toEqual([
+      '2026-09-30|habit|water|09:00',
+    ]);
   });
 
   it('does nothing when reminders are disabled', () => {

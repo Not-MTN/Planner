@@ -1,6 +1,6 @@
 import type { PlannerState } from './types';
 import { addDays, todayISO } from './dates';
-import { eventsForDate, tasksForDate } from './logic';
+import { eventsForDate, habitsDueOn, isDone, isSkipped, tasksForDate } from './logic';
 import type { ReminderSettings } from './reminders';
 
 const ENABLED_KEY = 'planner-background-push-enabled';
@@ -30,6 +30,13 @@ export function buildPushJobs(state: PlannerState, now = new Date(), settings: R
       const at = new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour, minute - settings.lead);
       if (at <= now) continue;
       jobs.push({ key: `${date}|task|${task.id}|${task.dueTime}`, sendAt: at.toISOString() });
+    }
+    for (const habit of habitsDueOn(state, date)) {
+      if (!habit.reminderTime || isDone(state, habit.id, date) || isSkipped(state, habit.id, date)) continue;
+      const [hour, minute] = habit.reminderTime.split(':').map(Number);
+      const at = new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour, minute);
+      if (at <= now) continue;
+      jobs.push({ key: `${date}|habit|${habit.id}|${habit.reminderTime}`, sendAt: at.toISOString() });
     }
     if (settings.digest) {
       const [hour, minute] = settings.digestTime.split(':').map(Number);

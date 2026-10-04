@@ -344,6 +344,7 @@ function sanitizeHabit(value: unknown): Habit | null {
     createdAt,
     updatedAt: asString(raw.updatedAt, 40) || createdAt,
     unit: sanitizeUnit(raw.unit),
+    reminderTime: typeof raw.reminderTime === 'string' && isValidTime(raw.reminderTime) ? raw.reminderTime : null,
   };
 }
 

@@ -153,6 +153,8 @@ export interface Habit {
   updatedAt: string;
   /** When set, a day counts as done once the recorded amount reaches the target. */
   unit: HabitUnit | null;
+  /** Optional local time for a daily nudge on days when this habit is due. */
+  reminderTime?: string | null;
 }
 
 export interface HabitCompletion {
@@ -574,6 +576,8 @@ export interface HabitInput {
   frequency: HabitFrequency;
   essential?: boolean;
   unit?: HabitUnit | null;
+  /** Optional HH:MM reminder, delivered only on days when the habit is due. */
+  reminderTime?: string | null;
 }
 
 export interface GoalInput {

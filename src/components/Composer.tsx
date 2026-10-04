@@ -13,6 +13,7 @@ import { Field, Modal } from './ui';
 import { AttachmentList } from './Attachments';
 import { Markdown } from './Markdown';
 import { t } from '../i18n';
+import { requestReminderPermission } from '../nativeReminders';
 
 const TITLES: Record<ComposerState['type'], [string, string]> = {
   task: [t("New task"), t("Edit task")],
@@ -433,7 +434,7 @@ function EventForm({ composer, onClose, onRemove }: { composer: ComposerState; o
 }
 
 function HabitForm({ composer, onClose, onRemove }: { composer: ComposerState; onClose: () => void; onRemove: () => void }) {
-  const { state, addHabit, updateHabit } = usePlanner();
+  const { state, addHabit, updateHabit, reminders, setReminders, flash } = usePlanner();
   const existing = composer.mode === 'edit' ? state.habits.find((habit) => habit.id === composer.id) : undefined;
   const initial = existing?.frequency ?? { type: 'daily' as const };
   const [name, setName] = useState(existing?.name ?? '');
@@ -446,6 +447,8 @@ function HabitForm({ composer, onClose, onRemove }: { composer: ComposerState; o
   const [trackAmount, setTrackAmount] = useState(Boolean(existing?.unit));
   const [unitLabel, setUnitLabel] = useState(existing?.unit?.label ?? '');
   const [unitTarget, setUnitTarget] = useState(existing?.unit ? String(existing.unit.target) : '8');
+  const [remind, setRemind] = useState(Boolean(existing?.reminderTime));
+  const [reminderTime, setReminderTime] = useState(existing?.reminderTime ?? '09:00');
   const [error, setError] = useState<string | null>(null);
 
   const frequency: HabitFrequency = useMemo(() => {
@@ -455,7 +458,7 @@ function HabitForm({ composer, onClose, onRemove }: { composer: ComposerState; o
     return { type: 'daily' };
   }, [freqType, days, times]);
 
-  const submit = (event: FormEvent) => {
+  const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!name.trim()) {
       setError(t("Name the habit."));
@@ -470,6 +473,18 @@ function HabitForm({ composer, onClose, onRemove }: { composer: ComposerState; o
       setError(t("Give the amount a label and a daily target between 1 and 999."));
       return;
     }
+    // Checking “remind me” is the user gesture that enables reminders. Ask at
+    // that moment (never on launch), then keep an in-app reminder even if the
+    // operating-system prompt is declined.
+    if (remind && !reminders.enabled) {
+      try {
+        const permission = await requestReminderPermission();
+        if (permission !== 'granted') flash(t("Notifications are blocked — reminders will show inside the app instead."));
+      } catch {
+        flash(t("Notifications are blocked — reminders will show inside the app instead."));
+      }
+      setReminders({ ...reminders, enabled: true });
+    }
     const input: HabitInput = {
       name,
       icon,
@@ -477,6 +492,7 @@ function HabitForm({ composer, onClose, onRemove }: { composer: ComposerState; o
       frequency,
       essential,
       unit: trackAmount ? { label: unitLabel.trim().toLowerCase().slice(0, 20), target } : null,
+      reminderTime: remind ? reminderTime : null,
     };
     if (existing) updateHabit(existing.id, input);
     else addHabit(input);
@@ -581,6 +597,21 @@ function HabitForm({ composer, onClose, onRemove }: { composer: ComposerState; o
         <input type="checkbox" checked={essential} onChange={(event) => setEssential(event.target.checked)} />
         <span>{t("A must-do for every day — pinned to Today")}</span>
       </label>
+      <div className="form-row two habit-reminder-row">
+        <label className="check-line">
+          <input type="checkbox" checked={remind} onChange={(event) => setRemind(event.target.checked)} />
+          <span>{t("Remind me about this habit")}</span>
+        </label>
+        {remind ? (
+          <input
+            type="time"
+            aria-label={t("Habit reminder time")}
+            value={reminderTime}
+            onChange={(event) => event.target.value && setReminderTime(event.target.value.slice(0, 5))}
+          />
+        ) : null}
+      </div>
+      {remind ? <small className="hint">{t("Planner will nudge you on the days this habit is due, until you complete or rest it.")}</small> : null}
       <Actions editing={Boolean(existing)} label={t("Add habit")} onClose={onClose} onRemove={onRemove} />
     </form>
   );

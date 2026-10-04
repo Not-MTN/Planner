@@ -1,5 +1,5 @@
 import { addDays, displayTime, timeToMinutes, todayISO } from './dates';
-import { eventsForDate, tasksForDate } from './logic';
+import { eventsForDate, habitsDueOn, isDone, isSkipped, tasksForDate } from './logic';
 import type { PlannerState } from './types';
 import { t } from './i18n';
 import { isNativeMobileShell } from './shared/nativeShell';
@@ -50,6 +50,14 @@ function taskReminder(key: string, title: string, dueTime: string): Reminder {
   };
 }
 
+function habitReminder(key: string, name: string): Reminder {
+  return {
+    key,
+    title: t("Time for {0}", { 0: name }),
+    body: t("A small step keeps the rhythm going. Check in when you’re ready."),
+  };
+}
+
 function digestReminder(key: string, eventCount: number, taskCount: number): Reminder {
   const events = eventCount === 1 ? t("1 event") : t("{0} events", { 0: eventCount });
   const tasks = taskCount === 1 ? t("1 open task") : t("{0} open tasks", { 0: taskCount });
@@ -93,6 +101,12 @@ export function upcomingReminders(
       const key = `${date}|task|${task.id}|${task.dueTime}`;
       const at = localDateTime(date, task.dueTime, settings.lead);
       if (at > now) out.push({ ...taskReminder(key, task.title, task.dueTime), at });
+    }
+    for (const habit of habitsDueOn(state, date)) {
+      if (!habit.reminderTime || isDone(state, habit.id, date) || isSkipped(state, habit.id, date)) continue;
+      const key = `${date}|habit|${habit.id}|${habit.reminderTime}`;
+      const at = localDateTime(date, habit.reminderTime);
+      if (at > now) out.push({ ...habitReminder(key, habit.name), at });
     }
     if (settings.digest) {
       const key = `${date}|digest`;
@@ -246,6 +260,13 @@ export function dueReminders(
     const target = dueAt(key, own);
     if (target === null || !inWindow(target)) continue;
     out.push(taskReminder(key, task.title, task.dueTime));
+  }
+  for (const habit of habitsDueOn(state, today)) {
+    if (!habit.reminderTime || isDone(state, habit.id, today) || isSkipped(state, habit.id, today)) continue;
+    const key = `${today}|habit|${habit.id}|${habit.reminderTime}`;
+    const target = dueAt(key, timeToMinutes(habit.reminderTime));
+    if (target === null || !inWindow(target)) continue;
+    out.push(habitReminder(key, habit.name));
   }
   if (settings.digest) {
     const key = `${today}|digest`;
