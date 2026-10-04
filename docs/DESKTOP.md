@@ -16,8 +16,9 @@ PLANNER_API_ORIGIN=https://your-app.example.com npm run desktop:dist
 
 `npm run desktop:dist -- --win` (or `--mac`, `--linux`, `--dir`) narrows the
 build; `npm run desktop:pack` produces an unpacked app directory for a quick
-look. `PLANNER_VERSION_NAME=1.2.0 npm run desktop:dist` versions the installer
-files (the Apps workflow passes the release tag automatically).
+look. `PLANNER_VERSION_NAME=1.2.0 npm run desktop:dist` sets the packaged app
+version (the Apps workflow passes the release tag automatically). Installer
+filenames remain fixed for stable download links.
 
 Packaging never publishes. `desktop-build.mjs` passes `--publish never` on
 purpose: on a git tag electron-builder publishes on its own when the app's
@@ -56,19 +57,25 @@ and the whole planner work identically to the website.
   the page's own notification API). Reminders while the app is closed would
   need a background service or a tray process — not implemented, and not
   pretended otherwise.
+- Packaged **Windows** builds check `planner-update.json` at startup. When a
+  newer release exists, the app downloads the fixed-name installer, checks its
+  declared size and SHA-256, then offers the NSIS in-place update. NSIS keeps
+  the per-user app data and reopens Planner. Offline or invalid feed checks do
+  not block startup. macOS and Linux automatic updates are not implemented.
 
-`desktop/main.cjs` is the whole main process: window, menu, protocol, links and
-permissions. It never touches your planner data. The two IPC calls the page may
-make — read the app version, open an external link — are validated in the main
-process.
+`desktop/main.cjs` is the main process: window, menu, protocol, links,
+permissions and the Windows updater. It never reads, migrates or deletes your
+planner data. The page gets a narrow preload bridge for the app version,
+external links, update-feed checks, verified installer downloads, progress and
+install launch; update requests are revalidated in the main process.
 
 ## What each build produces
 
 | Target | Files |
 | --- | --- |
-| Windows | `Planner-<version>-windows-x64.exe`, `…-arm64.exe` — an NSIS installer with a licence-free, per-user install, a directory choice and a Start-menu shortcut. |
-| macOS | `Planner-<version>-macos-x64.dmg` / `…-arm64.dmg` plus `.zip` (the zip is what an auto-updater would use). |
-| Linux | `…-linux-x64.AppImage`, `.deb`, `.rpm` (ARM builds for AppImage and deb). |
+| Windows | `Planner-windows.exe` — one NSIS installer for x64 and arm64, with a per-user install, a directory choice and a Start-menu shortcut. The package version changes with the release tag; the public filename stays fixed. |
+| macOS | `Planner-macos-x64.dmg` / `…-arm64.dmg` plus matching `.zip` files. The filename stays fixed by architecture; in-app updates are deferred. |
+| Linux | `Planner-linux-x64.AppImage`, `.deb`, `.rpm` (ARM builds for AppImage and deb). In-app updates are deferred. |
 
 ## Signing, and what users will see without it
 
@@ -98,7 +105,7 @@ by unit test and parse-check `main.cjs`/`preload.cjs` with `node --check`.
 | Path | What it is |
 | --- | --- |
 | `desktop/main.cjs` | The main process: window, menu, `app://` protocol, permissions, IPC. |
-| `desktop/preload.cjs` | The three things the page can see: platform, version, open-a-link. |
+| `desktop/preload.cjs` | Narrow page bridge: platform/version, external links, and Windows update checks/download/install progress. |
 | `desktop/lib.cjs` | Tested helpers: route → file, content types, CSP, origin checks. |
 | `desktop/electron-builder.yml` | Installer configuration for the three platforms. |
 | `desktop/build/` | App icons (`icon.ico`, `icon.icns`, `icon.png`, 1024² source). |

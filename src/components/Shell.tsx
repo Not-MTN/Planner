@@ -61,8 +61,9 @@ const PanelsView = lazy(() => import('../views/PanelsView').then((m) => ({ defau
 const StudentPanelView = lazy(() => import('../views/StudentPanelView').then((m) => ({ default: m.StudentPanelView })));
 const GuardianPanelView = lazy(() => import('../views/GuardianPanelView').then((m) => ({ default: m.GuardianPanelView })));
 import { applyUpdate, onUpdateAvailable } from '../pwa';
-import { RELEASES_PAGE, dismissVersion, findUpdate } from '../shared/updates';
-import { isNativeShell } from '../shared/nativeShell';
+import { RELEASES_PAGE, dismissVersion } from '../shared/updates';
+import { applyPackagedUpdate, downloadPackagedUpdate } from '../shared/updateRuntime';
+import { dismissStartupUpdate, useStartupState, withUpdateProgress } from '../shared/startup';
 import { isAIVisited, onTourRequest, requestTour, TOUR_STOPS, tourRouteFor, tourStartIndex } from '../tour';
 import { onAboutRequest, requestAbout } from '../about';
 import { TourSheet } from './TourSheet';
@@ -92,6 +93,7 @@ const NAV = [
 
 export function Shell() {
   const planner = usePlanner();
+  const startup = useStartupState();
   const {
     ready,
     route,
@@ -230,25 +232,15 @@ export function Shell() {
   const [updateReady, setUpdateReady] = useState(false);
   useEffect(() => onUpdateAvailable(() => setUpdateReady(true)), []);
 
-  // A packaged app cannot update itself: the planner is inside the installer,
-  // so the service-worker prompt above can never fire there. Ask GitHub what
-  // the newest release is and say so, once per version, and only when the
-  // answer is usable. `findUpdate` never throws — no network simply means we
-  // do not know, which is not worth interrupting anyone about.
-  const [newVersion, setNewVersion] = useState<string | null>(null);
-  useEffect(() => {
-    // Only in a packaged app. In a browser tab the service worker above is the
-    // real update path — pointing a website visitor at a download would be
-    // asking them to reinstall something that just updated itself.
-    if (!isNativeShell()) return;
-    let cancelled = false;
-    void findUpdate().then((version) => {
-      if (!cancelled && version) setNewVersion(version);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // AccountGate validates the platform-specific manifest alongside the
+  // account check and hands the offer through StartupProvider. The planner
+  // never waits for the updater to open.
+  const updateState = startup?.state.update;
+  const updateOffer = updateState?.offer ?? null;
+  const showUpdateNotice = Boolean(
+    startup && updateOffer && updateState &&
+    ['available', 'downloading', 'verifying', 'ready-to-apply', 'applying', 'complete', 'error'].includes(updateState.phase),
+  );
 
   // First-run tour: opens by itself on the very first boot (and resumes after
   // a language-switch reload); replayable from the (?) side tool or Settings.
@@ -897,23 +889,99 @@ export function Shell() {
           </div>
         </Modal>
       ) : null}
-      {newVersion ? (
-        <div className="toast update-toast" role="status">
-          <span>{t("Planner {0} is available to download.", { 0: newVersion })}</span>
-          <a className="toast-action" href={RELEASES_PAGE} target="_blank" rel="noreferrer">
-            {t("Download")}
+      {showUpdateNotice && startup && updateState && updateOffer ? (
+        <div className="toast update-toast" role="status" aria-live="polite">
+          <div className="update-toast-copy">
+            <span>
+              {t('Planner {0} is available to update.', { 0: updateOffer.version })}
+            </span>
+            {updateState.phase === 'downloading' || updateState.phase === 'verifying' ? (
+              <div className="update-download-status">
+                <span>
+                  {updateState.phase === 'verifying'
+                    ? t('Verifying update…')
+                    : updateState.progress?.totalBytes
+                      ? t('Downloading update · {0}%', { 0: Math.min(100, Math.floor((updateState.progress.bytesReceived / updateState.progress.totalBytes) * 100)) })
+                      : t('Downloading update…')}
+                </span>
+                <progress
+                  className="update-download-progress"
+                  max={updateState.progress?.totalBytes || updateOffer.sizeBytes}
+                  value={updateState.progress?.bytesReceived ?? 0}
+                  aria-label={t('Update download progress')}
+                />
+              </div>
+            ) : null}
+            {updateState.phase === 'ready-to-apply' ? <span>{t('Update ready to install')}</span> : null}
+            {updateState.phase === 'applying' ? <span>{t('Installing update…')}</span> : null}
+            {updateState.phase === 'complete' ? <span>{t('Update installed. Opening Planner…')}</span> : null}
+            {updateState.phase === 'error' && updateState.error ? (
+              <span className="update-error">{t('Update failed: {0}', { 0: updateState.error })}</span>
+            ) : null}
+          </div>
+          {updateState.phase === 'available' || updateState.phase === 'error' ? (
+            <button
+              type="button"
+              className="toast-action update-download-action"
+              onClick={() => {
+                startup.setState((current) => withUpdateProgress(current, 'downloading', { bytesReceived: 0, totalBytes: updateOffer.sizeBytes }));
+                void downloadPackagedUpdate(updateOffer, (progress) => {
+                  const phase = progress.bytesReceived >= progress.totalBytes ? 'verifying' : 'downloading';
+                  startup.setState((current) => withUpdateProgress(current, phase, progress));
+                }).then(
+                  () => startup.setState((current) => withUpdateProgress(
+                    current,
+                    'ready-to-apply',
+                    { bytesReceived: updateOffer.sizeBytes, totalBytes: updateOffer.sizeBytes },
+                  )),
+                  (error: unknown) => startup.setState((current) => withUpdateProgress(
+                    current,
+                    'error',
+                    null,
+                    error instanceof Error ? error.message : t('The update could not be downloaded.'),
+                  )),
+                );
+              }}
+            >
+              {updateState.phase === 'error' ? t('Try again') : t('Download update')}
+            </button>
+          ) : null}
+          {updateState.phase === 'ready-to-apply' ? (
+            <button
+              type="button"
+              className="toast-action"
+              onClick={() => {
+                startup.setState((current) => withUpdateProgress(current, 'applying', current.update.progress));
+                void applyPackagedUpdate(updateOffer).then(
+                  () => startup.setState((current) => withUpdateProgress(current, 'complete', current.update.progress)),
+                  (error: unknown) => startup.setState((current) => withUpdateProgress(
+                    current,
+                    'error',
+                    current.update.progress,
+                    error instanceof Error ? error.message : t('The update could not be installed.'),
+                  )),
+                );
+              }}
+            >
+              {t('Install and reopen')}
+            </button>
+          ) : null}
+          {updateState.phase === 'available' || updateState.phase === 'ready-to-apply' || updateState.phase === 'error' ? (
+            <button
+              type="button"
+              className="toast-action"
+              onClick={() => {
+                if (updateState.availableVersion) dismissVersion(updateState.availableVersion);
+                startup.setState((current) => dismissStartupUpdate(current));
+              }}
+              aria-label={t('Later')}
+            >
+              {t('Later')}
+            </button>
+          ) : null}
+          <a className="toast-action update-release-link" href={RELEASES_PAGE} target="_blank" rel="noreferrer">
+            {t('Release page')}
           </a>
-          <button
-            type="button"
-            className="toast-action"
-            onClick={() => {
-              dismissVersion(newVersion);
-              setNewVersion(null);
-            }}
-            aria-label={t("Later")}
-          >
-            {t("Later")}
-          </button>
         </div>
       ) : null}
       {updateReady ? (

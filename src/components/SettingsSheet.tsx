@@ -34,12 +34,13 @@ import { canInstall, isInstalled, onInstallChange, promptInstall } from '../pwa'
 import { requestTour } from '../tour';
 import { requestAbout } from '../about';
 import { LEAD_CHOICES } from '../reminders';
+import { getReminderPermission, requestReminderPermission, type ReminderPermission } from '../nativeReminders';
 import { loadSpeechLocaleId, saveSpeechLocaleId, speechAvailable, SPEECH_LOCALES } from '../speech';
 import { faNum, t, tn, getLang, setLang, LANGUAGES, type Lang } from '../i18n';
 import { loadMobileFavorites, loadNavigationPages, MAX_MOBILE_FAVORITES, moveMobileFavorite, NAVIGATION_PAGES, saveMobileFavorites, saveNavigationPages, type NavigationPage } from '../navigationPrefs';
 import { backgroundPushEnabled, configureBackgroundPush, refreshBackgroundPushSchedule } from '../push';
 import { currentPlatform, deviceInstallActionFor } from '../marketing/downloads';
-import { isNativeShell } from '../shared/nativeShell';
+import { isNativeMobileShell, isNativeShell } from '../shared/nativeShell';
 import { RELEASES_PAGE } from '../shared/updates';
 
 const NAV_LABELS: Record<NavigationPage, string> = {
@@ -306,14 +307,26 @@ function SyncSection() {
 
 function RemindersSection() {
   const { reminders, setReminders, flash } = usePlanner();
-  const supported = typeof Notification !== 'undefined';
-  const [permission, setPermission] = useState(supported ? Notification.permission : 'denied');
+  const native = isNativeMobileShell();
+  const supported = native || typeof Notification !== 'undefined';
+  const [permission, setPermission] = useState<ReminderPermission>(supported ? 'prompt' : 'denied');
+
+  useEffect(() => {
+    let live = true;
+    void getReminderPermission().then((current) => { if (live) setPermission(current); });
+    return () => { live = false; };
+  }, []);
 
   const enable = async (on: boolean) => {
-    if (on && supported && Notification.permission === 'default') {
-      const result = await Notification.requestPermission();
-      setPermission(result);
-      if (result === 'denied') flash(t("Notifications are blocked — reminders will show inside the app instead."));
+    if (on && supported) {
+      try {
+        const current = await requestReminderPermission();
+        setPermission(current);
+        if (current !== 'granted') flash(t("Notifications are blocked — reminders will show inside the app instead."));
+      } catch {
+        setPermission('denied');
+        flash(t("Notifications are blocked — reminders will show inside the app instead."));
+      }
     }
     setReminders({ ...reminders, enabled: on });
   };
@@ -328,8 +341,12 @@ function RemindersSection() {
             {!supported
               ? t("This browser has no notifications; reminders appear inside the app while it is open.")
               : permission === 'denied'
-                ? t("Notifications are blocked in your browser. Reminders show inside the app while it is open.")
-                : t("Before events and timed tasks. Works while Planner is open (or installed).")}
+                ? native
+                  ? t("Notifications are blocked in device settings. Reminders still appear while Planner is open.")
+                  : t("Notifications are blocked in your browser. Reminders show inside the app while it is open.")
+                : native
+                  ? t("Scheduled on this device, even when Planner is closed. Event and task names stay on this device.")
+                  : t("Before events and timed tasks. Works while Planner is open (or installed).")}
           </p>
         </div>
         <div className="segmented" role="radiogroup" aria-label={t("Reminders")}>

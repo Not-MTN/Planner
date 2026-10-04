@@ -10,6 +10,7 @@
 import {
   DEFAULT_MAX_TOKENS,
   LONG_RANGE_MAX_TOKENS,
+  buildPlanningContext,
   draftForModel,
   groqChatJson,
   normalizeDraftPlan,
@@ -68,29 +69,14 @@ export function buildVoiceContext(state: PlannerState, today: string, range: Pla
     .filter((task) => !task.completed && (task.dueDate === null || (task.dueDate >= range.startDate && task.dueDate <= lastDate)))
     .sort((a, b) => (a.dueDate ?? '9999-99-99').localeCompare(b.dueDate ?? '9999-99-99') || (a.dueTime ?? '99:99').localeCompare(b.dueTime ?? '99:99'))
     .slice(0, 30);
-  const moods = state.moods.slice(-3);
   return {
     today,
     lastDate,
-    pendingTaskTitles: pending.map((task) => ({ title: task.title, date: task.dueDate, time: task.dueTime })),
-    existingEvents: state.events
-      .filter((event) => event.date >= range.startDate && event.date <= lastDate)
-      .sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime))
-      .slice(0, 50)
-      .map((event) => ({ title: event.title, date: event.date, startTime: event.startTime, endTime: event.endTime })),
-    fixedWeeklyTimes: state.fixedCommitments.map((item) => ({ weekday: item.weekday, title: item.title, startTime: item.startTime, endTime: item.endTime })),
-    savedPlans: (state.aiPlans ?? [])
-      .filter((plan) => plan.startDate <= lastDate && addDays(plan.startDate, plan.days - 1) >= range.startDate)
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      .slice(0, 8)
-      .map((plan) => ({
-        title: plan.title,
-        status: plan.status,
-        events: plan.events.slice(0, 10).map(({ title, date, startTime, endTime }) => ({ title, date, startTime, endTime })),
-        tasks: plan.tasks.slice(0, 10).map(({ title, dueDate, dueTime }) => ({ title, date: dueDate, time: dueTime })),
-      })),
-    habits: state.habits.filter((habit) => !habit.archived).map((habit) => habit.name),
-    recentMoods: moods.map((mood) => ({ date: mood.date, value: mood.value })),
+    // Give voice the same real-life guardrails as the typed planner: explicit
+    // preferences, goals, daily workload, overdue work and declined ideas.
+    ...buildPlanningContext(state, range),
+    pendingTaskTitles: pending.map((task) => ({ title: task.title, date: task.dueDate, time: task.dueTime, priority: task.priority })),
+    recentMoods: state.moods.slice(-3).map((mood) => ({ date: mood.date, value: mood.value })),
   };
 }
 
@@ -106,9 +92,9 @@ The user may speak with ANY accent, and the transcript you receive is imperfect 
 Persian must be understood perfectly, however casually it is spoken. Expect fast colloquial Persian with Tehrani contractions and swallowed endings (میخوام، میخوای، میرم، برم، میشه، نیستش، خسته‌م، حوصلم سر رفته، یه کم، دوتا، هیچی), slang and filler words (مثلاً، یعنی، خلاصه، اصلاً، والا), Afghan/Dari or Tajik-flavored phrasing and vocabulary, Arabic-script typos (ي/ی, ك/ک, ة/ه), half-finished sentences, and Persian typed or transcribed in Latin letters — Finglish — such as "farda miam", "khasteam, ye hafte sabok michazi?", "do hafte kar daram". Treat ALL of that as normal Persian speech: read Finglish as Persian, repair recognition damage silently, and infer the meaning from context instead of giving up. Mixing Persian and English inside one breath is normal — understand both halves. Never ask the user to repeat, rephrase, or speak "properly".
 
 Rules:
-1. "reply": plain words meant to be heard out loud, IN THE USER'S LANGUAGE — if they speak Persian or Finglish, answer in warm, natural, conversational Persian (like a caring friend, not a textbook and not formal news-speak); if English, answer in English; if mixed, follow whichever dominates — no markdown, no bullet lists, no emojis, at most 60 words. Warm, human, direct. Never say "As requested". Dates and times inside the reply stay as plain digits.
-2. When the user wants anything planned, arranged, moved, or cleared — INCLUDING vague tired asks like "fix tomorrow for me" — include a "draft" built from their context: a realistic, honest plan, never packed, respecting fixed weekly times and existing events. Tasks must have a date inside ${'${range}'}. Use events only when a time is useful. Do not duplicate anything already listed in the context. Honor the LENGTH the user asked for: spread the plan across that whole span, and keep longer spans lighter per day. The context includes live schedule items and saved plans. Treat draft-status saved plans as proposals, not confirmed calendar events. If the requested activity/time conflicts with a named event, class, fixed time, or timed task, tell the user exactly what is already scheduled and ask what to protect or move; leave "draft" null until they answer. Never silently skip the request, overwrite an existing item, or move the existing commitment without explicit permission.
-3. If one crucial thing is missing (for example they asked to plan "this week" but the draft would depend on a specific day), ask ONE short spoken question in "reply", set "followUp" to the same question, and leave "draft" null.
+1. "reply": plain words meant to be heard out loud, IN THE USER'S LANGUAGE — if they speak Persian or Finglish, answer in warm, natural, conversational Persian (like a caring friend, not a textbook and not formal news-speak); if Finnish, answer in natural, warm Finnish; if English, answer in English; if mixed, follow whichever language dominates — no markdown, no bullet lists, no emojis, at most 60 words. Warm, human, direct, and specific to what they actually said; avoid generic filler. Never say "As requested" or claim that items have already been added: plans are drafts for the user to review. Dates and times inside the reply stay as plain digits.
+2. When the user wants anything planned, arranged, moved, or cleared — INCLUDING vague tired asks like "fix tomorrow for me" — include a "draft" built from their context: a realistic, honest plan, never packed, respecting fixed weekly times and existing events. Tasks must have a date inside ${'${range}'}. Use events only when a time is useful. Do not duplicate anything already listed in the context. Honor the LENGTH the user asked for: spread the plan across that whole span, and keep longer spans lighter per day. The context includes live schedule items, the user's saved preferences and goals, daily workload, and saved plans. Treat draft-status saved plans as proposals, not confirmed calendar events. If the requested activity/time conflicts with a named event, class, fixed time, or timed task, tell the user exactly what is already scheduled and ask what to protect or move; leave "draft" null until they answer. Never silently skip the request, overwrite an existing item, or move the existing commitment without explicit permission.
+3. If one crucial detail is missing (for example they asked to plan "this week" but the plan genuinely depends on a specific day), do not guess: put a brief acknowledgment in "reply", put ONE short spoken question in "followUp", and leave "draft" null. Do not repeat the follow-up question in "reply"; the app speaks both fields.
 4. Keep health ideas gentle and optional; never medical advice. If they sound low, answer kindly first, plan lightly second.
 5. "followUp": null or one short question that would genuinely change the plan. "draft": null or a JSON plan object.
 6. A draft may already be on screen ("currentDraft", with its range). If the user refers to that plan — revise it, lighten it, tighten it, move things in it, add to it, or take things out — return the FULL revised draft for that same range: keep every item they did not ask to change, apply their change, and update the summary. Only build a brand-new plan when they clearly ask for a different one.
@@ -276,11 +262,15 @@ export function pickVoice(voices: SpeechSynthesisVoiceLike[], lang: Lang): Speec
  * not the app language: a Persian answer to a Persian question needs a
  * Persian voice even when the app UI is English (and vice versa).
  */
-export function replyLang(text: string): 'en' | 'fa' {
+export function replyLang(text: string): Lang {
   const rtl = (text.match(/[\u0600-\u06FF]/g) ?? []).length;
   const latin = (text.match(/[a-z]/gi) ?? []).length;
-  if (rtl === 0 && latin === 0) return getLang() === 'fa' ? 'fa' : 'en';
-  return rtl >= latin ? 'fa' : 'en';
+  if (rtl > 0 && rtl >= latin) return 'fa';
+  // Finnish replies often contain ä/ö/å; for a short reply with none, follow
+  // the app's language rather than sending the text to an English voice.
+  if (getLang() === 'fi' || /[äöå]/i.test(text)) return 'fi';
+  if (latin === 0) return getLang();
+  return 'en';
 }
 
 /**

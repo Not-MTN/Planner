@@ -11,7 +11,19 @@ import { describe, expect, it } from 'vitest';
 // The desktop shell is CommonJS (Electron loads it directly); the tests are
 // ESM, so they pull it in through createRequire rather than a bundler shim.
 const require = createRequire(import.meta.url);
-const { contentType, contentSecurityPolicy, isHttpUrl, isInternal, normalizeAddress, originOf, resolveRequestedFile } = require('./lib.cjs');
+const {
+  WINDOWS_UPDATE_MANIFEST_URL,
+  contentType,
+  contentSecurityPolicy,
+  isHttpUrl,
+  isInternal,
+  isTrustedUpdateUrl,
+  normalizeAddress,
+  originOf,
+  resolveRequestedFile,
+  validateWindowsOffer,
+  windowsOfferFromManifest,
+} = require('./lib.cjs');
 
 function fakeBundle() {
   const root = mkdtempSync(join(tmpdir(), 'planner-bundle-'));
@@ -77,6 +89,7 @@ describe('contentSecurityPolicy', () => {
     expect(policy).toContain("object-src 'none'");
     expect(policy).toContain('connect-src');
     expect(policy).toContain('https://api.open-meteo.com');
+    expect(policy).not.toContain('api.github.com');
     expect(policy).not.toContain('https://planner.example.com');
   });
 
@@ -115,6 +128,43 @@ describe('resolveRequestedFile', () => {
       expect(resolved === null || resolved.startsWith(root)).toBe(true);
     }
     expect(resolveRequestedFile('/%00/app', root)).toBeNull();
+  });
+});
+
+describe('Windows updater contract', () => {
+  it('accepts only the stable release manifest and exact Windows installer path', () => {
+    const version = '1.4.2';
+    const hash = 'ab'.repeat(32);
+    const manifest = {
+      schemaVersion: 1,
+      product: 'Planner',
+      tag: `v${version}`,
+      version,
+      platforms: {
+        android: {},
+        windows: {
+          appId: 'com.notmtn.planner',
+          version,
+          installer: {
+            fileName: 'Planner-windows.exe',
+            downloadUrl: `https://github.com/Not-MTN/Planner/releases/download/v${version}/Planner-windows.exe`,
+            sizeBytes: 4096,
+            sha256: hash,
+          },
+        },
+      },
+    };
+    const offer = windowsOfferFromManifest(manifest);
+    expect(WINDOWS_UPDATE_MANIFEST_URL).toBe('https://github.com/Not-MTN/Planner/releases/latest/download/planner-update.json');
+    expect(offer).toMatchObject({ version, sha256: hash });
+    expect(validateWindowsOffer(offer)).toMatchObject({ version, sha256: hash });
+    expect(isTrustedUpdateUrl(offer.downloadUrl)).toBe(true);
+
+    expect(validateWindowsOffer({ ...offer, downloadUrl: 'https://example.com/Planner-windows.exe' })).toBeNull();
+    expect(validateWindowsOffer({ ...offer, appId: 'com.attacker.app' })).toBeNull();
+    expect(validateWindowsOffer({ ...offer, fileName: 'other.exe' })).toBeNull();
+    expect(validateWindowsOffer({ ...offer, sha256: 'bad' })).toBeNull();
+    expect(windowsOfferFromManifest({ ...manifest, version: '1.4.3' })).toBeNull();
   });
 });
 

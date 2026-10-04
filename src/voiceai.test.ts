@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { compressHistory, normalizeVoiceReply, pickVoice, replyLang, speakText, stopSpeaking, voiceRange, voiceSystemPrompt, voiceTurn, VOICE_HISTORY_LIMIT, type VoiceCurrentDraft } from './voiceai';
+import { buildVoiceContext, compressHistory, normalizeVoiceReply, pickVoice, replyLang, speakText, stopSpeaking, voiceRange, voiceSystemPrompt, voiceTurn, VOICE_HISTORY_LIMIT, type VoiceCurrentDraft } from './voiceai';
+import { setLang } from './i18n';
 import { DEFAULT_MAX_TOKENS, LONG_RANGE_MAX_TOKENS, GROQ_TEXT_MODEL, GROQ_VISION_MODEL } from './ai';
 import { createEmptyState } from './types';
 
@@ -9,8 +10,9 @@ const tomorrow = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
 
 describe('voice ai', () => {
   beforeEach(() => {
-    // every test starts with a predictable localStorage
+    // every test starts with a predictable language and localStorage
     localStorage.clear();
+    setLang('en');
   });
 
   it('keeps only the recent, trimmed conversation turns', () => {
@@ -68,6 +70,8 @@ describe('voice ai', () => {
     expect(prompt).toContain('no markdown');
     expect(prompt).toContain('tired');
     expect(prompt.toLowerCase()).toContain('persian');
+    expect(prompt).toContain('natural, warm Finnish');
+    expect(prompt).toContain('Do not repeat the follow-up question in "reply"');
   });
 
   it('is fluent in messy real-world Persian: colloquial, Dari, Finglish, typos', () => {
@@ -88,11 +92,24 @@ describe('voice ai', () => {
     expect(prompt).toContain('conversational Persian');
   });
 
-  it('speaks replies with a voice matching the reply text, not the app', () => {
+  it('speaks replies with a voice matching Persian, Finnish or English text', () => {
     expect(replyLang('باشه، فردا رو سبک می‌چینم.')).toBe('fa');
     expect(replyLang('Sure, keeping tomorrow light.')).toBe('en');
+    expect(replyLang('Voin siirtää sen huomiselle.')).toBe('fi');
     // Mostly-Persian with a few Latin words still speaks Persian.
     expect(replyLang('باشه، deep work رو می‌ذارم عصر.')).toBe('fa');
+    setLang('fi');
+    expect(replyLang('Kyllä, sopii.')).toBe('fi');
+    expect(pickVoice([{ lang: 'fi-FI', name: 'Finnish voice' }], 'fi')?.name).toBe('Finnish voice');
+  });
+
+  it('gives voice planning the typed planner context and workload guardrails', () => {
+    const context = buildVoiceContext(createEmptyState(), today, voiceRange(today)) as Record<string, unknown>;
+    expect(context).toHaveProperty('memory');
+    expect(context).toHaveProperty('goals');
+    expect(context).toHaveProperty('perDayBusy');
+    expect(context).toHaveProperty('declinedSuggestions');
+    expect(context).toHaveProperty('pendingTaskTitles');
   });
 
   it('sends the utterance, bounded history and schedule context to the Groq proxy', async () => {

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest';
-import { clearSnoozes, dueReminders, loadSnoozes, snoozeReminder, DEFAULT_REMINDERS, type ReminderSettings } from './reminders';
+import { clearSnoozes, dueReminders, loadSnoozes, snoozeReminder, upcomingReminders, DEFAULT_REMINDERS, type ReminderSettings } from './reminders';
+import { addTask } from './mutate';
 import { createEmptyState, type PlannerState } from './types';
 
 /**
@@ -36,6 +37,18 @@ function withEvent(state: PlannerState, at: Date): PlannerState {
   };
 }
 
+function withTask(state: PlannerState, date: string): PlannerState {
+  return addTask(state, {
+    title: 'Send report',
+    priority: 'medium',
+    dueDate: date,
+    dueTime: '11:00',
+    category: 'work',
+    note: '',
+    goalId: null,
+  }, 'task-1', NOW.toISOString());
+}
+
 /** 2026-09-30 09:50 local — ten minutes before a 10:00 event. */
 const NOW = new Date(2026, 8, 30, 9, 50, 0);
 const KEY = '2026-09-30|event|event-1|10:00';
@@ -52,6 +65,48 @@ describe('reminders fire once', () => {
     // The caller records the key; the same minute must not fire twice.
     fired.add(KEY);
     expect(dueReminders(state, NOW, SETTINGS, fired)).toEqual([]);
+  });
+});
+
+describe('native background reminder schedule', () => {
+  it('schedules warm, task-specific reminders at local event and task times', () => {
+    const now = new Date(2026, 8, 30, 9, 0, 0);
+    const date = '2026-09-30';
+    const state = withTask(withEvent(createEmptyState(), now), date);
+    const scheduled = upcomingReminders(state, now, SETTINGS);
+
+    expect(scheduled.map((reminder) => reminder.key)).toEqual([
+      '2026-09-30|event|event-1|10:00',
+      '2026-09-30|task|task-1|11:00',
+    ]);
+    expect(scheduled[0]?.at).toEqual(new Date(2026, 8, 30, 9, 50, 0));
+    expect(scheduled[0]?.title).toBe('Coming up: Dentist');
+    expect(scheduled[0]?.body).toContain('get settled');
+    expect(scheduled[1]?.at).toEqual(new Date(2026, 8, 30, 10, 50, 0));
+    expect(scheduled[1]?.title).toBe('A gentle nudge');
+    expect(scheduled[1]?.body).toContain('Send report');
+    expect(scheduled[1]?.body).toContain('One step at a time');
+  });
+
+  it('adds a warm day digest and skips reminders that are already in the past', () => {
+    const now = new Date(2026, 8, 30, 9, 10, 0);
+    const settings = { ...SETTINGS, digest: true, digestTime: '09:05' };
+    const state = withTask(withEvent(createEmptyState(), now), '2026-09-30');
+    const scheduled = upcomingReminders(state, now, settings);
+
+    expect(scheduled.map((reminder) => reminder.key)).toEqual([
+      '2026-09-30|event|event-1|10:00',
+      '2026-09-30|task|task-1|11:00',
+    ]);
+    expect(scheduled.some((reminder) => reminder.key.endsWith('|digest'))).toBe(false);
+    const beforeDigest = upcomingReminders(state, new Date(2026, 8, 30, 9, 0, 0), settings);
+    const digest = beforeDigest.find((reminder) => reminder.key.endsWith('|digest'));
+    expect(digest?.body).toContain('1 event and 1 open task ahead');
+  });
+
+  it('does nothing when reminders are disabled', () => {
+    const state = withEvent(createEmptyState(), NOW);
+    expect(upcomingReminders(state, new Date(2026, 8, 30, 9, 0), DEFAULT_REMINDERS)).toEqual([]);
   });
 });
 

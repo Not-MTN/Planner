@@ -202,6 +202,47 @@ describe('app smoke', () => {
     expect(text()).not.toContain('Buy milk');
   });
 
+  it('confirms task deletion only after the planner has saved it, and offers undo', () => {
+    mountApp();
+    const input = document.querySelector<HTMLInputElement>('.quick-add input');
+    setInputValue(input as HTMLInputElement, 'Buy milk');
+    act(() => document.querySelector<HTMLFormElement>('.quick-add')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    const remove = document.querySelector<HTMLButtonElement>('button[aria-label="Remove Buy milk"]');
+    expect(remove).toBeTruthy();
+
+    act(() => remove?.click());
+    expect(text()).toContain('Task “Buy milk” removed.');
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}') as { tasks?: Array<{ title: string }> };
+    expect(saved.tasks?.some((task) => task.title === 'Buy milk')).toBe(false);
+
+    const undo = [...document.querySelectorAll<HTMLButtonElement>('.toast-action')].find((button) => button.textContent === 'Undo');
+    expect(undo).toBeTruthy();
+    act(() => undo?.click());
+    expect(text()).toContain('Buy milk');
+  });
+
+  it('leaves a task in place and explains when a deletion could not be saved', () => {
+    mountApp();
+    const input = document.querySelector<HTMLInputElement>('.quick-add input');
+    setInputValue(input as HTMLInputElement, 'Buy milk');
+    act(() => document.querySelector<HTMLFormElement>('.quick-add')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    const remove = document.querySelector<HTMLButtonElement>('button[aria-label="Remove Buy milk"]');
+    expect(remove).toBeTruthy();
+
+    const originalSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function setItem(key: string, value: string) {
+      if (key === STORAGE_KEY) throw new Error('Storage unavailable');
+      return originalSetItem.call(this, key, value);
+    };
+    try {
+      act(() => remove?.click());
+    } finally {
+      Storage.prototype.setItem = originalSetItem;
+    }
+    expect(text()).toContain('Buy milk');
+    expect(text()).toContain('Couldn’t remove “Buy milk”; your changes were not saved.');
+  });
+
   it('opens the palette, searches, and navigates', async () => {
     mountApp();
     pressKey('k', { metaKey: true });
@@ -737,6 +778,9 @@ describe('app smoke', () => {
     const text = () => document.body.textContent ?? '';
     expect(text()).toContain('Welcome to Planner');
     expect(text()).toContain('Pick your language');
+    expect(
+      [...document.querySelectorAll('.tour-lang-btn strong')].map((language) => language.textContent),
+    ).toEqual(['English', 'فارسی']);
     expect(document.querySelector('[data-tour]')).toBeTruthy();
 
     // Picking the already-active language advances without a reload.

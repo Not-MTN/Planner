@@ -1,26 +1,30 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { StrictMode, act } from 'react';
+import { StrictMode, act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { App } from './App';
-import { RELEASES_API, RELEASES_PAGE, dismissVersion } from './shared/updates';
+import { currentVersion, RELEASES_PAGE, type WindowsUpdateOffer } from './shared/updates';
+import {
+  createStartupState,
+  StartupProvider,
+  type StartupState,
+  type StartupUpdatePhase,
+} from './shared/startup';
 
-// The notice only belongs in a packaged app; the website has its own service
-// worker prompt. Flipped per test rather than stubbed away, so both halves of
-// that rule are covered.
-const shell = vi.hoisted(() => ({ native: false }));
-vi.mock('./shared/nativeShell', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('./shared/nativeShell')>()),
-  isNativeShell: () => shell.native,
+const updater = vi.hoisted(() => ({
+  downloadPackagedUpdate: vi.fn(),
+  applyPackagedUpdate: vi.fn(),
+}));
+vi.mock('./shared/updateRuntime', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./shared/updateRuntime')>()),
+  downloadPackagedUpdate: updater.downloadPackagedUpdate,
+  applyPackagedUpdate: updater.applyPackagedUpdate,
 }));
 
 /**
- * The notice a packaged app shows when a newer release exists.
- *
- * It is checked here rather than in updates.ts alone because the plumbing is
- * where a feature like this fails quietly: the check can be correct and still
- * never reach the screen, and the whole point of the thing is that someone sees
- * it. The app has to keep working when the check fails, too.
+ * The packaged notice consumes an offer checked by AccountGate. The updater
+ * integration itself is mocked here; manifest selection and native bridges
+ * have their own focused tests.
  */
 
 declare global {
@@ -33,21 +37,46 @@ beforeAll(() => {
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
-let fetchSpy: ReturnType<typeof vi.spyOn>;
 
-function releaseResponse(tag: string): Response {
-  return new Response(JSON.stringify({ tag_name: tag }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+function updateOffer(version: string): WindowsUpdateOffer {
+  return {
+    platform: 'windows',
+    version,
+    appId: 'com.notmtn.planner',
+    fileName: 'Planner-windows.exe',
+    downloadUrl: `https://github.com/Not-MTN/Planner/releases/download/v${version}/Planner-windows.exe`,
+    sizeBytes: 1024,
+    sha256: 'ab'.repeat(32),
+  };
 }
 
-/** Mount the app and let the update check's promise settle. */
-async function mountApp(): Promise<void> {
+function TestPlanner({ phase, version }: { phase: StartupUpdatePhase; version?: string }) {
+  const [startup, setStartup] = useState<StartupState>(() => ({
+    ...createStartupState(currentVersion(), phase !== 'not-applicable'),
+    update: {
+      phase,
+      availableVersion: version ?? null,
+      offer: version ? updateOffer(version) : null,
+      progress: null,
+      error: null,
+      notApplicableReason: null,
+    },
+  }));
+  return (
+    <StartupProvider state={startup} setState={setStartup}>
+      <App />
+    </StartupProvider>
+  );
+}
+
+async function mountApp(phase: StartupUpdatePhase, version?: string): Promise<void> {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
     root?.render(
       <StrictMode>
-        <App />
+        <TestPlanner phase={phase} version={version} />
       </StrictMode>,
     );
   });
@@ -57,16 +86,13 @@ function text(): string {
   return document.body.textContent ?? '';
 }
 
-/** Does the app ask GitHub for the newest release? */
-function askedForLatest(): boolean {
-  return fetchSpy.mock.calls.some((call: unknown[]) => String(call[0]).includes(RELEASES_API));
-}
-
 beforeEach(() => {
-  shell.native = true;
   localStorage.clear();
   document.body.innerHTML = '';
-  // jsdom has no matchMedia; the app's tour and narrow-screen checks need it.
+  updater.downloadPackagedUpdate.mockReset();
+  updater.applyPackagedUpdate.mockReset();
+  updater.downloadPackagedUpdate.mockResolvedValue(undefined);
+  updater.applyPackagedUpdate.mockResolvedValue(undefined);
   window.matchMedia = ((query: string) => ({
     matches: false,
     media: query,
@@ -79,7 +105,6 @@ beforeEach(() => {
   })) as unknown as typeof window.matchMedia;
   Element.prototype.scrollIntoView = () => undefined;
   window.scrollTo = () => undefined;
-  // The first-run tour would otherwise cover the app in a dialog.
   localStorage.setItem('planner-tour-done', '1');
 });
 
@@ -88,52 +113,71 @@ afterEach(() => {
   root = null;
   container?.remove();
   container = null;
-  fetchSpy?.mockRestore();
-  vi.restoreAllMocks();
 });
 
-describe('the update notice', () => {
-  it('says so, with a download link, when a newer release exists', async () => {
-    fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => releaseResponse('v99.0.0'));
-    await mountApp();
-
-    expect(askedForLatest()).toBe(true);
-    expect(text()).toContain('99.0.0');
+describe('the packaged update notice', () => {
+  it('offers a verified update and links to its release page', async () => {
+    await mountApp('available', '1.0.1');
+    expect(text()).toContain('Planner 1.0.1 is available to update.');
+    expect(document.querySelector('button.update-download-action')?.textContent).toContain('Download update');
     const link = Array.from(document.querySelectorAll('a')).find((a) => a.getAttribute('href') === RELEASES_PAGE);
-    expect(link).toBeTruthy();
-    expect(link?.textContent).toContain('Download');
+    expect(link?.textContent).toContain('Release page');
   });
 
-  it('stays quiet when this build is already the newest', async () => {
-    // The same version this build was made from, published as a release.
-    const { currentVersion } = await import('./shared/updates');
-    fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => releaseResponse(`v${currentVersion()}`));
-    await mountApp();
-    expect(text()).not.toContain('is available to download');
+  it('stays quiet when the installed build is current or the offer was dismissed', async () => {
+    await mountApp('current');
+    expect(document.querySelector('.update-toast')).toBeNull();
+    if (root) act(() => root?.unmount());
+    root = null;
+    container?.remove();
+    container = null;
+
+    await mountApp('dismissed', '1.0.1');
+    expect(document.querySelector('.update-toast')).toBeNull();
   });
 
-  it('does not ask again about a version the reader waved away', async () => {
-    dismissVersion('99.0.0');
-    fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => releaseResponse('v99.0.0'));
-    await mountApp();
-    expect(text()).not.toContain('99.0.0');
+  it('records Later in storage and removes an available notice', async () => {
+    await mountApp('available', '1.0.1');
+    const later = document.querySelector<HTMLButtonElement>('.update-toast button[aria-label="Later"]');
+    expect(later).toBeTruthy();
+    act(() => later?.click());
+    expect(localStorage.getItem('planner-update-dismissed')).toBe('1.0.1');
+    expect(document.querySelector('.update-toast')).toBeNull();
   });
 
-  it('does not appear on the website, which updates itself', async () => {
-    shell.native = false;
-    fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => releaseResponse('v99.0.0'));
-    await mountApp();
-    // Not even asked: a browser tab has the service worker for this.
-    expect(askedForLatest()).toBe(false);
-    expect(text()).not.toContain('99.0.0');
+  it('shows byte progress, then offers installation and reopening', async () => {
+    let finishDownload: (() => void) | null = null;
+    updater.downloadPackagedUpdate.mockImplementation((_offer: WindowsUpdateOffer, onProgress: (progress: { bytesReceived: number; totalBytes: number }) => void) => {
+      onProgress({ bytesReceived: 512, totalBytes: 1024 });
+      return new Promise<void>((resolve) => { finishDownload = resolve; });
+    });
+    await mountApp('available', '1.0.1');
+
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>('.update-download-action')?.click();
+      await Promise.resolve();
+    });
+    expect(text()).toContain('Downloading update · 50%');
+    expect(document.querySelector<HTMLProgressElement>('.update-download-progress')?.value).toBe(512);
+
+    await act(async () => {
+      finishDownload?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(text()).toContain('Update ready to install');
+    const install = Array.from(document.querySelectorAll('button')).find((button) => button.textContent?.includes('Install and reopen'));
+    expect(install).toBeTruthy();
+
+    await act(async () => {
+      install?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(updater.applyPackagedUpdate).toHaveBeenCalledOnce();
+    expect(text()).toContain('Update installed. Opening Planner…');
   });
 
-  it('is invisible, and harmless, when the request fails', async () => {
-    // No network is the normal state for this app, not an error worth showing.
-    fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'));
-    await mountApp();
-    expect(text()).not.toContain('is available to download');
-    // The planner itself still rendered.
-    expect(text().length).toBeGreaterThan(0);
+  it('does not offer an update when no eligible platform offer exists', async () => {
+    await mountApp('not-applicable');
+    expect(document.querySelector('.update-toast')).toBeNull();
   });
 });

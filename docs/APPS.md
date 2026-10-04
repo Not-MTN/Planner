@@ -135,18 +135,30 @@ From the command line instead:
 
 ```bash
 cd android
-./gradlew assembleDebug                 # installable debug APK
-./gradlew assembleRelease bundleRelease # signed release APK + Play bundle
+./gradlew assembleDirectDebug                           # sideload/debug APK
+./gradlew assembleDirectRelease bundlePlayRelease      # direct APK + Play AAB
 ```
 
-Outputs land in `android/app/build/outputs/apk/release/` and
-`android/app/build/outputs/bundle/release/`.
+The `direct` and `play` product flavors share the same permanent package ID
+and signing config. Only `src/direct/AndroidManifest.xml` requests
+`REQUEST_INSTALL_PACKAGES` for the user-started sideload updater; the Play AAB
+contains no such permission, and Play remains responsible for its own updates.
+The CI job copies the direct flavor to `app-release.apk` (the stable website
+and updater name) and the Play flavor to `app-play-release.aab`. Gradle's
+variant outputs are under `outputs/apk/direct/release/` and
+`outputs/bundle/playRelease/`.
 
 - **Requirements:** JDK 21 and the Android SDK (Android Studio installs both).
   `minSdkVersion 24` (Android 7), `targetSdkVersion 36`.
-- **Permissions:** `INTERNET` only. No location, no contacts, no camera. The
-  microphone is used through the WebView for the voice features, and Android
-  asks at that moment.
+- **Permissions:** `INTERNET`, microphone (`RECORD_AUDIO`), and notifications
+  (`POST_NOTIFICATIONS` on Android 13+). The microphone prompt appears only when
+  someone starts voice input; the notification prompt appears only when they
+  turn reminders on. The app never requests broad photo/storage access: Android's
+  system Photo Picker grants access only to the picture the person taps. The
+  direct-APK flavor declares package-install access only for the updater and
+  opens Android's “install unknown apps” setting only after someone taps
+  **Install**; the Play flavor does not include that permission. No location,
+  contacts, or camera permission is requested.
 - **Package name:** `com.notmtn.planner` in `android/app/build.gradle`. Change
   it *before* your first store upload — after that it is permanent.
 
@@ -171,49 +183,64 @@ keytool -genkey -v -keystore android/app/keystore/release.jks \
 
 For CI, add these repository secrets and the workflow writes the same files
 itself: `ANDROID_KEYSTORE_BASE64` (`base64 -w0 release.jks`),
-`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`.
+`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD`.
+Also add the repository variable `ANDROID_SIGNING_CERT_SHA256`, the public
+certificate fingerprint printed by the helper below. The workflow verifies the
+APK against that pin and establishes signing continuity with existing stable
+releases (then carries that verified fingerprint forward in the update feed).
 
-**Without those secrets, the APK you publish cannot be updated.** The workflow
-still builds and the APK installs — but it is signed with a debug key, and
-Android generates that key per machine. A CI job runs on a fresh machine every
-time, so each release is signed with a different key, and Android refuses to
-install an app whose signature does not match the installed one. Anyone who
-installed the earlier APK has to uninstall it first, which deletes their planner
-data on that device unless it was synced. Tagged builds therefore print a
-warning in the run summary when no keystore is configured.
+A branch/manual build may use the debug key for testing. **A public version-tag
+release will stop before building if the permanent signing key or fingerprint
+is missing, and it will refuse to publish if the key does not match an APK
+already released.** Publishing a differently signed APK would make Android
+reject the in-place update; uninstalling to get around that can erase local
+planner data. The release gate exists to avoid that outcome, not to warn after
+it has happened.
 
-Generate the keystore once, keep it, and use it for every release. It cannot be
-regenerated later without breaking updates for everyone who already installed
-the app — that is what "upload key" means. One command does all of it:
+Generate the keystore once, keep it, and use it for every direct APK release.
+It cannot be regenerated later without breaking updates for everyone who
+already installed the app. One command does all of it:
 
 ```bash
 npm run android:keystore
 ```
 
 It creates `android/app/keystore/release.jks` and `android/keystore.properties`
-(both git-ignored), then prints the four secret values ready to paste, with the
-base64 also written to a file so a long string does not have to be copied out of
-a terminal. It refuses to overwrite an existing key unless you pass `--force`,
-because replacing one strands every installed copy.
+(both git-ignored), then prints the four secret values and the
+`ANDROID_SIGNING_CERT_SHA256` fingerprint. Add the secrets under **Settings →
+Secrets and variables → Actions → Secrets** and the fingerprint under
+**Variables**. The base64 is also written to a file so a long string does not
+have to be copied out of a terminal. It refuses to overwrite an existing key
+unless you pass `--force`, because replacing one strands every installed copy.
 
-Run it on your own machine, not in CI: it is your key, and the point of the
-script is that nothing has to be sent anywhere.
+If the key already exists, print its fingerprint without changing it:
+
+```bash
+npm run android:keystore -- --fingerprint
+```
+
+Run key generation on your own machine, not in CI: it is your key, and the
+point of the script is that nothing has to be sent anywhere.
 
 ### Where to publish
 
 | Store | What to upload | Notes |
 | --- | --- | --- |
-| Google Play | `app-release.aab` | Play App Signing; your keystore becomes the *upload* key. |
-| Xiaomi GetApps, Samsung Galaxy Store, Huawei AppGallery, Amazon | the same `.aab` or `.apk` | They accept the identical build. One APK covers Xiaomi/Redmi/POCO, Samsung, Pixel and Huawei phones; nothing here uses Google Play Services, so it works on Huawei/Honor devices with no Play store. |
-| Your own site / GitHub releases | `app-release.apk` | Sideloading requires "install unknown apps" on the device; the CI workflow attaches the APK to each release so a download link always exists. |
+| Google Play | `app-play-release.aab` | Play App Signing; your keystore becomes the *upload* key. This flavor leaves update delivery to Play and does not request package-install permission. |
+| Xiaomi GetApps, Samsung Galaxy Store, Huawei AppGallery, Amazon | `app-play-release.aab` or `app-release.apk` | The AAB has the Play-safe manifest; `app-release.apk` is the direct/sideload build. One APK covers Xiaomi/Redmi/POCO, Samsung, Pixel and Huawei phones; nothing here uses Google Play Services. |
+| Your own site / GitHub releases | `app-release.apk` | Direct/sideload flavor. Android asks for “install unknown apps” only if the user chooses **Install** inside Planner; CI attaches the APK to each release. |
 | F-Droid | source build | F-Droid builds it themselves from the repository; the app has no proprietary dependencies. |
 
 Version numbers come from `versionCode` / `versionName` in
-`android/app/build.gradle` (both `1` by default). The Apps workflow overrides
-them on a version tag: tag `v1.2.0` builds `versionName 1.2.0`, and
-`versionCode` becomes the workflow run number, which always increases — so a
-tagged build can go straight to Play without editing anything. A store upload
-made by hand needs `versionCode` bumped yourself; it must never repeat.
+`android/app/build.gradle` for local builds. Tagged releases require a stable
+`vMAJOR.MINOR.PATCH` tag: `v1.2.0` produces `versionName 1.2.0`, while
+`versionCode` is the monotonically increasing Apps workflow run number. The
+release gate checks that the APK actually contains that package ID and code.
+A store upload made by hand needs `versionCode` bumped yourself; it must never
+repeat. Google Play re-signs Play-delivered APKs with its Play App Signing key;
+the in-app APK update path is for direct/sideloaded APK installs signed with
+this repository's permanent key. Play-managed installs should continue to update
+through Play.
 
 ## 4. iOS
 
@@ -223,6 +250,16 @@ made by hand needs `versionCode` bumped yourself; it must never repeat.
 npm run native:sync -- ios
 npx cap open ios              # opens Xcode
 ```
+
+### Permission prompts and privacy
+
+The iOS usage descriptions are in `ios/App/App/Info.plist`. Microphone and
+speech-recognition permission are requested only after the person starts voice
+input. Notification permission is requested only when they turn reminders on.
+Photo Library access is reached only after they tap **Add a plan picture**;
+the picker returns only their selection, not a scan of the library. No permission
+prompt is shown on install or app launch. These flows need no location,
+contacts, or camera access.
 
 - Signing: select your team in Xcode → App target → **Signing & Capabilities**.
   `PRODUCT_BUNDLE_IDENTIFIER` is `com.notmtn.planner`; `MARKETING_VERSION` is
@@ -258,11 +295,13 @@ adaptive icon, `resources/icon-background.png` is the paper-coloured layer,
 ## 6. Releases from CI
 
 `.github/workflows/apps.yml` builds everything on demand (Actions → Apps → Run
-workflow) and on every `v*` tag, attaching the files to that release:
+workflow) and for valid stable `vMAJOR.MINOR.PATCH` tags, attaching the files
+to that release (a malformed `v*` tag fails its release-contract gate):
 
 - Windows `.exe`, macOS `.dmg`/`.zip`, Linux `.AppImage`/`.deb`/`.rpm`
 - Android `.apk` and `.aab`
 - iOS `.xcarchive.zip` and the packaged `.app.zip` (unsigned)
+- `planner-update.json`, the versioned Android/Windows updater contract
 
 ### Every build checks the deployment first
 
@@ -293,14 +332,17 @@ changes**. So:
 
 - **no version number in an artifact name.** `Planner-1.2.0-windows-x64.exe`
   would break every button on the site at the next release. The names are
-  `Planner-windows.exe`, `Planner-macos-<arch>.dmg`, `Planner-linux-<arch>.*`
-  and `app-release.apk`, and the version lives on the release, not in the file.
-- **the names are listed in `src/marketing/downloads.ts`.** Rename an artifact
-  in `desktop/electron-builder.yml` (or change the APK's name in `apps.yml`) and
-  you have to change it there too.
-- `npm run check:downloads` asks the live release whether every one of those
-  names still exists, and the release job runs it right after uploading — so a
-  mismatch fails the build that created it, not a visitor's click.
+  `Planner-windows.exe`, `Planner-macos-<arch>.dmg`, `Planner-linux-<arch>.*`,
+  `app-release.apk`, and the update-feed file `planner-update.json`; the version
+  lives in package metadata and the release tag, not in these asset names.
+- **The website-button names are listed in `src/marketing/downloads.ts`.**
+  Rename an installer in `desktop/electron-builder.yml` or the APK in `apps.yml`
+  and update that list too. `planner-update.json` is the separate updater feed,
+  generated by `scripts/create-update-manifest.mjs` and required by the release
+  upload step.
+- `npm run check:downloads` asks the live release whether every website download
+  still exists, and the release job runs it right after uploading — so a mismatch
+  fails the build that created it, not a visitor's click.
 
 Windows is deliberately a single installer for both architectures:
 electron-builder only produces a separate installer per architecture when the
@@ -327,52 +369,107 @@ So a build made by pushing a tag is an offline-first app pointed at the
 deployment in step 3, and one of the two things below is all you need to change
 that.
 
-Tagged builds are versioned from the tag: `v1.2.0` produces
-`Planner-1.2.0-windows-x64.exe`, an Android `versionName` of 1.2.0 with the run
-number as `versionCode`, and the same 1.2.0 in the iOS archive. Installer and
-bundle file names carry the version, so nothing has to be renamed before an
-upload. Write the tag as `vMAJOR.MINOR.PATCH` — `v1.2.0`, not `v1.2` — because
-the desktop installers need a full semantic version.
+Tagged builds are versioned from the tag: `v1.2.0` produces a Windows app
+version of 1.2.0 with the stable public installer name `Planner-windows.exe`,
+an Android `versionName` of 1.2.0 with the run number as `versionCode`, and the
+same 1.2.0 in the iOS archive. The installer names stay stable across releases;
+the version lives in package metadata and the release tag. Write the tag as
+`vMAJOR.MINOR.PATCH` — `v1.2.0`, not `v1.2` — because desktop installers need
+a full semantic version.
+
+Version-tag jobs also run `scripts/validate-release-contract.mjs`. It locks the
+Android package ID and Windows `appId`, protects the NSIS app-data setting, and
+requires the Android signing secrets plus the pinned certificate fingerprint.
+The Android job verifies the APK's actual package, `versionCode`, and signing
+certificate. When bootstrapping the feed it compares against existing stable
+release APKs; later releases compare against the prior verified signer in the
+feed. A mismatch fails the release instead of publishing an APK that could not
+replace an installed copy.
 
 ## 7. Updates
 
-A packaged app carries the planner inside it, so the service-worker prompt the
-website shows can never fire there — the code cannot change under the app. What
-happens instead: on launch, the app asks GitHub for the newest published release
-(`src/shared/updates.ts`) and, when that is newer than the build it is running,
-shows one toast — "Planner 1.2.0 is available to download", with a Download
-link to the releases page and a Later button. Dismissing a version keeps it
-quiet until the next one exists.
+### Release contract (Phase 1)
 
-It is deliberately quiet, and it never breaks anything:
+Every stable version-tag release now includes the fixed-name feed
+`planner-update.json` at
+`https://github.com/Not-MTN/Planner/releases/latest/download/planner-update.json`.
+It records the schema and app version, stable Android package ID and
+`versionCode`, the Android signing-certificate SHA-256, and the exact APK URL,
+size and SHA-256. It also records the stable Windows `appId`, NSIS installer
+URL, size and SHA-256. The per-version asset URLs avoid a race if a newer
+release appears while a download is in progress.
 
-- no network, a rate limit, a malformed answer or a blocked request all mean
-  "we do not know", which is not worth interrupting anyone about;
-- a draft or pre-release is never offered, and a pre-release sorts below the
-  release it leads to (`1.2.0-beta` is not newer than `1.2.0`);
-- it only runs inside a packaged app. A browser tab updates itself through the
-  service worker, so it never sees this toast.
+The manifest intentionally covers **direct APK installs on Android** and
+Windows installers only. Google Play updates Play-installed copies itself;
+iOS/App Store updates are deferred. Android still shows the system install
+confirmation for a downloaded sideloaded APK. The app is replaced in place
+only when its Android package and signing identity match; it must never
+uninstall first. Windows keeps the same Electron `appId`, and the NSIS config
+keeps app data when uninstalling, so a normal update does not reset the planner.
 
-The version a build reports comes from `PLANNER_VERSION_NAME`, which the Apps
-workflow sets from the tag — a `v1.2.0` build of any platform knows it is 1.2.0.
+The release workflow blocks a tag unless the permanent Android keystore and
+`ANDROID_SIGNING_CERT_SHA256` Actions variable are configured. It verifies the
+built APK's actual package, version code and certificate, compares its signer
+with previously released APKs, and checksums the APK and Windows installer
+before writing the feed. This prevents accidentally publishing an update that
+Android would reject and protects the local data of installed copies.
 
-**It tells people; it does not update them.** Installing the newer build stays
-their choice, and on Android that install only succeeds if the app is signed
-with the same key as before (see §3, Release signing). A real
-install-it-yourself update would mean `electron-updater` on the desktop
-targets, with a signing certificate to match.
+### Packaged startup, download and install flow (Phases 2–3)
+
+The `/app` startup screen checks the account/session, connection, installed
+version and update feed together. The update check never delays opening the
+installed/local planner. Its result moves into shared startup state and then to
+the planner's quiet update notice, which shows download progress, verification,
+installation status, **Later**, retry and a release-page link.
+
+Windows and direct-APK Android builds read the stable `planner-update.json`
+contract; they do not treat an arbitrary newer GitHub tag as an installable
+update. Every asset has an exact stable filename, per-release URL, declared
+size and SHA-256. Downloads are bounded, hashed and checked against those
+values before an installer is allowed to run.
+
+On **Android**, the app checks the installed package ID, current signing
+certificate, installer source, `versionName` and monotonic `versionCode` before
+offering an APK. Play-installed copies are left to Google Play. For an eligible
+direct install, the APK is downloaded to the app's private cache, its package,
+version, signer and checksum are verified, and Android's own package installer
+asks the user to confirm. If Android requires “install unknown apps” access,
+Planner opens that system setting only after the user chooses **Install**.
+After an accepted update the new Planner is reopened; cancellation leaves the
+current app usable. No uninstall, data wipe or setup reset is part of the flow.
+
+On **Windows**, the Electron main process validates the release feed and
+installer request, downloads into a temporary directory, and checks the exact
+size and SHA-256 before the UI can launch the NSIS installer. The same stable
+Electron app ID and per-user install path are retained, NSIS does not delete
+Planner's user-data directory, and the updated app is opened when installation
+finishes.
+
+Google Play remains responsible for Play-managed Android installs. iOS and
+App Store updates are deferred. In any packaged app, no network, a blocked
+feed or a malformed response means “we do not know”: startup continues with the
+installed version and does not interrupt offline use. Browser tabs continue to
+update themselves through the service worker and do not use the native updater.
 
 ## 8. What the shells do not do yet
 
 Named plainly, because each one is a real feature and none of them is hidden:
 
-- **Reminders inside the apps.** The reminder engine runs while the app is
-  open and shows a system notification. Real scheduled notifications while the
-  app is closed need `@capacitor/local-notifications` (Android and iOS), which
-  is the next step. In a browser tab, Web Push already covers this.
-- **Web Push subscriptions** (`Settings → Notifications`) are a browser
-  feature; the setting is inert inside a shell because there is no push
-  endpoint.
+- **Reminders inside the apps** use `@capacitor/local-notifications` on both
+  Android and iOS. After the person enables reminders and grants notification
+  permission, Planner replaces the device schedule with upcoming events, timed
+  tasks, and the optional morning digest (up to 60 notices from the next 31
+  days). The OS can deliver them while Planner is closed; no server or special
+  exact-alarm permission is needed. Disabling reminders cancels the pending
+  schedule. The same settings show in-app reminders as a fallback if OS
+  notifications are unavailable.
+- **Web Push subscriptions** are a browser/PWA feature; they are separate from
+  the on-device reminder schedule in the mobile shells.
+- **Feature-gated access:** voice input requests microphone and speech
+  recognition only when started. **Add a plan picture** opens the system photo
+  picker only after an explicit tap; Android grants access to the chosen image,
+  and iOS may show its Photo Library prompt then. No permission is requested at
+  install or app startup.
 - **Passkeys** (see §2).
 - **Deep links.** A guardian's QR code opens `https://your-app/#/panels?invite=…`
   in a browser. Opening that link straight into the installed app needs

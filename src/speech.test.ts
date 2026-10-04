@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest';
-import { bestTranscript, classifySpeechError, loadSpeechLocaleId, recognitionLang, saveSpeechLocaleId, SPEECH_LOCALES } from './speech';
+import { bestTranscript, classifySpeechError, loadSpeechLocaleId, recognitionLang, saveSpeechLocaleId, speechAvailable, SPEECH_LOCALES } from './speech';
+import { setLang } from './i18n';
 
 describe('speech error taxonomy', () => {
   it('maps every engine error into a message the UI knows', () => {
@@ -20,13 +21,30 @@ describe('speech error taxonomy', () => {
   });
 });
 
-describe('accent-aware listening', () => {
-  beforeEach(() => localStorage.clear());
+describe('native speech availability', () => {
+  it('uses the native recognizer inside Android and iOS shells', () => {
+    const shell = window as Window & { Capacitor?: { isNativePlatform?: () => boolean; getPlatform?: () => string } };
+    const original = shell.Capacitor;
+    shell.Capacitor = { isNativePlatform: () => true, getPlatform: () => 'android' };
+    expect(speechAvailable()).toBe(true);
+    shell.Capacitor = { isNativePlatform: () => true, getPlatform: () => 'ios' };
+    expect(speechAvailable()).toBe(true);
+    if (original) shell.Capacitor = original;
+    else delete shell.Capacitor;
+  });
+});
 
-  it('offers several English accents plus Persian and an auto choice', () => {
+describe('accent-aware listening', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    setLang('en');
+  });
+
+  it('offers several English accents plus Finnish, Persian and an auto choice', () => {
     const ids = SPEECH_LOCALES.map((locale) => locale.id);
     expect(ids).toContain('auto');
     expect(ids).toContain('en-IN');
+    expect(ids).toContain('fi-FI');
     expect(ids).toContain('fa-IR');
     for (const locale of SPEECH_LOCALES) expect(locale.label.length).toBeGreaterThan(0);
   });
@@ -43,7 +61,10 @@ describe('accent-aware listening', () => {
     saveSpeechLocaleId('en-GB');
     expect(recognitionLang()).toBe('en-GB');
     saveSpeechLocaleId('auto');
-    // In tests the app language is English, so auto resolves to en-US.
+    // Auto follows the app language, so Finnish speakers are heard in Finnish.
+    setLang('fi');
+    expect(recognitionLang()).toBe('fi-FI');
+    setLang('en');
     expect(recognitionLang()).toBe('en-US');
   });
 

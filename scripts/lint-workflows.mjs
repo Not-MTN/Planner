@@ -35,11 +35,13 @@ if (files.length === 0) {
   process.exit(1);
 }
 
-const lint = await createLinter();
 let problems = 0;
 let suppressed = 0;
 
 for (const file of files) {
+  // Isolate each workflow in a fresh WASM linter instance. Reusing one instance
+  // after the large Apps workflow can trap inside actionlint's Go runtime.
+  const lint = await createLinter();
   const text = readFileSync(file, 'utf8');
   const results = lint(text, file).filter((result) => {
     if (!KNOWN_FALSE_POSITIVE.test(result.message)) return true;

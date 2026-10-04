@@ -19,6 +19,15 @@ def appVersionCode = (System.getenv('PLANNER_VERSION_CODE') ?: '1') as Integer
 android {
     namespace = "com.notmtn.planner"
     compileSdk = rootProject.ext.compileSdkVersion
+    flavorDimensions += "distribution"
+    productFlavors {
+        direct {
+            dimension "distribution"
+        }
+        play {
+            dimension "distribution"
+        }
+    }
     defaultConfig {
         applicationId "com.notmtn.planner"
         minSdkVersion rootProject.ext.minSdkVersion
@@ -47,8 +56,8 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            // Fall back to the debug key so `assembleRelease` always produces
-            // something installable; a real keystore takes over automatically.
+            // Fall back to the debug key so local release variants remain
+            // installable; a real keystore takes over automatically.
             signingConfig keystorePropertiesFile.exists() ? signingConfigs.release : signingConfigs.debug
         }
     }

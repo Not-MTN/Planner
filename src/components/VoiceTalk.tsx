@@ -218,7 +218,9 @@ export function VoiceTalk({ onDraft, currentDraft = null }: {
   // works just as well, and the hints make that obvious.
   const hints = getLang() === 'fa'
     ? ['فردا روز سنگینیه، نظمش بده', 'خسته‌ام — عصرِ آرومی برام بچین', 'Two weeks of exams — help me fit it all in']
-    : ['Tomorrow is heavy — sort it out', "I'm wiped — make tonight easy", 'فردا روز سنگینیه، نظمش بده'];
+    : getLang() === 'fi'
+      ? ['Huomisesta tulee kiireinen — auta järjestämään se', 'Olen ihan poikki — suunnittele rauhallinen ilta', 'Two weeks of exams — help me fit it all in']
+      : ['Tomorrow is heavy — sort it out', "I'm wiped — make tonight easy", 'فردا روز سنگینیه، نظمش بده'];
 
   return (
     <section className={cx('card voice-card', `voice-${phase}`)} aria-label={t("Talk to the AI")}>

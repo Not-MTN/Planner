@@ -8,6 +8,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { AccountGate } from './AccountGate';
+import { RELEASES_PAGE } from '../shared/updates';
+
+const startupUpdate = vi.hoisted(() => ({ checkPackagedUpdate: vi.fn() }));
+vi.mock('../shared/updateRuntime', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../shared/updateRuntime')>()),
+  checkPackagedUpdate: startupUpdate.checkPackagedUpdate,
+}));
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
@@ -48,6 +55,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 beforeEach(() => {
+  startupUpdate.checkPackagedUpdate.mockReset().mockResolvedValue({ status: 'unavailable', version: null, offer: null });
   window.localStorage.clear();
   window.localStorage.setItem('planner-tour-done', '1');
   window.sessionStorage.clear();
@@ -127,6 +135,78 @@ describe('account gate', () => {
     expect(document.querySelector('input[type="password"]')).not.toBeNull();
     // The planner itself must not be reachable yet.
     expect(text()).not.toContain('Personal Planner');
+  });
+
+  it('shows the shared account, connection and version checks while the account request is pending', async () => {
+    const pendingSessions: Array<(response: Response) => void> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        if (url.includes('/api/auth/session')) {
+          return new Promise<Response>((resolve) => pendingSessions.push(resolve));
+        }
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <StrictMode>
+          <AccountGate />
+        </StrictMode>,
+      );
+    });
+
+    expect(text()).toContain('Checking your account…');
+    expect(text()).toContain('Checking your connection…');
+    expect(text()).toContain('Installed version');
+
+    await act(async () => {
+      for (const resolve of pendingSessions) {
+        resolve(jsonResponse({
+          user: { id: 'u-startup', username: 'planner', email: null, displayName: 'Planner', role: 'personal', createdAt: new Date().toISOString() },
+        }));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    expect(text()).toContain('Unlock your planner');
+  });
+
+  it('shares an update found during startup with the offline planner', async () => {
+    (window as Window & { Capacitor?: unknown }).Capacitor = {
+      isNativePlatform: () => true,
+      getPlatform: () => 'android',
+    };
+    startupUpdate.checkPackagedUpdate.mockResolvedValue({
+      status: 'available',
+      version: '99.99.99',
+      offer: {
+        platform: 'android',
+        version: '99.99.99',
+        applicationId: 'com.notmtn.planner',
+        versionCode: 999,
+        signingCertificateSha256: 'ab'.repeat(32),
+        fileName: 'app-release.apk',
+        downloadUrl: 'https://github.com/Not-MTN/Planner/releases/download/v99.99.99/app-release.apk',
+        sizeBytes: 1024,
+        sha256: 'cd'.repeat(32),
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('offline'); }));
+
+    await mount();
+    expect(text()).toContain('Sign in to Planner');
+    clickButton('Use Planner offline');
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+
+    expect(text()).toContain('Planner 99.99.99 is available to update.');
+    expect(document.querySelector<HTMLAnchorElement>('.update-release-link')?.href).toBe(RELEASES_PAGE);
   });
 
   it('offers sign-in in a downloaded app that cannot reach its server', async () => {

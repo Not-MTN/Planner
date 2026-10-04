@@ -6,6 +6,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { getLang, t } from './i18n';
+import { isNativeMobileShell } from './shared/nativeShell';
 
 /**
  * Speech recognition is far more accurate when the engine is told which
@@ -27,6 +28,7 @@ export const SPEECH_LOCALES: SpeechLocale[] = [
   { id: 'en-AU', tag: 'en-AU', get label() { return t("English (Australia)"); } },
   { id: 'en-NG', tag: 'en-NG', get label() { return t("English (Nigeria)"); } },
   { id: 'en-ZA', tag: 'en-ZA', get label() { return t("English (South Africa)"); } },
+  { id: 'fi-FI', tag: 'fi-FI', get label() { return t("Finnish (Suomi)"); } },
   { id: 'fa-IR', tag: 'fa-IR', get label() { return t("Persian (فارسی)"); } },
 ];
 
@@ -56,7 +58,8 @@ export function saveSpeechLocaleId(id: string): void {
 export function recognitionLang(localeId = loadSpeechLocaleId()): string {
   const chosen = SPEECH_LOCALES.find((locale) => locale.id === localeId);
   if (chosen && chosen.tag) return chosen.tag;
-  return getLang() === 'fa' ? 'fa-IR' : 'en-US';
+  const language = getLang();
+  return language === 'fa' ? 'fa-IR' : language === 'fi' ? 'fi-FI' : 'en-US';
 }
 
 interface SpeechAlternativeLike {
@@ -124,7 +127,7 @@ function ctor(): SpeechRecognitionCtor | null {
 }
 
 export function speechAvailable(): boolean {
-  return ctor() !== null;
+  return isNativeMobileShell() || ctor() !== null;
 }
 
 /** Honest failure kinds the UI can translate. */
@@ -132,9 +135,9 @@ export type SpeechError = 'mic-blocked' | 'network' | 'no-speech' | 'unknown';
 
 export function classifySpeechError(kind: string | undefined): SpeechError {
   const value = (kind ?? '').toLowerCase();
-  if (value === 'not-allowed' || value === 'service-not-allowed' || value === 'audio-capture') return 'mic-blocked';
-  if (value === 'network') return 'network';
-  if (value === 'no-speech') return 'no-speech';
+  if (/not-allowed|service-not-allowed|audio-capture|permission|not authorized/.test(value)) return 'mic-blocked';
+  if (value.includes('network')) return 'network';
+  if (/no-speech|no match|speech timeout/.test(value)) return 'no-speech';
   return 'unknown';
 }
 
@@ -160,10 +163,13 @@ export interface SpeechInput {
 export function useSpeechInput(): SpeechInput {
   const [listening, setListening] = useState(false);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const nativeStopRef = useRef<(() => void) | null>(null);
   const available = speechAvailable();
 
   useEffect(() => {
     return () => {
+      nativeStopRef.current?.();
+      nativeStopRef.current = null;
       recognitionRef.current?.stop();
       recognitionRef.current = null;
     };
@@ -173,10 +179,83 @@ export function useSpeechInput(): SpeechInput {
     available,
     listening,
     start: (onText, callbacks) => {
-      const Ctor = ctor();
-      if (!Ctor || listening) return;
+      if (listening || recognitionRef.current || nativeStopRef.current) return;
       // Legacy callers pass the interim handler as the second argument.
       const opts: SpeechCallbacks = typeof callbacks === 'function' ? { onInterim: callbacks } : callbacks ?? {};
+
+      // Android WebViews do not consistently expose Web Speech. The native
+      // recognizer requests RECORD_AUDIO only after this user-initiated tap.
+      if (isNativeMobileShell()) {
+        type NativeRecognizer = typeof import('@capacitor-community/speech-recognition').SpeechRecognition;
+        let plugin: NativeRecognizer | null = null;
+        let stopped = false;
+        let finished = false;
+        let heard = false;
+        const finish = (error?: SpeechError) => {
+          if (finished) return;
+          finished = true;
+          if (nativeStopRef.current === stopNative) nativeStopRef.current = null;
+          setListening(false);
+          if (error) opts.onError?.(error);
+          else opts.onEnd?.(heard);
+        };
+        const stopNative = () => {
+          if (finished || stopped) return;
+          stopped = true;
+          setListening(false);
+          // stop() lets the platform return its final transcript; it does not
+          // discard the words the person just finished saying.
+          void plugin?.stop().catch(() => undefined);
+        };
+        nativeStopRef.current = stopNative;
+        setListening(true);
+        void (async () => {
+          try {
+            const { SpeechRecognition } = await import('@capacitor-community/speech-recognition');
+            plugin = SpeechRecognition;
+            if (stopped) {
+              finish();
+              return;
+            }
+            const capability = await plugin.available();
+            if (!capability.available) {
+              finish('unknown');
+              return;
+            }
+            let permission = await plugin.checkPermissions();
+            if (permission.speechRecognition !== 'granted') permission = await plugin.requestPermissions();
+            if (permission.speechRecognition !== 'granted') {
+              finish('mic-blocked');
+              return;
+            }
+            if (stopped) {
+              finish();
+              return;
+            }
+            const result = await plugin.start({
+              language: recognitionLang(),
+              maxResults: 5,
+              partialResults: false,
+              popup: false,
+            });
+            const transcript = result.matches?.find((match) => match.trim())?.replace(/\s+/g, ' ').trim();
+            if (transcript) {
+              heard = true;
+              onText(transcript);
+            }
+            finish();
+          } catch (error) {
+            // A user-initiated stop can race with the final native callback;
+            // it is a quiet end, not a failed microphone session.
+            if (stopped) finish();
+            else finish(classifySpeechError(error instanceof Error ? error.message : String(error)));
+          }
+        })();
+        return;
+      }
+
+      const Ctor = ctor();
+      if (!Ctor) return;
       const recognition = new Ctor();
       // The accent the user picked (or the app language default) — matching the
       // engine to the speaker is the single biggest accuracy win.
@@ -227,6 +306,10 @@ export function useSpeechInput(): SpeechInput {
       }
     },
     stop: () => {
+      if (nativeStopRef.current) {
+        nativeStopRef.current();
+        return;
+      }
       recognitionRef.current?.stop();
       recognitionRef.current = null;
       setListening(false);

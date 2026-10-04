@@ -1,7 +1,8 @@
-import { displayTime, timeToMinutes, todayISO } from './dates';
+import { addDays, displayTime, timeToMinutes, todayISO } from './dates';
 import { eventsForDate, tasksForDate } from './logic';
 import type { PlannerState } from './types';
 import { t } from './i18n';
+import { isNativeMobileShell } from './shared/nativeShell';
 
 export interface ReminderSettings {
   enabled: boolean;
@@ -18,6 +19,10 @@ export interface Reminder {
   body: string;
 }
 
+export interface UpcomingReminder extends Reminder {
+  at: Date;
+}
+
 const SETTINGS_KEY = 'planner-reminders';
 const FIRED_KEY = 'planner-reminders-fired';
 const SNOOZE_KEY = 'planner-reminders-snoozed';
@@ -26,6 +31,79 @@ export const LEAD_CHOICES = [0, 5, 10, 15, 30, 60] as const;
 export const SNOOZE_CHOICES = [10, 30, 60] as const;
 
 export const DEFAULT_REMINDERS: ReminderSettings = { enabled: false, lead: 10, digest: true, digestTime: '08:00' };
+
+function eventReminder(key: string, title: string, startTime: string, settings: ReminderSettings): Reminder {
+  return {
+    key,
+    title: t("Coming up: {0}", { 0: title }),
+    body: settings.lead > 0
+      ? t("Your {0} starts at {1} — {2} min to get settled.", { 0: title, 1: displayTime(startTime), 2: settings.lead })
+      : t("Your {0} starts now. Take a breath and ease into it.", { 0: title }),
+  };
+}
+
+function taskReminder(key: string, title: string, dueTime: string): Reminder {
+  return {
+    key,
+    title: t("A gentle nudge"),
+    body: t("{0} is due at {1}. One step at a time — you’ve got this.", { 0: title, 1: displayTime(dueTime) }),
+  };
+}
+
+function digestReminder(key: string, eventCount: number, taskCount: number): Reminder {
+  const events = eventCount === 1 ? t("1 event") : t("{0} events", { 0: eventCount });
+  const tasks = taskCount === 1 ? t("1 open task") : t("{0} open tasks", { 0: taskCount });
+  return {
+    key,
+    title: t("Good morning — here is your day"),
+    body: t("A fresh day, at your pace: {0} and {1} ahead. Start with one small thing.", { 0: events, 1: tasks }),
+  };
+}
+
+function localDateTime(date: string, time: string, lead = 0): Date {
+  const [year, month, day] = date.split('-').map(Number);
+  const [hour, minute] = time.split(':').map(Number);
+  return new Date(year!, month! - 1, day!, hour!, minute! - lead, 0, 0);
+}
+
+/**
+ * Future local reminders for native background scheduling. Everything stays
+ * on-device; the OS receives only these notification strings and timestamps.
+ */
+export function upcomingReminders(
+  state: PlannerState,
+  now: Date,
+  settings: ReminderSettings,
+  days = 31,
+): UpcomingReminder[] {
+  if (!settings.enabled || !Number.isFinite(now.getTime()) || days < 1) return [];
+  const out: UpcomingReminder[] = [];
+  const horizon = Math.min(31, Math.floor(days));
+  const startDate = todayISO(now);
+  for (let offset = 0; offset < horizon; offset += 1) {
+    const date = addDays(startDate, offset);
+    for (const event of eventsForDate(state, date)) {
+      if (event.completed) continue;
+      const key = `${date}|event|${event.id}|${event.startTime}`;
+      const at = localDateTime(date, event.startTime, settings.lead);
+      if (at > now) out.push({ ...eventReminder(key, event.title, event.startTime, settings), at });
+    }
+    for (const task of tasksForDate(state, date)) {
+      if (task.completed || !task.dueTime) continue;
+      const key = `${date}|task|${task.id}|${task.dueTime}`;
+      const at = localDateTime(date, task.dueTime, settings.lead);
+      if (at > now) out.push({ ...taskReminder(key, task.title, task.dueTime), at });
+    }
+    if (settings.digest) {
+      const key = `${date}|digest`;
+      const at = localDateTime(date, settings.digestTime);
+      const eventCount = eventsForDate(state, date).filter((event) => !event.completed).length;
+      const taskCount = tasksForDate(state, date).filter((task) => !task.completed).length;
+      if (at > now && eventCount + taskCount > 0) out.push({ ...digestReminder(key, eventCount, taskCount), at });
+    }
+  }
+  return out.sort((a, b) => a.at.getTime() - b.at.getTime());
+}
 
 export function loadReminderSettings(): ReminderSettings {
   try {
@@ -159,11 +237,7 @@ export function dueReminders(
     const own = timeToMinutes(event.startTime) - settings.lead;
     const target = dueAt(key, own);
     if (target === null || !inWindow(target)) continue;
-    out.push({
-      key,
-      title: event.title,
-      body: settings.lead > 0 ? t("Starts at {0} · in {1} min", { 0: displayTime(event.startTime), 1: settings.lead }) : t("Starting now · {0}", { 0: displayTime(event.startTime) }),
-    });
+    out.push(eventReminder(key, event.title, event.startTime, settings));
   }
   for (const task of tasksForDate(state, today)) {
     if (task.completed || !task.dueTime) continue;
@@ -171,20 +245,16 @@ export function dueReminders(
     const own = timeToMinutes(task.dueTime) - settings.lead;
     const target = dueAt(key, own);
     if (target === null || !inWindow(target)) continue;
-    out.push({ key, title: task.title, body: t("Task due at {0}", { 0: displayTime(task.dueTime) }) });
+    out.push(taskReminder(key, task.title, task.dueTime));
   }
   if (settings.digest) {
     const key = `${today}|digest`;
     const target = dueAt(key, timeToMinutes(settings.digestTime));
     if (target !== null && inWindow(target)) {
       const tasks = tasksForDate(state, today).filter((task) => !task.completed).length;
-      const events = eventsForDate(state, today).length;
+      const events = eventsForDate(state, today).filter((event) => !event.completed).length;
       if (tasks + events > 0) {
-        out.push({
-          key,
-          title: t("Good morning — here is your day"),
-          body: t("{0} {1} and {2} open {3} today.", { 0: events, 1: events === 1 ? t("event") : t("events"), 2: tasks, 3: tasks === 1 ? t("task") : t("tasks") }),
-        });
+        out.push(digestReminder(key, events, tasks));
       }
     }
   }
@@ -192,7 +262,9 @@ export function dueReminders(
 }
 
 export async function showNotification(reminder: Reminder): Promise<boolean> {
-  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return false;
+  // The native OS schedule handles background and foreground delivery there;
+  // the page-level Notification API is for browsers and installed PWAs only.
+  if (isNativeMobileShell() || typeof Notification === 'undefined' || Notification.permission !== 'granted') return false;
   const options: NotificationOptions = { body: reminder.body, tag: reminder.key, icon: '/favicon.svg' };
   try {
     const registration = await navigator.serviceWorker?.getRegistration();
