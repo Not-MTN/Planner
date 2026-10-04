@@ -1373,25 +1373,31 @@ export function SettingsSheet() {
   if (!settingsOpen) return null;
 
   return (
-    <Modal title={t("Settings")} onClose={closeSettings} className="sheet-settings">
-      <div className="set-nav" role="tablist" aria-label={t("Settings sections")} onKeyDown={onTabKeys}>
-        {SETTINGS_TABS.map((entry) => (
-          <button
-            key={entry.id}
-            ref={(node) => { tabRefs.current[entry.id] = node; }}
-            type="button"
-            role="tab"
-            id={`set-tab-${entry.id}`}
-            aria-selected={tab === entry.id}
-            aria-controls="set-panel"
-            tabIndex={tab === entry.id ? 0 : -1}
-            className={cx('set-nav-item', tab === entry.id && 'on')}
-            onClick={() => setTab(entry.id)}
-          >
-            {entry.label}
-          </button>
-        ))}
-      </div>
+    <Modal
+      title={t("Settings")}
+      onClose={closeSettings}
+      className="sheet-settings"
+      subheader={
+        <div className="set-nav" role="tablist" aria-label={t("Settings sections")} onKeyDown={onTabKeys}>
+          {SETTINGS_TABS.map((entry) => (
+            <button
+              key={entry.id}
+              ref={(node) => { tabRefs.current[entry.id] = node; }}
+              type="button"
+              role="tab"
+              id={`set-tab-${entry.id}`}
+              aria-selected={tab === entry.id}
+              aria-controls="set-panel"
+              tabIndex={tab === entry.id ? 0 : -1}
+              className={cx('set-nav-item', tab === entry.id && 'on')}
+              onClick={() => setTab(entry.id)}
+            >
+              {entry.label}
+            </button>
+          ))}
+        </div>
+      }
+    >
 
       {/* Only the open group is mounted. The account tabs talk to the server
           when they appear, and there is no reason to ask about devices or

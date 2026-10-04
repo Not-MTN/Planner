@@ -1206,7 +1206,10 @@ h1, .page-head h1 {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 26px 26px 0 0;
-  padding: 10px 22px 24px;
+  /* The horizontal padding is a variable because the sticky title block has to
+     cancel exactly this much to span the sheet (see .sheet-top). */
+  --sheet-pad-x: 22px;
+  padding: 10px var(--sheet-pad-x) 24px;
   box-shadow: var(--shadow-lift);
   animation: sheet-up 0.34s var(--ease);
 }
@@ -1248,22 +1251,18 @@ h1, .page-head h1 {
 .more-list button:hover, .more-list button.on { background: var(--accent-soft); color: var(--accent-deep); }
 
 /* ---------- Settings ---------- */
+/* The strip stays put because it lives in the sheet's sticky header slot
+   (.sheet-top, see app-polish.css) — that is also what bleeds it to the sheet
+   edges and keeps it clear of the title. */
 .set-nav {
-  position: sticky;
-  top: 0;
-  z-index: 2;
   display: flex;
   gap: 6px;
-  /* Spans the sheet's own padding so settings scroll *under* the strip
-     rather than beside it. */
-  margin: 0 -22px 2px;
-  padding: 8px 22px 10px;
-  background: var(--surface);
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
 }
+.set-nav { scroll-padding-inline: 22px; }
 .set-nav::-webkit-scrollbar { display: none; }
 .set-nav-item {
   flex: 0 0 auto;

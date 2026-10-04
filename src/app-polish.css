@@ -347,12 +347,13 @@
     border-inline: 0;
     border-bottom: 0;
     border-radius: 24px 24px 0 0;
-    padding: 10px 18px calc(24px + env(safe-area-inset-bottom, 0px));
+    --sheet-pad-x: 18px;
+    padding: 10px var(--sheet-pad-x) calc(24px + env(safe-area-inset-bottom, 0px));
     max-height: 79dvh;
   }
 }
 @media (min-width: 700px) {
-  .sheet { padding: 14px 26px 26px; }
+  .sheet { --sheet-pad-x: 26px; padding: 14px var(--sheet-pad-x) 26px; }
 }
 
 /* ---------- 7. Less hunting and less thumb travel ---------- */
@@ -984,3 +985,46 @@
 .account-recovery-form { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 .modal-recovery .recovery-codes { margin-top: 12px; }
 .modal-recovery .set-hint { margin-bottom: 0; }
+
+/* ---------- A sheet's title stays where you left it ---------- */
+/* Sheets scroll their own content, and the longest ones (settings, the
+   composer, the habit library) are long enough that the heading and, in
+   settings, the tab strip scrolled away with it. Both now stay put, so a panel
+   can be switched without a scroll back to the top.
+
+   The negative margin cancels the sheet's own horizontal padding so nothing
+   scrolls through the gaps beside the title; the padding puts the content back
+   where it was. The drag handle stays above it and scrolls away with the first
+   swipe, the way a handle should. */
+.sheet-top {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  margin: 0 calc(-1 * var(--sheet-pad-x, 22px));
+  padding: 0 var(--sheet-pad-x, 22px);
+  background: var(--surface);
+}
+.sheet-settings .sheet-top {
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 12px 18px -18px color-mix(in srgb, var(--ink) 45%, transparent);
+}
+.sheet-settings .sheet-head { margin-bottom: 10px; }
+/* The strip is the reason the header has to stick: a panel can be switched
+   from anywhere in a long section. */
+.sheet-settings .sheet-top .set-nav { flex-wrap: nowrap; }
+
+/* The composer is the longest form in the app — subtasks, steps, attachments,
+   an icon grid — and the button that finishes it sat at the very bottom, off
+   screen the moment you started typing. Only the composer's own footer sticks;
+   every other .form-actions row is short enough to walk to. */
+.form-actions-sticky {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin: 10px calc(-1 * var(--sheet-pad-x, 22px)) 0;
+  padding: 12px var(--sheet-pad-x, 22px);
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  box-shadow: 0 -12px 18px -18px color-mix(in srgb, var(--ink) 45%, transparent);
+}

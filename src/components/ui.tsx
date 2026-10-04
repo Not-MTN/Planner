@@ -8,11 +8,18 @@ export function Modal({
   onClose,
   children,
   className,
+  subheader,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   className?: string;
+  /**
+   * A strip that belongs with the title rather than with the content — the
+   * settings tabs are the only one today. It sticks with the header so a long
+   * panel can be switched without scrolling back to the top first.
+   */
+  subheader?: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -81,12 +88,15 @@ export function Modal({
         ref={ref}
       >
         <div className="sheet-handle" aria-hidden="true" />
-        <header className="sheet-head">
-          <h2 id={titleId}>{title}</h2>
-          <button type="button" className="icon-btn" aria-label={t("Close")} onClick={onClose}>
-            <CloseIcon size={18} />
-          </button>
-        </header>
+        <div className={cx('sheet-top', Boolean(subheader) && 'has-subheader')}>
+          <header className="sheet-head">
+            <h2 id={titleId}>{title}</h2>
+            <button type="button" className="icon-btn" aria-label={t("Close")} onClick={onClose}>
+              <CloseIcon size={18} />
+            </button>
+          </header>
+          {subheader}
+        </div>
         {children}
       </div>
     </div>
