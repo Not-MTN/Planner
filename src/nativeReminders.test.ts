@@ -9,6 +9,7 @@ const notifications = vi.hoisted(() => ({
   checkPermissions: vi.fn(),
   requestPermissions: vi.fn(),
   cancelAll: vi.fn(),
+  createChannel: vi.fn(),
   schedule: vi.fn(),
   addListener: vi.fn(),
 }));
@@ -24,6 +25,7 @@ beforeEach(() => {
   notifications.checkPermissions.mockReset();
   notifications.requestPermissions.mockReset();
   notifications.cancelAll.mockReset().mockResolvedValue(undefined);
+  notifications.createChannel.mockReset().mockResolvedValue(undefined);
   notifications.schedule.mockReset().mockResolvedValue(undefined);
   notifications.addListener.mockReset();
   shell.Capacitor = { isNativePlatform: () => true, getPlatform: () => 'android' };
@@ -67,6 +69,9 @@ describe('native schedule synchronization', () => {
     await syncNativeReminders(stateWithEvent(), SETTINGS, NOW);
 
     expect(notifications.cancelAll).toHaveBeenCalledOnce();
+    expect(notifications.createChannel).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'planner-reminders', importance: 4, lightColor: '#6F846C', vibration: true,
+    }));
     expect(notifications.schedule).toHaveBeenCalledOnce();
     const payload = notifications.schedule.mock.calls[0]?.[0] as {
       notifications: Array<{ title: string; body: string; schedule: { at: Date }; isExactNotification: boolean }>;
@@ -75,6 +80,9 @@ describe('native schedule synchronization', () => {
     expect(payload.notifications[0]).toMatchObject({
       title: 'Coming up: Dentist',
       schedule: { at: new Date(2026, 8, 30, 9, 50, 0) },
+      channelId: 'planner-reminders',
+      smallIcon: 'ic_stat_planner',
+      iconColor: '#6F846C',
       isExactNotification: false,
     });
     expect(payload.notifications[0]?.body).toContain('get settled');

@@ -687,6 +687,7 @@ export function addHabit(
         createdAt: now,
         updatedAt: now,
         unit: cleanUnit(input.unit),
+        reminderTime: input.reminderTime && isValidTime(input.reminderTime) ? input.reminderTime : null,
       },
     ],
   };
@@ -714,6 +715,9 @@ export function updateHabit(state: PlannerState, id: string, patch: Partial<Habi
         name,
         essential: patch.essential === undefined ? habit.essential : patch.essential === true,
         unit: patch.unit === undefined ? habit.unit : cleanUnit(patch.unit),
+        reminderTime: patch.reminderTime === undefined
+          ? habit.reminderTime ?? null
+          : patch.reminderTime && isValidTime(patch.reminderTime) ? patch.reminderTime : null,
         updatedAt: now,
       };
     }),

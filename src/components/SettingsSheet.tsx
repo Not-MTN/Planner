@@ -348,8 +348,8 @@ function RemindersSection() {
                   ? t("Notifications are blocked in device settings. Reminders still appear while Planner is open.")
                   : t("Notifications are blocked in your browser. Reminders show inside the app while it is open.")
                 : native
-                  ? t("Scheduled on this device, even when Planner is closed. Event and task names stay on this device.")
-                  : t("Before events and timed tasks. Works while Planner is open (or installed).")}
+                  ? t("Scheduled on this device, even when Planner is closed. Event, task, and habit names stay on this device.")
+                  : t("Before events and timed tasks, and at the times you choose for habits. Works while Planner is open (or installed).")}
           </p>
         </div>
         <div className="segmented" role="radiogroup" aria-label={t("Reminders")}>
