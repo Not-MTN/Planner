@@ -11,6 +11,7 @@ import { StrictMode, act } from 'react';
 import { waitFor, waitForBoot } from './testing/wait';
 import { createRoot, type Root } from 'react-dom/client';
 import { App } from './App';
+import { addDays, formatFullDate, todayISO } from './dates';
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
@@ -115,5 +116,82 @@ describe('AI tab layout', () => {
     const controls = document.querySelector('.ai-review-controls');
     expect(controls?.querySelectorAll('.field').length).toBeGreaterThanOrEqual(2);
     expect(controls?.querySelector('.ai-review-action .btn-primary')).toBeTruthy();
+  });
+
+  it('reads a multi-day draft as one list per day, earliest first', { timeout: 20_000 }, async () => {
+    const dayOne = addDays(todayISO(), 1);
+    const dayTwo = addDays(todayISO(), 2);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/ai/status')) {
+        return new Response(JSON.stringify({ configured: true }), { status: 200 });
+      }
+      if (url.includes('/api/ai/chat/completions')) {
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    summary: 'Two calm days.',
+                    tasks: [
+                      { title: 'Pack lunch', date: dayTwo, priority: 'low', category: 'health' },
+                    ],
+                    events: [
+                      { title: 'Evening walk', date: dayOne, startTime: '18:00', endTime: '18:30', category: 'health' },
+                      { title: 'Morning study', date: dayTwo, startTime: '08:00', endTime: '09:00', category: 'learning' },
+                    ],
+                    habits: [],
+                    wellbeing: [],
+                  }),
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response('not found', { status: 404 });
+    }) as typeof fetch;
+    try {
+      await gotoAI();
+      // A week, so the two days below are both inside the requested range.
+      const horizon = document.querySelector<HTMLSelectElement>('.ai-range-row select');
+      expect(horizon).toBeTruthy();
+      const setSelect = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+      await act(async () => {
+        setSelect?.call(horizon, 'week');
+        horizon?.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      const field = document.querySelector<HTMLTextAreaElement>('.ai-prompt-field textarea');
+      expect(field).toBeTruthy();
+      const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      await act(async () => {
+        setValue?.call(field, 'plan two calm days');
+        field?.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      const build = document.querySelector<HTMLButtonElement>('.ai-build');
+      expect(build?.disabled).toBe(false);
+      await act(async () => {
+        build?.click();
+      });
+      await waitFor(() => Boolean(document.querySelector('.ai-draft-card')), 12_000, 'the draft');
+      const headings = [...document.querySelectorAll('.ai-draft-card .draft-group')].map(
+        (group) => group.querySelector('.draft-group-head strong')?.textContent ?? '',
+      );
+      // One heading per day, in reading order — not the model's own ordering,
+      // which put the later day first here.
+      expect(headings).toEqual([formatFullDate(dayOne), formatFullDate(dayTwo)]);
+      const firstDay = document.querySelectorAll('.ai-draft-card .draft-group')[0];
+      const secondDay = document.querySelectorAll('.ai-draft-card .draft-group')[1];
+      expect(firstDay.textContent).toContain('Evening walk');
+      // The timed item is listed before the untimed one inside a day.
+      expect(secondDay.textContent?.indexOf('Morning study')).toBeLessThan(
+        secondDay.textContent?.indexOf('Pack lunch') ?? -1,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });

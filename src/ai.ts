@@ -3,7 +3,7 @@ import { addBreadcrumb, reportCaught } from './reporting';
 import { CATEGORIES, HABIT_ICONS, PRIORITIES, categoryById } from './constants';
 import type { Priority } from './constants';
 import { MAX_PLAN_DAYS, normalizeDigits } from './duration';
-import { addDays, addMinutes, isValidISODate, isValidTime, timeToMinutes, weekdayIndex } from './dates';
+import { addDays, addMinutes, formatFullDate, isValidISODate, isValidTime, timeToMinutes, weekdayIndex } from './dates';
 import { weekOf } from './panels';
 import { eventsForDate, isDone, isPlannedDay } from './logic';
 import type {
@@ -1123,7 +1123,7 @@ const PLAN_JSON_SHAPE = `Return ONLY a JSON object with this shape: {"summary":"
  * rendered next to each item, so they are the difference between a plan that
  * can be trusted and one that has to be taken on faith.
  */
-const PLAN_ANSWER_STYLE = `How your answer must read. summary: one or two plain sentences naming the shape of the plan and the one trade-off you made; no greeting, no "Sure", no "Here is", no question, no markdown, no bullets, no emoji, no headings. Titles: 3 to 10 words, sentence case, a real verb and a real object ("Draft the statistics summary", not "Work on project"), the user's own words for their own things, never numbered, never a trailing period. reasons: one sentence under 20 words that names the fact which placed the item — a free morning, a class that ends at 12:00, a deadline the user mentioned. Your reasons are shown to the user next to each item so they can argue with them, so never invent a fact you were not given (say \"a free slot that morning\" rather than \"because you like mornings\" unless the user said so), never pad them, never restate the title, never praise, and never guess about how they feel. note: only when there is something genuinely useful to say, never to pad. Never ask the user a question anywhere in the answer: the app cannot answer back, so if something was ambiguous, choose the most reasonable reading, plan for it, and state the assumption in one clause of the summary.`;
+const PLAN_ANSWER_STYLE = `How your answer must read. summary: one or two plain sentences naming the shape of the plan and the one trade-off you made; no greeting, no "Sure", no "Here is", no question, no markdown, no bullets, no emoji, no headings. Titles: 3 to 10 words, sentence case, a real verb and a real object ("Draft the statistics summary", not "Work on project"), the user's own words for their own things, never numbered, never a trailing period. reasons: one sentence under 20 words that names the fact which placed the item — a free morning, a class that ends at 12:00, a deadline the user mentioned. Your reasons are shown to the user next to each item so they can argue with them, so never invent a fact you were not given (say "a free slot that morning" rather than "because you like mornings" unless the user said so), never pad them, never restate the title, never praise, and never guess about how they feel. note: only when there is something genuinely useful to say, never to pad. Never ask the user a question anywhere in the answer: the app cannot answer back, so if something was ambiguous, choose the most reasonable reading, plan for it, and state the assumption in one clause of the summary.`;
 
 /**
  * How many new things a day may gain, and how much of the range stays empty.
@@ -1312,7 +1312,7 @@ export function analyzeDraft(draft: AIDraft, state: PlannerState, range: PlanRan
     }
     const hours = Math.round((minutes / 60) * 10) / 10;
     if (hours >= 9) {
-      warnings.push({ kind: 'packed', date, message: t("{0} looks packed once this draft is added ({1}h scheduled).", { 0: date, 1: hours }) });
+      warnings.push({ kind: 'packed', date, message: t("{0} looks packed once this draft is added ({1}h scheduled).", { 0: formatFullDate(date), 1: hours }) });
     }
   }
 
@@ -1351,7 +1351,7 @@ function reviewCarryForward(raw: unknown, candidates: PlannerState['tasks'], tod
     const taskId = cleanText(item?.taskId, 80);
     const date = cleanText(item?.date, 10);
     if (!candidateById.has(taskId) || !isValidISODate(date) || date <= today || date > addDays(today, 30) || suggested.has(taskId)) continue;
-    suggested.set(taskId, { date, reason: cleanText(item?.reason, 200) || t("A little more room to finish this.") });
+    suggested.set(taskId, { date, reason: tidyLine(item?.reason, 200) || t("A little more room to finish this.") });
   }
   const defaultDate = addDays(today, 1);
   return candidates.map((task) => {

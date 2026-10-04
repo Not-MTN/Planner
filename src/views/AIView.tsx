@@ -1187,6 +1187,60 @@ function PlanDraft({ draft, warnings, working, onRefine, onAdd, onDiscard, isKep
   const total = draft.tasks.length + draft.events.length + draft.habits.length;
   const allKept = keptCount === total;
   const reason = (key: string): string => draft.reasons?.[key] ?? '';
+  interface DraftRow {
+    key: string;
+    date: string;
+    time: string;
+    /** Right-hand label: the hour for a timed item, the frequency for a habit. */
+    when: string;
+    kind: string;
+    kindClass: string;
+    title: string;
+    reason: string;
+  }
+  // The original index is the identity the selection and the reasons use, so it
+  // is carried through the regrouping untouched.
+  const rows: DraftRow[] = [
+    ...draft.events.map((item, index) => ({
+      key: `event:${index}`,
+      date: item.date,
+      time: item.startTime,
+      when: `${displayTime(item.startTime)}–${displayTime(item.endTime)}`,
+      kind: t("Event"),
+      kindClass: 'event-kind',
+      title: item.title,
+      reason: reason(`event:${index}`),
+    })),
+    ...draft.tasks.map((item, index) => ({
+      key: `task:${index}`,
+      date: item.dueDate ?? '',
+      time: '',
+      when: '',
+      kind: t("Task"),
+      kindClass: 'task-kind',
+      title: item.title,
+      reason: reason(`task:${index}`),
+    })),
+  ];
+  // A timed item comes before an untimed one, then earlier before later.
+  const byTime = (a: DraftRow, b: DraftRow) =>
+    (a.time ? 0 : 1) - (b.time ? 0 : 1) || a.time.localeCompare(b.time);
+  const draftDays = [...new Set(rows.map((row) => row.date).filter(Boolean))].sort();
+  const undatedItems = rows.filter((row) => !row.date);
+  const draftItems = rows.filter((row) => row.date).sort(byTime);
+  const renderDraftItem = (row: DraftRow) => (
+    <li key={row.key} className={isKept(row.key) ? 'draft-item' : 'draft-item is-declined'}>
+      <label className="draft-check">
+        <input type="checkbox" checked={isKept(row.key)} onChange={() => onToggle(row.key)} aria-label={t("Add {0}", { 0: row.title })} />
+        <span className={`draft-kind ${row.kindClass}`}>{row.kind}</span>
+        <span className="draft-item-copy">
+          <span className="draft-item-title">{row.title}</span>
+          {row.reason ? <small className="draft-item-reason">{row.reason}</small> : null}
+        </span>
+        {row.when ? <small className="draft-item-when">{row.when}</small> : null}
+      </label>
+    </li>
+  );
   return (
     <section className="card ai-draft-card">
       <header className="card-head">
@@ -1208,36 +1262,22 @@ function PlanDraft({ draft, warnings, working, onRefine, onAdd, onDiscard, isKep
         <div className="ai-wellbeing"><LeafIcon size={17} /><div><strong>{t("Gentle wellbeing ideas")}</strong><ul>{draft.suggestions.map((item, index) => <li key={index}>{item}</li>)}</ul></div></div>
       ) : null}
       {draft.tasks.length + draft.events.length + draft.habits.length === 0 ? <p className="empty-inline">{t("The AI did not find new items to add. Try a more specific request.")}</p> : null}
-      {draft.events.length > 0 ? <DraftGroup title={t("Timed plans")} count={draft.events.length}>
-        {draft.events.map((item, index) => (
-          <li key={`e-${index}`} className={isKept(`event:${index}`) ? 'draft-item' : 'draft-item is-declined'}>
-            <label className="draft-check">
-              <input type="checkbox" checked={isKept(`event:${index}`)} onChange={() => onToggle(`event:${index}`)} aria-label={t("Add {0}", { 0: item.title })} />
-              <span className="draft-kind event-kind">{t("Event")}</span>
-              <span className="draft-item-copy">
-                <span className="draft-item-title">{item.title}</span>
-                {reason(`event:${index}`) ? <small className="draft-item-reason">{reason(`event:${index}`)}</small> : null}
-              </span>
-              <small className="draft-item-when">{formatFullDate(item.date)} · {displayTime(item.startTime)}–{displayTime(item.endTime)}</small>
-            </label>
-          </li>
-        ))}
-      </DraftGroup> : null}
-      {draft.tasks.length > 0 ? <DraftGroup title={t("Tasks")} count={draft.tasks.length}>
-        {draft.tasks.map((item, index) => (
-          <li key={`t-${index}`} className={isKept(`task:${index}`) ? 'draft-item' : 'draft-item is-declined'}>
-            <label className="draft-check">
-              <input type="checkbox" checked={isKept(`task:${index}`)} onChange={() => onToggle(`task:${index}`)} aria-label={t("Add {0}", { 0: item.title })} />
-              <span className="draft-kind task-kind">{t("Task")}</span>
-              <span className="draft-item-copy">
-                <span className="draft-item-title">{item.title}</span>
-                {reason(`task:${index}`) ? <small className="draft-item-reason">{reason(`task:${index}`)}</small> : null}
-              </span>
-              <small className="draft-item-when">{item.dueDate ? formatFullDate(item.dueDate) : ''}</small>
-            </label>
-          </li>
-        ))}
-      </DraftGroup> : null}
+      {/* Read in the order it will be lived: one group per day, timed things
+          first, then anything with no time. Grouping by kind instead made a
+          week look like two disconnected lists. */}
+      {draftDays.map((day) => {
+        const dayItems = draftItems.filter((item) => item.date === day);
+        return (
+          <DraftGroup key={day} title={formatFullDate(day)} count={dayItems.length}>
+            {dayItems.map(renderDraftItem)}
+          </DraftGroup>
+        );
+      })}
+      {undatedItems.length > 0 ? (
+        <DraftGroup title={t("Anytime")} count={undatedItems.length}>
+          {undatedItems.map(renderDraftItem)}
+        </DraftGroup>
+      ) : null}
       {draft.habits.length > 0 ? <DraftGroup title={t("Habits")} count={draft.habits.length}>
         {draft.habits.map((item, index) => (
           <li key={`h-${index}`} className={isKept(`habit:${index}`) ? 'draft-item' : 'draft-item is-declined'}>

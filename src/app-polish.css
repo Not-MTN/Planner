@@ -943,3 +943,44 @@
   .ai-range-row { padding: 12px; }
   .ai-fold-summary { min-height: 56px; }
 }
+
+/* ============================================================
+   9. Names the markup asks for that no rule ever answered
+   ============================================================
+   Every class below is already rendered somewhere in the app; it just never
+   got a style, so the element inherited the wrong voice or lost its spacing.
+   Fixing them here keeps the fix in the last layer, where it lands on every
+   screen that uses the name. */
+
+/* Account-flow feedback in the recovery card: a hint should read as a hint,
+   and a mismatch is the one line here that has to look like an error. */
+.auth-hint { color: var(--muted); font-size: 12.5px; margin: 8px 0 0; }
+.auth-error { color: var(--danger); font-size: 12.5px; font-weight: 600; margin: 6px 0 0; }
+
+/* A plain row in a panel list is still a row: with no button inside it had no
+   padding, so it sat flush against the divider. */
+.panel-list li.plain { padding: 9px 2px; }
+
+/* "Show 60 more" belongs to the list it extends, not to the toolbar. */
+.item-more { display: flex; justify-content: center; padding: 10px 0 2px; }
+
+/* The rest-of-week card: its heading and prompts were unstyled, so the
+   reflection list ran straight into the open tasks above it. */
+.week-review .quiet-hint { margin-top: 0; }
+.weekly-questions { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.weekly-questions h3 { font-size: 13px; font-weight: 650; color: var(--ink-soft); margin: 0 0 6px; }
+
+/* Links inside settings prose (an app URI, a pointer to the docs) read as
+   links, not as more sentence. */
+.link, .set-hint a { color: var(--accent-deep); text-decoration: underline; text-underline-offset: 2px; }
+
+/* The streak emoji is punctuation, not the headline. */
+.streak-icon { font-size: 15px; line-height: 1; }
+
+/* Round counter inside the focus kicker. */
+.focus-round { font-variant-numeric: tabular-nums; }
+
+/* Replacing recovery codes is a form, so it gets a form's rhythm. */
+.account-recovery-form { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.modal-recovery .recovery-codes { margin-top: 12px; }
+.modal-recovery .set-hint { margin-bottom: 0; }
