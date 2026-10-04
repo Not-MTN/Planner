@@ -3,7 +3,7 @@ import { cx } from '../cx';
 import { usePlanner } from '../context';
 import { UploadIcon } from '../icons';
 import { parseTaskCSV } from '../importers';
-import { displayTime, formatEdited } from '../dates';
+import { displayTime, formatEdited, formatStamp } from '../dates';
 import { geocode } from '../weather';
 import { loadTemplates, removeTemplate, saveTemplates, type PlannerTemplate } from '../templates';
 import { PasskeyError, listPasskeys, passkeysSupported, registerPasskey, removePasskey, type ListedPasskey } from '../auth/passkey';
@@ -545,7 +545,7 @@ export function SecuritySection() {
             <li key={row.credentialId} className="feed-item">
               <div className="feed-copy">
                 <strong>{row.label}</strong>
-                <small className="set-hint">{t("Added {0}", { 0: new Date(row.createdAt).toLocaleDateString() })}</small>
+                <small className="set-hint">{t("Added {0}", { 0: formatStamp(row.createdAt) })}</small>
               </div>
               <button
                 type="button"

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { displayTime, formatMonthLong, monthGrid, setDisplayPrefs, setWeekStart, startOfWeek, weekdayHeaders } from './dates';
+import { displayTime, formatMonthLong, formatStamp, monthGrid, setDisplayPrefs, setWeekStart, startOfWeek, weekdayHeaders } from './dates';
 import { parseICS, toBusyICS, toICS } from './ics';
 import { focusSummary, habitLinks, productiveHours } from './insights';
 import { weeklyReport } from './weeklyReport';
@@ -287,5 +287,15 @@ describe('display preferences', () => {
     expect(formatMonthLong('2026-09-27').toLowerCase()).toContain('syys');
     setDisplayPrefs({ dateLanguage: 'en-GB', timeFormat: '24h' });
     expect(weekdayHeaders()).toEqual(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
+  });
+
+  it('stamps a timestamp with the date language the user chose', () => {
+    // "Signed in", "Added", "Sent" — these used to go through toLocaleString()
+    // and so followed the browser, not the setting.
+    setDisplayPrefs({ dateLanguage: 'fi', timeFormat: '24h' });
+    const stamp = formatStamp('2026-10-03T14:05:00.000Z');
+    expect(stamp).toContain('·');
+    expect(stamp).toContain('14:05');
+    expect(formatStamp('not a date')).toBe('');
   });
 });

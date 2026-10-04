@@ -28,7 +28,7 @@ import {
   type DeviceSession,
   type TotpSetup,
 } from '../auth/session';
-import { DATE_LANGUAGES, todayISO, type DateLanguage } from '../dates';
+import { DATE_LANGUAGES, formatStamp, todayISO, type DateLanguage } from '../dates';
 import { downloadBusyICS, downloadICS, parseICS } from '../ics';
 import { canInstall, isInstalled, onInstallChange, promptInstall } from '../pwa';
 import { requestTour } from '../tour';
@@ -164,7 +164,7 @@ function ConflictList() {
             <div>
               <p className="sync-conflict-title">{conflict.title || t("Untitled")}</p>
               <p className="sync-conflict-when">
-                {t("Other version edited {0}", { 0: new Date(conflict.lostAt).toLocaleString() })}
+                {t("Other version edited {0}", { 0: formatStamp(conflict.lostAt) })}
               </p>
             </div>
             <div className="sync-conflict-actions">

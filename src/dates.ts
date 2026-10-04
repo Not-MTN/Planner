@@ -277,6 +277,18 @@ export function formatEdited(iso: string): string {
   return editedDate.format(date);
 }
 
+/* A timestamp with a clock time — "signed in", "added", "sent". Same date
+   language and the same digits as every other date in the app: toLocaleString()
+   follows the browser locale instead, so a Persian reader got Latin digits and
+   someone who set Suomi got English month names. */
+const stamp = { format: (date: Date) => faDigits(fmt('st', { day: 'numeric', month: 'short' }).format(date)) };
+
+export function formatStamp(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${stamp.format(date)} · ${displayTime(`${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`)}`;
+}
+
 /** Day of month for display: Persian digits in fa, a plain number in English. */
 export function dayNumber(iso: string): number | string {
   return faNum(parseISODate(iso).getDate());
