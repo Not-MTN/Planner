@@ -12,11 +12,13 @@ import {
 } from './shared/startup';
 
 const updater = vi.hoisted(() => ({
+  checkPackagedUpdate: vi.fn(),
   downloadPackagedUpdate: vi.fn(),
   applyPackagedUpdate: vi.fn(),
 }));
 vi.mock('./shared/updateRuntime', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./shared/updateRuntime')>()),
+  checkPackagedUpdate: updater.checkPackagedUpdate,
   downloadPackagedUpdate: updater.downloadPackagedUpdate,
   applyPackagedUpdate: updater.applyPackagedUpdate,
 }));
@@ -47,6 +49,27 @@ function updateOffer(version: string): WindowsUpdateOffer {
     downloadUrl: `https://github.com/Not-MTN/Planner/releases/download/v${version}/Planner-windows.exe`,
     sizeBytes: 1024,
     sha256: 'ab'.repeat(32),
+  };
+}
+
+function setAndroidShell(): void {
+  (window as Window & { Capacitor?: unknown }).Capacitor = {
+    isNativePlatform: () => true,
+    getPlatform: () => 'android',
+  };
+}
+
+function androidUpdateOffer(version: string) {
+  return {
+    platform: 'android' as const,
+    version,
+    applicationId: 'com.notmtn.planner' as const,
+    versionCode: 2,
+    signingCertificateSha256: 'ab'.repeat(32),
+    fileName: 'app-release.apk' as const,
+    downloadUrl: `https://github.com/Not-MTN/Planner/releases/download/v${version}/app-release.apk`,
+    sizeBytes: 1024,
+    sha256: 'cd'.repeat(32),
   };
 }
 
@@ -89,6 +112,7 @@ function text(): string {
 beforeEach(() => {
   localStorage.clear();
   document.body.innerHTML = '';
+  updater.checkPackagedUpdate.mockReset().mockResolvedValue({ status: 'unavailable', version: null, offer: null });
   updater.downloadPackagedUpdate.mockReset();
   updater.applyPackagedUpdate.mockReset();
   updater.downloadPackagedUpdate.mockResolvedValue(undefined);
@@ -109,6 +133,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  delete (window as Window & { Capacitor?: unknown }).Capacitor;
   if (root) act(() => root?.unmount());
   root = null;
   container?.remove();
@@ -119,7 +144,7 @@ describe('the packaged update notice', () => {
   it('offers a verified update and links to its release page', async () => {
     await mountApp('available', '1.0.1');
     expect(text()).toContain('Planner 1.0.1 is available to update.');
-    expect(document.querySelector('button.update-download-action')?.textContent).toContain('Download update');
+    expect(document.querySelector('button.update-download-action')?.textContent).toContain('Update now');
     const link = Array.from(document.querySelectorAll('a')).find((a) => a.getAttribute('href') === RELEASES_PAGE);
     expect(link?.textContent).toContain('Release page');
   });
@@ -145,7 +170,7 @@ describe('the packaged update notice', () => {
     expect(document.querySelector('.update-toast')).toBeNull();
   });
 
-  it('shows byte progress, then offers installation and reopening', async () => {
+  it('shows byte progress, then starts the platform installer after verification', async () => {
     let finishDownload: (() => void) | null = null;
     updater.downloadPackagedUpdate.mockImplementation((_offer: WindowsUpdateOffer, onProgress: (progress: { bytesReceived: number; totalBytes: number }) => void) => {
       onProgress({ bytesReceived: 512, totalBytes: 1024 });
@@ -164,15 +189,49 @@ describe('the packaged update notice', () => {
       finishDownload?.();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    expect(text()).toContain('Update ready to install');
-    const install = Array.from(document.querySelectorAll('button')).find((button) => button.textContent?.includes('Install and reopen'));
-    expect(install).toBeTruthy();
+    expect(updater.applyPackagedUpdate).toHaveBeenCalledOnce();
+    expect(text()).toContain('Update installed. Opening Planner…');
+  });
 
+  it('adds an in-app refresh control that can recheck after startup missed an update', async () => {
+    setAndroidShell();
+    updater.checkPackagedUpdate.mockResolvedValue({ status: 'current', version: null, offer: null });
+    await mountApp('unavailable');
+
+    const refresh = document.querySelector<HTMLButtonElement>('.mobile-bar-actions button[aria-label="Check for updates"]');
+    expect(refresh).toBeTruthy();
     await act(async () => {
-      install?.click();
+      refresh?.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    expect(updater.applyPackagedUpdate).toHaveBeenCalledOnce();
+
+    expect(updater.checkPackagedUpdate).toHaveBeenCalledWith({ ignoreDismissal: true });
+    expect(text()).toContain('Planner is up to date.');
+  });
+
+  it('checks from Settings and downloads then starts the Android installer in-app', async () => {
+    setAndroidShell();
+    const offer = androidUpdateOffer('1.0.1');
+    updater.checkPackagedUpdate.mockResolvedValue({ status: 'available', version: offer.version, offer });
+    await mountApp('unavailable');
+
+    const more = [...document.querySelectorAll<HTMLButtonElement>('.tabbar .tab')].find((button) => button.textContent?.includes('More'));
+    act(() => more?.click());
+    const settings = [...document.querySelectorAll<HTMLButtonElement>('.more-list button')].find((button) => button.textContent?.trim() === 'Settings');
+    act(() => settings?.click());
+    const appTab = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((button) => button.textContent?.trim() === 'App');
+    act(() => appTab?.click());
+
+    const check = [...document.querySelectorAll<HTMLButtonElement>('.set-panels button')].find((button) => button.textContent?.trim() === 'Check for updates');
+    expect(check).toBeTruthy();
+    await act(async () => {
+      check?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(updater.checkPackagedUpdate).toHaveBeenCalledWith({ ignoreDismissal: true });
+    expect(updater.downloadPackagedUpdate).toHaveBeenCalledWith(offer, expect.any(Function));
+    expect(updater.applyPackagedUpdate).toHaveBeenCalledWith(offer);
     expect(text()).toContain('Update installed. Opening Planner…');
   });
 

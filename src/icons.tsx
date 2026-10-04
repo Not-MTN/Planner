@@ -411,6 +411,17 @@ export function RedoIcon(props: IconProps) {
   );
 }
 
+export function RefreshIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M20 7v5h-5" />
+      <path d="M4.9 9a7.5 7.5 0 0 1 12.3-2L20 12" />
+      <path d="M4 17v-5h5" />
+      <path d="M19.1 15a7.5 7.5 0 0 1-12.3 2L4 12" />
+    </Svg>
+  );
+}
+
 export function ExitIcon(props: IconProps) {
   return (
     <Svg {...props}>

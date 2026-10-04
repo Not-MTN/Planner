@@ -423,8 +423,12 @@ Android would reject and protects the local data of installed copies.
 The `/app` startup screen checks the account/session, connection, installed
 version and update feed together. The update check never delays opening the
 installed/local planner. Its result moves into shared startup state and then to
-the planner's quiet update notice, which shows download progress, verification,
-installation status, **Later**, retry and a release-page link.
+the planner's update notice, which shows download progress and verification.
+On packaged Android/Windows builds, **Update now** downloads and verifies the
+release in-app before handing it to the platform installer. A refresh control in
+the phone app bar and **Settings → App → Check for updates** force a fresh check
+(including releases previously dismissed with **Later**) and start that same
+in-app update flow when a release is found.
 
 Windows and direct-APK Android builds read the stable `planner-update.json`
 contract; they do not treat an arbitrary newer GitHub tag as an installable
@@ -435,10 +439,11 @@ values before an installer is allowed to run.
 On **Android**, the app checks the installed package ID, current signing
 certificate, installer source, `versionName` and monotonic `versionCode` before
 offering an APK. Play-installed copies are left to Google Play. For an eligible
-direct install, the APK is downloaded to the app's private cache, its package,
-version, signer and checksum are verified, and Android's own package installer
-asks the user to confirm. If Android requires “install unknown apps” access,
-Planner opens that system setting only after the user chooses **Install**.
+direct install, **Update now** (or an explicit manual check that finds a newer
+release) downloads the APK to the app's private cache, verifies its package,
+version, signer and checksum off the UI thread, then opens Android's own package
+installer to ask for confirmation. If Android requires “install unknown apps”
+access, Planner opens that system setting as part of the user-started update.
 After an accepted update the new Planner is reopened; cancellation leaves the
 current app usable. No uninstall, data wipe or setup reset is part of the flow.
 

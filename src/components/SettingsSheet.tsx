@@ -40,8 +40,11 @@ import { faNum, t, tn, getLang, setLang, LANGUAGES, type Lang } from '../i18n';
 import { loadMobileFavorites, loadNavigationPages, MAX_MOBILE_FAVORITES, moveMobileFavorite, NAVIGATION_PAGES, saveMobileFavorites, saveNavigationPages, type NavigationPage } from '../navigationPrefs';
 import { backgroundPushEnabled, configureBackgroundPush, refreshBackgroundPushSchedule } from '../push';
 import { currentPlatform, deviceInstallActionFor } from '../marketing/downloads';
-import { isNativeMobileShell, isNativeShell } from '../shared/nativeShell';
-import { RELEASES_PAGE } from '../shared/updates';
+import { isNativeMobileShell, isNativeShell, shellPlatform } from '../shared/nativeShell';
+import { RELEASES_PAGE, type UpdateOffer } from '../shared/updates';
+import { checkAndStartPackagedUpdate, startPackagedUpdate } from '../shared/updateActions';
+import { supportsPackagedUpdates } from '../shared/updateRuntime';
+import { useStartupState, type StartupUpdateState } from '../shared/startup';
 
 const NAV_LABELS: Record<NavigationPage, string> = {
   today: t("Today"), calendar: t("Calendar"), tasks: t("Tasks"), matrix: t("Matrix"), habits: t("Habits"),
@@ -623,6 +626,99 @@ function CalendarExchangeSection() {
         </button>
       </div>
       <input ref={icsFile.ref} className="visually-hidden" tabIndex={-1} aria-hidden="true" type="file" accept="text/calendar,.ics" onChange={icsFile.onChange} />
+    </section>
+  );
+}
+
+function packagedUpdateStatus(update: StartupUpdateState, installedVersion: string): string {
+  switch (update.phase) {
+    case 'not-applicable':
+      if (update.notApplicableReason === 'store-managed') return t("Updates are managed by Google Play.");
+      if (update.notApplicableReason === 'signing-mismatch') return t("This install cannot be safely updated in-app.");
+      if (update.notApplicableReason === 'package-mismatch') return t("This package is not eligible for in-app updates.");
+      return t("In-app updates are not available on this device.");
+    case 'checking':
+      return t("Checking for updates…");
+    case 'current':
+      return t("Planner is up to date · Version {0}", { 0: installedVersion });
+    case 'available':
+    case 'dismissed':
+      return t("Version {0} is available.", { 0: update.availableVersion ?? '' });
+    case 'downloading': {
+      const { bytesReceived, totalBytes } = update.progress ?? { bytesReceived: 0, totalBytes: null };
+      return totalBytes && totalBytes > 0
+        ? t("Downloading update · {0}%", { 0: Math.min(100, Math.floor((bytesReceived / totalBytes) * 100)) })
+        : t("Downloading update…");
+    }
+    case 'verifying':
+      return t("Verifying update…");
+    case 'ready-to-apply':
+      return t("Update ready to install.");
+    case 'applying':
+      return t("Opening the installer…");
+    case 'complete':
+      return t("Update installed.");
+    case 'unavailable':
+      return t("Couldn’t check for updates. Try again when you’re online.");
+    case 'error':
+      return t("Update failed: {0}", { 0: update.error ?? t("Please try again.") });
+  }
+}
+
+function UpdateSection() {
+  const startup = useStartupState();
+  const [checking, setChecking] = useState(false);
+  if (!startup || !supportsPackagedUpdates()) return null;
+
+  const update = startup.state.update;
+  const actionInProgress = ['checking', 'downloading', 'verifying', 'ready-to-apply', 'applying'].includes(update.phase);
+  const updateOffer = update.offer;
+  const canStartExistingOffer = Boolean(updateOffer && ['available', 'error'].includes(update.phase));
+  const platformCopy = shellPlatform() === 'android'
+    ? t("Available APK updates download and verify inside Planner. Android will ask you to confirm before installing.")
+    : t("Available updates download and verify inside Planner before the Windows installer starts.");
+
+  const checkNow = async () => {
+    if (checking || actionInProgress) return;
+    setChecking(true);
+    try {
+      await checkAndStartPackagedUpdate(startup.setState);
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const startExistingOffer = (offer: UpdateOffer) => {
+    void startPackagedUpdate(offer, startup.setState);
+  };
+
+  return (
+    <section className="set-section">
+      <h3 className="kicker">{t("Software updates")}</h3>
+      <p className="set-hint">{platformCopy}</p>
+      <div className="set-row">
+        <div>
+          <p className="set-label">{t("Installed version · {0}", { 0: startup.state.installedVersion || t("Unknown") })}</p>
+          <p className="set-hint" role="status" aria-live="polite" aria-atomic="true">
+            {packagedUpdateStatus(update, startup.state.installedVersion)}
+          </p>
+        </div>
+        <div className="set-actions">
+          <button
+            type="button"
+            className="btn btn-soft"
+            onClick={() => void checkNow()}
+            disabled={checking || actionInProgress}
+          >
+            {checking || update.phase === 'checking' ? t("Checking…") : t("Check for updates")}
+          </button>
+          {canStartExistingOffer && updateOffer ? (
+            <button type="button" className="btn btn-primary" onClick={() => startExistingOffer(updateOffer)}>
+              {update.phase === 'error' ? t("Try again") : t("Update now")}
+            </button>
+          ) : null}
+        </div>
+      </div>
     </section>
   );
 }
@@ -1525,6 +1621,7 @@ export function SettingsSheet() {
         {tab === 'app' ? (
           <>
             <InstallSection />
+            <UpdateSection />
             <PrivacySection />
       <section className="set-section">
         <h3 className="kicker">{t("New here?")}</h3>

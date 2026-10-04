@@ -27,6 +27,7 @@ import {
   SunIcon,
   UndoIcon,
   RedoIcon,
+  RefreshIcon,
   UploadIcon,
   WeekIcon,
 } from '../icons';
@@ -62,8 +63,9 @@ const StudentPanelView = lazy(() => import('../views/StudentPanelView').then((m)
 const GuardianPanelView = lazy(() => import('../views/GuardianPanelView').then((m) => ({ default: m.GuardianPanelView })));
 import { applyUpdate, onUpdateAvailable } from '../pwa';
 import { RELEASES_PAGE, dismissVersion } from '../shared/updates';
-import { applyPackagedUpdate, downloadPackagedUpdate } from '../shared/updateRuntime';
-import { dismissStartupUpdate, useStartupState, withUpdateProgress } from '../shared/startup';
+import { supportsPackagedUpdates } from '../shared/updateRuntime';
+import { checkAndStartPackagedUpdate, installPackagedUpdate, startPackagedUpdate } from '../shared/updateActions';
+import { dismissStartupUpdate, useStartupState } from '../shared/startup';
 import { isAIVisited, onTourRequest, requestTour, TOUR_STOPS, tourRouteFor, tourStartIndex } from '../tour';
 import { onAboutRequest, requestAbout } from '../about';
 import { TourSheet } from './TourSheet';
@@ -128,6 +130,7 @@ export function Shell() {
   } = planner;
   const [moreOpen, setMoreOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [manualUpdateCheckBusy, setManualUpdateCheckBusy] = useState(false);
   const [notificationItems, setNotificationItems] = useState(loadNotifications);
   const [visiblePages, setVisiblePages] = useState(loadNavigationPages);
   const [mobileFavorites, setMobileFavorites] = useState(loadMobileFavorites);
@@ -241,6 +244,33 @@ export function Shell() {
     startup && updateOffer && updateState &&
     ['available', 'downloading', 'verifying', 'ready-to-apply', 'applying', 'complete', 'error'].includes(updateState.phase),
   );
+  const packagedUpdatesSupported = supportsPackagedUpdates();
+  const updateActionBusy = Boolean(updateState &&
+    ['checking', 'downloading', 'verifying', 'ready-to-apply', 'applying'].includes(updateState.phase));
+
+  const refreshUpdates = async () => {
+    if (!startup || manualUpdateCheckBusy || updateActionBusy) return;
+    setManualUpdateCheckBusy(true);
+    try {
+      const result = await checkAndStartPackagedUpdate(startup.setState);
+      if (result.status === 'current') {
+        flash(t('Planner is up to date.'));
+      } else if (result.status === 'unavailable') {
+        flash(t("Couldn’t check for updates. Try again when you’re online."));
+      } else if (result.status === 'not-applicable') {
+        const message = result.reason === 'store-managed'
+          ? t('Updates are managed by Google Play.')
+          : result.reason === 'signing-mismatch'
+            ? t('This install cannot be safely updated in-app.')
+            : result.reason === 'package-mismatch'
+              ? t('This package is not eligible for in-app updates.')
+              : t('In-app updates are not available on this device.');
+        flash(message);
+      }
+    } finally {
+      setManualUpdateCheckBusy(false);
+    }
+  };
 
   // First-run tour: opens by itself on the very first boot (and resumes after
   // a language-switch reload); replayable from the (?) side tool or Settings.
@@ -645,6 +675,18 @@ export function Shell() {
               <SparklesIcon size={18} />
               {!aiSeen ? <i className="nav-attention" aria-hidden="true" /> : null}
             </button>
+            {packagedUpdatesSupported ? (
+              <button
+                type="button"
+                className="icon-btn round"
+                aria-label={manualUpdateCheckBusy || updateState?.phase === 'checking' ? t("Checking for updates…") : t("Check for updates")}
+                title={t("Check for updates")}
+                disabled={!startup || manualUpdateCheckBusy || updateActionBusy}
+                onClick={() => void refreshUpdates()}
+              >
+                <RefreshIcon size={18} />
+              </button>
+            ) : null}
             <button type="button" className="icon-btn round notification-trigger" aria-label={unreadNotifications ? t("Notifications · {0} unread", { 0: unreadNotifications }) : t("Notifications")} title={t("Notifications")} onClick={() => setNotificationsOpen(true)}>
               <BellIcon size={18} />
               {unreadNotifications > 0 ? <i className="notification-dot" aria-hidden="true" /> : null}
@@ -948,45 +990,17 @@ export function Shell() {
               <button
                 type="button"
                 className="toast-action update-toast-primary update-download-action"
-                onClick={() => {
-                  startup.setState((current) => withUpdateProgress(current, 'downloading', { bytesReceived: 0, totalBytes: updateOffer.sizeBytes }));
-                  void downloadPackagedUpdate(updateOffer, (progress) => {
-                    const phase = progress.bytesReceived >= progress.totalBytes ? 'verifying' : 'downloading';
-                    startup.setState((current) => withUpdateProgress(current, phase, progress));
-                  }).then(
-                    () => startup.setState((current) => withUpdateProgress(
-                      current,
-                      'ready-to-apply',
-                      { bytesReceived: updateOffer.sizeBytes, totalBytes: updateOffer.sizeBytes },
-                    )),
-                    (error: unknown) => startup.setState((current) => withUpdateProgress(
-                      current,
-                      'error',
-                      null,
-                      error instanceof Error ? error.message : t('The update could not be downloaded.'),
-                    )),
-                  );
-                }}
+                disabled={updateActionBusy}
+                onClick={() => void startPackagedUpdate(updateOffer, startup.setState)}
               >
-                {updateState.phase === 'error' ? t('Try again') : t('Download update')}
+                {updateState.phase === 'error' ? t('Try again') : t('Update now')}
               </button>
             ) : null}
             {updateState.phase === 'ready-to-apply' ? (
               <button
                 type="button"
                 className="toast-action update-toast-primary"
-                onClick={() => {
-                  startup.setState((current) => withUpdateProgress(current, 'applying', current.update.progress));
-                  void applyPackagedUpdate(updateOffer).then(
-                    () => startup.setState((current) => withUpdateProgress(current, 'complete', current.update.progress)),
-                    (error: unknown) => startup.setState((current) => withUpdateProgress(
-                      current,
-                      'error',
-                      current.update.progress,
-                      error instanceof Error ? error.message : t('The update could not be installed.'),
-                    )),
-                  );
-                }}
+                onClick={() => void installPackagedUpdate(updateOffer, startup.setState)}
               >
                 {t('Install and reopen')}
               </button>
