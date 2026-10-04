@@ -24,13 +24,14 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
 
 const args = process.argv.slice(2);
 const force = args.includes('--force');
+const printFingerprint = args.includes('--fingerprint');
 const keytoolFlag = args.indexOf('--keytool');
 const keytool = (keytoolFlag !== -1 ? args[keytoolFlag + 1] : process.env.PLANNER_KEYTOOL) || 'keytool';
 
@@ -48,6 +49,45 @@ function generatePassword() {
 function fail(message) {
   console.error(`\n✗ ${message}\n`);
   process.exit(1);
+}
+
+function readGradleProperties() {
+  try {
+    return Object.fromEntries(
+      readFileSync(PROPERTIES, 'utf8')
+        .split(/\r?\n/)
+        .filter((line) => line.trim() && !line.trim().startsWith('#'))
+        .map((line) => {
+          const separator = line.indexOf('=');
+          return separator < 0 ? [line.trim(), ''] : [line.slice(0, separator).trim(), line.slice(separator + 1).trim()];
+        }),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function certificateFingerprint(password, alias) {
+  const certificate = execFileSync(
+    keytool,
+    ['-exportcert', '-keystore', KEYSTORE, '-alias', alias, '-storepass', password],
+    { stdio: ['ignore', 'pipe', 'inherit'] },
+  );
+  return createHash('sha256').update(certificate).digest('hex').toUpperCase().match(/.{2}/g).join(':');
+}
+
+if (printFingerprint) {
+  if (!existsSync(KEYSTORE)) fail(`No Android signing keystore found at ${KEYSTORE.replace(root + '/', '')}.`);
+  const properties = readGradleProperties();
+  if (!properties.storePassword || !properties.keyAlias) {
+    fail(`Could not read storePassword and keyAlias from ${PROPERTIES.replace(root + '/', '')}.`);
+  }
+  try {
+    console.log(`ANDROID_SIGNING_CERT_SHA256=${certificateFingerprint(properties.storePassword, properties.keyAlias)}`);
+  } catch (error) {
+    fail(`Could not read the signing certificate: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  process.exit(0);
 }
 
 if (existsSync(KEYSTORE) && !force) {
@@ -118,6 +158,7 @@ writeFileSync(
 // terminal is where people lose half of it.
 const base64 = readFileSync(KEYSTORE).toString('base64');
 writeFileSync(BASE64_FILE, `${base64}\n`, { mode: 0o600 });
+const fingerprint = certificateFingerprint(password, ALIAS);
 
 const rule = '─'.repeat(68);
 console.log(`
@@ -126,8 +167,8 @@ console.log(`
     android/keystore.properties   (Gradle reads this; both are git-ignored)
 
 ${rule}
-Add these four repository secrets, then tag a release:
-  GitHub → Settings → Secrets and variables → Actions → New repository secret
+Add these four repository secrets and one repository variable, then tag a release:
+  GitHub → Settings → Secrets and variables → Actions
 ${rule}
 
 ANDROID_KEYSTORE_BASE64
@@ -141,6 +182,9 @@ ${ALIAS}
 
 ANDROID_KEY_PASSWORD
 ${password}
+
+ANDROID_SIGNING_CERT_SHA256 (repository variable, not a secret)
+${fingerprint}
 
 ${rule}
 

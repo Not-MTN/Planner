@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { CATEGORIES, categoryById } from '../constants';
 import { usePlanner } from '../context';
 import { addDays, addMinutes, formatFullDate, timeToMinutes, todayISO, weekdayIndex, displayTime } from '../dates';
@@ -12,6 +12,7 @@ import { DraftRefine } from '../components/DraftRefine';
 import { CalendarIcon, CheckIcon, LeafIcon, MicIcon, PlusIcon, SparklesIcon, UploadIcon } from '../icons';
 import type { AIDeclined, AIDeclinedKind, AIMemory, AIMemoryCategory, FixedCommitmentInput } from '../types';
 import { markAIVisited } from '../tour';
+import { isNativeMobileShell } from '../shared/nativeShell';
 import { faNum, t } from '../i18n';
 
 const WEEKDAYS = [
@@ -120,6 +121,8 @@ export function AIView() {
     });
   };
   const [image, setImage] = useState<{ name: string; dataUrl: string } | null>(null);
+  const [imageSelecting, setImageSelecting] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
   const [draft, setDraft] = useState<AIDraft | null>(null);
   // The saved-plan id behind the card on screen — so "Add this plan" can mark
   // the copy on the Plans page as added in the same undoable step.
@@ -383,9 +386,7 @@ export function AIView() {
     }
   };
 
-  const onImage = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
+  const processImageFile = async (file: File | undefined) => {
     if (!file) return;
     setError('');
     if (!['image/jpeg', 'image/png'].includes(file.type)) {
@@ -398,9 +399,65 @@ export function AIView() {
     }
     try {
       const dataUrl = await readFile(file);
-      setImage({ name: file.name, dataUrl });
+      setImage({ name: file.name || t("Plan picture"), dataUrl });
     } catch (reason) {
       setError(friendlyGroqError(reason));
+    }
+  };
+
+  const onImage = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    void processImageFile(file);
+  };
+
+  const chooseImage = async () => {
+    setError('');
+    if (!isNativeMobileShell()) {
+      imageInputRef.current?.click();
+      return;
+    }
+    setImageSelecting(true);
+    try {
+      // The system Photo Picker grants access to the chosen image only. Any
+      // platform permission prompt is reached here, after this explicit tap.
+      const { Camera, MediaTypeSelection } = await import('@capacitor/camera');
+      const { results } = await Camera.chooseFromGallery({
+        mediaType: MediaTypeSelection.Photo,
+        allowMultipleSelection: false,
+        quality: 85,
+        targetWidth: 2000,
+        targetHeight: 2000,
+        includeMetadata: true,
+      });
+      const photo = results[0];
+      if (!photo) return;
+      if (photo.metadata?.size !== undefined && photo.metadata.size > MAX_PLAN_IMAGE_BYTES) {
+        setError(t("That image is over 3 MB. Choose a smaller or more compressed image for the AI to read."));
+        return;
+      }
+      let blob: Blob;
+      if (photo.webPath) {
+        const response = await fetch(photo.webPath);
+        if (!response.ok) throw new Error(t("That image could not be read. Try another file."));
+        blob = await response.blob();
+      } else if (photo.thumbnail) {
+        const format = photo.metadata?.format?.toLowerCase() === 'png' ? 'image/png' : 'image/jpeg';
+        const dataUrl = photo.thumbnail.startsWith('data:image/')
+          ? photo.thumbnail
+          : `data:${format};base64,${photo.thumbnail}`;
+        blob = await (await fetch(dataUrl)).blob();
+      } else {
+        throw new Error(t("That image could not be read. Try another file."));
+      }
+      const format = photo.metadata?.format?.toLowerCase() === 'png' ? 'image/png' : 'image/jpeg';
+      const type = blob.type.startsWith('image/') ? blob.type : format;
+      const extension = type === 'image/png' ? 'png' : 'jpg';
+      await processImageFile(new File([blob], `plan-picture.${extension}`, { type }));
+    } catch (reason) {
+      setError(friendlyGroqError(reason));
+    } finally {
+      setImageSelecting(false);
     }
   };
 
@@ -688,10 +745,24 @@ export function AIView() {
               />
             </label>
             <div className="ai-upload-row">
-              <label className="btn btn-soft btn-small ai-upload-button">
-                <UploadIcon size={15} /> {t("Add a plan picture")}
-                <input type="file" accept="image/png,image/jpeg" onChange={onImage} />
-              </label>
+              <>
+                <button
+                  type="button"
+                  className="btn btn-soft btn-small ai-upload-button"
+                  disabled={working || imageSelecting}
+                  onClick={() => void chooseImage()}
+                >
+                  <UploadIcon size={15} /> {imageSelecting ? t("Opening photos…") : t("Add a plan picture")}
+                </button>
+                <input
+                  ref={imageInputRef}
+                  className="visually-hidden"
+                  type="file"
+                  accept="image/png,image/jpeg"
+                  aria-label={t("Choose a plan picture")}
+                  onChange={onImage}
+                />
+              </>
               <span className="hint">{t("PNG or JPG · up to 3 MB. Images are sent to Groq for reading and are not saved in your planner.")}</span>
             </div>
             {image ? (

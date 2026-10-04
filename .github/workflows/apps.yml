@@ -1,13 +1,13 @@
 name: Apps
 
 # Builds the things people install: the Windows/macOS/Linux installers, the
-# Android APK + Play bundle, and an unsigned iOS archive. Nothing is published
-# anywhere by this workflow — every job uploads its output as a build artifact,
-# and on a version tag the files are also attached to that GitHub release.
+# Android APK + Play bundle, and an unsigned iOS archive. Manual runs keep the
+# outputs as build artifacts; stable version tags attach them and a
+# checksummed update manifest (including the APK signer identity) to the release.
 #
-# Signing is deliberately out of the way: Android picks up a keystore when the
-# repository has the secrets below, and the Apple build stays unsigned until a
-# maintainer adds their certificates (see docs/APPS.md).
+# Manual Android builds may use the debug key for testing. Public version tags
+# require the permanent sideload keystore and a pinned certificate fingerprint;
+# the Apple build stays unsigned until a maintainer adds signing certificates.
 #
 # The API address is baked in at build time. Set the optional inputs (or the
 # PLANNER_APP_URL / PLANNER_API_ORIGIN repository variables) once, and every
@@ -96,9 +96,31 @@ jobs:
         env:
           API_ORIGIN: ${{ env.API_ORIGIN }}
 
+  release-contract:
+    name: Verify public release identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Branch/manual artifacts may use the debug key for testing. A public tag
+    # must have the permanent sideload signing key and its pinned fingerprint.
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      ANDROID_SIGNING_CERT_SHA256: ${{ vars.ANDROID_SIGNING_CERT_SHA256 }}
+      PLANNER_RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      PLANNER_RUN_NUMBER: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check the tag, permanent app IDs, and signing configuration
+        run: node scripts/validate-release-contract.mjs
+
   desktop:
     name: Desktop installers (${{ matrix.target }})
-    needs: preflight
+    needs: [preflight, release-contract]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -159,7 +181,7 @@ jobs:
 
   android:
     name: Android APK and Play bundle
-    needs: preflight
+    needs: [preflight, release-contract]
     runs-on: ubuntu-latest
     timeout-minutes: 40
     # Secrets cannot be read inside an `if:` directly; carrying them in the
@@ -169,6 +191,7 @@ jobs:
       KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      ANDROID_SIGNING_CERT_SHA256: ${{ vars.ANDROID_SIGNING_CERT_SHA256 }}
       # Read by android/app/build.gradle. Spelled with the `github` context
       # rather than `env.VERSION_NAME`: the `env` context is not available in
       # `jobs.<job_id>.env`, and using it there makes the whole workflow file
@@ -221,63 +244,130 @@ jobs:
           chmod +x ./gradlew
           # Signed with the upload key when the secrets above exist; otherwise
           # the debug key signs it, which is enough to install and try the app.
-          if ./gradlew --no-daemon assembleRelease bundleRelease 2>&1 | tee "$RUNNER_TEMP/gradle.log"; then
+          if ./gradlew --no-daemon assembleDirectRelease bundlePlayRelease 2>&1 | tee "$RUNNER_TEMP/gradle.log"; then
             exit 0
           fi
           bash "$GITHUB_WORKSPACE/scripts/ci-annotate.sh" "$RUNNER_TEMP/gradle.log" \
             "Gradle failed" 60
           exit 1
-      - name: Say it out loud when this APK cannot be updated later
-        # Not a failure: a debug-signed APK is fine for trying the app on a
-        # phone. It is not fine to hand to other people, and the reason is not
-        # obvious, so it goes in the run summary where it cannot be missed.
-        if: ${{ startsWith(github.ref, 'refs/tags/v') && env.KEYSTORE_BASE64 == '' }}
+      - name: Verify Android upgrade identity and preserve signing continuity
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
         run: |
-          {
-            echo "## ⚠️ This APK cannot be installed over the previous one"
-            echo ""
-            echo "No upload keystore is configured, so Gradle signed this release with a"
-            echo "debug key. Android generates that key per machine, and this job runs on a"
-            echo "fresh machine every time — so every release is signed with a *different*"
-            echo "key, and Android refuses to install an app whose signature does not match"
-            echo "the installed one."
-            echo ""
-            echo "The practical effect: anyone who installs this APK cannot install the next"
-            echo "release. They would have to uninstall first, which deletes their planner"
-            echo "data on that device unless it was synced."
-            echo ""
-            echo "Fix it once by adding four repository secrets"
-            echo "(Settings → Secrets and variables → Actions):"
-            echo ""
-            echo '```'
-            echo "ANDROID_KEYSTORE_BASE64        base64 -w0 release.jks"
-            echo "ANDROID_KEYSTORE_PASSWORD"
-            echo "ANDROID_KEY_ALIAS"
-            echo "ANDROID_KEY_PASSWORD"
-            echo '```'
-            echo ""
-            echo "See docs/APPS.md → Release signing. Keep that keystore: it is what makes"
-            echo "future updates install, and it cannot be regenerated without breaking them."
-          } >> "$GITHUB_STEP_SUMMARY"
-          echo "::warning title=This APK cannot be updated::No upload keystore is configured, so this APK is signed with a per-run debug key. Android will refuse to install a future release over it. See the run summary, or docs/APPS.md → Release signing."
+          set -euo pipefail
+          apk="android/app/build/outputs/apk/direct/release/app-direct-release.apk"
+          apksigner="$(find "${ANDROID_HOME:?}"/build-tools -type f -name apksigner | sort -V | tail -n 1)"
+          aapt="$(find "${ANDROID_HOME:?}"/build-tools -type f -name aapt | sort -V | tail -n 1)"
+          if [[ -z "$apksigner" || -z "$aapt" ]]; then
+            echo "::error title=Android SDK tools missing::Could not find apksigner and aapt under ANDROID_HOME/build-tools."
+            exit 1
+          fi
+
+          package_line="$("$aapt" dump badging "$apk" | head -n 1)"
+          package_id="$(sed -nE "s/^package: name='([^']+)'.*/\1/p" <<< "$package_line")"
+          version_code="$(sed -nE "s/.*versionCode='([^']+)'.*/\1/p" <<< "$package_line")"
+          if [[ "$package_id" != "com.notmtn.planner" ]]; then
+            echo "::error title=Android package identity changed::Expected com.notmtn.planner, found ${package_id:-unknown}."
+            exit 1
+          fi
+          if [[ "$version_code" != "$PLANNER_VERSION_CODE" ]]; then
+            echo "::error title=Android versionCode mismatch::APK has ${version_code:-unknown}; the release contract expected $PLANNER_VERSION_CODE."
+            exit 1
+          fi
+
+          certificate_sha256() {
+            "$apksigner" verify --print-certs "$1" \
+              | sed -nE 's/^Signer #1 certificate SHA-256 digest: (.*)$/\1/p' \
+              | head -n 1 | tr -d ' :\t\r\n' | tr '[:upper:]' '[:lower:]'
+          }
+          actual="$(certificate_sha256 "$apk")"
+          expected="$(printf '%s' "$ANDROID_SIGNING_CERT_SHA256" | tr -d ' :\t\r\n' | tr '[:upper:]' '[:lower:]')"
+          if [[ ! "$actual" =~ ^[0-9a-f]{64}$ || "$actual" != "$expected" ]]; then
+            echo "::error title=Android signing certificate mismatch::The APK does not match the pinned ANDROID_SIGNING_CERT_SHA256. Refusing to publish an update that could strand installed data."
+            exit 1
+          fi
+
+          # Bootstrap by checking every older direct APK. Once one verified
+          # update manifest is published, that manifest is the compact lineage
+          # record, so later releases compare against it instead of re-downloading
+          # the APKs on every run. A rerun also checks its own already-published
+          # manifest before clobbering that release's assets.
+          release_json="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName,isDraft,isPrerelease)"
+          mapfile -t release_tags < <(printf '%s' "$release_json" | jq -r '.[] | select(.isDraft == false and .isPrerelease == false) | .tagName')
+          baseline_manifest_tag=""
+          for release_tag in "${release_tags[@]}"; do
+            asset_names="$(gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+            if grep -Fxq 'planner-update.json' <<< "$asset_names"; then
+              baseline_manifest_tag="$release_tag"
+              break
+            fi
+          done
+
+          checked=0
+          if [[ -n "$baseline_manifest_tag" ]]; then
+            previous_dir="$(mktemp -d)"
+            gh release download "$baseline_manifest_tag" --repo "$GITHUB_REPOSITORY" \
+              --pattern planner-update.json --dir "$previous_dir"
+            previous="$(jq -r '.platforms.android.signingCertificateSha256 // empty' "$previous_dir/planner-update.json" \
+              | tr -d ' :\t\r\n' | tr '[:upper:]' '[:lower:]')"
+            rm -rf "$previous_dir"
+            if [[ ! "$previous" =~ ^[0-9a-f]{64}$ || "$previous" != "$actual" ]]; then
+              echo "::error title=Android signing key changed::The published update contract in $baseline_manifest_tag does not match this APK. Refusing an update that could risk local planner data."
+              exit 1
+            fi
+            checked=1
+          else
+            # The first permanent-key release bootstraps the signing lineage.
+            # Only v1.0.0 and v1.0.1 are known test-only releases made with
+            # ephemeral debug keys; later tags remain strict baselines.
+            mapfile -t baseline_tags < <(node scripts/android-signing-baseline.mjs "${release_tags[@]}")
+            for release_tag in "${baseline_tags[@]}"; do
+              asset_names="$(gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+              if ! grep -Fxq 'app-release.apk' <<< "$asset_names"; then
+                continue
+              fi
+              previous_dir="$(mktemp -d)"
+              gh release download "$release_tag" --repo "$GITHUB_REPOSITORY" \
+                --pattern app-release.apk --dir "$previous_dir"
+              previous="$(certificate_sha256 "$previous_dir/app-release.apk")"
+              rm -rf "$previous_dir"
+              if [[ ! "$previous" =~ ^[0-9a-f]{64}$ ]]; then
+                echo "::error title=Could not verify previous APK::The Android signing certificate in $release_tag could not be read."
+                exit 1
+              fi
+              if [[ "$previous" != "$actual" ]]; then
+                echo "::error title=Android signing key changed::The APK in $release_tag was signed with a different key. Publishing this build would make Android refuse in-place updates and risk local planner data."
+                exit 1
+              fi
+              checked=$((checked + 1))
+            done
+          fi
+          mkdir -p artifacts/meta
+          printf '%s\n' "$actual" > artifacts/meta/android-signing-cert-sha256.txt
+          echo "✓ Android package, versionCode, pinned certificate and $checked signing baseline(s) agree."
 
       - name: Collect the builds
         run: |
           mkdir -p artifacts
-          cp android/app/build/outputs/apk/release/*.apk artifacts/ || true
-          cp android/app/build/outputs/bundle/release/*.aab artifacts/ || true
+          cp android/app/build/outputs/apk/direct/release/app-direct-release.apk artifacts/app-release.apk
+          cp android/app/build/outputs/bundle/playRelease/app-play-release.aab artifacts/app-play-release.aab
           ls -la artifacts
       - name: Upload Android builds
         uses: actions/upload-artifact@v4
         with:
           name: planner-android
-          path: artifacts/*
+          path: |
+            artifacts/*.apk
+            artifacts/*.aab
+            artifacts/meta/android-signing-cert-sha256.txt
           if-no-files-found: error
           retention-days: 14
 
   ios:
     name: iOS archive (unsigned)
-    needs: preflight
+    needs: [preflight, release-contract]
     runs-on: macos-latest
     timeout-minutes: 40
     steps:
@@ -326,25 +416,44 @@ jobs:
     needs: [desktop, android, ios]
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      ANDROID_SIGNING_CERT_SHA256: ${{ vars.ANDROID_SIGNING_CERT_SHA256 }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
+      - name: Create the machine-readable update manifest
+        run: node scripts/create-update-manifest.mjs artifacts "$GITHUB_REF_NAME" "$GITHUB_RUN_NUMBER"
       - name: Upload to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
         run: |
+          set -euo pipefail
           tag="${GITHUB_REF_NAME}"
           # The release may not exist yet (a tag pushed before the release was
-          # written); create it, then attach everything.
+          # written); create it, then attach everything. The internal signing
+          # fingerprint is only a build check and is never uploaded.
           gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
             || gh release create "$tag" --repo "$GITHUB_REPOSITORY" --title "Planner $tag" --generate-notes
-          gh release upload "$tag" artifacts/* --repo "$GITHUB_REPOSITORY" --clobber
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
+          mapfile -d '' release_assets < <(find artifacts -maxdepth 1 -type f -print0)
+          manifest_found=false
+          for asset in "${release_assets[@]}"; do
+            if [[ "$asset" == "artifacts/planner-update.json" ]]; then
+              manifest_found=true
+              break
+            fi
+          done
+          if [[ "$manifest_found" != true ]]; then
+            echo "::error title=Update manifest missing::planner-update.json was not created."
+            exit 1
+          fi
+          gh release upload "$tag" "${release_assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
       - name: Check the website's download buttons resolve
         # The site links to /releases/latest/download/<name>. If an artifact is
         # named differently from what src/marketing/downloads.ts expects, every

@@ -6,12 +6,24 @@
  * Key               → the planner, seeded with the decrypted state.
  * Offline           → the planner with the local copy, so the app still works.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { t } from '../i18n';
 import { App } from '../App';
 import { accountUser, bootAccount, signOut, unlockWithPassword, type AccountBoot } from './vault';
 import { AuthError, getLastUserId } from './session';
 import { isNativeShell } from '../shared/nativeShell';
+import { currentVersion, type PackagedUpdateCheckResult } from '../shared/updates';
+import { checkPackagedUpdate, supportsPackagedUpdates } from '../shared/updateRuntime';
+import type { PlannerState } from '../types';
+import {
+  createStartupState,
+  StartupProvider,
+  withAccountCheck,
+  withUpdateCheck,
+  type StartupAccountStatus,
+  type StartupConnectionStatus,
+  type StartupState,
+} from '../shared/startup';
 // The planner's component styles, for the unlock screen and the app behind it.
 // app-polish.css is the final layer: it ships in the same chunk and must load
 // after styles.css so its rules carry the day on every device class.
@@ -122,8 +134,169 @@ function GateFrame({ leaving = false, children }: { leaving?: boolean; children:
   );
 }
 
+function accountStatusForBoot(boot: AccountBoot): Exclude<StartupAccountStatus, 'checking'> {
+  switch (boot.status) {
+    case 'ready':
+      return 'ready';
+    case 'locked':
+      return 'locked';
+    case 'offline-trusted':
+      return 'offline-trusted';
+    case 'signed-out':
+      return 'signed-out';
+  }
+}
+
+function connectionStatusForBoot(boot: AccountBoot): Exclude<StartupConnectionStatus, 'checking'> {
+  // A trusted local copy can be reached after either a genuinely offline boot
+  // or an expired server session, so do not claim that the network is down.
+  return boot.status === 'offline-trusted' ? 'unknown' : 'connected';
+}
+
+function accountStatusText(status: StartupAccountStatus): string {
+  switch (status) {
+    case 'checking':
+      return t('Checking your account…');
+    case 'ready':
+      return t('Signed in');
+    case 'locked':
+      return t('Unlock your planner');
+    case 'signed-out':
+      return t('Sign in to Planner');
+    case 'offline':
+    case 'offline-trusted':
+      return t('Offline · saved here');
+    case 'blocked':
+      return t("Can't open your planner");
+  }
+}
+
+function connectionStatusText(status: StartupConnectionStatus): string {
+  switch (status) {
+    case 'checking':
+      return t('Checking your connection…');
+    case 'connected':
+      return t('Connected');
+    case 'offline':
+      return t('Offline');
+    case 'unknown':
+      return t('Couldn’t confirm connection');
+    case 'not-applicable':
+      return t('Not applicable');
+  }
+}
+
+function updateStatusText(state: StartupState): string {
+  switch (state.update.phase) {
+    case 'checking':
+      return t('Checking for updates…');
+    case 'current':
+      return t('Up to date · {0}', { 0: state.installedVersion });
+    case 'available':
+    case 'dismissed':
+      return t('Update available · {0}', { 0: state.update.availableVersion ?? '' });
+    case 'downloading': {
+      const { bytesReceived, totalBytes } = state.update.progress ?? { bytesReceived: 0, totalBytes: null };
+      if (totalBytes && totalBytes > 0) {
+        const percent = Math.min(100, Math.floor((bytesReceived / totalBytes) * 100));
+        return t('Downloading update · {0}%', { 0: percent });
+      }
+      return t('Downloading update…');
+    }
+    case 'verifying':
+      return t('Verifying update…');
+    case 'ready-to-apply':
+      return t('Update ready to install');
+    case 'applying':
+      return t('Installing update…');
+    case 'complete':
+      return t('Update complete');
+    case 'unavailable':
+      return t('Couldn’t check for updates');
+    case 'error':
+      return state.update.error || t('Couldn’t check for updates');
+    case 'not-applicable':
+      if (state.update.notApplicableReason === 'store-managed') return t('Updates are managed by Google Play');
+      if (state.update.notApplicableReason === 'signing-mismatch') return t('This install cannot be safely updated in-app');
+      if (state.update.notApplicableReason === 'package-mismatch') return t('This package is not eligible for in-app updates');
+      return t('Not applicable');
+  }
+}
+
+function StartupCheckRow({
+  label,
+  detail,
+  checking = false,
+  attention = false,
+}: {
+  label: string;
+  detail: string;
+  checking?: boolean;
+  attention?: boolean;
+}) {
+  const indicatorClass = `gate-startup-indicator${checking ? ' is-checking' : ''}${attention ? ' is-attention' : ''}`;
+  return (
+    <li className="gate-startup-row">
+      <span className={indicatorClass} aria-hidden="true">
+        {checking ? <span className="gate-spinner" /> : attention ? '!' : '✓'}
+      </span>
+      <span className="gate-startup-label">{label}</span>
+      <span className="gate-startup-value">{detail}</span>
+    </li>
+  );
+}
+
+function StartupScreen({ state }: { state: StartupState }) {
+  return (
+    <GateFrame>
+      <section
+        className="gate-startup"
+        aria-busy={state.account === 'checking' || state.connection === 'checking' || state.update.phase === 'checking'}
+        aria-live="polite"
+        aria-labelledby="startup-title"
+      >
+        <img className="gate-logo" src="/logo.svg" alt="" width="56" height="56" />
+        <h1 id="startup-title" className="gate-title">
+          {t('Opening your planner…')}
+        </h1>
+        <p className="gate-sub">{t('Your planner is getting things ready.')}</p>
+        <ul className="gate-startup-list">
+          <StartupCheckRow
+            label={t('Account')}
+            detail={accountStatusText(state.account)}
+            checking={state.account === 'checking'}
+            attention={state.account === 'offline' || state.account === 'offline-trusted' || state.account === 'blocked'}
+          />
+          <StartupCheckRow
+            label={t('Connection')}
+            detail={connectionStatusText(state.connection)}
+            checking={state.connection === 'checking'}
+            attention={state.connection === 'offline' || state.connection === 'unknown' || state.connection === 'not-applicable'}
+          />
+          <StartupCheckRow
+            label={t('Installed version')}
+            detail={state.installedVersion ? t('Version {0}', { 0: state.installedVersion }) : t('Unknown')}
+            attention={!state.installedVersion}
+          />
+          {state.update.phase !== 'not-applicable' ? (
+            <StartupCheckRow
+              label={t('Software update')}
+              detail={updateStatusText(state)}
+              checking={state.update.phase === 'checking'}
+              attention={state.update.phase === 'unavailable' || state.update.phase === 'error'}
+            />
+          ) : null}
+        </ul>
+      </section>
+    </GateFrame>
+  );
+}
+
 export function AccountGate() {
   const [boot, setBoot] = useState<Boot>(null);
+  const updatesEnabled = supportsPackagedUpdates();
+  const [startup, setStartup] = useState(() => createStartupState(currentVersion(), updatesEnabled));
+  const updateCheck = useRef<Promise<PackagedUpdateCheckResult> | null>(null);
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -139,27 +312,54 @@ export function AccountGate() {
   useEffect(() => {
     let cancelled = false;
     void bootAccount().then(
-      (result) => !cancelled && setBoot(result),
+      (result) => {
+        if (cancelled) return;
+        setStartup((current) => withAccountCheck(current, accountStatusForBoot(result), connectionStatusForBoot(result)));
+        setBoot(result);
+      },
       (err: unknown) => {
         if (cancelled) return;
         // Without a network we cannot read the vault, so keep working locally.
         if (err instanceof AuthError && err.code === 'network') {
+          setStartup((current) => withAccountCheck(current, 'offline', 'offline'));
           setBoot({ status: 'offline' });
           return;
         }
         // Everything else used to be treated as "signed out", which sent people
         // to a sign-in form that could not possibly work. Name the real cause.
         if (err instanceof AuthError) {
+          const connection = err.code === 'local_only_build'
+            ? 'not-applicable'
+            : err.code === 'origin_refused' || err.code === 'deployment_gate' || err.code === 'api_missing' || err.code === 'not_configured'
+              ? 'connected'
+              : 'unknown';
+          setStartup((current) => withAccountCheck(current, 'blocked', connection));
           setBoot({ status: 'blocked', error: err });
           return;
         }
+        setStartup((current) => withAccountCheck(current, 'signed-out', 'unknown'));
         setBoot({ status: 'signed-out' });
       },
     );
+
+    if (updatesEnabled) {
+      // The ref also deduplicates React Strict Mode's development-only effect
+      // replay. The result remains useful after AccountGate hands off to App.
+      updateCheck.current ??= checkPackagedUpdate();
+      void updateCheck.current.then(
+        (result) => {
+          if (!cancelled) setStartup((current) => withUpdateCheck(current, result));
+        },
+        () => {
+          if (!cancelled) setStartup((current) => withUpdateCheck(current, { status: 'unavailable', version: null, offer: null }));
+        },
+      );
+    }
+
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [updatesEnabled]);
 
   // The planner is for people who are signed in.
   useEffect(() => {
@@ -174,14 +374,20 @@ export function AccountGate() {
     return () => window.removeEventListener('online', retry);
   }, [boot]);
 
-  if (boot?.status === 'ready') return <App initialState={boot.state} />;
-  if (offlineChoice) return <App />;
+  const renderPlanner = (initialState?: PlannerState | null) => (
+    <StartupProvider state={startup} setState={setStartup}>
+      <App initialState={initialState} />
+    </StartupProvider>
+  );
+
+  if (boot?.status === 'ready') return renderPlanner(boot.state);
+  if (offlineChoice) return renderPlanner();
   // A device that signed in before opens its own copy offline, as it always
   // has. One that never did gets the choice below instead of an anonymous
   // planner with no way to sign in.
-  if (boot?.status === 'offline-trusted') return <App />;
+  if (boot?.status === 'offline-trusted') return renderPlanner();
   if (boot?.status === 'offline') {
-    return hasNothingToUnlock() ? <OfflineStart onOffline={() => setOfflineChoice(true)} /> : <App />;
+    return hasNothingToUnlock() ? <OfflineStart onOffline={() => setOfflineChoice(true)} /> : renderPlanner();
   }
 
   if (boot?.status === 'blocked') {
@@ -236,6 +442,7 @@ export function AccountGate() {
     setError(null);
     void unlockWithPassword(password, remember).then(
       (result) => {
+        setStartup((current) => withAccountCheck(current, accountStatusForBoot(result), connectionStatusForBoot(result)));
         // A short goodbye: the gate fades out instead of snapping to the app.
         if (result.status === 'ready') {
           setLeaving(true);
@@ -263,15 +470,11 @@ export function AccountGate() {
     );
   };
 
+  if (!locked) return <StartupScreen state={startup} />;
+
   return (
     <GateFrame leaving={leaving}>
-      {!locked ? (
-        <p className="gate-loading">
-          <span className="gate-spinner" aria-hidden="true" />
-          {t('Checking your account…')}
-        </p>
-      ) : (
-        <>
+      <>
           <img className="gate-logo" src="/logo.svg" alt="" width="56" height="56" />
           <h1 className="gate-title">{t('Unlock your planner')}</h1>
             <p className="gate-sub">
@@ -341,8 +544,7 @@ export function AccountGate() {
                 )}
               </p>
             </form>
-          </>
-      )}
+      </>
     </GateFrame>
   );
 }

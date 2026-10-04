@@ -28,6 +28,9 @@ import {
   type TourStopId,
 } from '../tour';
 
+// Finnish remains available in the app settings, but not in the first-run tour.
+const TOUR_LANGUAGES = LANGUAGES.filter((item) => item.id !== 'fi');
+
 interface Rect {
   top: number;
   left: number;
@@ -233,6 +236,10 @@ export function TourSheet({ step, onStep, onClose }: { step: number; onStep: (in
   };
 
   const isLang = stop === 'lang';
+  const currentLang = getLang();
+  const primaryTourLanguage = TOUR_LANGUAGES.some((item) => item.id === currentLang)
+    ? currentLang
+    : TOUR_LANGUAGES[0].id;
   const copy = stepCopy(stop);
   const last = advanceTour(step) === null;
 
@@ -291,14 +298,14 @@ export function TourSheet({ step, onStep, onClose }: { step: number; onStep: (in
               <span dir="rtl">زبان خود را انتخاب کنید؛ یک تور کوتاه همه‌چیز را نشانتان می‌دهد.</span>
             </p>
             <div className="tour-lang-row">
-              {LANGUAGES.map((item) => (
+              {TOUR_LANGUAGES.map((item) => (
                 <button
                   key={item.id}
                   type="button"
-                  className={cx('tour-lang-btn', item.id === getLang() && 'on')}
-                  aria-pressed={item.id === getLang()}
+                  className={cx('tour-lang-btn', item.id === currentLang && 'on')}
+                  aria-pressed={item.id === currentLang}
                   dir={item.dir}
-                  data-tour-primary={item.id === getLang() ? '' : undefined}
+                  data-tour-primary={item.id === primaryTourLanguage ? '' : undefined}
                   onClick={() => pickLanguage(item.id)}
                 >
                   <strong>{item.label}</strong>

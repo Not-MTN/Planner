@@ -61,6 +61,12 @@ export function shellPlatform(): ShellPlatform {
   return isNativeShell() ? 'android' : 'web';
 }
 
+/** Native phone/tablet shells that expose the Android or iOS permission UI. */
+export function isNativeMobileShell(): boolean {
+  const platform = shellPlatform();
+  return platform === 'android' || platform === 'ios';
+}
+
 /**
  * The API this build talks to, or '' when the app is served from the same
  * origin as the API (the website, and local development).

@@ -21,16 +21,24 @@
 'use strict';
 
 const { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, net, protocol, session, shell } = require('electron');
+const { createHash } = require('node:crypto');
+const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
+const { Readable, Transform } = require('node:stream');
+const { pipeline } = require('node:stream/promises');
 const { pathToFileURL } = require('node:url');
 const {
   contentType,
   contentSecurityPolicy,
   isHttpUrl,
   isInternal: isInternalUrl,
+  isTrustedUpdateUrl,
   normalizeAddress,
   resolveRequestedFile,
+  validateWindowsOffer,
+  windowsOfferFromManifest,
+  WINDOWS_UPDATE_MANIFEST_URL,
 } = require('./lib.cjs');
 
 const SCHEME = 'app';
@@ -72,6 +80,166 @@ function appOrigin() {
 /** Is this URL the app the window is showing, rather than the outside world? */
 function isInternal(value) {
   return isInternalUrl(value, appOrigin(), SCHEME);
+}
+
+let mainWindow = null;
+let currentWindowsOffer = null;
+let downloadedWindowsInstaller = null;
+let windowsDownloadInProgress = false;
+
+function assertUpdateSender(event) {
+  const frameUrl = event.senderFrame?.url ?? '';
+  if (!mainWindow || event.sender !== mainWindow.webContents || !isInternal(frameUrl)) {
+    throw new Error('The update request did not come from Planner.');
+  }
+  if (process.platform !== 'win32' || !app.isPackaged) {
+    throw new Error('In-app updates are available only in the installed Windows app.');
+  }
+}
+
+function sameWindowsOffer(left, right) {
+  if (!left || !right) return false;
+  return left.version === right.version
+    && left.downloadUrl === right.downloadUrl
+    && left.sizeBytes === right.sizeBytes
+    && left.sha256 === right.sha256;
+}
+
+async function limitedResponseText(response, maxBytes) {
+  if (!response.body) throw new Error('The update service returned an empty response.');
+  const reader = response.body.getReader();
+  const chunks = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel();
+        throw new Error('The update feed is unexpectedly large.');
+      }
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks, size).toString('utf8');
+}
+
+async function fetchWindowsUpdateManifest() {
+  if (process.platform !== 'win32' || !app.isPackaged) {
+    throw new Error('The Windows update feed is available only in the installed app.');
+  }
+  currentWindowsOffer = null;
+  const response = await net.fetch(WINDOWS_UPDATE_MANIFEST_URL, {
+    headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' },
+  });
+  if (!response.ok) throw new Error(`The update feed returned HTTP ${response.status}.`);
+  if (response.url && !isTrustedUpdateUrl(response.url)) throw new Error('The update feed redirected to an untrusted host.');
+  const manifest = JSON.parse(await limitedResponseText(response, 128 * 1024));
+  const offer = windowsOfferFromManifest(manifest);
+  if (!offer) throw new Error('The Windows update feed does not match Planner’s release contract.');
+  currentWindowsOffer = offer;
+  return manifest;
+}
+
+async function sha256File(filePath) {
+  const digest = createHash('sha256');
+  await new Promise((resolve, reject) => {
+    const stream = fs.createReadStream(filePath);
+    stream.on('data', (chunk) => digest.update(chunk));
+    stream.on('error', reject);
+    stream.on('end', resolve);
+  });
+  return digest.digest('hex');
+}
+
+async function downloadWindowsInstaller(event, untrustedOffer) {
+  assertUpdateSender(event);
+  const offer = validateWindowsOffer(untrustedOffer);
+  if (!offer || !sameWindowsOffer(offer, currentWindowsOffer)) {
+    throw new Error('The requested installer does not match the latest verified update feed.');
+  }
+  if (windowsDownloadInProgress) throw new Error('An update download is already in progress.');
+  windowsDownloadInProgress = true;
+
+  const directory = path.join(app.getPath('temp'), 'Planner-update');
+  const finalPath = path.join(directory, `${offer.version}-${offer.sha256}.exe`);
+  const partialPath = `${finalPath}.part`;
+  fs.mkdirSync(directory, { recursive: true });
+  await fs.promises.rm(partialPath, { force: true });
+
+  try {
+    const response = await net.fetch(offer.downloadUrl, {
+      headers: { Accept: 'application/octet-stream', 'Accept-Encoding': 'identity' },
+    });
+    if (!response.ok || !response.body) throw new Error(`The installer download returned HTTP ${response.status}.`);
+    if (response.url && !isTrustedUpdateUrl(response.url)) throw new Error('The installer redirected to an untrusted host.');
+    const declaredSize = Number(response.headers.get('content-length'));
+    if (Number.isFinite(declaredSize) && declaredSize > 0 && declaredSize !== offer.sizeBytes) {
+      throw new Error('The installer size does not match the update feed.');
+    }
+
+    const digest = createHash('sha256');
+    let bytesReceived = 0;
+    let lastProgressAt = 0;
+    const progress = new Transform({
+      transform(chunk, _encoding, callback) {
+        bytesReceived += chunk.length;
+        if (bytesReceived > offer.sizeBytes) {
+          callback(new Error('The installer is larger than the update feed declares.'));
+          return;
+        }
+        digest.update(chunk);
+        const now = Date.now();
+        if (now - lastProgressAt > 120 || bytesReceived === offer.sizeBytes) {
+          lastProgressAt = now;
+          if (!event.sender.isDestroyed()) {
+            event.sender.send('planner:update-progress', { bytesReceived, totalBytes: offer.sizeBytes });
+          }
+        }
+        callback(null, chunk);
+      },
+    });
+    await pipeline(Readable.fromWeb(response.body), progress, fs.createWriteStream(partialPath, { flags: 'wx' }));
+    if (bytesReceived !== offer.sizeBytes) throw new Error('The installer download ended before the expected size.');
+    if (digest.digest('hex') !== offer.sha256) throw new Error('The installer checksum does not match the update feed.');
+    await fs.promises.rm(finalPath, { force: true });
+    await fs.promises.rename(partialPath, finalPath);
+    downloadedWindowsInstaller = { ...offer, path: finalPath };
+    return { ready: true };
+  } catch (error) {
+    await fs.promises.rm(partialPath, { force: true });
+    throw error;
+  } finally {
+    windowsDownloadInProgress = false;
+  }
+}
+
+async function installWindowsUpdate(event, untrustedOffer) {
+  assertUpdateSender(event);
+  const offer = validateWindowsOffer(untrustedOffer);
+  if (!offer || !sameWindowsOffer(offer, currentWindowsOffer) || !sameWindowsOffer(offer, downloadedWindowsInstaller)) {
+    throw new Error('Download and verify the update before installing it.');
+  }
+  const file = downloadedWindowsInstaller.path;
+  const stat = await fs.promises.stat(file).catch(() => null);
+  if (!stat?.isFile() || stat.size !== offer.sizeBytes || await sha256File(file) !== offer.sha256) {
+    downloadedWindowsInstaller = null;
+    throw new Error('The downloaded installer failed its final integrity check.');
+  }
+
+  // NSIS upgrades the same per-user installation (never uninstall first). The
+  // installer keeps the app's userData directory and reopens Planner when done.
+  const installer = spawn(file, ['/S'], { detached: true, stdio: 'ignore', windowsHide: true });
+  await new Promise((resolve, reject) => {
+    installer.once('spawn', resolve);
+    installer.once('error', reject);
+  });
+  installer.unref();
+  setTimeout(() => app.quit(), 350);
+  return { started: true };
 }
 
 // ── Where the window keeps its size and place ──────────────────────────────
@@ -145,8 +313,6 @@ function hardenSession() {
 }
 
 // ── The window ─────────────────────────────────────────────────────────────
-
-let mainWindow = null;
 
 function createWindow() {
   const state = readWindowState();
@@ -303,6 +469,12 @@ if (!gotLock) {
       if (typeof url === 'string' && isHttpUrl(url)) void shell.openExternal(url);
       return true;
     });
+    ipcMain.handle('planner:update-manifest', async (event) => {
+      assertUpdateSender(event);
+      return fetchWindowsUpdateManifest();
+    });
+    ipcMain.handle('planner:update-download', (event, offer) => downloadWindowsInstaller(event, offer));
+    ipcMain.handle('planner:update-install', (event, offer) => installWindowsUpdate(event, offer));
     createWindow();
 
     app.on('activate', () => {

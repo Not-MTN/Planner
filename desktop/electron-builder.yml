@@ -38,8 +38,11 @@ win:
   artifactName: Planner-windows.${ext}
 
 nsis:
-  # A normal installer with a directory choice, not a one-click mystery.
+  # A normal installer with a directory choice, not a one-click mystery. Its
+  # silent update invocation reuses the existing install path and opens Planner
+  # after replacing the packaged files.
   oneClick: false
+  runAfterFinish: true
   perMachine: false
   allowElevation: true
   allowToChangeInstallationDirectory: true

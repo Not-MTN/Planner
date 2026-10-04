@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { apiUrl, configuredApiOrigin, hasConfiguredApi, installApiOriginShim, isNativeShell, shellPlatform } from './nativeShell';
+import { apiUrl, configuredApiOrigin, hasConfiguredApi, installApiOriginShim, isNativeMobileShell, isNativeShell, shellPlatform } from './nativeShell';
 
 type ShellWindow = Window & {
   Capacitor?: { isNativePlatform?: () => boolean; getPlatform?: () => string };
@@ -19,20 +19,24 @@ describe('shell detection', () => {
   it('is a browser tab by default', () => {
     expect(isNativeShell()).toBe(false);
     expect(shellPlatform()).toBe('web');
+    expect(isNativeMobileShell()).toBe(false);
   });
 
   it('recognises a Capacitor shell and which one it is', () => {
     shell.Capacitor = { isNativePlatform: () => true, getPlatform: () => 'android' };
     expect(isNativeShell()).toBe(true);
     expect(shellPlatform()).toBe('android');
+    expect(isNativeMobileShell()).toBe(true);
     shell.Capacitor = { isNativePlatform: () => true, getPlatform: () => 'ios' };
     expect(shellPlatform()).toBe('ios');
+    expect(isNativeMobileShell()).toBe(true);
   });
 
-  it('recognises the desktop build', () => {
+  it('recognises the desktop build without treating it as a phone', () => {
     shell.plannerDesktop = { version: '1.0.0' };
     expect(isNativeShell()).toBe(true);
     expect(shellPlatform()).toBe('desktop');
+    expect(isNativeMobileShell()).toBe(false);
   });
 
   it('never throws when a shell stub misbehaves', () => {

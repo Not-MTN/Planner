@@ -374,8 +374,11 @@ export function TaskRow({
             className="icon-btn row-delete"
             aria-label={t("Remove {0}", { 0: task.title })}
             onClick={() => {
-              deleteTask(task.id);
-              flash(t("Task “{0}” removed.", { 0: task.title }), { label: t("Undo"), run: undo });
+              const removed = deleteTask(task.id);
+              flash(removed
+                ? t("Task “{0}” removed.", { 0: task.title })
+                : t("Couldn’t remove “{0}”; your changes were not saved.", { 0: task.title }),
+              removed ? { label: t("Undo"), run: undo } : undefined);
             }}
           >
             <TrashIcon size={16} />

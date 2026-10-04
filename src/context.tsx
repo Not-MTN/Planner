@@ -102,6 +102,8 @@ import { applyTheme, loadAccent, loadThemeMode, resolvedMode, type ThemeMode } f
 import type { Accent } from './constants';
 import { createEmptyState, type AIDeclinedKind, type AIMemoryInput, type AttachmentRef, type ComposerState, type EventInput, type FixedCommitmentInput, type GoalInput, type HabitInput, type MoodValue, type NoteInput, type Panels, type PlannerState, type SavedAIPlanInput, type StudentSubject, type TaskInput } from './types';
 import { t } from './i18n';
+import { isNativeMobileShell } from './shared/nativeShell';
+import { listenForNativeNotificationTaps, syncNativeReminders } from './nativeReminders';
 import { saveStudentSubject as saveStudentSubjectIn } from './panelFeatures';
 import { isTestEnv } from './env';
 import { attachmentNotice, MAX_ATTACHMENTS_PER_NOTE, storeAttachment, sweepAttachmentBlobs } from './files';
@@ -216,12 +218,12 @@ interface PlannerContextValue {
   addTask: (input: TaskInput) => void;
   duplicateTask: (id: string) => void;
   updateTask: (id: string, patch: TaskPatch) => void;
-  deleteTask: (id: string) => void;
+  deleteTask: (id: string) => boolean;
   clearCompletedTasks: () => void;
   toggleTask: (id: string) => void;
   completeTasksByIds: (ids: string[], complete?: boolean) => void;
   updateTasksByIds: (ids: string[], patch: TaskPatch) => void;
-  deleteTasksByIds: (ids: string[]) => void;
+  deleteTasksByIds: (ids: string[]) => boolean;
   moveTasksByIds: (ids: string[], date: string | null) => void;
   toggleSubtask: (taskId: string, subtaskId: string) => void;
   resizeEvent: (id: string, endTime: string) => void;
@@ -499,20 +501,22 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     }, 700);
   }, []);
 
-  const commit = useCallback((updater: (current: PlannerState) => PlannerState) => {
+  const commit = useCallback((updater: (current: PlannerState) => PlannerState): boolean => {
     try {
       const prev = stateRef.current;
       const next = updater(prev);
-      if (next === prev) return;
-      if (!trySave(next)) return;
+      if (next === prev) return false;
+      if (!trySave(next)) return false;
       stateRef.current = next;
       setState(next);
       historyRef.current = [...historyRef.current.slice(-HISTORY_LIMIT + 1), prev];
       futureRef.current = [];
       syncHistoryFlags();
       persistHistory();
+      return true;
     } catch {
       setError(t("Something went wrong with that change."));
+      return false;
     }
   }, [trySave, syncHistoryFlags, persistHistory]);
 
@@ -1079,6 +1083,47 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     return () => window.clearInterval(id);
   }, [reminders, flash]);
 
+  const nativeReminderTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (isTestEnv() || !isNativeMobileShell()) return;
+    if (nativeReminderTimer.current !== null) window.clearTimeout(nativeReminderTimer.current);
+    nativeReminderTimer.current = window.setTimeout(() => {
+      void syncNativeReminders(state, reminders).catch(() => {
+        /* Keep in-app reminders available if native scheduling is temporarily unavailable. */
+      });
+    }, 300);
+    return () => {
+      if (nativeReminderTimer.current !== null) window.clearTimeout(nativeReminderTimer.current);
+    };
+  }, [state, reminders]);
+
+  useEffect(() => {
+    if (isTestEnv() || !isNativeMobileShell()) return;
+    let disposed = false;
+    let removeNotificationTap: (() => void) | null = null;
+    let appListener: { remove: () => Promise<void> } | null = null;
+
+    void listenForNativeNotificationTaps(() => navigate({ name: 'today' })).then((remove) => {
+      if (disposed) remove();
+      else removeNotificationTap = remove;
+    });
+    void import('@capacitor/app').then(async ({ App }) => {
+      const listener = await App.addListener('appStateChange', ({ isActive }) => {
+        if (isActive) {
+          void syncNativeReminders(stateRef.current, loadReminderSettings()).catch(() => undefined);
+        }
+      });
+      if (disposed) void listener.remove();
+      else appListener = listener;
+    }).catch(() => undefined);
+
+    return () => {
+      disposed = true;
+      removeNotificationTap?.();
+      if (appListener) void appListener.remove();
+    };
+  }, [navigate]);
+
   const pushScheduleTimer = useRef<number | null>(null);
   useEffect(() => {
     if (isTestEnv() || !backgroundPushEnabled()) return;
@@ -1232,18 +1277,24 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     updateTask: (id, patch) => commit((current) => updateTaskIn(current, id, patch)),
     deleteTask: (id) => {
       const task = stateRef.current.tasks.find((item) => item.id === id);
-      if (task?.category === SHARED_CATEGORY) recordTombstone('task', id);
-      commit((current) => deleteTaskFrom(current, id));
+      if (!task) return false;
+      const removed = commit((current) => deleteTaskFrom(current, id));
+      if (removed && task.category === SHARED_CATEGORY) recordTombstone('task', id);
+      return removed;
     },
     completeTasksByIds: (ids, complete = true) => commit((current) => completeTasksIn(current, ids, complete)),
     updateTasksByIds: (ids, patch) => commit((current) => updateTasksIn(current, ids, patch)),
     deleteTasksByIds: (ids) => {
-      if (sharedRef.current.code) {
-        for (const task of stateRef.current.tasks) {
-          if (ids.includes(task.id) && task.category === SHARED_CATEGORY) recordTombstone('task', task.id);
+      const requested = new Set(ids);
+      const tasks = stateRef.current.tasks.filter((task) => requested.has(task.id));
+      if (tasks.length === 0) return false;
+      const removed = commit((current) => deleteTasksIn(current, ids));
+      if (removed && sharedRef.current.code) {
+        for (const task of tasks) {
+          if (task.category === SHARED_CATEGORY) recordTombstone('task', task.id);
         }
       }
-      commit((current) => deleteTasksIn(current, ids));
+      return removed;
     },
     moveTasksByIds: (ids, date) => commit((current) => moveTasksIn(current, ids, date)),
     clearCompletedTasks,

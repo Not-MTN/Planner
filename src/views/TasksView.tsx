@@ -338,9 +338,12 @@ export function TasksView() {
             className="btn btn-small danger"
             onClick={() => {
               const count = selected.size;
-              bulk.deleteTasksByIds([...selected]);
+              const removed = bulk.deleteTasksByIds([...selected]);
               done();
-              bulk.flash(t("{0} {1} removed.", { 0: count, 1: count === 1 ? t("task") : t("tasks") }), { label: t("Undo"), run: bulk.undo });
+              bulk.flash(removed
+                ? t("{0} {1} removed.", { 0: count, 1: count === 1 ? t("task") : t("tasks") })
+                : t("Your selected tasks are still here — Planner couldn’t save that change."),
+              removed ? { label: t("Undo"), run: bulk.undo } : undefined);
             }}
           >
             {t("Delete")}

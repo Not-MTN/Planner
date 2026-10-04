@@ -46,7 +46,12 @@ function ComposerForm({
   const remove = () => {
     if (composer.mode !== 'edit') return;
     const item = findItem(planner.state, composer);
-    if (composer.type === 'task') planner.deleteTask(composer.id);
+    if (composer.type === 'task') {
+      if (!planner.deleteTask(composer.id)) {
+        planner.flash(t("Couldn’t remove “{0}”; your changes were not saved.", { 0: item ?? t("Task") }));
+        return;
+      }
+    }
     if (composer.type === 'event') planner.deleteEvent(composer.id);
     if (composer.type === 'habit') planner.deleteHabit(composer.id);
     if (composer.type === 'goal') planner.deleteGoal(composer.id);
