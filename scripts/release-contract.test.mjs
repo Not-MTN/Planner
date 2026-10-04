@@ -65,6 +65,14 @@ describe('release contract', () => {
     expect(plugin).toContain('@CapacitorPlugin(name = "PlannerUpdater")');
     expect(plugin).toContain('FileProvider.getUriForFile');
     expect(plugin).toContain('canRequestPackageInstalls()');
+    const installFlow = plugin.slice(
+      plugin.indexOf('public void installUpdate'),
+      plugin.indexOf('@ActivityCallback\n    private void unknownSourcesSettingsResult'),
+    );
+    expect(installFlow).toContain('executor.execute');
+    expect(installFlow).toContain('verifyDownloadedApk(apk, request)');
+    expect(installFlow).toContain('activity.runOnUiThread');
+    expect(installFlow).toContain('startSystemInstaller(call, request, apk)');
     expect(paths).toContain('planner-updates/');
   });
 });

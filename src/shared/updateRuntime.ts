@@ -76,7 +76,7 @@ export function supportsPackagedUpdates(): boolean {
  * then compare it with the actual installed package identity. Android and
  * Windows perform their own checks; no update service can block planner boot.
  */
-export async function checkPackagedUpdate(): Promise<PackagedUpdateCheckResult> {
+export async function checkPackagedUpdate(options: { ignoreDismissal?: boolean } = {}): Promise<PackagedUpdateCheckResult> {
   try {
     const platform = shellPlatform();
     if (platform === 'android') {
@@ -90,6 +90,7 @@ export async function checkPackagedUpdate(): Promise<PackagedUpdateCheckResult> 
         installedVersion: installedAndroid.versionName,
         installedAndroid,
         manifest: parseNativeManifest(response.manifest),
+        ignoreDismissal: options.ignoreDismissal,
       });
     }
 
@@ -102,7 +103,7 @@ export async function checkPackagedUpdate(): Promise<PackagedUpdateCheckResult> 
         desktop.version(),
         desktop.getUpdateManifest(),
       ]);
-      return checkUpdateFromManifest({ platform: 'windows', installedVersion, manifest });
+      return checkUpdateFromManifest({ platform: 'windows', installedVersion, manifest, ignoreDismissal: options.ignoreDismissal });
     }
 
     return { status: 'not-applicable', version: null, offer: null, reason: 'unsupported-platform' };

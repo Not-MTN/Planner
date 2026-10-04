@@ -45,6 +45,7 @@ public class PlannerUpdaterPlugin extends Plugin {
     private static final String PREFERENCES = "planner-updater";
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private volatile boolean downloadInProgress = false;
+    private volatile boolean installInProgress = false;
 
     @PluginMethod
     public void getInstallInfo(PluginCall call) {
@@ -150,40 +151,91 @@ public class PlannerUpdaterPlugin extends Plugin {
 
     @PluginMethod
     public void installUpdate(PluginCall call) {
-        final UpdateRequest request;
-        try {
-            request = UpdateRequest.from(call);
-            verifyInstalledIdentity(request);
-            File apk = downloadedApk(request);
-            if (!apk.isFile() || apk.length() != request.sizeBytes || !sha256File(apk).equals(request.sha256)) {
-                throw new IllegalStateException("Download and verify the APK before installing it.");
+        if (installInProgress) {
+            call.reject("The Android installer is already open.");
+            return;
+        }
+        installInProgress = true;
+        // APK hashing and package-archive inspection can take several seconds
+        // on a phone. Do them off the WebView thread so the update tap cannot
+        // appear to freeze before Android's install confirmation opens.
+        executor.execute(() -> {
+            final UpdateRequest request;
+            final File apk;
+            try {
+                request = UpdateRequest.from(call);
+                verifyInstalledIdentity(request);
+                apk = downloadedApk(request);
+                verifyDownloadedApk(apk, request);
+            } catch (Exception error) {
+                installInProgress = false;
+                call.reject(error.getMessage() == null ? "Could not prepare the verified Android update." : error.getMessage(), error);
+                return;
             }
-            verifyApk(apk, request);
-        } catch (Exception error) {
-            call.reject(error.getMessage(), error);
-            return;
-        }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !getContext().getPackageManager().canRequestPackageInstalls()) {
-            Intent settings = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + getContext().getPackageName()));
-            startActivityForResult(call, settings, "unknownSourcesSettingsResult");
-            return;
-        }
-        startSystemInstaller(call);
+            Activity activity = getActivity();
+            if (activity == null) {
+                installInProgress = false;
+                call.reject("Keep Planner open while the Android update is prepared.");
+                return;
+            }
+            activity.runOnUiThread(() -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !getContext().getPackageManager().canRequestPackageInstalls()) {
+                    Intent settings = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + getContext().getPackageName()));
+                    try {
+                        startActivityForResult(call, settings, "unknownSourcesSettingsResult");
+                    } catch (Exception error) {
+                        installInProgress = false;
+                        call.reject("Could not open Android's install-permission settings.", error);
+                    }
+                    return;
+                }
+                startSystemInstaller(call, request, apk);
+            });
+        });
     }
 
     @ActivityCallback
     private void unknownSourcesSettingsResult(PluginCall call, ActivityResult result) {
-        if (call == null) return;
+        if (call == null) {
+            installInProgress = false;
+            return;
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !getContext().getPackageManager().canRequestPackageInstalls()) {
+            installInProgress = false;
             call.reject("Allow Planner to install the downloaded update in Android settings, then try again.");
             return;
         }
-        startSystemInstaller(call);
+
+        // The user may have left Planner in Settings for a while. Recheck the
+        // private APK and installed package identity before opening the system
+        // installer, and keep the expensive verification away from the UI.
+        executor.execute(() -> {
+            final UpdateRequest request;
+            final File apk;
+            try {
+                request = UpdateRequest.from(call);
+                verifyInstalledIdentity(request);
+                apk = downloadedApk(request);
+                verifyDownloadedApk(apk, request);
+            } catch (Exception error) {
+                installInProgress = false;
+                call.reject(error.getMessage() == null ? "Could not prepare the verified Android update." : error.getMessage(), error);
+                return;
+            }
+            Activity activity = getActivity();
+            if (activity == null) {
+                installInProgress = false;
+                call.reject("Keep Planner open while the Android update is prepared.");
+                return;
+            }
+            activity.runOnUiThread(() -> startSystemInstaller(call, request, apk));
+        });
     }
 
     @ActivityCallback
     private void installerActivityResult(PluginCall call, ActivityResult result) {
+        installInProgress = false;
         if (call == null) return;
         try {
             PackageInfo installed = getContext().getPackageManager().getPackageInfo(PACKAGE_ID, 0);
@@ -203,13 +255,16 @@ public class PlannerUpdaterPlugin extends Plugin {
         }
     }
 
-    private void startSystemInstaller(PluginCall call) {
-        try {
-            UpdateRequest request = UpdateRequest.from(call);
-            File apk = downloadedApk(request);
-            verifyInstalledIdentity(request);
-            verifyApk(apk, request);
+    private void verifyDownloadedApk(File apk, UpdateRequest request) throws Exception {
+        if (!apk.isFile() || apk.length() != request.sizeBytes || !sha256File(apk).equals(request.sha256)) {
+            throw new IllegalStateException("Download and verify the APK before installing it.");
+        }
+        verifyApk(apk, request);
+    }
 
+    private void startSystemInstaller(PluginCall call, UpdateRequest request, File apk) {
+        try {
+            if (!apk.isFile()) throw new IllegalStateException("The verified APK is no longer available.");
             SharedPreferences preferences = getContext().getSharedPreferences(PREFERENCES, Activity.MODE_PRIVATE);
             preferences.edit()
                 .putLong("pendingVersionCode", request.versionCode)
@@ -227,6 +282,7 @@ public class PlannerUpdaterPlugin extends Plugin {
             installIntent.putExtra(Intent.EXTRA_RETURN_RESULT, true);
             startActivityForResult(call, installIntent, "installerActivityResult");
         } catch (Exception error) {
+            installInProgress = false;
             clearPendingRelaunch();
             call.reject(error.getMessage() == null ? "Could not open the Android installer." : error.getMessage(), error);
         }
