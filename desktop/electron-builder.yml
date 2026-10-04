@@ -76,10 +76,16 @@ mac:
 
 dmg:
   artifactName: Planner-macos-${arch}.${ext}
-  # LZMA-compressed image: electron-builder's docs describe ULMO as the
-  # smallest download, roughly 30% under the zlib default. It mounts a few
-  # seconds slower and needs macOS 10.15+, far below what Electron requires.
-  format: ULMO
+  # LZFSE-compressed image: a little smaller than the zlib default (UDZO) and
+  # noticeably quicker to mount and copy.
+  #
+  # Not ULMO (LZMA), even though macOS 10.15+ supports it and it is ~20%
+  # smaller again: the electron-builder this project pins rejects it — its
+  # schema allows only UDRW | UDRO | UDCO | UDZO | UDBZ | ULFO, and it
+  # validates the whole file even when the target is Windows, so an
+  # unsupported value here fails every desktop build, not just the Mac one.
+  # Take ULMO if electron-builder ever grows support for it.
+  format: ULFO
   contents:
     - x: 130
       y: 220
