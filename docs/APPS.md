@@ -186,16 +186,19 @@ itself: `ANDROID_KEYSTORE_BASE64` (`base64 -w0 release.jks`),
 `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD`.
 Also add the repository variable `ANDROID_SIGNING_CERT_SHA256`, the public
 certificate fingerprint printed by the helper below. The workflow verifies the
-APK against that pin and establishes signing continuity with existing stable
-releases (then carries that verified fingerprint forward in the update feed).
+APK against that pin and carries the verified fingerprint forward in the update
+feed so later releases can prove signing continuity.
 
 A branch/manual build may use the debug key for testing. **A public version-tag
-release will stop before building if the permanent signing key or fingerprint
-is missing, and it will refuse to publish if the key does not match an APK
-already released.** Publishing a differently signed APK would make Android
-reject the in-place update; uninstalling to get around that can erase local
-planner data. The release gate exists to avoid that outcome, not to warn after
-it has happened.
+release stops before building if the permanent signing key or fingerprint is
+missing, and later releases are rejected if their signer differs from the
+verified update feed.** The first permanent-key release bootstraps that lineage.
+The earlier `v1.0.0` and `v1.0.1` test releases were built with per-run CI debug
+keys, so only those two known tags are excluded from this first bootstrap; no
+other old or future release is ignored. Existing installs of those test APKs
+cannot be upgraded in place with a different key. Keep any planner data on a
+test install intact and use a separate device for testing the permanent-key
+build; never uninstall just to work around a signature mismatch.
 
 Generate the keystore once, keep it, and use it for every direct APK release.
 It cannot be regenerated later without breaking updates for everyone who
@@ -381,10 +384,11 @@ Version-tag jobs also run `scripts/validate-release-contract.mjs`. It locks the
 Android package ID and Windows `appId`, protects the NSIS app-data setting, and
 requires the Android signing secrets plus the pinned certificate fingerprint.
 The Android job verifies the APK's actual package, `versionCode`, and signing
-certificate. When bootstrapping the feed it compares against existing stable
-release APKs; later releases compare against the prior verified signer in the
-feed. A mismatch fails the release instead of publishing an APK that could not
-replace an installed copy.
+certificate. During first-feed bootstrap it compares against prior stable APKs,
+excluding only the known test-only `v1.0.0` and `v1.0.1` releases signed with
+per-run debug keys; later releases compare against the prior verified signer in
+the feed. A mismatch fails the release instead of publishing an APK that could
+not replace an installed copy.
 
 ## 7. Updates
 

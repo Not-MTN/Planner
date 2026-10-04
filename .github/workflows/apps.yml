@@ -319,7 +319,11 @@ jobs:
             fi
             checked=1
           else
-            for release_tag in "${release_tags[@]}"; do
+            # The first permanent-key release bootstraps the signing lineage.
+            # Only v1.0.0 and v1.0.1 are known test-only releases made with
+            # ephemeral debug keys; later tags remain strict baselines.
+            mapfile -t baseline_tags < <(node scripts/android-signing-baseline.mjs "${release_tags[@]}")
+            for release_tag in "${baseline_tags[@]}"; do
               asset_names="$(gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
               if ! grep -Fxq 'app-release.apk' <<< "$asset_names"; then
                 continue
