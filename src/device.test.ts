@@ -141,3 +141,54 @@ describe('opening a sheet does not move the page', () => {
     expect(allCss).toMatch(/(^|\n)\s*html\s*\{[^}]*scrollbar-gutter:\s*stable/s);
   });
 });
+
+describe('a long sheet keeps its own way out', () => {
+  it('sticks the title, and in settings the tab strip with it', () => {
+    // Settings is the longest surface in the app and its strip is the only way
+    // between groups; scrolling back to the top to switch was the tax.
+    expect(/\.sheet-top\s*\{[^}]*position:\s*sticky/s.test(allCss)).toBe(true);
+    const strip = read('src/components/SettingsSheet.tsx');
+    expect(strip, 'the strip is no longer inside the sticky header').toMatch(/subheader=\{/);
+  });
+
+  it('keeps the strip on one line so it cannot wrap into two rows', () => {
+    expect(/\.sheet-top\s+\.set-nav\s*\{[^}]*flex-wrap:\s*nowrap/s.test(allCss)).toBe(true);
+  });
+});
+
+describe('the sticky sheet title lines up with the sheet at every width', () => {
+  it('bleeds by exactly the sheet padding, which changes per breakpoint', () => {
+    // Hard-coding 22px here would leave the header 4px short on a phone (18px)
+    // and 4px long on a desktop (26px).
+    expect(allCss).toMatch(/--sheet-pad-x:\s*22px/);
+    expect(allCss).toMatch(/--sheet-pad-x:\s*18px/);
+    expect(allCss).toMatch(/--sheet-pad-x:\s*26px/);
+    expect(/\.sheet-top\s*\{[^}]*margin:\s*0\s*calc\(-1 \* var\(--sheet-pad-x/s.test(allCss)).toBe(true);
+  });
+});
+
+describe('numbers the reader sees are localised', () => {
+  it('never prints a bare count as JSX text', () => {
+    // A count rendered straight into the page shows Latin digits inside a
+    // Persian UI. Persian means Eastern Arabic numerals everywhere; t() does
+    // that for its own {placeholders}, and lists need faNum( around them.
+    const offencers: string[] = [];
+    const files: string[] = [];
+    for (const dir of ['src/views', 'src/components']) {
+      for (const name of readdirSync(join(process.cwd(), dir))) {
+        if (name.endsWith('.tsx') && !name.includes('.test.')) files.push(join(dir, name));
+      }
+    }
+    const child = />\{((?:[^{}]|\{[^{}]*\})*)\}/g;
+    for (const path of files) {
+      const text = read(path);
+      for (const match of text.matchAll(child)) {
+        const expr = match[1] ?? '';
+        if (!expr.includes('.length')) continue;
+        if (/faNum|faDigits|tn\(|t\(|\.length\s*(===|!==|>|<|\?|&&)/.test(expr)) continue;
+        offencers.push(`${path}: ${expr.trim().slice(0, 60)}`);
+      }
+    }
+    expect(offencers).toEqual([]);
+  });
+});

@@ -324,4 +324,52 @@ describe('when the AI cannot be reached', () => {
       vi.useRealTimers();
     }
   });
+  it('reads the plan out of an answer that arrives wrapped in prose and a code fence', async () => {
+    // A real model sometimes narrates around its JSON. Losing a finished plan
+    // to a stray "Here you go:" is worse than any parsing cleverness.
+    const content = [
+      'Here you go:',
+      '```json',
+      '{"summary":"Two calm days.","tasks":[{"title":"Pack lunch","date":"2026-09-29","priority":"low","category":"health"},],"events":[],"habits":[],"wellbeing":[],}',
+      '```',
+      'Tell me if you want changes!',
+    ].join('\n');
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content } }] }),
+    })));
+
+    const result = await generateAIPlan({
+      prompt: 'plan two calm days',
+      range: { startDate: '2026-09-29', days: 2 },
+      state: createEmptyState(),
+    });
+
+    expect(result.summary).toBe('Two calm days.');
+    expect(result.tasks.map((task) => task.title)).toEqual(['Pack lunch']);
+  });
+
+  it('strips model decoration out of titles and drops repeated wellbeing ideas', async () => {
+    mockGroq({
+      summary: '  **Deep work, protected.**  Day one holds the hard thing; day two stays light. And a third sentence that should not survive. ',
+      tasks: [{ title: '1. **Draft** the statistics summary: ', date: '2026-09-29', priority: 'high', category: 'work', reason: 'Draft the statistics summary' }],
+      events: [],
+      habits: [{ name: '🌙 Wind down', frequency: { type: 'daily' }, category: 'health', icon: 'moon' }],
+      wellbeing: ['Take a short walk after lunch.', 'take a short walk after lunch.', 'Drink water through the morning.'],
+    });
+
+    const result = await generateAIPlan({
+      prompt: 'plan two calm days',
+      range: { startDate: '2026-09-29', days: 2 },
+      state: createEmptyState(),
+    });
+
+    expect(result.summary).toBe('Deep work, protected. Day one holds the hard thing; day two stays light.');
+    expect(result.tasks[0].title).toBe('Draft the statistics summary');
+    expect(result.habits[0].name).toBe('Wind down');
+    expect(result.suggestions).toEqual(['Take a short walk after lunch.', 'Drink water through the morning.']);
+    // A reason that only says the title again is noise, so nothing is shown.
+    expect(result.reasons?.['task:0']).toBeUndefined();
+  });
 });

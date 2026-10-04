@@ -43,14 +43,16 @@ export function WeekBars({ weeks, height = 150 }: BarsProps) {
 
   return (
     <div className="chart">
-      <div className="chart-legend">
-        <span className="chart-key chart-key-planned">{/* label comes from the caller */}</span>
-      </div>
+      {/* A key, not decoration: two bar colours and no words is a puzzle. */}
+      <ul className="chart-legend">
+        <li><span className="chart-key chart-key-planned" />{t('Planned')}</li>
+        <li><span className="chart-key chart-key-done" />{t('Done')}</li>
+      </ul>
       <svg className="chart-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={t('Weekly planned and completed items')} preserveAspectRatio="none">
         {[0, 0.5, 1].map((line) => (
           <line
             key={line}
-            className="chart-grid"
+            className="chart-grid-lines"
             x1={0}
             x2={width}
             y1={12 + (height - 26) * line}

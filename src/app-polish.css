@@ -111,7 +111,9 @@
 /* Hover states are a pointer luxury — gate them so they never stick on touch. */
 @media (hover: hover) {
   .nav-link:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); color: var(--ink); transform: none; }
-  .card:hover { transform: translateY(-2px); box-shadow: var(--shadow); border-color: color-mix(in srgb, var(--accent) 24%, var(--line)); }
+  /* Only cards that go somewhere move. A dashboard of six cards that all lift
+     under the pointer promises six clicks and delivers none. */
+  a.card:hover, button.card:hover, .card.is-interactive:hover { transform: translateY(-2px); box-shadow: var(--shadow); border-color: color-mix(in srgb, var(--accent) 24%, var(--line)); }
   .icon-btn:hover { transform: translateY(-1px); }
   .btn:hover { transform: translateY(-1px); }
   .btn:active { transform: translateY(0) scale(0.97); }
@@ -345,12 +347,13 @@
     border-inline: 0;
     border-bottom: 0;
     border-radius: 24px 24px 0 0;
-    padding: 10px 18px calc(24px + env(safe-area-inset-bottom, 0px));
+    --sheet-pad-x: 18px;
+    padding: 10px var(--sheet-pad-x) calc(24px + env(safe-area-inset-bottom, 0px));
     max-height: 79dvh;
   }
 }
 @media (min-width: 700px) {
-  .sheet { padding: 14px 26px 26px; }
+  .sheet { --sheet-pad-x: 26px; padding: 14px var(--sheet-pad-x) 26px; }
 }
 
 /* ---------- 7. Less hunting and less thumb travel ---------- */
@@ -714,7 +717,8 @@
   box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 36%, transparent);
 }
 .update-toast-state--ready,
-.update-toast-state--complete { color: var(--accent-deep); }
+.update-toast-state--complete,
+.update-toast-state--applying { color: var(--accent-deep); }
 .update-toast-state--error { color: var(--danger); }
 .update-toast-state--error .update-toast-state-dot { background: var(--danger); box-shadow: 0 0 8px color-mix(in srgb, var(--danger) 36%, transparent); }
 .update-download-progress {
@@ -873,4 +877,176 @@
     box-shadow: none;
   }
   .update-download-progress { accent-color: Highlight; }
+}
+
+/* ============================================================
+   8. Whole-app consistency
+   The passes before this one fixed structure per component.
+   This one fixes the things that only show up when you move
+   between two screens: the same card padded two ways, headings
+   that start at different heights, rows that wrap differently on
+   a phone. Nothing here changes what a screen does.
+   ============================================================ */
+
+/* ---------- One rhythm: heading, then content ---------- */
+.view { gap: 18px; }
+.content { gap: 18px; }
+
+/* A section heading starts in the same place on every page, at every width:
+   kicker, title, optional lede, then a gap you can measure. */
+.page-head { align-items: flex-end; row-gap: 10px; }
+.page-head > div:first-child { min-width: 0; }
+.page-head .lede { max-width: 56ch; }
+.page-head-actions, .ai-head-actions { align-self: flex-end; }
+.page-head h1 { margin-top: 4px; }
+
+/* Card heads keep their chip and their actions on the same line for as long
+   as there is room, then wrap instead of squeezing the title to one word. */
+.card-head { gap: 10px 14px; margin-bottom: 14px; }
+.card-head > div:first-child { min-width: 0; }
+@media (max-width: 480px) {
+  .card-head { flex-wrap: wrap; }
+  .card-head > .chip, .card-head > .meta-chip { margin-inline-start: 0; }
+}
+
+/* ---------- One card, one padding ---------- */
+.card {
+  padding: clamp(17px, 2.2vw, 22px) clamp(16px, 2.4vw, 24px);
+}
+
+/* ---------- A heading should outrank an eyebrow ---------- */
+/* Some cards are headed by a kicker alone (Habits, Goals, Review this week) and
+   sit beside cards that carry a kicker and a title. Read identically, the page
+   looks like it lost a heading. A heading-only kicker is a little louder than a
+   label, and still quieter than a card title. */
+.card-head > h2.kicker,
+.card-head > h3.kicker {
+  font-size: 12.5px;
+  letter-spacing: 0.09em;
+  color: var(--ink-soft);
+}
+
+/* ---------- Rows that read the same ---------- */
+/* Lists of options, reminders and saved things all sit on the same row
+   height so a long page stops looking hand-drawn. */
+.fixed-list-item, .ai-memory-list li { min-height: 56px; }
+.chip-row { row-gap: 8px; }
+.chip { max-width: 100%; overflow-wrap: anywhere; }
+
+/* Form errors and small field labels were styled per component; give them one
+   voice so a validation message looks like a validation message everywhere. */
+.form-error, .field-error { color: var(--danger); font-size: 12.5px; font-weight: 600; }
+.field-label { font-size: 12px; font-weight: 650; color: var(--ink-soft); }
+
+/* The "2 up" utility grid the More sheet already asks for by name. */
+.more-list .more-grid.more-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+/* ---------- The AI tab: composer first, everything else folded ---------- */
+.ai-view { --ai-grad: linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, var(--surface)), var(--surface) 70%); }
+.ai-composer .ai-prompt-field textarea { min-height: 124px; font-size: 15px; line-height: 1.6; }
+.ai-composer .ai-range-row { background: color-mix(in srgb, var(--surface-2) 70%, transparent); }
+.ai-fold { transition: border-color 0.16s, box-shadow 0.16s; }
+.ai-fold[open] { box-shadow: var(--shadow-soft); border-color: var(--line-strong); }
+.ai-fold-body .card-head:first-child { margin-top: 14px; }
+.fixed-manager .fixed-form { padding: 13px; }
+.fixed-manager .fixed-list { margin-top: 4px; }
+
+@media (max-width: 620px) {
+  .view { gap: 14px; }
+  .ai-range-row { padding: 12px; }
+  .ai-fold-summary { min-height: 56px; }
+}
+
+/* ============================================================
+   9. Names the markup asks for that no rule ever answered
+   ============================================================
+   Every class below is already rendered somewhere in the app; it just never
+   got a style, so the element inherited the wrong voice or lost its spacing.
+   Fixing them here keeps the fix in the last layer, where it lands on every
+   screen that uses the name. */
+
+/* Account-flow feedback in the recovery card: a hint should read as a hint,
+   and a mismatch is the one line here that has to look like an error. */
+.auth-hint { color: var(--muted); font-size: 12.5px; margin: 8px 0 0; }
+.auth-error { color: var(--danger); font-size: 12.5px; font-weight: 600; margin: 6px 0 0; }
+
+/* A plain row in a panel list is still a row: with no button inside it had no
+   padding, so it sat flush against the divider. */
+.panel-list li.plain { padding: 9px 2px; }
+
+/* "Show 60 more" belongs to the list it extends, not to the toolbar. */
+.item-more { display: flex; justify-content: center; padding: 10px 0 2px; }
+
+/* The rest-of-week card: its heading and prompts were unstyled, so the
+   reflection list ran straight into the open tasks above it. */
+.week-review .quiet-hint { margin-top: 0; }
+.weekly-questions { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.weekly-questions h3 { font-size: 13px; font-weight: 650; color: var(--ink-soft); margin: 0 0 6px; }
+
+/* Links inside settings prose (an app URI, a pointer to the docs) read as
+   links, not as more sentence. */
+.link, .set-hint a { color: var(--accent-deep); text-decoration: underline; text-underline-offset: 2px; }
+
+/* The streak emoji is punctuation, not the headline. */
+.streak-icon { font-size: 15px; line-height: 1; }
+
+/* Round counter inside the focus kicker. */
+.focus-round { font-variant-numeric: tabular-nums; }
+
+/* Replacing recovery codes is a form, so it gets a form's rhythm. */
+.account-recovery-form { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.modal-recovery .recovery-codes { margin-top: 12px; }
+.modal-recovery .set-hint { margin-bottom: 0; }
+
+/* ---------- A sheet's title stays where you left it ---------- */
+/* Sheets scroll their own content, and the longest ones (settings, the
+   composer, the habit library) are long enough that the heading and, in
+   settings, the tab strip scrolled away with it. Both now stay put, so a panel
+   can be switched without a scroll back to the top.
+
+   The negative margin cancels the sheet's own horizontal padding so nothing
+   scrolls through the gaps beside the title; the padding puts the content back
+   where it was. The drag handle stays above it and scrolls away with the first
+   swipe, the way a handle should. */
+.sheet-top {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  margin: 0 calc(-1 * var(--sheet-pad-x, 22px));
+  padding: 0 var(--sheet-pad-x, 22px);
+  background: var(--surface);
+}
+.sheet-settings .sheet-top {
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 12px 18px -18px color-mix(in srgb, var(--ink) 45%, transparent);
+}
+.sheet-settings .sheet-head { margin-bottom: 10px; }
+/* The strip is the reason the header has to stick: a panel can be switched
+   from anywhere in a long section. */
+.sheet-settings .sheet-top .set-nav { flex-wrap: nowrap; }
+
+/* The composer is the longest form in the app — subtasks, steps, attachments,
+   an icon grid — and the button that finishes it sat at the very bottom, off
+   screen the moment you started typing. Only the composer's own footer sticks;
+   every other .form-actions row is short enough to walk to. */
+.form-actions-sticky {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin: 10px calc(-1 * var(--sheet-pad-x, 22px)) 0;
+  padding: 12px var(--sheet-pad-x, 22px);
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  box-shadow: 0 -12px 18px -18px color-mix(in srgb, var(--ink) 45%, transparent);
+}
+
+/* ---------- The part of the reveal that was never loaded ---------- */
+/* The recovery codes and their confirmation field stagger in with an inline
+   animation-delay — but .reveal-in was only ever defined in marketing.css, so
+   inside the app the codes appeared instantly and the delay did nothing. Two
+   classes, so this still wins if the marketing page loaded first. */
+.recovery.reveal-in,
+.field.reveal-in {
+  animation: rise 0.42s var(--ease) both;
 }

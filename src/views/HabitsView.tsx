@@ -17,7 +17,7 @@ import { formatPercent, frequencyLabel, habitDot, habitStats, habitStreaks } fro
 import { Meter } from '../components/ui';
 import { HabitLibrary } from '../components/HabitLibrary';
 import { ESSENTIAL_PRESETS, presetToInput } from '../presets';
-import { t } from '../i18n';
+import { faNum, t } from '../i18n';
 
 const HEAT_WEEKS = 12;
 
@@ -246,7 +246,7 @@ export function HabitsView() {
           </div>
           {archived.length > 0 ? (
             <details className="archive-block">
-              <summary>{t("Archived (")}{archived.length})</summary>
+              <summary>{t("Archived (")}{faNum(archived.length)})</summary>
               <ul>
                 {archived.map((habit) => (
                   <li key={habit.id}>

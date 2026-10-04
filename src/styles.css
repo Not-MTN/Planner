@@ -477,6 +477,10 @@ h1, .page-head h1 {
 .btn-primary:hover { box-shadow: 0 12px 26px color-mix(in srgb, var(--accent) 48%, transparent); }
 .btn-soft { background: var(--surface-2); border-color: var(--line-strong); color: var(--ink); }
 .btn-soft:hover { background: var(--surface-3); }
+/* Asked for by several screens but never defined here: without it an outline
+   button rendered as a plain .btn and read as a third identical grey blob. */
+.btn-outline { background: transparent; border-color: var(--line-strong); color: var(--ink); }
+.btn-outline:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); border-color: color-mix(in srgb, var(--accent) 42%, var(--line-strong)); color: var(--accent-deep); }
 .btn-ghost { background: transparent; border-color: var(--line-strong); color: var(--ink-soft); }
 .btn-ghost:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 4%, transparent); }
 .btn-danger { background: var(--danger-soft); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 25%, transparent); }
@@ -1202,7 +1206,10 @@ h1, .page-head h1 {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 26px 26px 0 0;
-  padding: 10px 22px 24px;
+  /* The horizontal padding is a variable because the sticky title block has to
+     cancel exactly this much to span the sheet (see .sheet-top). */
+  --sheet-pad-x: 22px;
+  padding: 10px var(--sheet-pad-x) 24px;
   box-shadow: var(--shadow-lift);
   animation: sheet-up 0.34s var(--ease);
 }
@@ -1244,22 +1251,18 @@ h1, .page-head h1 {
 .more-list button:hover, .more-list button.on { background: var(--accent-soft); color: var(--accent-deep); }
 
 /* ---------- Settings ---------- */
+/* The strip stays put because it lives in the sheet's sticky header slot
+   (.sheet-top, see app-polish.css) — that is also what bleeds it to the sheet
+   edges and keeps it clear of the title. */
 .set-nav {
-  position: sticky;
-  top: 0;
-  z-index: 2;
   display: flex;
   gap: 6px;
-  /* Spans the sheet's own padding so settings scroll *under* the strip
-     rather than beside it. */
-  margin: 0 -22px 2px;
-  padding: 8px 22px 10px;
-  background: var(--surface);
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
 }
+.set-nav { scroll-padding-inline: 22px; }
 .set-nav::-webkit-scrollbar { display: none; }
 .set-nav-item {
   flex: 0 0 auto;
@@ -2288,7 +2291,6 @@ h1, .page-head h1 {
 }
 
 /* ---------- AI coach, protected weekly times, and expanded insights ---------- */
-.ai-day-link { width: 100%; margin-top: 10px; }
 .fixed-event { background: color-mix(in srgb, var(--item, var(--accent)) 5%, transparent); }
 .fixed-repeat { width: 22px; height: 22px; display: grid; place-items: center; flex: none; margin-top: 1px; border-radius: 7px; background: color-mix(in srgb, var(--item, var(--accent)) 16%, transparent); color: var(--item-text, var(--accent-deep)); font-size: 18px; line-height: 1; }
 .fixed-time { color: var(--item-text, var(--accent-deep)); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; padding-top: 3px; }
@@ -2312,6 +2314,9 @@ h1, .page-head h1 {
 .fixed-plan-mark { width: 22px; flex: none; text-align: center; color: var(--accent-deep); font-size: 17px; }
 .fixed-plan-tag { margin-inline-start: auto; }
 .plan-line.is-fixed { background: color-mix(in srgb, var(--accent) 4%, transparent); border-radius: 9px; padding-inline-end: 7px; }
+/* A note or a deadline is not an event: lavender keeps them distinguishable in
+   a month list without reading every chip. */
+.plan-line.is-note { --item: var(--cat-lav); --item-text: var(--cat-lav-text); }
 
 .ai-view { --ai-grad: linear-gradient(135deg, color-mix(in srgb, var(--accent) 12%, var(--surface)), var(--surface) 65%); }
 .ai-page-head { align-items: center; }
@@ -2322,32 +2327,62 @@ h1, .page-head h1 {
 .ai-disconnected .status-dot { background: var(--muted); }
 .ai-tabs { align-self: flex-start; }
 .ai-tabs .seg { display: inline-flex; align-items: center; gap: 7px; }
-.ai-privacy { display: grid; grid-template-columns: 38px minmax(0, 1fr); align-items: center; gap: 12px; padding: 14px 18px; background: var(--ai-grad); }
-.ai-privacy p { color: var(--ink-soft); font-size: 13px; }
-.ai-privacy strong { color: var(--ink); }
-.ai-apply-note { margin: 0 0 12px; padding: 10px 13px; border-inline-start: 3px solid var(--accent); border-radius: 0 10px 10px 0; background: var(--accent-soft); color: var(--ink-soft); font-size: 12.5px; line-height: 1.55; }
+
+/* The composer: one place to ask, with everything that shapes the request
+   sitting in a single quiet strip. */
+.ai-composer { display: flex; flex-direction: column; gap: 15px; border-color: color-mix(in srgb, var(--accent) 26%, var(--line)); }
+.ai-range-chip { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ai-range-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px; padding: 13px 15px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-2); }
+.ai-inline-field { min-width: 148px; }
+.ai-inline-field select, .ai-inline-field input { min-height: 40px; padding: 8px 12px; font-size: 13.5px; }
+.ai-custom-days { max-width: 130px; }
+.ai-range-note { flex: 1 1 100%; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.ai-prompt-field textarea { min-height: 128px; }
+.ai-composer .ai-chips { margin-top: -4px; }
+.ai-composer-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.ai-composer-foot .ai-upload-row { margin: 0; }
+.ai-build { min-height: 46px; padding-inline: 22px; }
+.ai-composer-note { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+
+/* Settings you visit on purpose live folded below the answer, not above it. */
+.ai-folds { display: flex; flex-direction: column; gap: 12px; }
+.ai-fold { padding: 0; overflow: hidden; }
+.ai-fold-summary { display: flex; align-items: center; gap: 12px; min-height: 62px; padding: 14px 18px; cursor: pointer; list-style: none; }
+.ai-fold-summary::-webkit-details-marker { display: none; }
+.ai-fold-summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.ai-fold-mark { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 12px; background: var(--accent-soft); color: var(--accent-deep); }
+.fixed-fold-mark { background: color-mix(in srgb, var(--cat-blue) 14%, transparent); color: var(--cat-blue-text); }
+.ai-fold-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.ai-fold-copy strong { font-size: 14px; }
+.ai-fold-copy small { color: var(--muted); font-size: 12px; }
+.ai-fold-chevron { width: 9px; height: 9px; flex: none; margin-inline-end: 5px; border-inline-end: 2px solid var(--muted); border-block-end: 2px solid var(--muted); transform: rotate(45deg); transition: transform 0.2s var(--ease); }
+[dir="rtl"] .ai-fold-chevron { transform: rotate(-135deg); }
+.ai-fold[open] .ai-fold-chevron { transform: rotate(135deg); }
+[dir="rtl"] .ai-fold[open] .ai-fold-chevron { transform: rotate(-45deg); }
+.ai-fold-body { padding: 0 18px 18px; border-top: 1px solid var(--line); }
+.ai-fold-intro { margin: 13px 0 14px; }
+.ai-memory-card:not(.card) { padding: 0; border: 0; background: none; }
+.fixed-manager { padding: 0; background: none; }
+.fixed-manager .fixed-form { margin-top: 2px; }
+
+/* The privacy promise is a footer, not a banner you scroll past every visit. */
+.ai-note { display: flex; align-items: flex-start; gap: 11px; padding: 14px 16px; border: 1px dashed var(--line-strong); border-radius: 16px; }
+.ai-note p { color: var(--muted); font-size: 12.5px; line-height: 1.6; }
+.ai-note p + p { margin-top: 6px; }
+.ai-note strong { color: var(--ink-soft); }
+.ai-note-mark { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 10px; background: color-mix(in srgb, var(--cat-sage) 14%, transparent); color: var(--cat-sage); }
 .ai-schedule-conflict, .voice-schedule-conflict { margin: 12px 0; padding: 14px; border: 1px solid color-mix(in srgb, var(--cat-peach) 48%, var(--line)); border-radius: 14px; background: color-mix(in srgb, var(--cat-peach) 9%, var(--surface)); }
 .ai-schedule-conflict strong { font-size: 13px; color: var(--cat-peach-text); }
 .ai-schedule-conflict p { margin: 5px 0 10px; color: var(--ink-soft); font-size: 13px; line-height: 1.55; }
 .ai-schedule-conflict .form-actions { margin-top: 8px; }
 .voice-schedule-conflict { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; margin-top: 0; }
-.ai-privacy-icon, .ai-ideas-mark { width: 36px; height: 36px; border-radius: 13px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-deep); }
 .ai-error { border-color: color-mix(in srgb, var(--danger) 25%, transparent); background: var(--danger-soft); color: var(--danger); }
-.ai-range-controls { display: grid; grid-template-columns: repeat(2, minmax(180px, 1fr)) minmax(150px, .7fr); gap: 12px; align-items: end; }
-.ai-custom-days { max-width: 200px; }
-.ai-range-note { color: var(--muted); font-size: 12.5px; margin: 10px 0 16px; }
-.ai-prompt-field textarea { min-height: 128px; }
 .ai-upload-row { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 2px; }
-.ai-upload-button { position: relative; overflow: hidden; }
-.ai-upload-button input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 .ai-image-preview { display: flex; align-items: center; gap: 12px; margin-top: 13px; padding: 9px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-2); }
 .ai-image-preview img { width: 58px; height: 58px; object-fit: cover; border-radius: 9px; }
 .ai-image-preview div { min-width: 0; display: flex; flex-direction: column; flex: 1; }
 .ai-image-preview strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-image-preview span { color: var(--muted); font-size: 11.5px; }
-.ai-builder-actions { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 18px; }
-.ai-builder-actions .meta { max-width: 48ch; }
-.fixed-manager { background: linear-gradient(160deg, color-mix(in srgb, var(--cat-blue) 7%, var(--surface)), var(--surface) 65%); }
 .fixed-protected-count { border-radius: 999px; background: var(--accent-soft); color: var(--accent-deep); padding: 5px 10px; font-size: 11px; font-weight: 700; white-space: nowrap; }
 .fixed-form { display: grid; grid-template-columns: minmax(150px, 1.5fr) minmax(120px, 1fr) repeat(2, minmax(100px, .8fr)) minmax(120px, 1fr) auto; align-items: end; gap: 10px; padding: 14px; border-radius: 16px; background: color-mix(in srgb, var(--surface-2) 78%, transparent); border: 1px solid var(--line); }
 .fixed-form-actions { display: flex; gap: 6px; align-items: center; justify-content: flex-end; }
@@ -2372,9 +2407,11 @@ h1, .page-head h1 {
 .draft-group-head strong { font-size: 13px; }
 .draft-group-head span { border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: 11px; font-weight: 700; padding: 1px 7px; }
 .draft-group ul { border-top: 1px solid var(--line); }
-.draft-group li { display: grid; grid-template-columns: 66px minmax(0, 1fr) minmax(130px, auto); gap: 10px; align-items: center; min-height: 44px; border-bottom: 1px solid var(--line); padding: 7px 2px; }
-.draft-group li > span:nth-child(2) { font-size: 13.5px; font-weight: 600; }
-.draft-group li small { color: var(--muted); font-size: 11.5px; text-align: end; }
+/* One row is one label, and the label owns the columns: tick, kind, the item,
+   then when it lands. The list item itself stays a plain block so the row can
+   never be squeezed into a single column of its own grid. */
+.draft-group li { display: block; min-height: 44px; border-bottom: 1px solid var(--line); padding: 9px 2px; }
+.draft-group li small { color: var(--muted); font-size: 11.5px; }
 .draft-kind { width: max-content; border-radius: 999px; padding: 3px 8px; font-size: 10px; font-weight: 700; }
 .event-kind { background: color-mix(in srgb, var(--cat-blue) 15%, transparent); color: var(--cat-blue); }
 .task-kind { background: color-mix(in srgb, var(--cat-peach) 16%, transparent); color: var(--cat-peach); }
@@ -2385,10 +2422,8 @@ h1, .page-head h1 {
 .ai-skipped ul { display: flex; flex-direction: column; gap: 4px; padding-inline-start: 17px; list-style: disc; margin-top: 5px; }
 .ai-draft-actions { display: flex; margin-top: 18px; gap: 8px; }
 .ai-undo-note { text-align: end; margin-top: 7px; }
-.ai-review-controls { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
-.ai-review-form { display: grid; grid-template-columns: 1.2fr 1fr .8fr auto; gap: 12px; align-items: end; }
-.ai-review-form .btn { margin-bottom: 1px; }
-.ai-review-controls .ai-range-note { margin: -7px 0 0; }
+.ai-review-controls { display: flex; flex-direction: column; gap: 15px; }
+.ai-review-action { display: flex; justify-content: flex-end; }
 .ai-review-card { border-top: 3px solid var(--accent); }
 .ai-review-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .ai-review-block { padding: 14px 16px; border-radius: 15px; background: var(--surface-2); }
@@ -2407,12 +2442,8 @@ h1, .page-head h1 {
 .carry-list li > small { color: var(--muted); font-size: 11.5px; }
 .carry-date { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; }
 .carry-date input { min-width: 0; flex: 1; padding: 7px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface-2); font-size: 12px; }
-.ai-ideas { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 13px; }
-.ai-ideas ul { display: flex; flex-direction: column; gap: 7px; margin-top: 10px; padding-inline-start: 18px; list-style: disc; color: var(--ink-soft); font-size: 13px; }
-.ai-ideas strong { color: var(--ink); }
 .env-code { margin-top: 10px; padding: 11px 13px; overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); color: var(--ink); font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .ai-privacy-note { color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 10px; }
-.ai-memory-card { border-color: color-mix(in srgb, var(--accent) 22%, var(--line)); background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 6%, var(--surface)), var(--surface) 62%); }
 .ai-memory-count { border-radius: 999px; background: var(--accent-soft); color: var(--accent-deep); padding: 5px 10px; font-size: 11px; font-weight: 700; white-space: nowrap; }
 .ai-memory-safety { color: var(--muted); font-size: 11.5px; margin-top: 5px; }
 .ai-memory-form { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(140px, .7fr) auto; gap: 10px; align-items: end; padding: 13px; border: 1px solid var(--line); border-radius: 15px; background: color-mix(in srgb, var(--surface-2) 78%, transparent); }
@@ -2472,10 +2503,6 @@ h1, .page-head h1 {
 }
 @media (max-width: 700px) {
   .ai-head-actions { width: 100%; }
-  .ai-range-controls { grid-template-columns: 1fr 1fr; }
-  .ai-custom-days { grid-column: 1 / -1; max-width: none; }
-  .ai-review-form { grid-template-columns: 1fr 1fr; }
-  .ai-review-form .btn { grid-column: 1 / -1; }
   .carry-list li { grid-template-columns: 1fr; gap: 6px; }
   .carry-date { max-width: 280px; }
   .fixed-form { grid-template-columns: 1fr 1fr; }
@@ -2484,14 +2511,11 @@ h1, .page-head h1 {
   .ai-memory-text { grid-column: auto; }
   .ai-memory-actions { justify-content: flex-start; }
   .ai-memory-foot { align-items: flex-start; flex-direction: column; gap: 5px; }
-  .ai-builder-actions { align-items: stretch; flex-direction: column; }
-  .ai-builder-actions .btn { align-self: flex-start; }
   .ai-review-columns { grid-template-columns: 1fr; }
 }
 @media (max-width: 520px) {
   .ai-tabs { width: 100%; }
   .ai-tabs .seg { flex: 1; justify-content: center; padding-inline: 7px; }
-  .ai-privacy { align-items: start; }
   .draft-group li { grid-template-columns: 56px minmax(0, 1fr); gap: 7px; }
   .draft-group li small { grid-column: 2; text-align: start; }
   .ai-draft-actions { flex-direction: column-reverse; align-items: stretch; }
@@ -2504,7 +2528,6 @@ h1, .page-head h1 {
   .donut-layout { gap: 10px; }
   .donut-wrap { width: 47%; }
   .chart-range .seg { padding-inline: 7px; }
-  .ai-review-form { grid-template-columns: 1fr; }
 }
 
 /* ── Repeating tasks & checklists ─────────────────────────── */
@@ -3524,39 +3547,6 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 .draft-warnings ul { margin: 6px 0 0; padding-inline-start: 18px; display: flex; flex-direction: column; gap: 4px; }
 .draft-warnings li { font-size: 13px; color: var(--ink-soft); overflow-wrap: anywhere; }
 
-/* ── AI coach, front and center ─────────────────────────────────────── */
-.ai-coach-card {
-  display: flex; align-items: center; gap: 14px;
-  width: 100%; text-align: start; cursor: pointer;
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
-  background:
-    radial-gradient(130% 220% at 0% 0%, color-mix(in srgb, var(--accent-soft) 80%, transparent) 0%, transparent 55%),
-    var(--surface);
-  transition: transform 0.18s var(--ease), box-shadow 0.18s var(--ease), border-color 0.18s var(--ease);
-}
-.ai-coach-card:hover {
-  transform: translateY(-1px);
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
-  box-shadow: 0 10px 26px -14px color-mix(in srgb, var(--accent) 60%, transparent);
-}
-.ai-coach-orb {
-  flex-shrink: 0; display: grid; place-items: center;
-  width: 46px; height: 46px; border-radius: 14px;
-  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--cat-peach)));
-  color: var(--accent-contrast);
-  box-shadow: 0 6px 16px -6px color-mix(in srgb, var(--accent) 70%, transparent);
-}
-.ai-coach-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
-.ai-coach-kicker { font: 600 11px/1.4 var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--accent-deep); }
-:root:lang(fa) .ai-coach-kicker { letter-spacing: 0; }
-.ai-coach-title { font-size: 16px; color: var(--ink); overflow-wrap: anywhere; }
-.ai-coach-body { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
-.ai-coach-btn { flex-shrink: 0; pointer-events: none; }
-@media (max-width: 620px) {
-  .ai-coach-card { flex-wrap: wrap; }
-  .ai-coach-btn { width: 100%; justify-content: center; }
-}
-
 /* Mobile: the AI coach gets its own glowing orb in the top bar. */
 .ai-orb {
   position: relative;
@@ -3608,7 +3598,7 @@ html, body { overflow-x: clip; }
 
 .panel-hub-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-top: 14px; }
 .hub-tile {
-  display: flex; flex-direction: column; gap: 4px; align-items: flex-start; text-align: left;
+  display: flex; flex-direction: column; gap: 4px; align-items: flex-start; text-align: start;
   padding: 15px 16px; border-radius: var(--radius-small); cursor: pointer;
   border: 1px solid var(--line-strong);
   background: color-mix(in srgb, var(--surface-2) 80%, transparent);
@@ -3641,7 +3631,7 @@ html, body { overflow-x: clip; }
 [data-theme="dark"] .panel-choice-icon.accent-blue { background: #1f2c36; color: #7aa3c8; }
 [data-theme="dark"] .panel-choice-icon.accent-peach { background: #33231a; color: #c99a72; }
 .panel-choice-tag { margin: 2px 0 0; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
-.panel-points { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; line-height: 1.6; color: var(--ink-soft); }
+.panel-points { margin: 0; padding-inline-start: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; line-height: 1.6; color: var(--ink-soft); }
 .panel-choice-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
 .panel-kind-pick { display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: var(--radius-small); background: var(--surface-2); border: 1px solid var(--line); }
 .panel-kind-question { margin: 0; font-size: 13.5px; font-weight: 620; color: var(--ink); }
@@ -3788,7 +3778,7 @@ html, body { overflow-x: clip; }
 }
 
 .spinner {
-  display: inline-block; width: 13px; height: 13px; margin-right: 8px; vertical-align: -1px;
+  display: inline-block; width: 13px; height: 13px; margin-inline-end: 8px; vertical-align: -1px;
   border-radius: 50%; border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
   border-top-color: currentColor; animation: spin 0.7s linear infinite;
 }
@@ -3798,13 +3788,18 @@ html, body { overflow-x: clip; }
 /* ---------- Guardian charts ---------- */
 .chart { width: 100%; }
 .chart-svg { width: 100%; height: auto; display: block; overflow: visible; }
-.chart-grid { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.chart-grid-lines { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .chart-bar-planned { fill: color-mix(in srgb, var(--muted) 32%, transparent); }
 .chart-bar-done { fill: var(--accent); }
 .chart-area { fill: color-mix(in srgb, var(--accent) 14%, transparent); }
 .chart-line { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
 .chart-dot { fill: var(--accent); stroke: var(--surface); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
 .chart-max { fill: var(--muted); font-size: 9px; font-variant-numeric: tabular-nums; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0 0 8px; padding: 0; list-style: none; font-size: 11.5px; color: var(--muted); }
+.chart-legend li { display: inline-flex; align-items: center; gap: 6px; }
+.chart-key { width: 10px; height: 10px; flex: none; border-radius: 3px; background: var(--muted); }
+.chart-key-planned { background: color-mix(in srgb, var(--muted) 32%, transparent); }
+.chart-key-done { background: var(--accent); }
 .chart-axis { display: flex; justify-content: space-between; gap: 4px; margin-top: 6px; }
 .chart-axis span { flex: 1; text-align: center; font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .chart-keys { display: flex; gap: 14px; margin-top: 8px; font-size: 12px; color: var(--muted); }
@@ -3852,7 +3847,7 @@ html, body { overflow-x: clip; }
 /* ---------- Panel advice (AI) ---------- */
 .advice { margin-top: 12px; }
 .advice-summary { margin: 0 0 10px; font-size: 13.5px; line-height: 1.65; color: var(--ink); }
-.advice-list { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 7px; }
+.advice-list { margin: 0; padding-inline-start: 20px; display: flex; flex-direction: column; gap: 7px; }
 .advice-list li { font-size: 13px; line-height: 1.6; color: var(--ink); }
 .advice-watchout {
   margin: 12px 0 0; padding: 10px 12px; border-radius: var(--radius-small);
@@ -3941,7 +3936,7 @@ html, body { overflow-x: clip; }
   .chart-area { fill: var(--accent-soft); }
   .chart-line { stroke: var(--accent); }
   .chart-dot { fill: var(--accent); stroke: var(--surface); }
-  .chart-grid { stroke: var(--line); }
+  .chart-grid-lines { stroke: var(--line); }
   .completion-ring-track { stroke: var(--line); }
   .completion-ring-value { stroke: var(--accent); }
   .split-fill { background: var(--accent); }
@@ -4200,22 +4195,24 @@ html, body { overflow-x: clip; }
 /* Several of these are 3-to-5 column grids on a desktop. Each one steps
    down a column at a time, so a phone never has to scroll sideways. */
 @media (max-width: 900px) {
-  .ai-range-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .ai-custom-days { max-width: none; }
-  .ai-review-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ai-inline-field { min-width: 130px; }
   .ai-review-columns { grid-template-columns: 1fr; }
   .carry-list li { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); }
-  .draft-group li { grid-template-columns: 66px minmax(0, 1fr) auto; }
 }
 
 @media (max-width: 620px) {
   .ai-head-actions { flex-wrap: wrap; }
-  .ai-range-controls,
-  .ai-review-form,
+  .ai-range-row { align-items: stretch; }
+  .ai-inline-field { flex: 1 1 130px; min-width: 0; }
   .fixed-form,
   .ai-memory-form {
     grid-template-columns: minmax(0, 1fr);
   }
+  .ai-composer-foot { flex-direction: column; align-items: stretch; }
+  .ai-build { width: 100%; justify-content: center; }
+  .ai-fold-summary { padding: 13px 15px; }
+  .ai-fold-body { padding: 0 15px 16px; }
+  .ai-note { padding: 13px 14px; }
   .fixed-form-actions,
   .ai-memory-actions {
     justify-content: stretch;
@@ -4225,9 +4222,9 @@ html, body { overflow-x: clip; }
     flex: 1;
   }
   .carry-list li { grid-template-columns: minmax(0, 1fr); }
-  .draft-group li { grid-template-columns: minmax(0, 1fr) auto; }
-  .draft-group li > span:first-child { grid-column: 1 / -1; }
-  .ai-builder-actions { flex-direction: column; align-items: stretch; }
+  .draft-check { grid-template-columns: auto minmax(0, 1fr) auto; row-gap: 4px; }
+  .draft-check .draft-item-copy { grid-column: 2 / -1; grid-row: 2; }
+  .draft-check .draft-item-when { grid-row: 1; justify-self: end; }
   .ai-draft-actions { flex-wrap: wrap; }
   .ai-upload-row { flex-direction: column; align-items: stretch; }
 }

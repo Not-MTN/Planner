@@ -598,10 +598,10 @@ export function AIView() {
   return (
     <div className="view ai-view">
       <header className="page-head ai-page-head">
-        <div>
+        <div className="ai-head-copy">
           <p className="kicker">{t("AI coach · powered by Groq")}</p>
           <h1>{t("Make a plan that fits.")}</h1>
-          <p className="lede">{t("Turn a brain dump or a picture into a kind, realistic schedule — then reflect on what worked.")}</p>
+          <p className="lede">{t("Describe your days in your own words, attach a photo, or just talk — then review what comes back before anything changes.")}</p>
         </div>
         <div className="ai-head-actions">
           <span className={cx('chip', groqConfigured ? 'ai-connected' : 'ai-disconnected')}>
@@ -620,42 +620,23 @@ export function AIView() {
         </button>
       </div>
 
-      <section className="ai-privacy card">
-        <span className="ai-privacy-icon"><LeafIcon size={18} /></span>
-        <p><strong>{t("Your data, your choice.")}</strong> {t("Your prompt, saved AI memory, and relevant schedule/check-in details go to Groq through the server proxy. The API key stays on the server, planner notes are not included, and you can forget memory at any time. AI suggestions never change your planner until you review and add them.")}</p>
-      </section>
-
-      <MemoryCard
-        memories={state.aiMemory}
-        declined={state.aiDeclined ?? []}
-        addMemory={addAIMemory}
-        updateMemory={updateAIMemory}
-        deleteMemory={deleteAIMemory}
-        clearMemory={clearAIMemory}
-        forgetDeclined={forgetDeclined}
-        clearDeclined={clearDeclined}
-        requestConfirm={requestConfirm}
-        flash={flash}
-      />
-
       {error ? <div className="banner ai-error" role="alert"><p>{error}</p></div> : null}
 
       {currentTab === 'plan' ? (
         <>
-          <p className="ai-apply-note" role="note">
-            {t("Typed and spoken requests create a reviewable draft. Voice can revise the draft on screen, but it does not directly change existing tasks or events. Review the draft and choose Add this plan to add its tasks, events and habits to your planner.")}
-          </p>
-          <VoiceTalk onDraft={onVoiceDraft} currentDraft={draft ? { draft, range: draftRange } : null} />
-          <section className="card ai-builder">
+          {/* One place to ask. Everything else on this page is either the
+              answer to that request or a setting you visit on purpose. */}
+          <section className="card ai-composer">
             <header className="card-head">
               <div>
                 <p className="kicker">{t("Tell it what matters")}</p>
                 <h2 className="card-title">{t("What do you want to do?")}</h2>
               </div>
-              <span className="chip">{planRange.days} {planRange.days === 1 ? t("day") : t("days")}</span>
+              <span className="chip ai-range-chip"><CalendarIcon size={14} />{formatFullDate(planRange.startDate)} — {formatFullDate(planEnd)}</span>
             </header>
-            <div className="ai-range-controls">
-              <label className="field">
+
+            <div className="ai-range-row">
+              <label className="field ai-inline-field">
                 <span>{t("Plan horizon")}</span>
                 <select value={period} onChange={(event) => setPeriod(event.target.value as PlanningPeriod)}>
                   <option value="day">{t("Daily · 1 day")}</option>
@@ -664,61 +645,22 @@ export function AIView() {
                   <option value="custom">{t("Custom range")}</option>
                 </select>
               </label>
-              <label className="field">
+              <label className="field ai-inline-field">
                 <span>{t("Start date")}</span>
                 <input type="date" min={today} value={planStart} onChange={(event) => setPlanStart(event.target.value || today)} />
               </label>
               {period === 'custom' ? (
-                <label className="field ai-custom-days">
+                <label className="field ai-inline-field ai-custom-days">
                   <span>{t("Number of days")}</span>
                   <input type="number" min={2} max={MAX_PLAN_DAYS} value={customDays} onChange={(event) => setCustomDays(event.target.value)} />
                 </label>
               ) : null}
+              <p className="ai-range-note">{t("{start} — {end}. Fixed weekly times and existing events are treated as busy, protected slots.", {
+                start: formatFullDate(planRange.startDate),
+                end: formatFullDate(planEnd),
+              })}</p>
             </div>
-            <p className="ai-range-note">{t("{start} — {end}. Fixed weekly times and existing events are treated as busy, protected slots.", {
-              start: formatFullDate(planRange.startDate),
-              end: formatFullDate(planEnd),
-            })}</p>
-            {pendingScheduleConflict ? (
-              <div className="ai-schedule-conflict" role="alert">
-                <strong>{t("I spotted a schedule conflict")}</strong>
-                <p>{t("You mentioned {0}; {1} is already scheduled on {2} from {3} to {4}. Should I keep that commitment and find another time for your request?", {
-                  0: displayTime(pendingScheduleConflict.requestedTime),
-                  1: pendingScheduleConflict.title,
-                  2: formatFullDate(pendingScheduleConflict.date),
-                  3: displayTime(pendingScheduleConflict.startTime),
-                  4: displayTime(pendingScheduleConflict.endTime),
-                })}</p>
-                <div className="form-actions">
-                  <button type="button" className="btn btn-primary btn-small" onClick={() => void generatePlan(pendingScheduleConflict)}>
-                    {t("Keep {0} and find another time", { 0: pendingScheduleConflict.title })}
-                  </button>
-                  <button type="button" className="btn btn-ghost btn-small" onClick={() => setPendingScheduleConflict(null)}>{t("I’ll change my request")}</button>
-                </div>
-              </div>
-            ) : null}
-            {heard && heardDiffers ? (
-              <div className="ai-heard-range" role="status">
-                <span><CalendarIcon size={14} /> {heard.clamped
-                  ? t("That's a long stretch — I can plan up to {0} days in one go.", { 0: MAX_PLAN_DAYS })
-                  : t("Sounds like you want {0} {1} planned.", { 0: heard.days, 1: heard.days === 1 ? t("day") : t("days") })}
-                </span>
-                <button
-                  type="button"
-                  className="btn btn-soft btn-small"
-                  onClick={() => { setPeriod('custom'); setCustomDays(String(heard.days)); setPlanStart(heard.startDate); }}
-                >
-                  {t("Plan that long")}
-                </button>
-              </div>
-            ) : null}
-            <div className="chip-row ai-chips" role="group" aria-label={t("Start from a suggestion")}>
-              {PLAN_CHIPS.map((chip) => (
-                <button key={chip} type="button" className="chip" onClick={() => { setPendingScheduleConflict(null); setPrompt(chip); }}>
-                  {chip}
-                </button>
-              ))}
-            </div>
+
             <label className="field ai-prompt-field">
               <span className="ai-prompt-label">
                 {t("Your plan request")}
@@ -737,15 +679,76 @@ export function AIView() {
                 ) : null}
               </span>
               <textarea
-                rows={5}
+                rows={4}
                 maxLength={2400}
                 value={prompt}
                 placeholder={speech.available ? t("Type or dictate — tap the mic and just say your day. Example: “Class Tuesday 8am, gym after, help me fit it all in.”") : t("Example: I have class Tuesday morning. Help me fit in studying, a short workout, meals, and time to unwind. Keep each day manageable.")}
                 onChange={(event) => { setPendingScheduleConflict(null); setPrompt(event.target.value); }}
               />
             </label>
-            <div className="ai-upload-row">
-              <>
+
+            <div className="chip-row ai-chips" role="group" aria-label={t("Start from a suggestion")}>
+              {PLAN_CHIPS.map((chip) => (
+                <button key={chip} type="button" className="chip" onClick={() => { setPendingScheduleConflict(null); setPrompt(chip); }}>
+                  {chip}
+                </button>
+              ))}
+            </div>
+
+            {pendingScheduleConflict ? (
+              <div className="ai-schedule-conflict" role="alert">
+                <strong>{t("I spotted a schedule conflict")}</strong>
+                <p>{t("You mentioned {0}; {1} is already scheduled on {2} from {3} to {4}. Should I keep that commitment and find another time for your request?", {
+                  0: displayTime(pendingScheduleConflict.requestedTime),
+                  1: pendingScheduleConflict.title,
+                  2: formatFullDate(pendingScheduleConflict.date),
+                  3: displayTime(pendingScheduleConflict.startTime),
+                  4: displayTime(pendingScheduleConflict.endTime),
+                })}</p>
+                <div className="form-actions">
+                  <button type="button" className="btn btn-primary btn-small" onClick={() => void generatePlan(pendingScheduleConflict)}>
+                    {t("Keep {0} and find another time", { 0: pendingScheduleConflict.title })}
+                  </button>
+                  <button type="button" className="btn btn-ghost btn-small" onClick={() => setPendingScheduleConflict(null)}>{t("I’ll change my request")}</button>
+                </div>
+              </div>
+            ) : null}
+
+            {heard && heardDiffers ? (
+              <div className="ai-heard-range" role="status">
+                <span><CalendarIcon size={14} /> {heard.clamped
+                  ? t("That's a long stretch — I can plan up to {0} days in one go.", { 0: MAX_PLAN_DAYS })
+                  : t("Sounds like you want {0} {1} planned.", { 0: heard.days, 1: heard.days === 1 ? t("day") : t("days") })}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-soft btn-small"
+                  onClick={() => { setPeriod('custom'); setCustomDays(String(heard.days)); setPlanStart(heard.startDate); }}
+                >
+                  {t("Plan that long")}
+                </button>
+              </div>
+            ) : null}
+
+            {image ? (
+              <div className="ai-image-preview">
+                <img src={image.dataUrl} alt={t("Preview of uploaded plan")} />
+                <div><strong>{image.name}</strong><span>{t("Attached to this request only")}</span></div>
+                <button type="button" className="text-btn" onClick={() => setImage(null)}>{t("Remove")}</button>
+              </div>
+            ) : null}
+
+            {image ? (
+              <div className="ai-timetable-row">
+                <button type="button" className="btn btn-soft btn-small" disabled={working} onClick={() => void readTimetable()}>
+                  <CalendarIcon size={15} /> {working ? t("Reading the timetable…") : t("This is a weekly timetable")}
+                </button>
+                <span className="hint">{t("Reads the class grid into protected weekly times instead of one-off tasks.")}</span>
+              </div>
+            ) : null}
+
+            <div className="ai-composer-foot">
+              <div className="ai-upload-row">
                 <button
                   type="button"
                   className="btn btn-soft btn-small ai-upload-button"
@@ -762,30 +765,13 @@ export function AIView() {
                   aria-label={t("Choose a plan picture")}
                   onChange={onImage}
                 />
-              </>
-              <span className="hint">{t("PNG or JPG · up to 3 MB. Images are sent to Groq for reading and are not saved in your planner.")}</span>
-            </div>
-            {image ? (
-              <div className="ai-image-preview">
-                <img src={image.dataUrl} alt={t("Preview of uploaded plan")} />
-                <div><strong>{image.name}</strong><span>{t("Attached to this request only")}</span></div>
-                <button type="button" className="text-btn" onClick={() => setImage(null)}>{t("Remove")}</button>
+                <span className="hint">{t("PNG or JPG · up to 3 MB. Images are sent to Groq for reading and are not saved in your planner.")}</span>
               </div>
-            ) : null}
-            {image ? (
-              <div className="ai-timetable-row">
-                <button type="button" className="btn btn-soft btn-small" disabled={working} onClick={() => void readTimetable()}>
-                  <CalendarIcon size={15} /> {working ? t("Reading the timetable…") : t("This is a weekly timetable")}
-                </button>
-                <span className="hint">{t("Reads the class grid into protected weekly times instead of one-off tasks.")}</span>
-              </div>
-            ) : null}
-            <div className="ai-builder-actions">
-              <p className="meta">{t("Health ideas stay gentle and optional. The AI is not a medical professional.")}</p>
-              <button type="button" className="btn btn-primary" disabled={working || (!prompt.trim() && !image)} onClick={() => void generatePlan()}>
+              <button type="button" className="btn btn-primary ai-build" disabled={working || (!prompt.trim() && !image)} onClick={() => void generatePlan()}>
                 <SparklesIcon size={16} />{working ? t("Building your plan…") : t("Build a draft")}
               </button>
             </div>
+            <p className="ai-composer-note">{t("Typed and spoken requests create a reviewable draft. Voice can revise the draft on screen, but it does not directly change existing tasks or events. Review the draft and choose Add this plan to add its tasks, events and habits to your planner.")}</p>
           </section>
 
           {timetable ? (
@@ -812,79 +798,118 @@ export function AIView() {
             />
           ) : null}
 
-          <section className="card fixed-manager">
-            <header className="card-head">
-              <div>
-                <p className="kicker">{t("Protect your schedule")}</p>
-                <h2 className="card-title">{t("Weekly fixed times")}</h2>
-                <p className="meta">{t("Add class, work, care, or anything that always happens at the same time.")}</p>
+          {/* The other way in: say it out loud instead of typing it. */}
+          <VoiceTalk onDraft={onVoiceDraft} currentDraft={draft ? { draft, range: draftRange } : null} />
+
+          <div className="ai-folds">
+            <details className="card ai-fold">
+              <summary className="ai-fold-summary">
+                <span className="ai-fold-mark"><SparklesIcon size={17} /></span>
+                <span className="ai-fold-copy">
+                  <strong>{t("AI memory")}</strong>
+                  <small>{faNum(state.aiMemory.length)} {t("remembered")}</small>
+                </span>
+                <span className="ai-fold-chevron" aria-hidden="true" />
+              </summary>
+              <div className="ai-fold-body">
+                <MemoryCard
+                  embedded
+                  memories={state.aiMemory}
+                  declined={state.aiDeclined ?? []}
+                  addMemory={addAIMemory}
+                  updateMemory={updateAIMemory}
+                  deleteMemory={deleteAIMemory}
+                  clearMemory={clearAIMemory}
+                  forgetDeclined={forgetDeclined}
+                  clearDeclined={clearDeclined}
+                  requestConfirm={requestConfirm}
+                  flash={flash}
+                />
               </div>
-              <span className="fixed-protected-count">{state.fixedCommitments.length} {t('protected')}</span>
-            </header>
-            <form className="fixed-form" onSubmit={saveBlock}>
-              <label className="field">
-                <span>{t("Name")}</span>
-                <input value={blockTitle} maxLength={140} placeholder={t("Class")} onChange={(event) => setBlockTitle(event.target.value)} />
-              </label>
-              <label className="field">
-                <span>{t("Repeats")}</span>
-                <select value={blockDay} onChange={(event) => setBlockDay(Number(event.target.value))}>
-                  {WEEKDAYS.map((day) => <option key={day.value} value={day.value}>{day.label}</option>)}
-                </select>
-              </label>
-              <label className="field">
-                <span>{t("Starts")}</span>
-                <input type="time" value={blockStart} onChange={(event) => setBlockStart(event.target.value)} />
-              </label>
-              <label className="field">
-                <span>{t("Ends")}</span>
-                <input type="time" value={blockEnd} onChange={(event) => setBlockEnd(event.target.value)} />
-              </label>
-              <label className="field">
-                <span>{t("Type")}</span>
-                <select value={blockCategory} onChange={(event) => setBlockCategory(event.target.value)}>
-                  {CATEGORIES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-                </select>
-              </label>
-              <div className="fixed-form-actions">
-                {editingBlockId ? <button type="button" className="btn btn-ghost btn-small" onClick={() => { setEditingBlockId(null); setBlockTitle(''); setBlockError(''); }}>{t("Cancel")}</button> : null}
-                <button type="submit" className="btn btn-soft btn-small"><PlusIcon size={15} />{editingBlockId ? t("Save change") : t("Protect time")}</button>
-              </div>
-              {blockError ? <small className="field-error fixed-form-error">{blockError}</small> : null}
-            </form>
-            {sortedBlocks.length === 0 ? (
-              <p className="empty-inline fixed-empty">{t("No recurring times yet. Add “Class · Tuesday · 08:00–09:00” to keep that hour clear in every AI plan.")}</p>
-            ) : (
-              <ul className="fixed-list">
-                {sortedBlocks.map((block) => (
-                  <li key={block.id} className="fixed-list-item">
-                    <span className={cx('fixed-list-dot', `accent-${categoryById(block.category).accent}`)} />
-                    <div className="fixed-list-copy">
-                      <strong>{block.title}</strong>
-                      <span>{t("{day} · {start}–{end} · Protected every week", {
-                        day: WEEKDAYS.find((day) => day.value === block.weekday)?.label ?? '',
-                        start: displayTime(block.startTime),
-                        end: displayTime(block.endTime),
-                      })}</span>
+            </details>
+
+            <details className="card ai-fold">
+              <summary className="ai-fold-summary">
+                <span className="ai-fold-mark fixed-fold-mark"><CalendarIcon size={17} /></span>
+                <span className="ai-fold-copy">
+                  <strong>{t("Weekly fixed times")}</strong>
+                  <small>{faNum(state.fixedCommitments.length)} {t("protected")}</small>
+                </span>
+                <span className="ai-fold-chevron" aria-hidden="true" />
+              </summary>
+              <div className="ai-fold-body">
+                <section className="fixed-manager">
+                  <p className="meta ai-fold-intro">{t("Add class, work, care, or anything that always happens at the same time. Every AI plan is built around these.")}</p>
+                  <form className="fixed-form" onSubmit={saveBlock}>
+                    <label className="field">
+                      <span>{t("Name")}</span>
+                      <input value={blockTitle} maxLength={140} placeholder={t("Class")} onChange={(event) => setBlockTitle(event.target.value)} />
+                    </label>
+                    <label className="field">
+                      <span>{t("Repeats")}</span>
+                      <select value={blockDay} onChange={(event) => setBlockDay(Number(event.target.value))}>
+                        {WEEKDAYS.map((day) => <option key={day.value} value={day.value}>{day.label}</option>)}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>{t("Starts")}</span>
+                      <input type="time" value={blockStart} onChange={(event) => setBlockStart(event.target.value)} />
+                    </label>
+                    <label className="field">
+                      <span>{t("Ends")}</span>
+                      <input type="time" value={blockEnd} onChange={(event) => setBlockEnd(event.target.value)} />
+                    </label>
+                    <label className="field">
+                      <span>{t("Type")}</span>
+                      <select value={blockCategory} onChange={(event) => setBlockCategory(event.target.value)}>
+                        {CATEGORIES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                      </select>
+                    </label>
+                    <div className="fixed-form-actions">
+                      {editingBlockId ? <button type="button" className="btn btn-ghost btn-small" onClick={() => { setEditingBlockId(null); setBlockTitle(''); setBlockError(''); }}>{t("Cancel")}</button> : null}
+                      <button type="submit" className="btn btn-soft btn-small"><PlusIcon size={15} />{editingBlockId ? t("Save change") : t("Protect time")}</button>
                     </div>
-                    <button type="button" className="text-btn" onClick={() => editBlock(block.id)}>{t("Edit")}</button>
-                    <button type="button" className="icon-btn" aria-label={t("Remove {0}", { 0: block.title })} onClick={() => { deleteFixedCommitment(block.id); if (editingBlockId === block.id) { setEditingBlockId(null); setBlockTitle(''); } }}>×</button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+                    {blockError ? <small className="field-error fixed-form-error">{blockError}</small> : null}
+                  </form>
+                  {sortedBlocks.length === 0 ? (
+                    <p className="empty-inline fixed-empty">{t("No recurring times yet. Add “Class · Tuesday · 08:00–09:00” to keep that hour clear in every AI plan.")}</p>
+                  ) : (
+                    <ul className="fixed-list">
+                      {sortedBlocks.map((block) => (
+                        <li key={block.id} className="fixed-list-item">
+                          <span className={cx('fixed-list-dot', `accent-${categoryById(block.category).accent}`)} />
+                          <div className="fixed-list-copy">
+                            <strong>{block.title}</strong>
+                            <span>{t("{day} · {start}–{end} · Protected every week", {
+                              day: WEEKDAYS.find((day) => day.value === block.weekday)?.label ?? '',
+                              start: displayTime(block.startTime),
+                              end: displayTime(block.endTime),
+                            })}</span>
+                          </div>
+                          <button type="button" className="text-btn" onClick={() => editBlock(block.id)}>{t("Edit")}</button>
+                          <button type="button" className="icon-btn" aria-label={t("Remove {0}", { 0: block.title })} onClick={() => { deleteFixedCommitment(block.id); if (editingBlockId === block.id) { setEditingBlockId(null); setBlockTitle(''); } }}>×</button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+              </div>
+            </details>
+          </div>
+
         </>
       ) : (
         <>
           <section className="card ai-review-controls">
-            <div>
-              <p className="kicker">{t("Look back without judgment")}</p>
-              <h2 className="card-title">{t("How did this stretch go?")}</h2>
-              <p className="meta">{t("Review plans, completions, and habit check-ins. Missed items are suggestions to reschedule, never failures.")}</p>
-            </div>
-            <div className="ai-review-form">
-              <label className="field">
+            <header className="card-head">
+              <div>
+                <p className="kicker">{t("Look back without judgment")}</p>
+                <h2 className="card-title">{t("How did this stretch go?")}</h2>
+                <p className="meta">{t("Review plans, completions, and habit check-ins. Missed items are suggestions to reschedule, never failures.")}</p>
+              </div>
+            </header>
+            <div className="ai-range-row">
+              <label className="field ai-inline-field">
                 <span>{t("Review period")}</span>
                 <select value={period} onChange={(event) => setPeriod(event.target.value as PlanningPeriod)}>
                   <option value="day">{t("Daily · 1 day")}</option>
@@ -893,21 +918,23 @@ export function AIView() {
                   <option value="custom">{t("Custom range")}</option>
                 </select>
               </label>
-              <label className="field">
+              <label className="field ai-inline-field">
                 <span>{t("Through")}</span>
                 <input type="date" max={today} value={reviewThrough} onChange={(event) => setReviewThrough(event.target.value || today)} />
               </label>
               {period === 'custom' ? (
-                <label className="field">
+                <label className="field ai-inline-field ai-custom-days">
                   <span>{t("Number of days")}</span>
                   <input type="number" min={2} max={MAX_PLAN_DAYS} value={customDays} onChange={(event) => setCustomDays(event.target.value)} />
                 </label>
               ) : null}
+              <p className="ai-range-note">{formatFullDate(reviewStart)} — {formatFullDate(reviewEnd)}</p>
+            </div>
+            <div className="ai-review-action">
               <button type="button" className="btn btn-primary" disabled={working} onClick={generateReview}>
                 <SparklesIcon size={16} />{working ? t("Reflecting…") : t("Get my AI review")}
               </button>
             </div>
-            <p className="ai-range-note">{formatFullDate(reviewStart)} — {formatFullDate(reviewEnd)}</p>
           </section>
           {review ? (
             <ReviewCard
@@ -924,23 +951,21 @@ export function AIView() {
         </>
       )}
 
-      <section className="ai-ideas card wash-sage">
-        <div className="ai-ideas-mark"><LeafIcon size={20} /></div>
+      {/* Said once, at the end, in both tabs: what leaves the device, and what
+          never changes without you. */}
+      <footer className="ai-note">
+        <span className="ai-note-mark"><LeafIcon size={16} /></span>
         <div>
-          <p className="kicker">{t("A few good next steps")}</p>
-          <h2 className="card-title">{t("Small features that make this even smarter")}</h2>
-          <ul>
-            <li><strong>{t("Protected weekly schedule:")}</strong> {t("add classes, shifts, appointments, or family time once; AI will reserve those slots.")}</li>
-            <li><strong>{t("End-of-day check-in:")}</strong> {t("a two-minute note about energy and mood can help future plans get more realistic.")}</li>
-            <li><strong>{t("Gentle capacity setting:")}</strong> {t("choose a light, normal, or full day so the planner leaves enough room to rest.")}</li>
-          </ul>
+          <p><strong>{t("Your data, your choice.")}</strong> {t("Your prompt, saved AI memory, and relevant schedule/check-in details go to Groq through the server proxy. The API key stays on the server, planner notes are not included, and you can forget memory at any time. AI suggestions never change your planner until you review and add them.")}</p>
+          <p className="meta">{t("Health ideas stay gentle and optional. The AI is not a medical professional.")}</p>
         </div>
-      </section>
+      </footer>
     </div>
   );
 }
 
 function MemoryCard({
+  embedded = false,
   memories,
   declined,
   addMemory,
@@ -952,6 +977,8 @@ function MemoryCard({
   requestConfirm,
   flash,
 }: {
+  /** Inside a disclosure of its own: no card chrome, no repeated heading. */
+  embedded?: boolean;
   memories: AIMemory[];
   declined: AIDeclined[];
   addMemory: (input: { text: string; category: AIMemoryCategory }) => void;
@@ -1020,16 +1047,20 @@ function MemoryCard({
   };
 
   return (
-    <section className="card ai-memory-card">
-      <header className="card-head">
-        <div>
-          <p className="kicker">{t("Teach it what matters")}</p>
-          <h2 className="card-title">{t("AI memory")}</h2>
-          <p className="meta">{t("Save the parts of your life you want future plans to understand. Write them in your own words; you stay in control.")}</p>
-          <p className="ai-memory-safety">{t("Only save details you are comfortable sending to Groq when you ask for help.")}</p>
-        </div>
-        <span className="ai-memory-count">{memories.length} {t("remembered")}</span>
-      </header>
+    <section className={cx('ai-memory-card', !embedded && 'card')}>
+      {embedded ? (
+        <p className="meta ai-fold-intro">{t("Save the parts of your life you want future plans to understand. Write them in your own words; you stay in control.")}</p>
+      ) : (
+        <header className="card-head">
+          <div>
+            <p className="kicker">{t("Teach it what matters")}</p>
+            <h2 className="card-title">{t("AI memory")}</h2>
+            <p className="meta">{t("Save the parts of your life you want future plans to understand. Write them in your own words; you stay in control.")}</p>
+            <p className="ai-memory-safety">{t("Only save details you are comfortable sending to Groq when you ask for help.")}</p>
+          </div>
+          <span className="ai-memory-count">{faNum(memories.length)} {t("remembered")}</span>
+        </header>
+      )}
       <form className="ai-memory-form" onSubmit={submit}>
         <label className="field ai-memory-text">
           <span>{editingId ? t("Edit memory") : t("Something for AI to remember")}</span>
@@ -1072,7 +1103,9 @@ function MemoryCard({
           </ul>
           <div className="ai-memory-foot">
             <span>{t("Only these saved memories are added to AI planning and reviews. They are stored with your planner.")}</span>
-            <button type="button" className="text-btn danger-text" onClick={forgetAll}>{t("Forget all")}</button>
+            {/* Named for its scope: with turned-down suggestions listed below,
+                a second bare "Forget all" on the same card is a coin toss. */}
+            <button type="button" className="text-btn danger-text" onClick={forgetAll}>{t("Forget all memory")}</button>
           </div>
         </>
       ) : (
@@ -1084,7 +1117,7 @@ function MemoryCard({
             <strong>{t("Suggestions you turned down")}</strong>
             {/* Visible on purpose: a preference the AI learned on its own and
                 then acted on silently is a guess nobody can correct. */}
-            <button type="button" className="text-btn danger-text" onClick={forgetAllDeclined}>{t("Forget all")}</button>
+            <button type="button" className="text-btn danger-text" onClick={forgetAllDeclined}>{t("Forget all suggestions")}</button>
           </div>
           <p className="meta">{t("The AI will not suggest these again. They are forgotten on their own after a while. Remove one if you would like to hear it again.")}</p>
           <ul className="ai-memory-list">
@@ -1156,6 +1189,60 @@ function PlanDraft({ draft, warnings, working, onRefine, onAdd, onDiscard, isKep
   const total = draft.tasks.length + draft.events.length + draft.habits.length;
   const allKept = keptCount === total;
   const reason = (key: string): string => draft.reasons?.[key] ?? '';
+  interface DraftRow {
+    key: string;
+    date: string;
+    time: string;
+    /** Right-hand label: the hour for a timed item, the frequency for a habit. */
+    when: string;
+    kind: string;
+    kindClass: string;
+    title: string;
+    reason: string;
+  }
+  // The original index is the identity the selection and the reasons use, so it
+  // is carried through the regrouping untouched.
+  const rows: DraftRow[] = [
+    ...draft.events.map((item, index) => ({
+      key: `event:${index}`,
+      date: item.date,
+      time: item.startTime,
+      when: `${displayTime(item.startTime)}–${displayTime(item.endTime)}`,
+      kind: t("Event"),
+      kindClass: 'event-kind',
+      title: item.title,
+      reason: reason(`event:${index}`),
+    })),
+    ...draft.tasks.map((item, index) => ({
+      key: `task:${index}`,
+      date: item.dueDate ?? '',
+      time: '',
+      when: '',
+      kind: t("Task"),
+      kindClass: 'task-kind',
+      title: item.title,
+      reason: reason(`task:${index}`),
+    })),
+  ];
+  // A timed item comes before an untimed one, then earlier before later.
+  const byTime = (a: DraftRow, b: DraftRow) =>
+    (a.time ? 0 : 1) - (b.time ? 0 : 1) || a.time.localeCompare(b.time);
+  const draftDays = [...new Set(rows.map((row) => row.date).filter(Boolean))].sort();
+  const undatedItems = rows.filter((row) => !row.date);
+  const draftItems = rows.filter((row) => row.date).sort(byTime);
+  const renderDraftItem = (row: DraftRow) => (
+    <li key={row.key} className={isKept(row.key) ? 'draft-item' : 'draft-item is-declined'}>
+      <label className="draft-check">
+        <input type="checkbox" checked={isKept(row.key)} onChange={() => onToggle(row.key)} aria-label={t("Add {0}", { 0: row.title })} />
+        <span className={`draft-kind ${row.kindClass}`}>{row.kind}</span>
+        <span className="draft-item-copy">
+          <span className="draft-item-title">{row.title}</span>
+          {row.reason ? <small className="draft-item-reason">{row.reason}</small> : null}
+        </span>
+        {row.when ? <small className="draft-item-when">{row.when}</small> : null}
+      </label>
+    </li>
+  );
   return (
     <section className="card ai-draft-card">
       <header className="card-head">
@@ -1177,36 +1264,22 @@ function PlanDraft({ draft, warnings, working, onRefine, onAdd, onDiscard, isKep
         <div className="ai-wellbeing"><LeafIcon size={17} /><div><strong>{t("Gentle wellbeing ideas")}</strong><ul>{draft.suggestions.map((item, index) => <li key={index}>{item}</li>)}</ul></div></div>
       ) : null}
       {draft.tasks.length + draft.events.length + draft.habits.length === 0 ? <p className="empty-inline">{t("The AI did not find new items to add. Try a more specific request.")}</p> : null}
-      {draft.events.length > 0 ? <DraftGroup title={t("Timed plans")} count={draft.events.length}>
-        {draft.events.map((item, index) => (
-          <li key={`e-${index}`} className={isKept(`event:${index}`) ? 'draft-item' : 'draft-item is-declined'}>
-            <label className="draft-check">
-              <input type="checkbox" checked={isKept(`event:${index}`)} onChange={() => onToggle(`event:${index}`)} aria-label={t("Add {0}", { 0: item.title })} />
-              <span className="draft-kind event-kind">{t("Event")}</span>
-              <span className="draft-item-copy">
-                <span className="draft-item-title">{item.title}</span>
-                {reason(`event:${index}`) ? <small className="draft-item-reason">{reason(`event:${index}`)}</small> : null}
-              </span>
-              <small className="draft-item-when">{formatFullDate(item.date)} · {displayTime(item.startTime)}–{displayTime(item.endTime)}</small>
-            </label>
-          </li>
-        ))}
-      </DraftGroup> : null}
-      {draft.tasks.length > 0 ? <DraftGroup title={t("Tasks")} count={draft.tasks.length}>
-        {draft.tasks.map((item, index) => (
-          <li key={`t-${index}`} className={isKept(`task:${index}`) ? 'draft-item' : 'draft-item is-declined'}>
-            <label className="draft-check">
-              <input type="checkbox" checked={isKept(`task:${index}`)} onChange={() => onToggle(`task:${index}`)} aria-label={t("Add {0}", { 0: item.title })} />
-              <span className="draft-kind task-kind">{t("Task")}</span>
-              <span className="draft-item-copy">
-                <span className="draft-item-title">{item.title}</span>
-                {reason(`task:${index}`) ? <small className="draft-item-reason">{reason(`task:${index}`)}</small> : null}
-              </span>
-              <small className="draft-item-when">{item.dueDate ? formatFullDate(item.dueDate) : ''}</small>
-            </label>
-          </li>
-        ))}
-      </DraftGroup> : null}
+      {/* Read in the order it will be lived: one group per day, timed things
+          first, then anything with no time. Grouping by kind instead made a
+          week look like two disconnected lists. */}
+      {draftDays.map((day) => {
+        const dayItems = draftItems.filter((item) => item.date === day);
+        return (
+          <DraftGroup key={day} title={formatFullDate(day)} count={dayItems.length}>
+            {dayItems.map(renderDraftItem)}
+          </DraftGroup>
+        );
+      })}
+      {undatedItems.length > 0 ? (
+        <DraftGroup title={t("Anytime")} count={undatedItems.length}>
+          {undatedItems.map(renderDraftItem)}
+        </DraftGroup>
+      ) : null}
       {draft.habits.length > 0 ? <DraftGroup title={t("Habits")} count={draft.habits.length}>
         {draft.habits.map((item, index) => (
           <li key={`h-${index}`} className={isKept(`habit:${index}`) ? 'draft-item' : 'draft-item is-declined'}>
@@ -1266,7 +1339,7 @@ function TimetableCard({ timetable, isKept, onToggle, onAdd, onDiscard }: {
           <p className="kicker">{t("Review before protecting")}</p>
           <h2 className="card-title">{t("Your weekly timetable")}</h2>
         </div>
-        <span className="chip">{allKept ? `${timetable.blocks.length} ${t("times")}` : `${keptCount} ${t("of")} ${timetable.blocks.length}`}</span>
+        <span className="chip">{allKept ? `${faNum(timetable.blocks.length)} ${t("times")}` : `${faNum(keptCount)} ${t("of")} ${faNum(timetable.blocks.length)}`}</span>
       </header>
       <p className="ai-draft-summary">{timetable.summary}</p>
 

@@ -811,8 +811,9 @@ describe('app smoke', () => {
     expect(whyBtn).toBeTruthy();
     act(() => whyBtn.click());
     const text = () => document.body.textContent ?? '';
-    await Promise.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 120));
+    // Polled, not slept. A fixed 120ms was enough on a laptop and not on a
+    // loaded CI runner, where this is the assertion that went red.
+    await waitForText('One quiet place for one wild life');
     expect(text()).toContain('One quiet place for one wild life');
     expect(text()).toContain('Private by design');
     act(() => (document.querySelector('[aria-label="Close"]') as HTMLButtonElement).click());

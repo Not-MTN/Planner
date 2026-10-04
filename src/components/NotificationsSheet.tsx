@@ -3,6 +3,7 @@ import { BellIcon, CheckIcon, StopwatchIcon } from '../icons';
 import { t } from '../i18n';
 import { SNOOZE_CHOICES } from '../reminders';
 import { Modal } from './ui';
+import { formatStamp } from '../dates';
 
 export function NotificationsSheet({
   items,
@@ -48,7 +49,7 @@ export function NotificationsSheet({
                 <span className="notification-copy">
                   <strong>{item.title}</strong>
                   <span>{item.body}</span>
-                  <time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleString()}</time>
+                  <time dateTime={item.createdAt}>{formatStamp(item.createdAt)}</time>
                 </span>
                 {!item.read ? <i className="notification-dot" aria-label={t('Unread')} /> : <CheckIcon size={15} />}
               </button>

@@ -118,7 +118,7 @@ export function TaskBoard({ tasks, group, today }: { tasks: Task[]; group: Board
         >
           <header className="board-head">
             <h2 className="kicker">{column.label}</h2>
-            <span className="filter-count">{column.tasks.length}</span>
+            <span className="filter-count">{faNum(column.tasks.length)}</span>
           </header>
           <ul className="board-cards">
             {sortForBoard(column.tasks).map((task) => {

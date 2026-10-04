@@ -90,6 +90,10 @@ async function join() {
   });
 }
 
+/* Every test here does real key derivation — one join or sign-in is seconds of
+   PBKDF2 — so the default 5s budget is a coin flip once the whole suite is
+   running in parallel. The generous timeout is per test, not a licence to be
+   slow: alone, the slowest of these is under 5s. */
 describe('signing in', () => {
   it('says the same thing for a wrong password and for a stranger', async () => {
     await join();
@@ -112,7 +116,7 @@ describe('signing in', () => {
 
     expect(wrongPassword).toBe(stranger);
     expect(wrongPassword.toLowerCase()).toContain('wrong');
-  });
+  }, 90_000);
 
   it('accepts the username in any case, and the email too', async () => {
     await join();
@@ -138,7 +142,7 @@ describe('signing in', () => {
     expect(second.dek).not.toBe(first.dek);
     const pulled = await pullVault();
     expect(pulled?.version).toBeGreaterThan(0);
-  });
+  }, 90_000);
 
   it('slows down after too many attempts, and lets you in afterwards', async () => {
     await join();
@@ -173,13 +177,13 @@ describe('signing in', () => {
     expect(out.status).toBe(200);
     const after = await fetch('/api/auth/session', { method: 'GET' });
     expect(after.status).toBe(401);
-  });
+  }, 90_000);
 
   it('refuses a password that is too short before it ever reaches the server', async () => {
     await join();
     endSession();
     await expect(signIn(username(), 'short', false)).rejects.toBeInstanceOf(AuthError);
-  });
+  }, 90_000);
 
   it('reports a conflict instead of letting one device overwrite another', async () => {
     await join();
@@ -235,5 +239,5 @@ describe('signing in', () => {
     // decryptVault uses the session's own key, which was derived from scratch.
     const decrypted = await decryptVault();
     expect(decrypted?.tasks[0]?.title).toBe('Buy bread');
-  });
+  }, 90_000);
 });

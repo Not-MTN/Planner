@@ -834,7 +834,7 @@ function Actions({
   onRemove: () => void;
 }) {
   return (
-    <div className="form-actions">
+    <div className="form-actions form-actions-sticky">
       {editing ? (
         <button type="button" className="btn btn-danger" onClick={onRemove}>
           {t("Remove")}

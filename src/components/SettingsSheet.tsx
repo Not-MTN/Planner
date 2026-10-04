@@ -28,7 +28,7 @@ import {
   type DeviceSession,
   type TotpSetup,
 } from '../auth/session';
-import { DATE_LANGUAGES, todayISO, type DateLanguage } from '../dates';
+import { DATE_LANGUAGES, formatStamp, todayISO, type DateLanguage } from '../dates';
 import { downloadBusyICS, downloadICS, parseICS } from '../ics';
 import { canInstall, isInstalled, onInstallChange, promptInstall } from '../pwa';
 import { requestTour } from '../tour';
@@ -164,7 +164,7 @@ function ConflictList() {
             <div>
               <p className="sync-conflict-title">{conflict.title || t("Untitled")}</p>
               <p className="sync-conflict-when">
-                {t("Other version edited {0}", { 0: new Date(conflict.lostAt).toLocaleString() })}
+                {t("Other version edited {0}", { 0: formatStamp(conflict.lostAt) })}
               </p>
             </div>
             <div className="sync-conflict-actions">
@@ -1373,25 +1373,31 @@ export function SettingsSheet() {
   if (!settingsOpen) return null;
 
   return (
-    <Modal title={t("Settings")} onClose={closeSettings} className="sheet-settings">
-      <div className="set-nav" role="tablist" aria-label={t("Settings sections")} onKeyDown={onTabKeys}>
-        {SETTINGS_TABS.map((entry) => (
-          <button
-            key={entry.id}
-            ref={(node) => { tabRefs.current[entry.id] = node; }}
-            type="button"
-            role="tab"
-            id={`set-tab-${entry.id}`}
-            aria-selected={tab === entry.id}
-            aria-controls="set-panel"
-            tabIndex={tab === entry.id ? 0 : -1}
-            className={cx('set-nav-item', tab === entry.id && 'on')}
-            onClick={() => setTab(entry.id)}
-          >
-            {entry.label}
-          </button>
-        ))}
-      </div>
+    <Modal
+      title={t("Settings")}
+      onClose={closeSettings}
+      className="sheet-settings"
+      subheader={
+        <div className="set-nav" role="tablist" aria-label={t("Settings sections")} onKeyDown={onTabKeys}>
+          {SETTINGS_TABS.map((entry) => (
+            <button
+              key={entry.id}
+              ref={(node) => { tabRefs.current[entry.id] = node; }}
+              type="button"
+              role="tab"
+              id={`set-tab-${entry.id}`}
+              aria-selected={tab === entry.id}
+              aria-controls="set-panel"
+              tabIndex={tab === entry.id ? 0 : -1}
+              className={cx('set-nav-item', tab === entry.id && 'on')}
+              onClick={() => setTab(entry.id)}
+            >
+              {entry.label}
+            </button>
+          ))}
+        </div>
+      }
+    >
 
       {/* Only the open group is mounted. The account tabs talk to the server
           when they appear, and there is no reason to ask about devices or

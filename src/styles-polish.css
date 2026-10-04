@@ -762,54 +762,6 @@
   box-shadow: var(--shadow-lift);
 }
 
-/* ---------- AI coach card ---------- */
-.ai-coach-card {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 18px 20px;
-  background: linear-gradient(135deg, var(--accent-soft) 0%, var(--surface) 100%);
-  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line));
-  cursor: pointer;
-  text-align: start;
-}
-.ai-coach-card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow);
-}
-.ai-coach-orb {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  background: var(--accent);
-  color: white;
-  display: grid;
-  place-items: center;
-  flex: none;
-}
-.ai-coach-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.ai-coach-kicker {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--accent);
-}
-.ai-coach-title {
-  font-size: 15px;
-  font-weight: 700;
-}
-.ai-coach-body {
-  font-size: 13px;
-  color: var(--ink-soft);
-  line-height: 1.4;
-}
-
 /* ---------- Mood card ---------- */
 .mood-card {
   background: linear-gradient(135deg, var(--surface) 0%, var(--surface-2) 100%);
