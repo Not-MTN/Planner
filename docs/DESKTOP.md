@@ -77,6 +77,48 @@ install launch; update requests are revalidated in the main process.
 | macOS | `Planner-macos-x64.dmg` / `…-arm64.dmg` plus matching `.zip` files. The filename stays fixed by architecture; in-app updates are deferred. |
 | Linux | `Planner-linux-x64.AppImage`, `.deb`, `.rpm` (ARM builds for AppImage and deb). In-app updates are deferred. |
 
+## Keeping the installers small
+
+An installer is two things: the Electron runtime and the app. The runtime is
+roughly 90 MB and it is not ours — every Electron app pays it. The part this
+repository controls is the payload beside it, `dist/`, which is **4.1 MB**
+(measured with `npm run size:report`; it was 4.7 MB). It is packed whole into
+every installer, and into the Android APK.
+
+What trims it without touching a pixel anyone can see:
+
+- **`compression: maximum`** in `desktop/electron-builder.yml`. LZMA at its
+  slowest setting, applied to the archive inside every installer. It is worth
+  several megabytes of download and costs build minutes, which is why the Apps
+  workflow gives the desktop job a 45-minute timeout.
+- **`dmg.format: ULMO`** — an LZMA disk image, typically ~30% smaller than the
+  zlib one electron-builder defaults to. It mounts a few seconds slower and
+  needs macOS 10.15, which Electron itself already requires.
+- **`electronLanguages: [en, fa]`** — Chromium ships a translation pack for
+  every language it knows; only these two are kept.
+- **Icons, recompressed losslessly.** The four PNGs in `public/` are rewritten
+  with a better zlib strategy: 42% smaller, and `compare -metric AE` reports
+  zero differing pixels. Nothing to review, because nothing changed.
+- **No dead weight.** Files nothing references (`mkt-guardian.jpg`,
+  `mkt-student.jpg`, `logo-full.png`, `logo-full-dark.png`) are deleted rather
+  than copied into every build.
+
+To see where the payload goes, and to catch a regression:
+
+```bash
+npm run build && npm run size:report            # where the megabytes are
+npm run size:report -- --check 5                # fail above a 5 MB payload
+```
+
+The remaining artwork in `public/img/` is byte-for-byte the original photography.
+WebP is the next 1.6 MB and it was tried and undone: converting those files and
+sizing them to what the layout renders brings the payload to 2.9 MB, but the
+saving is a re-encode plus a resize, which is a real loss (37–42 dB PSNR, and
+the marketing shots end up at 1.07× the page width instead of 1.23× — soft on a
+Retina screen). If a release ever needs the megabytes more than the fidelity,
+that is the trade to make; measure it with `npm run size:report` before and
+after so the cost is written down.
+
 ## Signing, and what users will see without it
 
 - **Windows:** an unsigned installer shows SmartScreen's "Windows protected your
@@ -114,6 +156,7 @@ by unit test and parse-check `main.cjs`/`preload.cjs` with `node --check`.
 | `desktop/config.json` | Written at build time from the two environment variables. |
 | `scripts/desktop-build.mjs` | `npm run desktop:dist` — build, copy, package. |
 | `scripts/desktop-prepare.mjs` | Copy `dist/` → `desktop/dist/`, write `config.json`. |
+| `scripts/report-sizes.mjs` | `npm run size:report` — weigh the payload and the finished installers. |
 
 ## Turning off sign-in entirely
 

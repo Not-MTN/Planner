@@ -18,6 +18,14 @@ files:
   - config.json
   - dist/**/*
   - package.json
+  # Source maps belong in a debug build, not in something people download.
+  - '!**/*.map'
+
+# Electron is ~90 MB of the installer and it compresses like any other archive:
+# `maximum` (LZMA at its slowest setting) is worth several megabytes per
+# installer. It costs build time, which is why the Apps workflow gives this job
+# a longer timeout than it needs today.
+compression: maximum
 
 asar: true
 # The app never spawns anything and never needs a shell.
@@ -68,6 +76,10 @@ mac:
 
 dmg:
   artifactName: Planner-macos-${arch}.${ext}
+  # LZMA-compressed image: electron-builder's docs describe ULMO as the
+  # smallest download, roughly 30% under the zlib default. It mounts a few
+  # seconds slower and needs macOS 10.15+, far below what Electron requires.
+  format: ULMO
   contents:
     - x: 130
       y: 220
