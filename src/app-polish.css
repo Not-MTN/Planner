@@ -111,7 +111,9 @@
 /* Hover states are a pointer luxury — gate them so they never stick on touch. */
 @media (hover: hover) {
   .nav-link:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); color: var(--ink); transform: none; }
-  .card:hover { transform: translateY(-2px); box-shadow: var(--shadow); border-color: color-mix(in srgb, var(--accent) 24%, var(--line)); }
+  /* Only cards that go somewhere move. A dashboard of six cards that all lift
+     under the pointer promises six clicks and delivers none. */
+  a.card:hover, button.card:hover, .card.is-interactive:hover { transform: translateY(-2px); box-shadow: var(--shadow); border-color: color-mix(in srgb, var(--accent) 24%, var(--line)); }
   .icon-btn:hover { transform: translateY(-1px); }
   .btn:hover { transform: translateY(-1px); }
   .btn:active { transform: translateY(0) scale(0.97); }
@@ -714,7 +716,8 @@
   box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 36%, transparent);
 }
 .update-toast-state--ready,
-.update-toast-state--complete { color: var(--accent-deep); }
+.update-toast-state--complete,
+.update-toast-state--applying { color: var(--accent-deep); }
 .update-toast-state--error { color: var(--danger); }
 .update-toast-state--error .update-toast-state-dot { background: var(--danger); box-shadow: 0 0 8px color-mix(in srgb, var(--danger) 36%, transparent); }
 .update-download-progress {
@@ -873,4 +876,70 @@
     box-shadow: none;
   }
   .update-download-progress { accent-color: Highlight; }
+}
+
+/* ============================================================
+   8. Whole-app consistency
+   The passes before this one fixed structure per component.
+   This one fixes the things that only show up when you move
+   between two screens: the same card padded two ways, headings
+   that start at different heights, rows that wrap differently on
+   a phone. Nothing here changes what a screen does.
+   ============================================================ */
+
+/* ---------- One rhythm: heading, then content ---------- */
+.view { gap: 18px; }
+.content { gap: 18px; }
+
+/* A section heading starts in the same place on every page, at every width:
+   kicker, title, optional lede, then a gap you can measure. */
+.page-head { align-items: flex-end; row-gap: 10px; }
+.page-head > div:first-child { min-width: 0; }
+.page-head .lede { max-width: 56ch; }
+.page-head-actions, .ai-head-actions { align-self: flex-end; }
+.page-head h1 { margin-top: 4px; }
+
+/* Card heads keep their chip and their actions on the same line for as long
+   as there is room, then wrap instead of squeezing the title to one word. */
+.card-head { gap: 10px 14px; margin-bottom: 14px; }
+.card-head > div:first-child { min-width: 0; }
+@media (max-width: 480px) {
+  .card-head { flex-wrap: wrap; }
+  .card-head > .chip, .card-head > .meta-chip { margin-inline-start: 0; }
+}
+
+/* ---------- One card, one padding ---------- */
+.card {
+  padding: clamp(17px, 2.2vw, 22px) clamp(16px, 2.4vw, 24px);
+}
+
+/* ---------- Rows that read the same ---------- */
+/* Lists of options, reminders and saved things all sit on the same row
+   height so a long page stops looking hand-drawn. */
+.fixed-list-item, .ai-memory-list li { min-height: 56px; }
+.chip-row { row-gap: 8px; }
+.chip { max-width: 100%; overflow-wrap: anywhere; }
+
+/* Form errors and small field labels were styled per component; give them one
+   voice so a validation message looks like a validation message everywhere. */
+.form-error, .field-error { color: var(--danger); font-size: 12.5px; font-weight: 600; }
+.field-label { font-size: 12px; font-weight: 650; color: var(--ink-soft); }
+
+/* The "2 up" utility grid the More sheet already asks for by name. */
+.more-list .more-grid.more-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+/* ---------- The AI tab: composer first, everything else folded ---------- */
+.ai-view { --ai-grad: linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, var(--surface)), var(--surface) 70%); }
+.ai-composer .ai-prompt-field textarea { min-height: 124px; font-size: 15px; line-height: 1.6; }
+.ai-composer .ai-range-row { background: color-mix(in srgb, var(--surface-2) 70%, transparent); }
+.ai-fold { transition: border-color 0.16s, box-shadow 0.16s; }
+.ai-fold[open] { box-shadow: var(--shadow-soft); border-color: var(--line-strong); }
+.ai-fold-body .card-head:first-child { margin-top: 14px; }
+.fixed-manager .fixed-form { padding: 13px; }
+.fixed-manager .fixed-list { margin-top: 4px; }
+
+@media (max-width: 620px) {
+  .view { gap: 14px; }
+  .ai-range-row { padding: 12px; }
+  .ai-fold-summary { min-height: 56px; }
 }
