@@ -276,6 +276,8 @@ export interface PackagedUpdateCheckOptions {
   installedAndroid?: AndroidInstalledAppInfo;
   manifest: unknown;
   storage?: Storage;
+  /** An explicit user check should be able to find a release they dismissed earlier. */
+  ignoreDismissal?: boolean;
 }
 
 /** Compare a validated release feed against the actual installed app identity. */
@@ -317,6 +319,8 @@ export function checkUpdateFromManifest(options: PackagedUpdateCheckOptions): Pa
   }
 
   const storage = options.storage ?? localStorage;
-  if (dismissedVersion(storage) === offer.version) return { status: 'dismissed', version: offer.version, offer };
+  if (!options.ignoreDismissal && dismissedVersion(storage) === offer.version) {
+    return { status: 'dismissed', version: offer.version, offer };
+  }
   return { status: 'available', version: offer.version, offer };
 }

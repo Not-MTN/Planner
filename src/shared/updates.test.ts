@@ -290,6 +290,15 @@ describe('platform update eligibility', () => {
       manifest,
       storage: storage(),
     }).status).toBe('unavailable');
+
+    expect(checkUpdateFromManifest({
+      platform: 'android',
+      installedVersion: '1.0.0',
+      installedAndroid: installedAndroid(),
+      manifest,
+      storage: storage({ 'planner-update-dismissed': '1.0.1' }),
+      ignoreDismissal: true,
+    })).toMatchObject({ status: 'available', version: '1.0.1' });
   });
 
   it('offers the Windows installer, stays quiet for current versions and persists dismissal', () => {
