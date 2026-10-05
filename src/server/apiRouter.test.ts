@@ -57,6 +57,7 @@ describe('apiRoute table', () => {
       '/api/auth/signup',
       '/api/auth/status',
       '/api/auth/vault',
+      '/api/caldav',
       '/api/ics',
       '/api/sync',
       '/api/sync/status',
@@ -116,8 +117,17 @@ describe('handleApiRequest', () => {
     const ics = await handleApiRequest(request('/api/ics', { method: 'POST' }), NO_ENV);
     expect(ics.status).toBe(405);
 
+    const caldav = await handleApiRequest(request('/api/caldav'), NO_ENV);
+    expect(caldav.status).toBe(405);
+
     const completions = await handleApiRequest(request('/api/ai/chat/completions'), NO_ENV);
     expect(completions.status).toBe(405);
+  });
+
+  it('routes the CalDAV proxy and lets it reject its own bad requests', async () => {
+    const noBody = await handleApiRequest(request('/api/caldav', { method: 'POST' }), NO_ENV);
+    expect(noBody.status).toBe(400);
+    await expect(noBody.json()).resolves.toMatchObject({ error: { message: 'Body must be JSON.' } });
   });
 
   it('reports sync as not configured without DATABASE_URL', async () => {

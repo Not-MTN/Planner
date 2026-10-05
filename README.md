@@ -106,6 +106,30 @@ How it works: the sync code never leaves your devices. The browser derives an AE
 | `/api/sync/status` | GET | `{ configured: boolean }` |
 | `/api/sync` | GET / PUT / DELETE | Read, compare-and-swap write, or delete the encrypted blob (`X-Sync-Id` header) |
 
+### Two-way calendars (CalDAV)
+
+Feeds are read-only by design. A **two-way calendar** is the other arrangement: the planner is allowed to write to it, so an event added on the Today page can appear on your phone's calendar and an event your phone adds comes back.
+
+Connect one in **Settings → Connections → Two-way calendars**: paste the calendar address (a CalDAV collection, or a server address that holds several — the app asks and lets you choose), then a username and password. The credentials are stored in this device's own storage and posted to the server only when the browser talks to `/api/caldav`, which speaks WebDAV to the calendar server on the app's behalf: the browser cannot send `PROPFIND`/`REPORT`, and calendar servers do not answer cross-origin requests.
+
+| Endpoint | Method | Purpose |
+| --- | --- | --- |
+| `/api/caldav` | POST | One action per request: `discover`, `list`, `push`, `delete` |
+
+What the sync does, and the rules it follows:
+
+- **Identity is the remote address.** A pulled event is stored with `source: { url, uid: <remote href> }`; an event this app uploads is remembered in the subscription's `hrefs` map after its first successful `PUT`. Nothing is ever matched by title or time, so a sync cannot duplicate a calendar.
+- **The newer edit wins.** Remote `LAST-MODIFIED` (or `DTSTAMP`) is compared with the local `updatedAt`; the newer side is copied over the older one. A tie means nothing happens, and an unreadable stamp is not treated as an edit.
+- **Deletions travel both ways.** Delete an event here and it is deleted remotely; delete it on the calendar and it is removed here. Deleted addresses are remembered (`dropped`) so the next sync neither re-imports nor re-creates them.
+- **Only what belongs there is uploaded.** Repeating events, generated weekly occurrences, events that came from a *different* feed or calendar, and anything outside the sync window (a month back, half a year forward) stay local. At most 30 events are uploaded per run; the next run continues.
+- **A read-only switch per calendar.** Turn *Send events I add here* off and the subscription pulls without ever writing. Reads still work; so does a remote deletion.
+- **Notes and categories stay yours.** Like feeds, the calendar owns the schedule and the title; the planner owns the note, category and importance you wrote about it. Uploaded events carry the note with them.
+- **Writes are conditional.** A `PUT`/`DELETE` carries the etag it was based on (`If-Match`, or `If-None-Match: *` for a new event), so an edit made elsewhere in between is refused with a conflict rather than overwritten — the next sync then resolves it by the newer-wins rule.
+
+The proxy refuses private, loopback, link-local and metadata addresses (names are resolved first), never follows redirects, caps the response at 4 MB and the request at 512 KB, times out after 20 s, and reports failures with a short message instead of the server's own words — a login page must never be echoed back through the app.
+
+Deleting a *feed* subscription removes the events it brought in; disconnecting a **two-way** calendar keeps the events, because they are now part of the planner's own schedule. A calendar that came from an address this app uploaded to but that you then deleted locally is deleted on the server too, not re-imported.
+
 ### When two devices change the same thing
 
 If both devices edited the *same* item since they last met, the newest edit wins — but the edit that lost is not thrown away. It is written to `planner-sync-conflicts` in the device's own storage (at most 20, newest first) and the merge says so: a badge on **Settings**, a line reading *Review 1 change from another device* on whatever screen you are on, and a **Changed on two devices** list under **Settings → Sync**. Each row compares the two versions field by field (title, due date and time, priority, category, amount, progress, note body) so you can see what actually differs instead of choosing between two identical-looking titles, then either **Keep what I have** or **Use the other version** — the stored copy is whole, so putting it back restores every field, not just the one shown. There is also **Keep what I have for all of them**.
@@ -235,6 +259,7 @@ Settings → **Language** switches the whole interface; the page reloads to appl
 - **Unit habits & rest days** — a habit can count an amount (8 glasses, 20 km) with a +1 button on Today, and any habit supports a rest day (the moon or Shift-click) that pauses the day without breaking the streak.
 - **Shared space** — a second, independently coded end-to-end encrypted sync room for whatever sits in the Shared category (groceries, household plans). Settings → Shared space: create a room, copy the code, join from other devices; deletions travel via tombstones.
 - **Calendar feeds** — subscribe to any iCalendar (.ics) URL (Google's secret address, Outlook published calendars). Events mirror read-only and refresh automatically; your own categories and notes on them survive refreshes. Settings → Calendar feeds.
+- **Two-way calendars** — connect a calendar you can write to over CalDAV (Google, iCloud, Fastmail, Nextcloud, a university server) and it stops being a one-way mirror: events you add here are uploaded, changes made elsewhere come back, and when both sides edited the same event the newer edit wins. Settings → Two-way calendars.
 - **Task import (CSV)** — import a Todoist or TickTick CSV (or any CSV with a title column); done items are skipped, dates and priorities come along. Settings → Move your tasks in.
 - **Voice quick add** — a microphone button on the quick add bar (Web Speech API) dictates straight into the parser; hidden where the browser doesn't support speech.
 - **Weather on Today** — a quiet forecast line for a place you pick once (Open-Meteo, no key, no account); never in the way, off by default. Settings → Weather on Today.

@@ -52,6 +52,7 @@ import { authStore, hashToken } from './authStore.js';
 import { handleReport, handleReportOverview } from './reportApi.js';
 import { resolveProviders } from './aiProviders.js';
 import { handleICS } from './icsProxy.js';
+import { handleCalDav } from './calDav.js';
 import { handleSync, handleSyncStatus, neonStore } from './sync.js';
 import { handleGroqChatCompletions, handleGroqStatus } from './groqProxy.js';
 import { handlePushConfig, handlePushDevice, handlePushDispatch, handlePushSubscription } from './pushApi.js';
@@ -202,6 +203,8 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
       return (request) => authStore(env.DATABASE_URL).then((store) => handleAccountVault(request, store));
     case '/api/ics':
       return (request) => handleICS(request);
+    case '/api/caldav':
+      return (request) => handleCalDav(request);
     case '/api/sync':
       return (request) => neonStore(env.DATABASE_URL).then((store) => handleSync(request, store));
     case '/api/sync/status':

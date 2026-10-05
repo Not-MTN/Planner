@@ -119,6 +119,24 @@ import {
   type Tombstones,
 } from './shared';
 import { fetchFeedEvents, loadFeeds, mergeFeedEvents, saveFeeds, type CalendarFeed } from './feeds';
+import {
+  CALENDAR_STALE_MINUTES,
+  MAX_CALENDARS,
+  applyCalendarPull,
+  applyCalendarRemovals,
+  loadCalendars,
+  markPushed,
+  planCalendarSync,
+  pullWindow,
+  recordFailure,
+  recordSync,
+  remoteDelete,
+  remoteDiscover,
+  remoteList,
+  remotePush,
+  saveCalendars,
+  type CalendarSubscription,
+} from './calendarSync';
 import { loadWeatherSettings, saveWeatherSettings, type WeatherSettings } from './weather';
 import { applyTheme, loadAccent, loadThemeMode, resolvedMode, type ThemeMode } from './theme';
 import type { Accent } from './constants';
@@ -239,10 +257,21 @@ interface PlannerContextValue {
   stopShared: () => void;
   syncSharedNow: () => void;
   feeds: CalendarFeed[];
+  /** Calendars this device is allowed to change (two-way, over CalDAV). */
+  calendars: CalendarSubscription[];
+  calendarsSyncing: boolean;
   /** Validates + imports the feed once. Returns an error message, or null on success. */
   addFeed: (url: string) => Promise<string | null>;
   removeFeed: (url: string) => void;
   refreshFeeds: (force?: boolean) => void;
+  /** Ask a CalDAV address which calendars it holds. Throws with a short message. */
+  discoverCalendars: (input: { url: string; username: string; password: string }) => Promise<{ url: string; name: string }[]>;
+  /** Validates + subscribes once. Returns an error message, or null on success. */
+  addCalendar: (input: { url: string; name?: string; username: string; password: string; push: boolean }) => Promise<string | null>;
+  removeCalendar: (url: string) => void;
+  setCalendarPush: (url: string, push: boolean) => void;
+  syncCalendars: (force?: boolean) => Promise<void>;
+  syncCalendarNow: (url: string) => Promise<void>;
   weather: WeatherSettings;
   setWeather: (settings: WeatherSettings) => void;
   importTaskList: (tasks: TaskInput[]) => void;
@@ -1112,6 +1141,127 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     commit((current) => ({ ...current, events: current.events.filter((event) => event.source?.url !== url) }));
   }, [commit, updateFeeds]);
 
+  // ── Two-way calendars (CalDAV) ─────────────────────────────────────────────
+  //
+  // A feed mirrors somebody else's calendar; this is a calendar the planner is
+  // allowed to change. The plan is drawn before anything is written (see
+  // calendarSync.ts for the rules), then the writes go out one by one, and the
+  // subscription record keeps the mapping between planner ids and remote
+  // addresses so a second run updates the same items instead of copying them.
+  const [calendars, setCalendarsState] = useState<CalendarSubscription[]>(() => loadCalendars());
+  const calendarsRef = useRef(calendars);
+  const [calendarsSyncing, setCalendarsSyncing] = useState(false);
+  const syncingRef = useRef(false);
+
+  const updateCalendars = useCallback((next: CalendarSubscription[]) => {
+    calendarsRef.current = next;
+    saveCalendars(next);
+    setCalendarsState(next);
+  }, []);
+
+  const syncCalendarNow = useCallback(async (url: string) => {
+    const subscription = calendarsRef.current.find((item) => item.url === url);
+    if (!subscription) return;
+    const credentials = { url: subscription.url, username: subscription.username, password: subscription.password };
+    const { start, end } = pullWindow();
+    try {
+      const remote = await remoteList(credentials, start, end);
+      const plan = planCalendarSync(stateRef.current, subscription, remote);
+      if (plan.pull.length > 0 || plan.removeLocal.length > 0) {
+        commit((current) => {
+          const pulled = plan.pull.reduce((next, item) => applyCalendarPull(next, subscription.url, item), current);
+          return applyCalendarRemovals(pulled, plan.removeLocal);
+        });
+      }
+      const pushed: { id: string; href: string; etag: string }[] = [];
+      const removed: { href: string }[] = [];
+      const failures: string[] = [];
+      for (const item of plan.push) {
+        try {
+          const result = await remotePush(credentials, item.data, item.href, item.etag);
+          pushed.push({ id: item.id, href: result.href, etag: result.etag });
+          commit((current) => markPushed(current, item.id, result.href, subscription.url));
+        } catch (caught) {
+          // One event the server does not want must not abandon the rest.
+          failures.push(caught instanceof Error ? caught.message : t('The calendar refused an event.'));
+        }
+      }
+      for (const item of plan.removeRemote) {
+        try {
+          await remoteDelete(credentials, item.href, item.etag);
+          removed.push({ href: item.href });
+        } catch (caught) {
+          failures.push(caught instanceof Error ? caught.message : t('The calendar refused a deletion.'));
+        }
+      }
+      const record = recordSync(subscription, plan, { pushed, removed });
+      updateCalendars(calendarsRef.current.map((item) => (item.url === url ? (failures[0] ? recordFailure(record, failures[0]) : record) : item)));
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : t('The calendar could not be synced.');
+      updateCalendars(calendarsRef.current.map((item) => (item.url === url ? recordFailure(item, message) : item)));
+    }
+  }, [commit, updateCalendars]);
+
+  const syncCalendars = useCallback(async (force = false) => {
+    if (isTestEnv() || syncingRef.current) return;
+    const due = calendarsRef.current.filter(
+      (item) => force || !item.lastSyncedAt || Date.now() - Date.parse(item.lastSyncedAt) > CALENDAR_STALE_MINUTES * 60_000,
+    );
+    if (due.length === 0) return;
+    syncingRef.current = true;
+    setCalendarsSyncing(true);
+    try {
+      for (const item of due) await syncCalendarNow(item.url);
+    } finally {
+      syncingRef.current = false;
+      setCalendarsSyncing(false);
+    }
+  }, [syncCalendarNow]);
+
+  useEffect(() => {
+    if (isTestEnv() || calendars.length === 0) return;
+    void syncCalendars(false);
+    const id = window.setInterval(() => void syncCalendars(false), 30 * 60 * 1000);
+    return () => window.clearInterval(id);
+  }, [calendars.length, syncCalendars]);
+
+  const discoverCalendars = useCallback(
+    async (input: { url: string; username: string; password: string }) => remoteDiscover(input),
+    [],
+  );
+
+  const addCalendar = useCallback(async (input: { url: string; name?: string; username: string; password: string; push: boolean }): Promise<string | null> => {
+    const url = input.url.trim();
+    if (!/^https:\/\//i.test(url)) return t('Enter the calendar address starting with https.');
+    if (calendarsRef.current.some((item) => item.url === url)) return t('That calendar is already connected.');
+    if (calendarsRef.current.length >= MAX_CALENDARS) return t('Remove a calendar before adding another one.');
+    const record: CalendarSubscription = {
+      url,
+      name: (input.name ?? '').slice(0, 120),
+      username: input.username.slice(0, 200),
+      password: input.password.slice(0, 400),
+      push: input.push,
+      addedAt: new Date().toISOString(),
+      lastSyncedAt: null,
+      lastError: null,
+      seen: [],
+      hrefs: {},
+      etags: {},
+      dropped: [],
+    };
+    updateCalendars([...calendarsRef.current, record]);
+    await syncCalendarNow(url);
+    return calendarsRef.current.find((item) => item.url === url)?.lastError ?? null;
+  }, [syncCalendarNow, updateCalendars]);
+
+  const removeCalendar = useCallback((url: string) => {
+    updateCalendars(calendarsRef.current.filter((item) => item.url !== url));
+  }, [updateCalendars]);
+
+  const setCalendarPush = useCallback((url: string, push: boolean) => {
+    updateCalendars(calendarsRef.current.map((item) => (item.url === url ? { ...item, push } : item)));
+  }, [updateCalendars]);
+
   // ── App icon badge: open items due today (and earlier) ─────────────────────
   useEffect(() => {
     if (typeof navigator === 'undefined' || !('setAppBadge' in navigator)) return;
@@ -1415,6 +1565,14 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     syncSharedNow: () => void runSharedSync(),
     feeds,
     addFeed,
+    calendars,
+    calendarsSyncing,
+    discoverCalendars,
+    addCalendar,
+    removeCalendar,
+    setCalendarPush,
+    syncCalendars,
+    syncCalendarNow,
     removeFeed,
     refreshFeeds,
     weather,
@@ -1569,7 +1727,7 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     },
     setIntention: (date, text) => commit((current) => setIntentionIn(current, date, text)),
     logMood: (date, value, taskId) => commit((current) => setMoodIn(current, date, value, taskId)),
-  }), [state, ready, error, notice, saveBlocked, route, navigate, composer, confirm, startFresh, exportData, retentionWeeks, importText, loadSample, flash, dismissNotice, praise, undo, redo, canUndo, canRedo, themeMode, accent, paletteOpen, settingsOpen, settingsTab, focus, confettiSeed, celebrate, clearCompletedTasks, commit, reminders, setReminders, weekStart, setWeekStart, display, setDisplay, sync, syncStatus, syncMessage, syncConflicts, conflictChanges, keepConflictVersion, dismissConflict, dismissAllConflicts, syncAvailable, startSync, stopSync, runSync, deleteCloudCopy, shared, sharedStatus, sharedMessage, startShared, stopShared, runSharedSync, feeds, addFeed, removeFeed, refreshFeeds, weather, setWeather, recordTombstone, updatePanels, setPanelEnabled, runRollUp]);
+  }), [state, ready, error, notice, saveBlocked, route, navigate, composer, confirm, startFresh, exportData, retentionWeeks, importText, loadSample, flash, dismissNotice, praise, undo, redo, canUndo, canRedo, themeMode, accent, paletteOpen, settingsOpen, settingsTab, focus, confettiSeed, celebrate, clearCompletedTasks, commit, reminders, setReminders, weekStart, setWeekStart, display, setDisplay, sync, syncStatus, syncMessage, syncConflicts, conflictChanges, keepConflictVersion, dismissConflict, dismissAllConflicts, syncAvailable, startSync, stopSync, runSync, deleteCloudCopy, shared, sharedStatus, sharedMessage, startShared, stopShared, runSharedSync, feeds, addFeed, removeFeed, refreshFeeds, calendars, calendarsSyncing, discoverCalendars, addCalendar, removeCalendar, setCalendarPush, syncCalendars, syncCalendarNow, weather, setWeather, recordTombstone, updatePanels, setPanelEnabled, runRollUp]);
 
   return <PlannerContext.Provider value={value}>{children}</PlannerContext.Provider>;
 }

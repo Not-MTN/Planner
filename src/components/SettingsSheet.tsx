@@ -7,6 +7,7 @@ import { Rich } from './Rich';
 import { Modal } from './ui';
 import { RecoveryCodes } from './RecoveryCodes';
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { CalendarsSection } from './CalendarSyncSection';
 import { FeedsSection, RetentionSection, SecuritySection, SharedSpaceSection, SyllabusSection, TaskImportSection, TemplatesSection, WeatherSection } from './SettingsExtras';
 import { BiometricSetting } from './BiometricSetting';
 import { isReportingEnabled, setReportingEnabled } from '../reporting';
@@ -1823,6 +1824,7 @@ export function SettingsSheet() {
           <>
             <CalendarExchangeSection />
             <FeedsSection />
+            <CalendarsSection />
             <TaskImportSection />
             <SyllabusSection />
             <WeatherSection />
