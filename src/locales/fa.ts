@@ -2209,4 +2209,11 @@ export const fa: Record<string, string> = {
   "Could not register this device for notifications.": "ثبت این دستگاه برای اعلان‌ها ممکن نشد.",
   "Background push is not configured on this server yet.": "اعلان پس‌زمینه هنوز روی این سرور تنظیم نشده است.",
   "A generic alert at the times you chose. It never shows task, event or habit text.": "یک هشدار عمومی در زمان‌هایی که انتخاب کرده‌اید. هرگز متن کار، رویداد یا عادت را نشان نمی‌دهد.",
+  "Planner will keep running when you close the window.": "Planner پس از بستن پنجره همچنان اجرا می‌شود.",
+  "Closing the window will quit Planner.": "بستن پنجره Planner را می‌بندد.",
+  "Background": "پس‌زمینه",
+  "Keep running when the window is closed": "اجرا در پس‌زمینه پس از بستن پنجره",
+  "Reading the setting from the app…": "خواندن این تنظیم از برنامه…",
+  "Reminders keep arriving after you close the window. A tray icon brings Planner back, and Quit Planner stops it for good.": "پس از بستن پنجره هم یادآورها می‌رسند. نماد سینی، Planner را برمی‌گرداند و «خروج از Planner» آن را برای همیشه می‌بندد.",
+  "Planner quits when you close the window, so reminders only arrive while it is open.": "با بستن پنجره Planner بسته می‌شود، پس یادآورها فقط تا وقتی برنامه باز است می‌رسند.",
 };

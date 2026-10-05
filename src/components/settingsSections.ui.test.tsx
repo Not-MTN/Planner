@@ -20,6 +20,7 @@ import { addTask, toggleTask } from '../mutate';
 import { createEmptyState } from '../types';
 import { RETENTION_KEY } from '../retention';
 import { loadWeekStart, setWeekStart } from '../dates';
+import { desktopPreferences, setDesktopBackground } from '../desktop';
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
@@ -236,5 +237,65 @@ describe('the retention window', () => {
     expect(window.localStorage.getItem(RETENTION_KEY)).toBe('4');
     clickByText('Keep everything');
     expect(window.localStorage.getItem(RETENTION_KEY)).toBe('0');
+  });
+});
+
+/**
+ * The desktop app's background mode (docs/DESKTOP.md §9) is a settings-screen
+ * promise like the others: the switch reads its value from the app, writes
+ * changes back, and says what the choice means. Outside the desktop app the
+ * whole section is absent rather than disabled — the setting does not exist
+ * anywhere else.
+ */
+describe('the desktop background setting', () => {
+  interface DesktopWindow extends Window {
+    plannerDesktop?: unknown;
+    Capacitor?: { isNativePlatform?: () => boolean; getPlatform?: () => string };
+  }
+
+  function desktopBridge(background: boolean) {
+    const calls: boolean[] = [];
+    const bridge = {
+      getPreferences: async () => ({ background, backgroundExplained: false }),
+      setPreferences: async (patch: { background: boolean }) => {
+        calls.push(patch.background);
+        return { background: patch.background, backgroundExplained: false };
+      },
+      onPreferences: () => () => undefined,
+      setReminders: async () => ({ scheduled: 0 }),
+    };
+    return { bridge, calls };
+  }
+
+  it('appears only in the desktop app, and off means the window quits', async () => {
+    const { bridge, calls } = desktopBridge(false);
+    (window as DesktopWindow).plannerDesktop = bridge;
+    (window as DesktopWindow).Capacitor = { isNativePlatform: () => true, getPlatform: () => 'desktop' };
+
+    act(() => root?.unmount());
+    container?.remove();
+    root = null;
+    mountApp();
+
+    await waitForText('Today');
+    click('.side-tool[data-tour="settings"]');
+    await waitForText('App');
+    click('#set-tab-app');
+    await waitForText('Background');
+    await waitForText('Planner quits when you close the window');
+
+    // Turning it on stores the choice in the main process, not in localStorage.
+    expect(window.localStorage.getItem(STORAGE_KEY) ?? '').not.toContain('background');
+    clickByText('On');
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    });
+    expect(calls).toEqual([true]);
+    expect(await desktopPreferences()).toEqual({ background: false, backgroundExplained: false });
+    expect(text()).toContain('Reminders keep arriving after you close the window');
+
+    delete (window as DesktopWindow).plannerDesktop;
+    delete (window as DesktopWindow).Capacitor;
+    expect(await setDesktopBackground(true)).toBeNull();
   });
 });

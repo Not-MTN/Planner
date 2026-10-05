@@ -104,7 +104,9 @@ import type { Accent } from './constants';
 import { createEmptyState, type AIDeclinedKind, type AIMemoryInput, type AttachmentRef, type ComposerState, type EventInput, type FixedCommitmentInput, type GoalInput, type HabitInput, type MoodValue, type NoteInput, type Panels, type PlannerState, type SavedAIPlanInput, type StudentSubject, type TaskInput } from './types';
 import { t, tn } from './i18n';
 import { isNativeMobileShell } from './shared/nativeShell';
+import { isDesktopShell } from './desktop';
 import { listenForNativeNotificationTaps, syncNativeReminders } from './nativeReminders';
+import { syncDesktopReminders } from './desktop';
 import { saveStudentSubject as saveStudentSubjectIn } from './panelFeatures';
 import { isTestEnv } from './env';
 import { attachmentNotice, MAX_ATTACHMENTS_PER_NOTE, storeAttachment, sweepAttachmentBlobs } from './files';
@@ -1192,6 +1194,24 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
       if (appListener) void appListener.remove();
     };
   }, [navigate]);
+
+  /**
+   * The desktop app's own hand-off (docs/DESKTOP.md §9). The main process is
+   * what outlives the window, so it gets the reminders the page has worked out
+   * and fires them with nothing on screen. The same debounce as the phone
+   * shells: a burst of edits should settle before the schedule is rebuilt.
+   */
+  const desktopReminderTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (isTestEnv() || !isDesktopShell()) return;
+    if (desktopReminderTimer.current !== null) window.clearTimeout(desktopReminderTimer.current);
+    desktopReminderTimer.current = window.setTimeout(() => {
+      void syncDesktopReminders(state, reminders);
+    }, 300);
+    return () => {
+      if (desktopReminderTimer.current !== null) window.clearTimeout(desktopReminderTimer.current);
+    };
+  }, [state, reminders]);
 
   const pushScheduleTimer = useRef<number | null>(null);
   useEffect(() => {

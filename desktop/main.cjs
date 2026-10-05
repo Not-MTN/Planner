@@ -20,7 +20,7 @@
  */
 'use strict';
 
-const { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, net, protocol, session, shell } = require('electron');
+const { app, BrowserWindow, Menu, Notification, Tray, dialog, ipcMain, nativeImage, nativeTheme, net, protocol, session, shell } = require('electron');
 const { createHash } = require('node:crypto');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
@@ -29,12 +29,18 @@ const { Readable, Transform } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 const { pathToFileURL } = require('node:url');
 const {
+  DEFAULT_PREFERENCES,
+  PREFERENCES_FILE,
   contentType,
   contentSecurityPolicy,
+  dueReminders,
   isHttpUrl,
   isInternal: isInternalUrl,
   isTrustedUpdateUrl,
+  msUntilNext,
   normalizeAddress,
+  normalizePreferences,
+  normalizeReminderSchedule,
   resolveRequestedFile,
   validateWindowsOffer,
   windowsOfferFromManifest,
@@ -268,6 +274,154 @@ function saveWindowState(win) {
   }
 }
 
+// ── Staying in the background, and reminders (docs/DESKTOP.md §9) ──────────
+
+/**
+ * Closing the window hides Planner instead of quitting it, so reminders keep
+ * arriving; the tray icon brings it back and quitting is always a menu item
+ * away. This lives in the app's own preferences file, not in the planner
+ * vault: it describes this installation, not the planner.
+ */
+function preferencesFile() {
+  return path.join(app.getPath('userData'), PREFERENCES_FILE);
+}
+
+let preferences = { ...DEFAULT_PREFERENCES };
+let quitting = false;
+let tray = null;
+/** The page's reminder schedule, newest sync wins. */
+let reminderSchedule = [];
+let reminderTimer = null;
+
+function loadPreferences() {
+  try {
+    preferences = normalizePreferences(JSON.parse(fs.readFileSync(preferencesFile(), 'utf8')));
+  } catch {
+    preferences = { ...DEFAULT_PREFERENCES };
+  }
+  return preferences;
+}
+
+function savePreferences(next) {
+  preferences = normalizePreferences(next);
+  try {
+    fs.mkdirSync(path.dirname(preferencesFile()), { recursive: true });
+    fs.writeFileSync(preferencesFile(), JSON.stringify(preferences));
+  } catch {
+    /* a preference that cannot be written still holds for this session */
+  }
+  broadcastPreferences();
+  return preferences;
+}
+
+function broadcastPreferences() {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send('planner:preferences-changed', preferences);
+  }
+}
+
+function showWindow() {
+  const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow();
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+  return win;
+}
+
+function trayImage() {
+  const file = path.join(__dirname, 'build', process.platform === 'win32' ? 'icon.ico' : 'icon.png');
+  const image = nativeImage.createFromPath(file);
+  if (image.isEmpty()) return nativeImage.createEmpty();
+  return process.platform === 'darwin' ? image.resize({ width: 18, height: 18 }) : image.resize({ width: 16, height: 16 });
+}
+
+function buildTray() {
+  if (tray) return;
+  try {
+    tray = new Tray(trayImage());
+  } catch {
+    // A headless session (CI, a container) has no tray to show; background
+    // mode still works, there is just no icon to click.
+    return;
+  }
+  const refresh = () => {
+    if (!tray) return;
+    tray.setToolTip(preferences.background ? 'Planner — reminders on' : 'Planner');
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { label: 'Open Planner', click: () => showWindow() },
+      { type: 'separator' },
+      {
+        label: 'Keep running when the window closes',
+        type: 'checkbox',
+        checked: preferences.background,
+        click: (item) => { savePreferences({ ...preferences, background: item.checked }); refresh(); },
+      },
+      { type: 'separator' },
+      { label: 'Quit Planner', click: () => { quitting = true; app.quit(); } },
+    ]));
+  };
+  refresh();
+  tray.on('click', () => showWindow());
+}
+
+function destroyTray() {
+  if (!tray) return;
+  tray.destroy();
+  tray = null;
+}
+
+/**
+ * Fire everything that is due, then wait for the next one.
+ *
+ * Timers do not survive a sleeping machine, so the guard below is a real one:
+ * whatever happens, each fire recomputes the wait from the schedule's own
+ * timestamps rather than trusting an interval to have kept time.
+ */
+function scheduleReminders() {
+  if (reminderTimer) {
+    clearTimeout(reminderTimer);
+    reminderTimer = null;
+  }
+  const now = Date.now();
+  for (const reminder of dueReminders(reminderSchedule, now)) {
+    notify(reminder);
+    reminderSchedule = reminderSchedule.filter((entry) => entry.key !== reminder.key);
+  }
+  const wait = msUntilNext(reminderSchedule, Date.now());
+  if (wait === null) return;
+  // setTimeout overflows past ~24.8 days; `msUntilNext` never returns more than
+  // the horizon, but clamp anyway so a bad schedule cannot fire immediately.
+  reminderTimer = setTimeout(scheduleReminders, Math.min(Math.max(wait, 250), 12 * 60 * 60 * 1000));
+}
+
+function notify(reminder) {
+  if (!Notification.isSupported()) return;
+  try {
+    const notification = new Notification({ title: reminder.title, body: reminder.body, silent: false });
+    notification.on('click', () => showWindow());
+    notification.show();
+  } catch {
+    /* a failed notification must never take the app down */
+  }
+}
+
+/** The one-time explanation that a close button did not quit the app. */
+function explainBackground() {
+  if (preferences.backgroundExplained) return;
+  savePreferences({ ...preferences, backgroundExplained: true });
+  if (!Notification.isSupported()) return;
+  try {
+    const notification = new Notification({
+      title: 'Planner is still running',
+      body: 'Reminders keep arriving while the window is closed. Quit from the tray icon, or turn this off in Settings → App.',
+    });
+    notification.on('click', () => showWindow());
+    notification.show();
+  } catch {
+    /* the setting is already saved; the notice is a courtesy */
+  }
+}
+
 // ── The bundled app, served the way a web server would ─────────────────────
 
 /**
@@ -341,7 +495,16 @@ function createWindow() {
   mainWindow = win;
 
   win.once('ready-to-show', () => win.show());
-  win.on('close', () => saveWindowState(win));
+  win.on('close', (event) => {
+    saveWindowState(win);
+    // The close button means "hide" while background mode is on: the process
+    // has to outlive the window for reminders to keep arriving. Quit is always
+    // available — the tray menu, and File → Quit when the window is open.
+    if (quitting || !preferences.background) return;
+    event.preventDefault();
+    win.hide();
+    explainBackground();
+  });
   win.on('closed', () => {
     mainWindow = null;
   });
@@ -390,7 +553,12 @@ function buildMenu() {
     ...(isMac ? [{ role: 'appMenu' }] : []),
     {
       label: 'File',
-      submenu: [isMac ? { role: 'close' } : { role: 'quit' }],
+      submenu: [
+        // "Close" hides the window when background mode is on, so quitting has
+        // its own labelled item rather than relying on the close button.
+        { label: 'Close window', accelerator: 'CmdOrCtrl+W', click: () => mainWindow?.close() },
+        ...(isMac ? [] : [{ label: 'Quit Planner', accelerator: 'CmdOrCtrl+Q', click: () => { quitting = true; app.quit(); } }]),
+      ],
     },
     { role: 'editMenu' },
     {
@@ -469,12 +637,27 @@ if (!gotLock) {
       if (typeof url === 'string' && isHttpUrl(url)) void shell.openExternal(url);
       return true;
     });
+    ipcMain.handle('planner:preferences-get', () => preferences);
+    ipcMain.handle('planner:preferences-set', (_event, patch) => {
+      const next = patch && typeof patch === 'object' ? { ...preferences, ...patch } : preferences;
+      const saved = savePreferences(next);
+      if (saved.background) buildTray();
+      else destroyTray();
+      return saved;
+    });
+    ipcMain.handle('planner:reminders-set', (_event, schedule) => {
+      reminderSchedule = normalizeReminderSchedule(schedule);
+      scheduleReminders();
+      return { scheduled: reminderSchedule.length };
+    });
     ipcMain.handle('planner:update-manifest', async (event) => {
       assertUpdateSender(event);
       return fetchWindowsUpdateManifest();
     });
     ipcMain.handle('planner:update-download', (event, offer) => downloadWindowsInstaller(event, offer));
     ipcMain.handle('planner:update-install', (event, offer) => installWindowsUpdate(event, offer));
+    loadPreferences();
+    if (preferences.background) buildTray();
     createWindow();
 
     app.on('activate', () => {
@@ -482,7 +665,20 @@ if (!gotLock) {
     });
   });
 
+  app.on('before-quit', () => {
+    quitting = true;
+  });
+
   app.on('window-all-closed', () => {
+    // With background mode on the window may close while the process stays;
+    // the tray icon is the way back in. Otherwise this is an ordinary quit.
+    if (preferences.background && !quitting) return;
     if (process.platform !== 'darwin') app.quit();
+  });
+
+  app.on('will-quit', () => {
+    if (reminderTimer) clearTimeout(reminderTimer);
+    reminderTimer = null;
+    destroyTray();
   });
 }

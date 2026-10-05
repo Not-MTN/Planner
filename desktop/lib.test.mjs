@@ -12,14 +12,21 @@ import { describe, expect, it } from 'vitest';
 // ESM, so they pull it in through createRequire rather than a bundler shim.
 const require = createRequire(import.meta.url);
 const {
+  DEFAULT_PREFERENCES,
+  MAX_REMINDERS,
   WINDOWS_UPDATE_MANIFEST_URL,
   contentType,
   contentSecurityPolicy,
   isHttpUrl,
   isInternal,
   isTrustedUpdateUrl,
+  dueReminders,
+  msUntilNext,
   normalizeAddress,
+  normalizePreferences,
+  normalizeReminderSchedule,
   originOf,
+  reminderInHorizon,
   resolveRequestedFile,
   validateWindowsOffer,
   windowsOfferFromManifest,
@@ -179,9 +186,11 @@ describe('electron-builder packaging', () => {
 
   const packaged = (() => {
     const yml = read('electron-builder.yml');
-    const filesBlock = yml.match(/^files:\n((?:[ \t]+-[^\n]*\n)+)/m);
+    const filesBlock = yml.match(/^files:\n((?:[ \t]+-[^\n]*\n|[ \t]*#[^\n]*\n|[ \t]*\n)+)/m);
     if (!filesBlock) return [];
-    return [...filesBlock[1].matchAll(/-\s*([^\s#]+)/g)].map((m) => m[1]);
+    // Entries only — blank lines and comments are part of the list's shape but
+    // not part of what it packs, and this test is about what gets installed.
+    return [...filesBlock[1].matchAll(/^[ \t]+-[ \t]*(.*)$/gm)].map((m) => m[1].trim()).filter(Boolean);
   })();
 
   const localRequires = (name) =>
@@ -198,5 +207,83 @@ describe('electron-builder packaging', () => {
         expect(packaged, `${entry} requires ./${required}, which electron-builder.yml does not package`).toContain(required);
       }
     }
+  });
+
+  it('packages the tray icon the background mode needs', () => {
+    // Same failure shape as the lib.cjs bug above, one release later: an icon
+    // that exists in the repository but not in the installer leaves a hidden
+    // window with no tray to bring it back.
+    for (const icon of ['build/icon.ico', 'build/icon.png']) {
+      expect(packaged, `background mode reads ${icon}`).toContain(icon);
+    }
+  });
+});
+
+// ── Background mode and the reminder hand-off ──────────────────────────────
+//
+// The main process owns both; these are the rules it applies to what the page
+// sends over IPC and to what it reads back from disk.
+describe('desktop preferences', () => {
+  it('defaults to staying in the background, and keeps only booleans', () => {
+    expect(DEFAULT_PREFERENCES.background).toBe(true);
+    expect(normalizePreferences(undefined)).toEqual({ background: true, backgroundExplained: false });
+    expect(normalizePreferences({ background: false })).toEqual({ background: false, backgroundExplained: false });
+    expect(normalizePreferences({ backgroundExplained: true })).toEqual({ background: true, backgroundExplained: true });
+    // A corrupted file must not turn into a truthy value, and the two fields
+    // fall back independently — one bad key does not reset the other.
+    expect(normalizePreferences({ background: 'yes', backgroundExplained: true })).toEqual({ background: true, backgroundExplained: true });
+    expect(normalizePreferences({ background: false, backgroundExplained: 7 })).toEqual({ background: false, backgroundExplained: false });
+    expect(normalizePreferences([])).toEqual({ background: true, backgroundExplained: false });
+  });
+});
+
+describe('the reminder schedule the main process accepts', () => {
+  const at = (minutes) => new Date(Date.now() + minutes * 60_000).toISOString();
+  const reminder = (overrides = {}) => ({ key: '2026-10-05|task|abc|09:00', title: 'Practice', body: 'Starts at 09:00', at: at(30), ...overrides });
+
+  it('takes a plain reminder and ignores anything it did not write', () => {
+    const one = reminder();
+    expect(normalizeReminderSchedule([one])).toEqual([{ key: '2026-10-05|task|abc|09:00', title: 'Practice', body: 'Starts at 09:00', at: Date.parse(one.at) }]);
+    expect(normalizeReminderSchedule('nope')).toEqual([]);
+    expect(normalizeReminderSchedule([null, 42, {}, { ...reminder(), key: '' }])).toEqual([]);
+    // A key with characters outside the reminder-key alphabet is refused, so
+    // the bridge cannot be used as a general-purpose notification pipe.
+    expect(normalizeReminderSchedule([reminder({ key: 'hello world!' })])).toEqual([]);
+    expect(normalizeReminderSchedule([reminder({ title: '   ' })])).toEqual([]);
+    expect(normalizeReminderSchedule([reminder({ at: 'not a date' })])).toEqual([]);
+  });
+
+  it('trims long text and deduplicates by key', () => {
+    const long = normalizeReminderSchedule([reminder({ title: 'T'.repeat(400), body: 'B'.repeat(400) })]);
+    expect(long[0].title).toHaveLength(120);
+    expect(long[0].body).toHaveLength(240);
+    const duplicated = normalizeReminderSchedule([reminder({ title: 'first' }), reminder({ title: 'second' })]);
+    expect(duplicated).toHaveLength(1);
+    expect(duplicated[0].title).toBe('first');
+  });
+
+  it('sorts by time and caps the list', () => {
+    const many = Array.from({ length: MAX_REMINDERS + 10 }, (_, index) => reminder({ key: `k-${index}`, at: at(index + 1) }));
+    const sorted = normalizeReminderSchedule(many);
+    expect(sorted).toHaveLength(MAX_REMINDERS);
+    expect(sorted[0].at).toBeLessThan(sorted[1].at);
+  });
+
+  it('knows what is due, what is next, and what is too far away to matter', () => {
+    const now = Date.now();
+    const schedule = normalizeReminderSchedule([
+      reminder({ key: 'past', at: new Date(now - 60_000).toISOString() }),
+      reminder({ key: 'soon', at: new Date(now + 60_000).toISOString() }),
+      reminder({ key: 'later', at: new Date(now + 3 * 60 * 60_000).toISOString() }),
+    ]);
+    expect(dueReminders(schedule, now).map((item) => item.key)).toEqual(['past']);
+    expect(msUntilNext(schedule, now)).toBeGreaterThan(50_000);
+    expect(msUntilNext(schedule, now)).toBeLessThanOrEqual(60_000);
+    expect(msUntilNext([], now)).toBeNull();
+    expect(reminderInHorizon(schedule[1], now)).toBe(true);
+    // A reminder left over from three days ago is stale, not overdue, and one
+    // forty days out is past anything the schedule should have carried.
+    expect(reminderInHorizon({ at: now - 3 * 24 * 60 * 60_000 }, now)).toBe(false);
+    expect(reminderInHorizon({ at: now + 41 * 24 * 60 * 60_000 }, now)).toBe(false);
   });
 });

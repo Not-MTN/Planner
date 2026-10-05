@@ -33,6 +33,7 @@ import {
 import { DATE_LANGUAGES, formatStamp, todayISO, type DateLanguage } from '../dates';
 import { downloadBusyICS, downloadICS, parseICS } from '../ics';
 import { canInstall, isInstalled, onInstallChange, promptInstall } from '../pwa';
+import { desktopPreferences, isDesktopShell, onDesktopPreferences, setDesktopBackground } from '../desktop';
 import { requestTour } from '../tour';
 import { requestAbout } from '../about';
 import { LEAD_CHOICES } from '../reminders';
@@ -429,6 +430,55 @@ function PrivacySection() {
         <button type="button" className={cx('btn', reports ? 'btn-soft' : 'btn-primary')} onClick={toggle}>
           {reports ? t("Turn off") : t("Turn on")}
         </button>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * The desktop app's background mode (docs/DESKTOP.md §9).
+ *
+ * Closing a window usually means quitting; in Planner on the desktop it means
+ * "keep my reminders coming", and this is where that is made explicit. The
+ * value lives in the main process — the tray menu edits the same one — so the
+ * switch reads it back from there and follows changes it did not make.
+ */
+function DesktopBackgroundSection() {
+  const { flash } = usePlanner();
+  const [background, setBackground] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void desktopPreferences().then((current) => { if (live && current) setBackground(current.background); });
+    const stop = onDesktopPreferences((current) => { if (live) setBackground(current.background); });
+    return () => { live = false; stop(); };
+  }, []);
+
+  const choose = async (on: boolean) => {
+    setBackground(on);
+    const saved = await setDesktopBackground(on);
+    if (saved) setBackground(saved.background);
+    flash(on ? t("Planner will keep running when you close the window.") : t("Closing the window will quit Planner."));
+  };
+
+  return (
+    <section className="set-section">
+      <h3 className="kicker">{t("Background")}</h3>
+      <div className="set-row">
+        <div>
+          <p className="set-label">{t("Keep running when the window is closed")}</p>
+          <p className="set-hint">
+            {background === null
+              ? t("Reading the setting from the app…")
+              : background
+                ? t("Reminders keep arriving after you close the window. A tray icon brings Planner back, and Quit Planner stops it for good.")
+                : t("Planner quits when you close the window, so reminders only arrive while it is open.")}
+          </p>
+        </div>
+        <div className="segmented" role="radiogroup" aria-label={t("Keep running when the window is closed")}>
+          <button type="button" role="radio" aria-checked={background === false} className={cx('seg', background === false && 'on')} onClick={() => void choose(false)}>{t("Off")}</button>
+          <button type="button" role="radio" aria-checked={background === true} className={cx('seg', background === true && 'on')} onClick={() => void choose(true)}>{t("On")}</button>
+        </div>
       </div>
     </section>
   );
@@ -1733,6 +1783,7 @@ export function SettingsSheet() {
 
         {tab === 'app' ? (
           <>
+            {isDesktopShell() ? <DesktopBackgroundSection /> : null}
             <InstallSection />
             <UpdateSection />
             <PrivacySection />

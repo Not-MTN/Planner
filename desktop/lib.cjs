@@ -194,6 +194,94 @@ function isTrustedUpdateUrl(value) {
   }
 }
 
+// ── Background mode and reminders (docs/DESKTOP.md §9) ─────────────────────
+//
+// Two things the desktop shell keeps for the page, both of them plain data so
+// they can be tested without Electron:
+//
+//   * a preference set — currently whether closing the window keeps Planner
+//     running. Written to the app's own user-data folder, never to the planner
+//     vault, because it describes this installation rather than the planner.
+//   * a reminder schedule — the notifications the page has already worked out,
+//     handed over so the main process can fire them while no window is open.
+
+const PREFERENCES_FILE = 'desktop-preferences.json';
+/** Reminders are only ever the next month of ordinary scheduling. */
+const MAX_REMINDERS = 60;
+const REMINDER_HORIZON_MS = 40 * 24 * 60 * 60 * 1000;
+const REMINDER_KEY_RE = /^[A-Za-z0-9|:_-]{1,180}$/;
+
+const DEFAULT_PREFERENCES = {
+  /**
+   * Closing the window hides Planner instead of quitting it.
+   *
+   * On by default: the whole point of the desktop build is that reminders keep
+   * arriving, and a close button that silently stops them is a worse surprise
+   * than a tray icon. It is a setting, it is explained the first time, and the
+   * tray menu always has "Quit Planner".
+   */
+  background: true,
+  /** Whether the "still running" notice has been shown once. */
+  backgroundExplained: false,
+};
+
+/** Anything unreadable or malformed falls back to the defaults, field by field. */
+function normalizePreferences(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return {
+    background: typeof source.background === 'boolean' ? source.background : DEFAULT_PREFERENCES.background,
+    backgroundExplained: typeof source.backgroundExplained === 'boolean' ? source.backgroundExplained : DEFAULT_PREFERENCES.backgroundExplained,
+  };
+}
+
+/**
+ * One reminder, as the page computed it. Titles and bodies are planner text —
+ * task, event and habit names — and they stay on this device: the schedule
+ * travels from the renderer to the main process through IPC, never over a
+ * network. The lengths below are what keeps a compromised page from using the
+ * bridge as a way to post arbitrary text to the operating system.
+ */
+function normalizeReminder(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const key = typeof value.key === 'string' ? value.key.trim() : '';
+  const title = typeof value.title === 'string' ? value.title.trim().slice(0, 120) : '';
+  const body = typeof value.body === 'string' ? value.body.trim().slice(0, 240) : '';
+  if (!REMINDER_KEY_RE.test(key) || !title) return null;
+  const at = Date.parse(typeof value.at === 'string' ? value.at : '');
+  if (!Number.isFinite(at)) return null;
+  return { key, title, body, at };
+}
+
+/** A whole schedule: deduplicated by key, sorted, and capped. */
+function normalizeReminderSchedule(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const entry of value) {
+    const reminder = normalizeReminder(entry);
+    if (!reminder || seen.has(reminder.key)) continue;
+    seen.add(reminder.key);
+    out.push(reminder);
+  }
+  return out.sort((a, b) => a.at - b.at).slice(0, MAX_REMINDERS);
+}
+
+/** Reminders that are due now, oldest first. */
+function dueReminders(schedule, now = Date.now()) {
+  return schedule.filter((reminder) => reminder.at <= now).sort((a, b) => a.at - b.at);
+}
+
+/** How long to wait for the next reminder, or null when there is none. */
+function msUntilNext(schedule, now = Date.now()) {
+  const next = schedule.reduce((soonest, reminder) => (reminder.at > now && reminder.at < soonest ? reminder.at : soonest), Infinity);
+  return Number.isFinite(next) ? next - now : null;
+}
+
+/** True when a reminder is still worth firing — the horizon guard. */
+function reminderInHorizon(reminder, now = Date.now()) {
+  return reminder.at > now - 60_000 && reminder.at < now + REMINDER_HORIZON_MS;
+}
+
 module.exports = {
   WINDOWS_UPDATE_MANIFEST_URL,
   contentType,
@@ -201,8 +289,17 @@ module.exports = {
   isHttpUrl,
   isInternal,
   isTrustedUpdateUrl,
+  DEFAULT_PREFERENCES,
+  MAX_REMINDERS,
+  PREFERENCES_FILE,
+  dueReminders,
+  msUntilNext,
   normalizeAddress,
+  normalizePreferences,
+  normalizeReminder,
+  normalizeReminderSchedule,
   originOf,
+  reminderInHorizon,
   resolveRequestedFile,
   stableReleaseVersion,
   validateWindowsOffer,
