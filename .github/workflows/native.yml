@@ -1,0 +1,92 @@
+name: Native builds
+
+# Compile the Android and iOS projects whenever something native changes.
+#
+# The Apps workflow already builds both, but only for a version tag or a manual
+# run — by which point a broken manifest, entitlement or Xcode build setting has
+# already been merged. These two jobs are the cheap version of that: no
+# keystore, no store upload, no release, just "does the native project still
+# compile". They run on pull requests that touch native files and can be started
+# by hand from the Actions tab, and they keep the path filter tight so a change
+# to a React component does not spend a macOS runner.
+#
+# Neither job produces anything publishable, and neither one needs a secret.
+
+on:
+  pull_request:
+    paths:
+      - 'android/**'
+      - 'ios/**'
+      - 'capacitor.config.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'scripts/native-sync.mjs'
+      - '.github/workflows/native.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # A build-time address is not needed to compile, but the scripts and Gradle
+  # both read these, and a fixed non-empty value keeps the run identical run to
+  # run. Nothing here is deployed anywhere: these jobs never publish.
+  PLANNER_LINK_HOST: planner.invalid
+
+jobs:
+  android:
+    name: Android compiles
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Build the web app into the Android project
+        run: npm run native:sync -- android
+      - name: Assemble a debug APK
+        # The debug variant needs no keystore and signs with the SDK's debug key,
+        # which is enough to know the manifest, the Gradle files and every Java
+        # source still compile — the App Links filter in the manifest included.
+        run: ./gradlew --no-daemon assembleDirectDebug
+        working-directory: android
+
+  ios:
+    name: iOS compiles
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Build the web app into the iOS project
+        run: npm run native:sync -- ios
+      - name: Build for the simulator
+        # No signing, no archive, no device: this is about Swift and Objective-C
+        # sources, the entitlements file and the Xcode project compiling. A
+        # simulator build is the fastest way to ask that question, and it is the
+        # same project the archive in the Apps workflow is made from.
+        run: |
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$PWD/build" \
+            PLANNER_LINK_HOST="${PLANNER_LINK_HOST}" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
