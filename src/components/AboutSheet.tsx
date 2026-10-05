@@ -41,7 +41,7 @@ export function AboutSheet({ onClose }: { onClose: () => void }) {
             <span className="about-icon accent-sky"><GlobeIcon size={17} /></span>
             <div>
               <strong>{t("Works everywhere")}</strong>
-              <p>{t("Installs on iOS, Android, tablets and desktops, works fully offline, and speaks English and فارسی.")}</p>
+              <p>{t("Installs on iOS, Android, tablets and desktops, works fully offline, and speaks English, فارسی and suomi.")}</p>
             </div>
           </div>
           <div className="about-card">

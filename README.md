@@ -162,19 +162,21 @@ Panels are optional additions to the personal planner. Open **Today → See the 
 
 Both workspaces support mobile layouts, light/dark themes, keyboard controls, and Persian/RTL. Existing backups need no new schema or migration. Automated coverage includes helper and UI tests (`src/panelFeatures*.test.*`), slow-sync regression tests, and desktop/mobile browser checks (`e2e/panels.spec.ts`).
 
-## Languages (English / فارسی)
+## Languages (English / suomi / فارسی)
 
-Settings → **Language** switches the whole interface to Persian with a right-to-left layout (Vazirmatn font, mirrored arrows, logical CSS). Choosing فارسی also sets Persian day/month names and a Saturday week start; the page reloads to apply. The AI coach replies in Persian while it is selected.
+Settings → **Language** switches the whole interface; the page reloads to apply, and the choice is remembered on that device.
 
+- **Persian** renders right-to-left (Vazirmatn font, mirrored arrows, logical CSS), sets Persian day/month names and a Saturday week start, and replies in Persian from the AI coach.
+- **Finnish** is complete: every string the app can show has a translation, including the marketing pages, the notification and reminder copy, and the settings sheets. Voice input follows it (`fi-FI`), and the terms are kept consistent — *tehtävä*, *tapa*, *tavoite*, *huone*… the same word every time the same concept appears.
 - Strings are wrapped in `t('English text')` (`src/i18n.ts`); English is the key and the fallback.
-- Persian lives in `src/locales/fa.ts`. `src/i18n.test.ts` fails if any `t(...)` string lacks a translation or a placeholder like `{0}` goes missing.
+- Dictionaries live in `src/locales/fa.ts` and `src/locales/fi.ts`. `COMPLETE_LANGS` in `src/i18n.ts` lists the languages expected to cover everything, and `src/i18n.test.ts` fails if a `t(...)` string is missing from one of them or a placeholder like `{0}` goes missing from a translation. Adding a language means adding it to `LANGUAGES` first and to `COMPLETE_LANGS` only when it is finished — a partial language falls back to English rather than rendering blank.
 - Dates stay on the Gregorian calendar with Latin digits so times and ISO dates line up everywhere.
 
 ## What's inside
 
 **Nine simple places** — Today, Calendar (Week · Month · Upcoming), AI Coach, Plans, Tasks, Habits, Goals, Notes, Insights.
 
-- **A calm first-run tour** — the very first visit opens a language choice (English / فارسی), then a short showcase walks the actual pages — one stop each for Today, AI coach, Plans, Tasks, Habits, Goals, Notes, Insights, Calendar, ⌘K search, and Settings — teaching the single most useful thing on every tab instead of every button. The app is paused while it teaches, so nothing can be mispressed; Escape skips it, and it never appears again on its own. Replay from the **?** button, the More sheet, or Settings → New here. The **Why Planner?** sheet (same places) answers what makes this app worth choosing.
+- **A calm first-run tour** — the very first visit opens a language choice (English / suomi / فارسی), then a short showcase walks the actual pages — one stop each for Today, AI coach, Plans, Tasks, Habits, Goals, Notes, Insights, Calendar, ⌘K search, and Settings — teaching the single most useful thing on every tab instead of every button. The app is paused while it teaches, so nothing can be mispressed; Escape skips it, and it never appears again on its own. Replay from the **?** button, the More sheet, or Settings → New here. The **Why Planner?** sheet (same places) answers what makes this app worth choosing.
 - **Voice everywhere it counts** — dictate into the AI coach prompt (tap the mic and just describe your day, in English or فارسی) and into quick add. Uses the browser's built-in speech service, so nothing is recorded anywhere else.
 - **Accents welcome** — pick the English accent that sounds most like you (Settings → Voice: US, UK, India, Australia, Nigeria, South Africa, or Persian). The recognizer listens in that accent, keeps the engine's most confident reading of what you said, and the AI is tuned to hear misheard words, homophones, and mixed English–Persian speech without ever asking you to repeat yourself.
 - **Talk to your planner** — on the AI Coach screen, tap the big mic orb and just *say* it: “I'm wiped, make tonight easy” or «فردا روز سنگینیه.» Say how long to plan — “plan my next two weeks”, «ده روز آینده» — and it plans exactly that stretch. The AI understands tired, casual, accented, mixed English–Persian speech, answers out loud (when the browser has a voice for it), and builds the plan from the conversation for your review — no typing, no formal phrasing needed, one tap to mute.

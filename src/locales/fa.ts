@@ -493,7 +493,7 @@ export const fa: Record<string, string> = {
   "Install": "نصب",
   "Install Planner": "نصب برنامه‌ریز",
   "Installed": "نصب شد",
-  "Installs on iOS, Android, tablets and desktops, works fully offline, and speaks English and فارسی.": "روی iOS، اندروید، تبلت و دسکتاپ نصب می‌شود، کامل آفلاین کار می‌کند و انگلیسی و فارسی حرف می‌زند.",
+  "Installs on iOS, Android, tablets and desktops, works fully offline, and speaks English, فارسی and suomi.": "روی iOS، اندروید، تبلت و رایانه نصب می‌شود، کاملاً آفلاین کار می‌کند و به انگلیسی، فارسی و فنلاندی صحبت می‌کند.",
   "Intention": "نیت",
   "Interface language. The page reloads to apply it.": "زبان رابط کاربری. صفحه برای اعمال آن دوباره بارگذاری می‌شود.",
   "JSON backups, calendar feeds in and out, optional sync through your own server — your data is never held hostage.": "پشتیبان JSON، ورودی و خروجی خوراک تقویم، و همگام‌سازی اختیاری از سرور خودتان — داده‌تان هرگز گروگان نیست.",

@@ -21,7 +21,7 @@ export const LANGUAGES: { id: Lang; label: string; dir: 'ltr' | 'rtl' }[] = [
  * English, so nothing renders blank. This is the list of the ones that have
  * finished that journey, and it is what the tests hold to.
  */
-export const COMPLETE_LANGS: Lang[] = ['fa'];
+export const COMPLETE_LANGS: Lang[] = ['fa', 'fi'];
 
 const LANG_KEY = 'planner-lang';
 const DICTS: Record<Lang, Record<string, string>> = { en: {}, fa, fi };
