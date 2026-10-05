@@ -55,19 +55,30 @@ function seededState(): PlannerState {
   return state;
 }
 
-/** Everything the app reads before its first paint, written in one go. */
+/**
+ * Everything the app reads before its first paint, written in one go.
+ *
+ * The display preferences matter as much as the language: picking Persian in
+ * Settings also switches the *date* language to Persian and the week to
+ * Saturday, so a session seeded with `planner-lang=fa` alone would have shown a
+ * Persian interface with English day names — a baseline of a state no user can
+ * reach. The seeds below are the ones the language switcher itself writes
+ * (`SettingsSheet.tsx`, `src/dates.ts`).
+ */
 async function seed(page: Page, language: 'en' | 'fa', theme: 'light' | 'dark'): Promise<void> {
   const state = seededState();
+  const display = { dateLanguage: language === 'fa' ? 'fa' : 'en-GB', timeFormat: '24h', jalali: false };
   await page.addInitScript(
-    ([key, value, lang, mode]) => {
+    ([key, value, lang, mode, prefs, weekStart]) => {
       localStorage.clear();
       localStorage.setItem('planner-tour-done', '1');
       localStorage.setItem('planner-lang', lang as string);
       localStorage.setItem('planner-theme', mode as string);
-      localStorage.setItem('planner-week-start', '1');
+      localStorage.setItem('planner-display', prefs as string);
+      localStorage.setItem('planner-week-start', weekStart as string);
       localStorage.setItem(key as string, value as string);
     },
-    ['personal-planner.v1', JSON.stringify({ version: 1, exportedAt: NOW, ...state }), language, theme] as const,
+    ['personal-planner.v1', JSON.stringify({ version: 1, exportedAt: NOW, ...state }), language, theme, JSON.stringify(display), language === 'fa' ? '6' : '1'] as const,
   );
 }
 
