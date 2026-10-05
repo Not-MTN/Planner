@@ -16,6 +16,21 @@
 	<string>6.0</string>
 	<key>CFBundleName</key>
 	<string>$(PRODUCT_NAME)</string>
+	<!-- planner://… : the scheme this app answers to with no domain and no
+	     server. https links are claimed through the associated-domains
+	     entitlement instead (App.entitlements), which iOS verifies against
+	     /.well-known/apple-app-site-association on the link's own domain. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.notmtn.planner</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>planner</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Planner uses the microphone only when you start voice input.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

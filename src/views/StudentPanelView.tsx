@@ -76,9 +76,13 @@ export function StudentPanelView() {
     if (route.name !== 'panels' || !route.invite) return;
     setCode(route.invite);
     setScanned(true);
-    // Take the code back out of the address so it is not left in the history.
-    navigate({ name: 'panels' });
-  }, [route, navigate]);
+    // The address stays as it arrived until there is an answer, and that is
+    // deliberate: it is the only place the code lives. A route change remounts
+    // this view by design (Shell's `view-enter` key), so a copy kept here would
+    // be lost the moment the panel is switched on — and a reload in the middle
+    // of deciding, which is exactly when someone would reload, would lose it
+    // too. Accepting rewrites the address to a plain #/student from here.
+  }, [route]);
 
   const accept = async () => {
     if (busy) return;
@@ -100,6 +104,9 @@ export function StudentPanelView() {
         return sent ? { ...guardian, sharedWeek: sent.sharedWeek } : guardian;
       }) } }));
       flash(t("Linked. Your weekly results now reach {0}.", { 0: added[0]?.guardianDisplayName ?? next.student.guardians.at(-1)?.guardianDisplayName ?? '' }));
+      // The code has been used, so it comes out of the address with it: the
+      // panel page is the same panel, addressed plainly.
+      navigate({ name: 'student' });
     } catch (error) {
       flash(error instanceof AuthError || error instanceof Error ? error.message : t("That code could not be used."));
     } finally {
@@ -216,7 +223,14 @@ export function StudentPanelView() {
       <div className="view panels-view student-panel-view">
         <Empty
           title={t("The student panel is not added")}
-          text={t("Your planner is untouched — the panel is simply not on. Add it whenever you want it.")}
+          // Someone arriving from a scanned invite has already chosen this
+          // panel; the code is held while they switch it on, so say so instead
+          // of offering the same blank welcome as a stray bookmark.
+          text={
+            scanned
+              ? t("Add the student panel, then press Link to accept the code you scanned.")
+              : t("Your planner is untouched — the panel is simply not on. Add it whenever you want it.")
+          }
           action={
             <button type="button" className="btn btn-primary btn-small" onClick={() => setPanelEnabled('student', true)}>
               {t("Add student panel")}

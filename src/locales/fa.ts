@@ -1398,6 +1398,7 @@ export const fa: Record<string, string> = {
   "Subject added.": "درس افزوده شد.",
   "Noted. Your guardian sees this with your reason attached.": "یادداشت شد. سرپرست شما این را همراه با دلیل شما می‌بیند.",
   "The student panel is not added": "پنل دانش‌آموز افزوده نشده است",
+  "Add the student panel, then press Link to accept the code you scanned.": "پنل دانش‌آموز را اضافه کنید، سپس برای پذیرش کدی که اسکن کردید «اتصال» را بزنید.",
   "This week, and what’s coming": "این هفته، و آنچه در پیش است",
   "Your planner is underneath all of this — the panel only adds a study view.": "برنامه‌ریز شما زیر همه‌ی این‌هاست — پنل فقط یک نمای درسی اضافه می‌کند.",
   "Explained": "توضیح‌داده‌شده",

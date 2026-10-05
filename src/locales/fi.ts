@@ -336,6 +336,7 @@ export const fi: Record<string, string> = {
   "The code works until they use it.": "Koodi toimii, kunnes he käyttävät sen.",
   "That invitation could not be sent.": "Kutsua ei voitu lähettää.",
   "Your planner is untouched — the panel is simply not on. Add it whenever you want it.": "Suunnittelijaasi ei ole muutettu — paneeli on vain pois päältä. Ota se käyttöön milloin haluat.",
+  "Add the student panel, then press Link to accept the code you scanned.": "Lisää opiskelijapaneeli ja paina sitten Yhdistä hyväksyäksesi skannaamasi koodin.",
   "Updated this week": "Päivitetty tällä viikolla",
   "Waiting for results": "Odottaa tuloksia",
   "From your shared circle": "Jaetusta piiristäsi",

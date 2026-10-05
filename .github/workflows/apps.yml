@@ -24,6 +24,10 @@ on:
         description: 'API origin for the bundled builds, e.g. https://planner.example.com'
         required: false
         type: string
+      link_origin:
+        description: 'Domain whose links open the app (blank = the app/API address above)'
+        required: false
+        type: string
   push:
     tags: ['v*']
 
@@ -220,6 +224,21 @@ jobs:
       # nothing the image had not already done.
       - name: Install dependencies
         run: npm ci --ignore-scripts
+      - name: Work out the domain whose links open the app
+        # Android's App Links intent filter and iOS's associated-domains
+        # entitlement both name a domain, and it is the deployment's: the same
+        # address the shells load or call. The value is exported for the build
+        # steps below, which read it as PLANNER_LINK_HOST (see docs/APPS.md §3).
+        env:
+          LINK_ORIGIN: ${{ inputs.link_origin || vars.PLANNER_LINK_ORIGIN || env.APP_URL || env.API_ORIGIN }}
+        run: |
+          host="$(printf '%s' "$LINK_ORIGIN" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://##; s#/.*$##')"
+          echo "PLANNER_LINK_HOST=${host}" >> "$GITHUB_ENV"
+          if [ -n "$host" ]; then
+            echo "Links on ${host} will open the app once that domain serves its /.well-known files."
+          else
+            echo "No deployment address: the app answers planner:// links only."
+          fi
       - name: Build the web app into the Android project
         run: npm run native:sync -- android
         env:
@@ -412,6 +431,21 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci --ignore-scripts
+      - name: Work out the domain whose links open the app
+        # Android's App Links intent filter and iOS's associated-domains
+        # entitlement both name a domain, and it is the deployment's: the same
+        # address the shells load or call. The value is exported for the build
+        # steps below, which read it as PLANNER_LINK_HOST (see docs/APPS.md §3).
+        env:
+          LINK_ORIGIN: ${{ inputs.link_origin || vars.PLANNER_LINK_ORIGIN || env.APP_URL || env.API_ORIGIN }}
+        run: |
+          host="$(printf '%s' "$LINK_ORIGIN" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://##; s#/.*$##')"
+          echo "PLANNER_LINK_HOST=${host}" >> "$GITHUB_ENV"
+          if [ -n "$host" ]; then
+            echo "Links on ${host} will open the app once that domain serves its /.well-known files."
+          else
+            echo "No deployment address: the app answers planner:// links only."
+          fi
       - name: Build the web app into the iOS project
         run: npm run native:sync -- ios
         env:
@@ -426,6 +460,7 @@ jobs:
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -archivePath "$PWD/build/Planner.xcarchive" \
+            PLANNER_LINK_HOST="${PLANNER_LINK_HOST:-planner.invalid}" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             archive
       - name: Package the app and its archive

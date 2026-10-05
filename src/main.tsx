@@ -2,6 +2,8 @@ import { StrictMode, Suspense, lazy } from 'react';
 import { createRoot } from 'react-dom/client';
 import { registerPWA } from './pwa';
 import { installApiOriginShim, isNativeShell } from './shared/nativeShell';
+import { installDeepLinkHandler } from './shared/deepLinks';
+import { appRouteFromHash } from './route';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { installGlobalErrorHandlers } from './reporting';
 import '@fontsource-variable/estedad';
@@ -21,6 +23,11 @@ const AccountGate = lazy(() => import('./auth/AccountGate').then((module) => ({ 
  * "/" and the auth pages are the marketing site; "/app" is the planner.
  * Old planner links ("/#/today") are redirected to "/app#/today" so bookmarks
  * and installed PWA shortcuts keep working.
+ *
+ * "Old" is not only historical: a guardian's QR code is a link to "/" with a
+ * route in its hash, which is where a scanned invite, an App Link and a shared
+ * bookmark all arrive. Every route the app knows counts, so `/` with
+ * `#/panels?invite=…` opens the invite instead of the landing page.
  */
 function bootTarget(): 'app' | 'site' {
   const path = window.location.pathname.replace(/\/+$/, '') || '/';
@@ -29,7 +36,7 @@ function bootTarget(): 'app' | 'site' {
   // on /login, and sending it back to the planner instead would bounce between
   // the two forever.
   if (path === '/login' || path === '/signup' || path === '/recover') return 'site';
-  if (path === '/' && /^#\/(today|calendar|tasks|habits|goals|notes|insights|plans|ai|day|quickadd)/.test(window.location.hash)) {
+  if (path === '/' && appRouteFromHash(window.location.hash)) {
     window.history.replaceState({}, '', `/app${window.location.hash}`);
     return 'app';
   }
@@ -61,6 +68,10 @@ if (target === 'app') void import('./i18n').then((module) => module.applyDocumen
 // API lives on another origin, and every `/api/...` call in the app is
 // rewritten to reach it, session cookie included.
 installApiOriginShim();
+// A link that opened this app — a guardian's invite code, or any address the
+// app recognizes — becomes the route it names. Nothing to do in a browser tab:
+// the address is already the one the page is on.
+void installDeepLinkHandler();
 registerPWA();
 // Catches what React cannot: throws in handlers and timers, and promises
 // nobody awaited. Without it a crash in the browser is invisible to us.

@@ -16,6 +16,17 @@ if (keystorePropertiesFile.exists()) {
 def appVersionName = (System.getenv('PLANNER_VERSION_NAME') ?: '').replaceFirst(/^v/, '')
 def appVersionCode = (System.getenv('PLANNER_VERSION_CODE') ?: '1') as Integer
 
+// The domain whose links this app answers (AndroidManifest's App Links filter).
+// A bare host, with or without the scheme pasted in. The default is a domain
+// nobody owns on purpose: an app built without being told where its links live
+// is never chosen for anyone else's, and the deployment's own
+// /.well-known/assetlinks.json has to name this package for a real host to work
+// (see docs/APPS.md §3).
+def plannerLinkHost = ((System.getenv('PLANNER_LINK_HOST') ?: 'planner.invalid')
+    .trim()
+    .replaceFirst(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, '')
+    .replaceFirst(/\/.*$/, ''))
+
 android {
     namespace = "com.notmtn.planner"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -35,6 +46,8 @@ android {
         // Bump these for every store upload (versionCode has to increase).
         versionCode appVersionCode
         versionName appVersionName ?: '1.0'
+        // Read by the App Links intent filter in AndroidManifest.xml.
+        manifestPlaceholders = [plannerLinkHost: plannerLinkHost]
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

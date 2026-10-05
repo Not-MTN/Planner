@@ -750,7 +750,10 @@ export function Shell() {
                   {route.name === 'insights' ? <InsightsView /> : null}
                   {route.name === 'ai' ? <AIView /> : null}
                   {route.name === 'plans' ? <PlansView /> : null}
-                  {route.name === 'panels' ? <PanelsView /> : null}
+                  {/* A scanned invite is addressed to the student panel — the one
+                      place that can accept it — so it renders there rather than on
+                      the chooser, even before the panel is added. */}
+                  {route.name === 'panels' ? (route.invite ? <StudentPanelView /> : <PanelsView />) : null}
                   {route.name === 'student' ? <StudentPanelView /> : null}
                   {route.name === 'guardian' ? <GuardianPanelView /> : null}
                 </Suspense>

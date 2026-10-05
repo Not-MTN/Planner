@@ -23,6 +23,26 @@ export type Route =
   | { name: 'ai'; tab?: 'plan' | 'review' };
 
 const PLAIN_NAMES = new Set(['today', 'tasks', 'habits', 'goals', 'notes', 'insights', 'plans', 'matrix', 'review', 'student', 'guardian']);
+/**
+ * Every head `parseHash` knows, including the legacy aliases. This is what
+ * tells an address that belongs to the app from one that does not: a link
+ * handed to the browser, or delivered to the installed app, is only followed
+ * when its hash names a real destination. Keep it in step with `parseHash`.
+ */
+const APP_HEADS = new Set([
+  ...PLAIN_NAMES,
+  'ai',
+  'day',
+  'calendar',
+  'quickadd',
+  'panels',
+  'daily',
+  'weekly',
+  'month',
+  'monthly',
+  'future',
+  'progress',
+]);
 const CALENDAR_TABS = new Set(['week', 'month', 'agenda']);
 
 export function calendarDateFor(year: number, month: number): string {
@@ -76,6 +96,21 @@ export function parseHash(hash: string, now = new Date()): Route {
   }
   if (PLAIN_NAMES.has(head)) return { name: head as 'today' };
   return { name: 'today' };
+}
+
+/**
+ * The route a hash names, or null when the hash is not ours.
+ *
+ * `parseHash` answers every address with something — an unknown hash is simply
+ * `today`, which is right for a planner someone already has open and wrong for
+ * a link arriving from outside. Anything deciding "should this address open
+ * the app?" has to be able to hear "no", and this is that answer.
+ */
+export function appRouteFromHash(hash: string): Route | null {
+  const clean = hash.replace(/^#\/?/, '');
+  const head = (clean.split('?')[0] ?? '').split('/').filter(Boolean)[0];
+  if (!head || !APP_HEADS.has(head)) return null;
+  return parseHash(hash);
 }
 
 export function toHash(route: Route): string {

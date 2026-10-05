@@ -22,6 +22,34 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- A Planner link opens the app instead of a browser tab. This is
+                 how a guardian's QR code reaches a student who has the app: the
+                 link is an ordinary https address, and Android hands it over
+                 only after /.well-known/assetlinks.json on that domain names
+                 this package and its signing certificate.
+
+                 The host is filled in at build time from PLANNER_LINK_HOST
+                 (android/app/build.gradle). Its default is a domain nobody
+                 owns, so a build that was never told where its links live is
+                 simply never chosen — rather than claiming someone else's. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="${plannerLinkHost}" />
+            </intent-filter>
+
+            <!-- planner://… needs no domain and no verification: the fallback
+                 for a build served entirely from the device, and for a link
+                 typed or scanned when the deployment is not set up for App
+                 Links yet. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="planner" />
+            </intent-filter>
+
         </activity>
 
         <provider

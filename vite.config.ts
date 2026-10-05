@@ -373,6 +373,13 @@ export default defineConfig(({ mode }) => {
   // so their build carries the address. Empty for the website and for local
   // development, where `/api/...` stays relative.
   const apiOrigin = normalizeAppApiOrigin(env.PLANNER_API_ORIGIN || fileEnv.PLANNER_API_ORIGIN);
+  // Where a link the app hands out (a guardian's invite QR, "get the apps")
+  // should point. A packaged app is served from https://localhost, so it cannot
+  // be its own answer; the deployment that built it is. Any of the three names
+  // answers, and an explicit PLANNER_LINK_ORIGIN wins.
+  const linkOrigin = normalizeAppApiOrigin(
+    env.PLANNER_LINK_ORIGIN || fileEnv.PLANNER_LINK_ORIGIN || env.PLANNER_APP_URL || fileEnv.PLANNER_APP_URL || env.PLANNER_API_ORIGIN || fileEnv.PLANNER_API_ORIGIN,
+  );
   // The API handlers read this one straight from `process.env`, exactly as the
   // deployed function does — so a value in `.env.local` has to be put there,
   // or a shell pointed at a local dev server would be refused as cross-origin.
@@ -392,7 +399,11 @@ export default defineConfig(({ mode }) => {
     // `__PLANNER_API_ORIGIN__` is read by src/shared/nativeShell.ts. Defining it
     // (rather than a VITE_ variable) keeps the name identical in the app, in
     // this config, and in the server-side allow-list docs.
-    define: { __PLANNER_API_ORIGIN__: JSON.stringify(apiOrigin), __APP_VERSION__: JSON.stringify(appVersion) },
+    define: {
+      __PLANNER_API_ORIGIN__: JSON.stringify(apiOrigin),
+      __PLANNER_LINK_ORIGIN__: JSON.stringify(linkOrigin),
+      __APP_VERSION__: JSON.stringify(appVersion),
+    },
     plugins: [appOrigins(), react(), groqProxyPlugin(apiKey, model, visionModel), syncApi(databaseUrl), authApi(databaseUrl), icsApi(), pushApi(pushEnv), apiFallback()],
     build: {
       rollupOptions: {

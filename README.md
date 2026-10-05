@@ -70,6 +70,16 @@ Then prove it, before anyone installs anything:
 npm run check:deployment -- https://your-app.example.com
 ```
 
+A guardian's invite QR code is a link into the app, so the installed apps claim
+your domain: Android reads `/.well-known/assetlinks.json` and iPhone reads
+`/.well-known/apple-app-site-association` from it. The ordinary build writes
+both from two environment variables on the deployment
+(`ANDROID_SIGNING_CERT_SHA256`, `IOS_TEAM_ID`), and the same
+`check:deployment` reports whether they answer. A link opens the app when they
+do, and opens a browser tab when they do not — nothing else changes either way.
+Section 3 of [docs/APPS.md](docs/APPS.md) is the whole story, including
+`planner://` for a build with no domain at all.
+
 The full guide — build, signing, keystores, stores, CI, and what the shells do
 not do yet — is in [docs/APPS.md](docs/APPS.md). The marketing site's "Apps"
 section (`src/marketing/Platforms.tsx`) links to the release downloads; paste

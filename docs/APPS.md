@@ -122,7 +122,77 @@ PLANNER_APP_ORIGINS=capacitor://localhost,https://localhost,app://planner npm ru
 npm run check:deployment -- http://localhost:5173
 ```
 
-## 3. Android
+## 3. Links that open the app (deep links)
+
+A guardian's QR code carries an ordinary web address —
+`https://your-app.example.com/#/panels?invite=plnr-…` — because the student
+scanning it may not have installed anything yet. When they *have* installed it,
+the same address should open the app, not a browser tab. Both platforms do that
+by asking your domain which app owns its links, which is why this is a server
+setting as much as an app setting:
+
+| Platform | What it fetches | What must be true |
+| --- | --- | --- |
+| Android | `https://your-app/.well-known/assetlinks.json` | Lists package `com.notmtn.planner` and the SHA-256 fingerprint of the certificate that signed the installed APK. |
+| iPhone / iPad | `https://your-app/.well-known/apple-app-site-association` | Lists `TEAMID.com.notmtn.planner`, and the App ID has **Associated Domains** enabled in the Apple Developer portal. |
+
+Both files are written by the ordinary build — `npm run build` ends with
+`scripts/deep-link-files.mjs` — from environment variables on the deployment
+that serves them (Vercel: Project → Settings → Environment Variables, then
+redeploy):
+
+```bash
+ANDROID_SIGNING_CERT_SHA256=AA:BB:…          # the release certificate fingerprint
+IOS_TEAM_ID=AB12CD34EF                       # your Apple Developer team id
+PLANNER_LINK_HOST=your-app.example.com       # optional: printed in the build log
+```
+
+The Android value is the same one the Apps workflow already pins as a
+repository variable, and it takes a comma-separated list: add your debug
+certificate (`keytool -list -v -keystore ~/.android/debug.keystore -alias
+androiddebugkey -storepass android`) so a locally installed APK can be tested
+against the same domain. Neither file is written for a build that was not given
+these values, and nothing else about the app changes.
+
+Then check it, against the live deployment:
+
+```bash
+npm run check:deployment -- https://your-app.example.com
+```
+
+The last two lines of that report are about these files
+(`PLANNER_REQUIRE_DEEP_LINKS=1` makes a failure fail the run). Both platforms
+fetch them **without redirects** and want `Content-Type: application/json` —
+`vercel.json` sets both, and the check fails loudly if a host serves the
+extensionless Apple file as a download instead.
+
+### What the app does with a link
+
+`src/shared/deepLinks.ts` listens for `appUrlOpen`, and reads `getLaunchUrl()`
+for the case where the link *started* the app. Either way the address becomes a
+route through the ordinary hash router, so nothing is granted by arriving this
+way: a scanned invite opens the student panel with the code filled in, and
+linking still takes a press.
+
+`planner://` (the custom scheme) also works, with no domain and no verification.
+It is the fallback for a build served entirely from the device — and for a
+deployment that has not set the two files up yet.
+
+### When it does not work
+
+- **Android.** `adb shell pm get-app-links com.notmtn.planner` says whether the
+  domain is `verified`. Turning it on by hand for a test —
+  `adb shell pm set-app-links --package com.notmtn.planner 0 all your-app.example.com` —
+  is a debugging step, not a fix: verification has to pass on its own.
+- **iOS.** Apple caches its copy of the association file. Toggling the app's
+  Developer settings or reinstalling the app re-fetches it; waiting is also
+  legitimate (the cache is not permanent).
+- **The app's own origin.** In a bundled (`PLANNER_API_ORIGIN`) build the app is
+  served from `https://localhost`, so the *link* has to point at the deployment,
+  not at the app. That address is baked in at build time and shown in the
+  `npm run native:sync` summary as `its links`.
+
+## 4. Android
 
 ### Build and run
 
@@ -245,7 +315,7 @@ the in-app APK update path is for direct/sideloaded APK installs signed with
 this repository's permanent key. Play-managed installs should continue to update
 through Play.
 
-## 4. iOS
+## 5. iOS
 
 ### Build and run
 
@@ -281,7 +351,7 @@ planner's real UI — but a reviewer may still ask. When submitting, describe it
 as an offline-first planner that syncs through the user's own server, and
 mention the offline behaviour in the review notes.
 
-## 5. Regenerating icons and splash screens
+## 6. Regenerating icons and splash screens
 
 The native artwork is committed in `android/` and `ios/`. If you change the
 logo, regenerate from `resources/` (which came from `public/icon-512.png`):
@@ -295,7 +365,7 @@ adaptive icon, `resources/icon-background.png` is the paper-coloured layer,
 `resources/icon.png` is the full-bleed 1024² icon for iOS, and
 `resources/splash*.png` are the 2732² splash screens (light and dark).
 
-## 6. Releases from CI
+## 7. Releases from CI
 
 `.github/workflows/apps.yml` builds everything on demand (Actions → Apps → Run
 workflow) and for valid stable `vMAJOR.MINOR.PATCH` tags, attaching the files
@@ -390,7 +460,7 @@ per-run debug keys; later releases compare against the prior verified signer in
 the feed. A mismatch fails the release instead of publishing an APK that could
 not replace an installed copy.
 
-## 7. Updates
+## 8. Updates
 
 ### Release contract (Phase 1)
 
@@ -460,7 +530,7 @@ feed or a malformed response means “we do not know”: startup continues with 
 installed version and does not interrupt offline use. Browser tabs continue to
 update themselves through the service worker and do not use the native updater.
 
-## 8. What the shells do not do yet
+## 9. What the shells do not do yet
 
 Named plainly, because each one is a real feature and none of them is hidden:
 
@@ -480,15 +550,16 @@ Named plainly, because each one is a real feature and none of them is hidden:
   and iOS may show its Photo Library prompt then. No permission is requested at
   install or app startup.
 - **Passkeys** (see §2).
-- **Deep links.** A guardian's QR code opens `https://your-app/#/panels?invite=…`
-  in a browser. Opening that link straight into the installed app needs
-  universal links (iOS) and app links (Android), plus a file on your domain.
+- **Deep links** are set up on the app side and documented in §3. What is left
+  is the part only a deployment can do: serving the two association files, and
+  for iOS having the Associated Domains capability enabled on the App ID. Until
+  then a link opens in the browser, which still works.
 - **Biometric unlock** (`@capacitor/biometric-*`) instead of typing the
   password each launch.
 
 Everything else — the entire planner — works, because it is the same code.
 
-## 9. Store listing copy, ready to paste
+## 10. Store listing copy, ready to paste
 
 **Title:** Planner — calm daily planning
 **Short description (Play, ≤80):** Tasks, habits, goals and notes — encrypted, offline-first, no account needed.
