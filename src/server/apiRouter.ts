@@ -54,7 +54,7 @@ import { resolveProviders } from './aiProviders.js';
 import { handleICS } from './icsProxy.js';
 import { handleSync, handleSyncStatus, neonStore } from './sync.js';
 import { handleGroqChatCompletions, handleGroqStatus } from './groqProxy.js';
-import { handlePushConfig, handlePushDispatch, handlePushSubscription } from './pushApi.js';
+import { handlePushConfig, handlePushDevice, handlePushDispatch, handlePushSubscription } from './pushApi.js';
 
 /** The server-side environment the API reads; never exposed to the browser. */
 export interface ApiEnv {
@@ -78,6 +78,13 @@ export interface ApiEnv {
   VAPID_PRIVATE_KEY?: string;
   VAPID_SUBJECT?: string;
   CRON_SECRET?: string;
+  /** Android push: the FCM service-account JSON, verbatim. */
+  FCM_SERVICE_ACCOUNT?: string;
+  /** iOS push: the APNs auth key (.p8) and where it belongs. */
+  APNS_KEY_ID?: string;
+  APNS_TEAM_ID?: string;
+  APNS_KEY_P8?: string;
+  APNS_BUNDLE_ID?: string;
 }
 
 type Handler = (request: Request) => Response | Promise<Response>;
@@ -207,9 +214,11 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
     case '/api/groq/status':
       return (request) => handleGroqStatus(request, env.GROQ_API_KEY, resolveProviders(aiEnv(env)));
     case '/api/push/config':
-      return (request) => handlePushConfig(request, env.VAPID_PUBLIC_KEY, env.VAPID_PRIVATE_KEY, env.DATABASE_URL, env.CRON_SECRET);
+      return (request) => handlePushConfig(request, env.VAPID_PUBLIC_KEY, env.VAPID_PRIVATE_KEY, env.DATABASE_URL, env.CRON_SECRET, env);
     case '/api/push/subscription':
       return (request) => handlePushSubscription(request, env);
+    case '/api/push/device':
+      return (request) => handlePushDevice(request, env);
     case '/api/push/dispatch':
       return (request) => handlePushDispatch(request, env);
     case '/api/report':

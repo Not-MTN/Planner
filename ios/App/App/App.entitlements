@@ -22,5 +22,18 @@
 	<array>
 		<string>applinks:$(PLANNER_LINK_HOST)</string>
 	</array>
+	<!--
+	  Push notifications (docs/APPS.md §9). The environment, not the app, is
+	  what decides between Apple's sandbox and production service: a Debug
+	  build talks to the sandbox, a Release archive to production. The APNs
+	  auth key is a server secret (APNS_KEY_P8), never shipped in the app —
+	  the device only ever hands its token to the server and waits.
+
+	  A distribution build needs the Push Notifications capability switched on
+	  for the App ID in the Apple Developer portal, or the archive is rejected
+	  for an entitlement the provisioning profile does not carry.
+	-->
+	<key>aps-environment</key>
+	<string>development</string>
 </dict>
 </plist>

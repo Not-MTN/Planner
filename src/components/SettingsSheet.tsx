@@ -40,7 +40,7 @@ import { getReminderPermission, requestReminderPermission, type ReminderPermissi
 import { loadSpeechLocaleId, saveSpeechLocaleId, speechAvailable, SPEECH_LOCALES } from '../speech';
 import { faNum, t, tn, getLang, setLang, LANGUAGES, type Lang } from '../i18n';
 import { loadMobileFavorites, loadNavigationPages, MAX_MOBILE_FAVORITES, moveMobileFavorite, NAVIGATION_PAGES, saveMobileFavorites, saveNavigationPages, type NavigationPage } from '../navigationPrefs';
-import { backgroundPushEnabled, configureBackgroundPush, refreshBackgroundPushSchedule } from '../push';
+import { backgroundPushEnabled, backgroundPushSupported, configureBackgroundPush, pushTransport, refreshBackgroundPushSchedule } from '../push';
 import { currentPlatform, deviceInstallActionFor } from '../marketing/downloads';
 import { isNativeMobileShell, isNativeShell, shellPlatform } from '../shared/nativeShell';
 import { RELEASES_PAGE, type UpdateOffer } from '../shared/updates';
@@ -440,7 +440,8 @@ function BackgroundPushSection() {
   const [enabled, setEnabled] = useState(backgroundPushEnabled);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const supported = typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  const supported = backgroundPushSupported();
+  const device = pushTransport() === 'device';
   useEffect(() => {
     let live = true;
     void fetch('/api/push/config', { cache: 'no-store' }).then((response) => response.json()).then((body: { configured?: boolean }) => { if (live) setConfigured(body.configured === true); }).catch(() => { if (live) setConfigured(false); });
@@ -464,7 +465,15 @@ function BackgroundPushSection() {
       <div className="set-row">
         <div>
           <p className="set-label">{enabled ? t("Background reminders are on") : t("Remind me while Planner is closed")}</p>
-          <p className="set-hint">{!supported ? t("This browser does not support push notifications.") : configured === false ? t("This server needs push keys, a database, and a scheduled delivery job before background reminders can be enabled.") : t("Sends a generic alert at scheduled times. Reminder times are uploaded; task and event titles stay on this device.")}</p>
+          <p className="set-hint">
+            {!supported
+              ? t("This browser does not support push notifications.")
+              : configured === false
+                ? t("This server needs push keys, a database, and a scheduled delivery job before background reminders can be enabled.")
+                : device
+                  ? t("Sends a generic alert at scheduled times even when the app is closed. Reminder times are uploaded; task and event titles stay on this device.")
+                  : t("Sends a generic alert at scheduled times. Reminder times are uploaded; task and event titles stay on this device.")}
+          </p>
         </div>
         <button type="button" className={cx('btn', enabled ? 'btn-soft' : 'btn-primary')} disabled={!supported || configured !== true || busy} onClick={() => void toggle()}>
           {busy ? t("Working…") : enabled ? t("Turn off") : t("Enable")}

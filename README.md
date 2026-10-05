@@ -249,6 +249,20 @@ Push delivery can work while Planner is closed, but it needs server configuratio
 4. Configure a trusted scheduler to call `GET https://<your-app>/api/push/dispatch` once per minute with `Authorization: Bearer <CRON_SECRET>`. Do not publish that secret in a URL. The endpoint rejects calls without it.
 5. In Planner, enable **Settings → Background notifications**. Browser permission and an installed/registered service worker are required. Turning it off removes the server subscription and queued reminders.
 
+Push uses the standard Web Push protocol in a browser. The **phone apps** use the
+platform's own service instead — FCM on Android, APNs on iOS — because a WebView
+cannot hold a Web Push subscription the way a browser tab can. Both transports
+share the same setting, the same job table and the same generic sentence; a phone
+registers with the OS, uploads its token and its reminder schedule, and the cron
+delivers through FCM or APNs. Add either set of credentials and `/api/push/config`
+starts offering that transport:
+
+- **Android:** `FCM_SERVICE_ACCOUNT` (the service-account JSON, one line) plus a
+  `google-services.json` in `android/app/` for the build itself.
+- **iOS:** `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_KEY_P8` (the `.p8` contents) and
+  `APNS_BUNDLE_ID=com.notmtn.planner`, plus the Push Notifications capability on
+  the App ID. `docs/APPS.md` §9.1 has the table.
+
 Push uses the standard Web Push protocol. Some hosting plans do not permit minute-level scheduled functions, so use an external scheduler if needed; without scheduled calls the browser cannot be woken at reminder time.
 
 ## AI setup

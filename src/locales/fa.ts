@@ -2203,4 +2203,10 @@ export const fa: Record<string, string> = {
   "Rolled up {count} finished weeks — results kept, detail tidied.": "{count} هفتهٔ گذشته جمع‌بندی شد — نتیجه‌ها ماندند و جزئیات مرتب شد.",
   "That window is already in effect — nothing older to tidy.": "این بازه از قبل اعمال شده است — چیز قدیمی‌تری برای مرتب کردن نیست.",
   "Tidied old detail — results kept.": "جزئیات قدیمی مرتب شد — نتیجه‌ها محفوظ ماندند.",
+  "Sends a generic alert at scheduled times even when the app is closed. Reminder times are uploaded; task and event titles stay on this device.": "در زمان‌های تعیین‌شده حتی وقتی برنامه بسته است یک هشدار عمومی می‌فرستد. زمان یادآورها بارگذاری می‌شود؛ عنوان کارها و رویدادها روی همین دستگاه می‌ماند.",
+  "Notification permission was not granted.": "اجازهٔ اعلان داده نشد.",
+  "The notification service did not answer. Check the app build and try again.": "سرویس اعلان پاسخ نداد. ساخت برنامه را بررسی کنید و دوباره تلاش کنید.",
+  "Could not register this device for notifications.": "ثبت این دستگاه برای اعلان‌ها ممکن نشد.",
+  "Background push is not configured on this server yet.": "اعلان پس‌زمینه هنوز روی این سرور تنظیم نشده است.",
+  "A generic alert at the times you chose. It never shows task, event or habit text.": "یک هشدار عمومی در زمان‌هایی که انتخاب کرده‌اید. هرگز متن کار، رویداد یا عادت را نشان نمی‌دهد.",
 };

@@ -320,7 +320,7 @@ function authApi(databaseUrl: string | undefined): Plugin {
   };
 }
 
-function pushApi(pushEnv: { DATABASE_URL?: string; VAPID_PUBLIC_KEY?: string; VAPID_PRIVATE_KEY?: string; VAPID_SUBJECT?: string; CRON_SECRET?: string }): Plugin {
+function pushApi(pushEnv: { DATABASE_URL?: string; VAPID_PUBLIC_KEY?: string; VAPID_PRIVATE_KEY?: string; VAPID_SUBJECT?: string; CRON_SECRET?: string; FCM_SERVICE_ACCOUNT?: string; APNS_KEY_ID?: string; APNS_TEAM_ID?: string; APNS_KEY_P8?: string; APNS_BUNDLE_ID?: string }): Plugin {
   const middleware: NextHandleFunction = (request, response, next) => {
     if (!request.url?.startsWith('/push/')) { next(); return; }
     const pathname = `/api${request.url}`;
@@ -391,6 +391,11 @@ export default defineConfig(({ mode }) => {
     VAPID_PUBLIC_KEY: env.VAPID_PUBLIC_KEY || fileEnv.VAPID_PUBLIC_KEY,
     VAPID_PRIVATE_KEY: env.VAPID_PRIVATE_KEY || fileEnv.VAPID_PRIVATE_KEY,
     VAPID_SUBJECT: env.VAPID_SUBJECT || fileEnv.VAPID_SUBJECT,
+    FCM_SERVICE_ACCOUNT: env.FCM_SERVICE_ACCOUNT || fileEnv.FCM_SERVICE_ACCOUNT,
+    APNS_KEY_ID: env.APNS_KEY_ID || fileEnv.APNS_KEY_ID,
+    APNS_TEAM_ID: env.APNS_TEAM_ID || fileEnv.APNS_TEAM_ID,
+    APNS_KEY_P8: env.APNS_KEY_P8 || fileEnv.APNS_KEY_P8,
+    APNS_BUNDLE_ID: env.APNS_BUNDLE_ID || fileEnv.APNS_BUNDLE_ID,
     CRON_SECRET: env.CRON_SECRET || fileEnv.CRON_SECRET,
     ERROR_REPORT_WEBHOOK: env.ERROR_REPORT_WEBHOOK || fileEnv.ERROR_REPORT_WEBHOOK,
     AI_ENV: { ...env, ...fileEnv } as Record<string, string | undefined>,

@@ -38,6 +38,11 @@ function currentEnv(): ApiEnv {
     VAPID_PRIVATE_KEY: process.env.VAPID_PRIVATE_KEY,
     VAPID_SUBJECT: process.env.VAPID_SUBJECT,
     CRON_SECRET: process.env.CRON_SECRET,
+    FCM_SERVICE_ACCOUNT: process.env.FCM_SERVICE_ACCOUNT,
+    APNS_KEY_ID: process.env.APNS_KEY_ID,
+    APNS_TEAM_ID: process.env.APNS_TEAM_ID,
+    APNS_KEY_P8: process.env.APNS_KEY_P8,
+    APNS_BUNDLE_ID: process.env.APNS_BUNDLE_ID,
   };
 }
 

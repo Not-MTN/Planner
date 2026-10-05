@@ -530,7 +530,7 @@ feed or a malformed response means “we do not know”: startup continues with 
 installed version and does not interrupt offline use. Browser tabs continue to
 update themselves through the service worker and do not use the native updater.
 
-## 9. What the shells do not do yet
+## 9. Reminders, permissions and what the shells do not do yet
 
 Named plainly, because each one is a real feature and none of them is hidden:
 
@@ -542,8 +542,33 @@ Named plainly, because each one is a real feature and none of them is hidden:
   exact-alarm permission is needed. Disabling reminders cancels the pending
   schedule. The same settings show in-app reminders as a fallback if OS
   notifications are unavailable.
-- **Web Push subscriptions** are a browser/PWA feature; they are separate from
-  the on-device reminder schedule in the mobile shells.
+- **Background reminders in the phone apps** have their own setting, the same
+  one a browser tab gets (Settings → Reminders, "Remind me while Planner is
+  closed"). A browser tab uses Web Push; a phone app registers with the
+  platform's notification service — FCM on Android, APNs on iOS — and uploads
+  its token and reminder schedule, so the server can wake the device even when
+  the app has been closed. Exactly like the Web Push path, the message is one
+  generic sentence and a deep link: no task, event or habit text ever leaves the
+  device. This needs deployment credentials (§9.1) and, on Android, a
+  `google-services.json` beside `android/app/build.gradle`; without them the
+  toggle stays disabled rather than pretending to work.
+
+### 9.1 Serving device push
+
+Both platforms are optional per deployment; a server with only Web Push keys
+keeps working, and `/api/push/config` reports which transports it can honour.
+
+| Platform | Environment variables | Also needed |
+|---|---|---|
+| Android (FCM) | `FCM_SERVICE_ACCOUNT` — the service-account JSON, as one line | `android/app/build.gradle` already applies the `com.google.gms.google-services` plugin when `google-services.json` exists; add that file (git-ignored) from the Firebase console. |
+| iOS (APNs) | `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_KEY_P8`, `APNS_BUNDLE_ID=com.notmtn.planner` | A `.p8` APNs auth key from the Apple Developer portal, and the **Push Notifications** capability switched on for the App ID. `ios/App/App/App.entitlements` already declares `aps-environment`. |
+
+The scheduler is shared with Web Push: `DATABASE_URL` holds the device tokens and
+their queued reminders, and a cron calls `/api/push/dispatch` with
+`Authorization: Bearer $CRON_SECRET`. A token the platform reports as gone is
+deleted; a job whose platform has no credentials is dropped rather than retried
+forever. `.env.example` and README's *Background push reminders* section list the
+variables next to the Web Push keys.
 - **Feature-gated access:** voice input requests microphone and speech
   recognition only when started. **Add a plan picture** opens the system photo
   picker only after an explicit tap; Android grants access to the chosen image,
