@@ -2,6 +2,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { COMPLETE_LANGS, digitsIn, faDigits, faNum, getLang, missingKeys, setLang, t, LANGUAGES } from './i18n';
+import { AI_OFFLINE_MESSAGE, GROQ_BILLING_MESSAGE } from './ai';
 import { fa } from './locales/fa';
 import { fi } from './locales/fi';
 
@@ -89,5 +90,46 @@ describe('translated sentences stay whole', () => {
     const NOT_PROSE = /^- |^\.\w/;
     const offenders = [...sourceKeys('src')].filter((key) => FRAGMENT.test(key) && !NOT_PROSE.test(key));
     expect(offenders).toEqual([]);
+  });
+});
+
+/**
+ * The completeness check above only sees *literal* t("...") calls. A handful of
+ * strings reach t() as a variable instead — the day's motivation line, the
+ * shortcut list, the matrix captions, two AI messages — and nothing looked at
+ * them, so Persian shipped an English sentence at the top of Today until a
+ * screenshot caught it (e2e/visual.spec.ts). Each row below is one such source:
+ * the file, the array or constant holding the strings, and a name for the
+ * failure. A new dynamic source means a new row.
+ */
+describe('keys built at runtime are translated too', () => {
+  function stringsInArray(file: string, name: string): string[] {
+    const text = readFileSync(file, 'utf8');
+    const start = text.indexOf(`const ${name} = [`);
+    expect(start, `${name} not found in ${file}`).toBeGreaterThan(-1);
+    const end = text.indexOf('\n];', start);
+    const body = text.slice(start, end < 0 ? undefined : end);
+    // Only prose: array elements also carry key names ("q1"), CSS values
+    // ("var(--danger)") and single key caps ("K", "Esc"), which are not strings
+    // any translator would see.
+    return [...body.matchAll(/'([^'\n]+)'/g)]
+      .map((match) => match[1])
+      .filter((value) => /[A-Za-z]/.test(value) && !/^var\(/.test(value) && !/^[A-Za-z]{1,3}$/.test(value) && !/^q\d$/.test(value));
+  }
+
+  const sources: Array<[string, string]> = [
+    ['src/constants.ts', 'MOTIVATION'],
+    ['src/components/ShortcutsSheet.tsx', 'SHORTCUTS'],
+    ['src/views/MatrixView.tsx', 'QUADRANTS'],
+  ];
+
+  it('translates every string in them', () => {
+    const keys = sources.flatMap(([file, name]) => stringsInArray(file, name));
+    expect(keys.length).toBeGreaterThan(25);
+    expect(missingKeys(keys, 'fa')).toEqual([]);
+  });
+
+  it('translates the messages that are passed to t() as a constant', () => {
+    expect(missingKeys([AI_OFFLINE_MESSAGE, GROQ_BILLING_MESSAGE], 'fa')).toEqual([]);
   });
 });
