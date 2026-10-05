@@ -26,9 +26,10 @@ export function QuickAddBar({ defaultDate, placeholder }: { defaultDate?: string
   }, []);
 
   useEffect(() => {
-    // PWA shortcut / deep link (#/today?qa=1) lands here: put the caret in the box.
+    // PWA shortcut / deep link (#/today?qa=1) lands here. Shell.tsx owns the
+    // caret (it retries while the app settles); this only keeps the query out
+    // of the address bar once it has been consumed.
     if (typeof window !== 'undefined' && /(#\/)?today\?qa=1/.test(window.location.hash)) {
-      inputRef.current?.focus();
       window.history.replaceState(null, '', '#/today');
     }
   }, []);

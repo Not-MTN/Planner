@@ -299,13 +299,44 @@ export function Shell() {
   const [aboutOpen, setAboutOpen] = useState(false);
   useEffect(() => onAboutRequest(() => setAboutOpen(true)), []);
 
-  // The PWA shortcut / #/today?qa=1 deep link: drop the caret straight into quick add.
+  // The PWA shortcut / #/today?qa=1 deep link: drop the caret straight into
+  // quick add. One bounded retry loop, because the focus lands while the app is
+  // still settling: the account gate unmounting, a pull from the vault, a
+  // re-render of the day. A single timer at 120ms lost that race and left the
+  // caret nowhere.
   useEffect(() => {
     if (route.name !== 'quickadd') return;
-    const id = window.setTimeout(() => {
-      (document.querySelector<HTMLInputElement>('.quick-add input') ?? document.querySelector<HTMLInputElement>('input[aria-autocomplete]'))?.focus();
-    }, 120);
-    return () => window.clearTimeout(id);
+    let cancelled = false;
+    let attempts = 0;
+    const find = () =>
+      document.querySelector<HTMLInputElement>('.quick-add input') ??
+      document.querySelector<HTMLInputElement>('input[aria-autocomplete]');
+    const tryFocus = () => {
+      if (cancelled) return;
+      const input = find();
+      if (input) {
+        input.focus();
+        // Stop as soon as the caret actually stays: retrying after success
+        // would fight a user who has tapped something else.
+        if (document.activeElement === input) {
+          // The shortcut's URL is `#/today?qa=1`; keep it out of the address bar
+          // once it has done its job, so a reload does not re-trigger it.
+          if (window.location.hash.includes('qa=1')) {
+            window.history.replaceState(null, '', window.location.hash.replace(/[?&]qa=1/, '').replace(/\?$/, ''));
+          }
+          return;
+        }
+      }
+      if (attempts < 10) {
+        attempts += 1;
+        window.setTimeout(tryFocus, 100);
+      }
+    };
+    const id = window.setTimeout(tryFocus, 120);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(id);
+    };
   }, [route.name, key]);
 
   useEffect(() => {
@@ -391,7 +422,26 @@ export function Shell() {
 
   return (
     <div className="app-shell">
-      <a className="skip" href="#content">{t("Skip to content")}</a>
+      {/*
+        `href="#content"` is the honest markup, but this app routes on the hash:
+        letting the fragment through would rewrite the address to `#content` and
+        hand the router a route called "content". So the click moves focus for
+        real — into the `<main tabIndex={-1}>` below — and the URL keeps saying
+        where the person actually is.
+      */}
+      <a
+        className="skip"
+        href="#content"
+        onClick={(event) => {
+          const main = document.getElementById('content');
+          if (!main) return;
+          event.preventDefault();
+          main.focus();
+          main.scrollIntoView({ block: 'start' });
+        }}
+      >
+        {t("Skip to content")}
+      </a>
       <aside className="sidebar">
         <button type="button" className="brand" onClick={() => navigate({ name: 'today' })}>
           <span className="brand-mark"><LeafIcon size={18} /></span>
@@ -705,7 +755,7 @@ export function Shell() {
           </div>
         </header>
         <span className="mobile-date">{formatWeekdayShort(today)} {today.slice(8)}</span>
-        <main id="content" className="content">
+        <main id="content" className="content" tabIndex={-1}>
           {!ready ? <LoadingScreen /> : (
             <>
               {error ? (

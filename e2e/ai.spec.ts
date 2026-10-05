@@ -30,7 +30,16 @@ test('voice chat: talk to the AI, get an answer, and a plan draft', async ({ pag
       choices: [{ message: { content: JSON.stringify({ reply: 'Soft tomorrow, one breath before the gym.', followUp: null, draft: { summary: 'Soft tomorrow', tasks: [{ title: 'Gym bag', date: new Date(Date.now() + 864e5).toISOString().slice(0, 10), priority: 'low', category: 'health' }], events: [], habits: [], suggestions: [] } }) } }],
     },
   }));
-  await page.evaluate(() => localStorage.setItem('planner-tour-done', '1'));
+  // Through an init script, not page.evaluate: this line used to run before the
+  // first navigation, on `about:blank`, where reading localStorage is a
+  // SecurityError.
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem('planner-tour-done', '1');
+    } catch {
+      // about:blank and friends have no storage; the real page will.
+    }
+  });
   await page.goto('/#/ai');
   await expect(page.getByText('Talk to your planner')).toBeVisible({ timeout: 10000 });
   await page.locator('.voice-orb').click();

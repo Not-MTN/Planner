@@ -20,6 +20,10 @@ test('PWA quick-add shortcut drops the caret into quick add', async ({ page }) =
 });
 
 test('the Today journal creates a journal note for the day', async ({ page }) => {
+  // The journal lives behind a disclosure on Today ("Journal & notes"), closed
+  // by default — the heading exists either way, so the first version of this
+  // test found a hidden element and called it missing.
+  await page.locator('details.day-notes-disclosure > summary').click();
   await expect(page.getByText('A few lines for this day')).toBeVisible();
   await page.locator('.journal-inline').fill('Met Bibi for coffee. Sun all day.');
   await page.locator('.journal-inline').blur();
@@ -87,11 +91,18 @@ test('overdue tasks offer “This weekend” snooze', async ({ page }) => {
 
 test('settings show shared space, feeds, weather, import and templates', async ({ page }) => {
   await page.getByRole('button', { name: 'Settings' }).first().click();
-  for (const label of ['Shared space', 'Calendar feeds', 'Weather on Today', 'Move your tasks in', 'Templates']) {
-    await expect(page.getByText(label, { exact: true }).first()).toBeVisible();
+  // Settings is tabbed and only the open group is mounted, so "is it in the
+  // settings sheet" is not the question — "is it in the group it belongs to".
+  const sheet = page.getByRole('dialog');
+  await sheet.getByRole('tab', { name: 'Sync & backup' }).click();
+  await expect(sheet.getByText('Shared space', { exact: true }).first()).toBeVisible();
+  await sheet.getByRole('tab', { name: 'Connections' }).click();
+  for (const label of ['Calendar feeds', 'Weather on Today', 'Move your tasks in', 'Templates']) {
+    await expect(sheet.getByText(label, { exact: true }).first()).toBeVisible();
   }
-  await page.getByRole('button', { name: 'Create a shared space' }).click();
-  await expect(page.getByText('Shared space is on')).toBeVisible();
+  await sheet.getByRole('tab', { name: 'Sync & backup' }).click();
+  await sheet.getByRole('button', { name: 'Create a shared space' }).click();
+  await expect(sheet.getByText('Shared space is on')).toBeVisible();
 });
 
 test('weather card appears when enabled, from a stubbed forecast', async ({ page, browserName }) => {
@@ -129,14 +140,18 @@ test('daily mood check-in saves and re-selects', async ({ page }) => {
 test('any file — including music — can be attached to a note', async ({ page }) => {
   await page.goto('/#/notes');
   await page.getByRole('button', { name: 'Add note' }).first().click();
-  const dialog = page.getByRole('dialog').last();
-  await dialog.locator('input[data-autofocus]').fill('Studio');
-  await page.locator('.attach-editor input[type="file"]').setInputFiles([
+  // Several sheets are in the DOM at once and each composer form has a
+  // `data-autofocus` field, so `getByRole('dialog').last()` plus one input was
+  // ambiguous (five matches). The note editor is the sheet with the attachment
+  // row the rest of this test uses.
+  const dialog = page.locator('.sheet', { has: page.locator('.attach-editor') }).last();
+  await dialog.locator('input[data-autofocus]').first().fill('Studio');
+  await dialog.locator('.attach-editor input[type="file"]').setInputFiles([
     { name: 'melody.mp3', mimeType: 'audio/mpeg', buffer: Buffer.from('ID3' + '0'.repeat(2048)) },
     { name: 'score.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4' + 'x'.repeat(100)) },
   ]);
-  await expect(page.locator('.attach-chip')).toHaveCount(2);
-  await page.locator('.sheet').getByRole('button', { name: 'Add note' }).click();
+  await expect(dialog.locator('.attach-chip')).toHaveCount(2);
+  await dialog.getByRole('button', { name: 'Add note' }).click();
   const card = page.locator('.note-card', { hasText: 'Studio' });
   await expect(card).toBeVisible();
   await expect(card.locator('.attach-chip')).toHaveCount(1); // collapsed card shows the file row minus… (image excluded)

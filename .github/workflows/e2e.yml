@@ -52,6 +52,13 @@ jobs:
       - name: Run the browser suites
         run: npm run test:e2e -- --project=desktop
 
+      # The one spec that needs a real touch shape. It asserts the coarse-pointer
+      # sizing in styles.css, which only applies when the browser emulates a
+      # finger — so it skips under the desktop project above and runs here, in
+      # the Pixel 7 project, where `pointer: coarse` matches.
+      - name: Run the touch-target measurements
+        run: npx playwright test e2e/touch-targets.spec.ts --project=mobile
+
       - name: Upload the failure report
         if: failure()
         uses: actions/upload-artifact@v4
