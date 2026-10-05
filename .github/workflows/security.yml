@@ -38,3 +38,9 @@ jobs:
         run: npm test
       - name: Build production bundle
         run: npm run build
+      # The payload every installer and the website carry. 4.11 MB at the time
+      # this was added, so 5 MB leaves room for content and catches an
+      # accidental multi-megabyte addition (a stray video, an unoptimised
+      # image, a dependency that bundles its own copy of something).
+      - name: Keep the payload inside its budget
+        run: npm run size:report -- --check 5

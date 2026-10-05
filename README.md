@@ -11,6 +11,8 @@ npm run dev
 
 Other scripts: `npm run typecheck`, `npm test`, `npm run build`, `npm run test:e2e` (browser tests — run `npx playwright install chromium` once first). `npm run test:e2e:visual` compares screenshots of the key screens in Persian/RTL and both themes against committed baselines; see [docs/VISUAL_TESTS.md](docs/VISUAL_TESTS.md) for how the baselines are made and why they are generated on CI.
 
+Contributing? [CONTRIBUTING.md](CONTRIBUTING.md) has the setup, the traps, and what a change is expected to come with.
+
 See [SECURITY.md](SECURITY.md) for the threat model, deployment hardening, privacy boundaries, and vulnerability reporting process. No app can be guaranteed unhackable; protect the device, browser profile, sync code, and server secrets too.
 
 ## Install it as an app
