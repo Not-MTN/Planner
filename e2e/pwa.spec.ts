@@ -57,6 +57,10 @@ async function primeServiceWorker(page: Page): Promise<void> {
 
 test.beforeEach(async ({ page }) => {
   await bootOffline(page);
+  // The product tour drops a dimming layer over the app on a first visit and
+  // swallows the clicks that follow. It has its own suite (e2e/tour.spec.ts);
+  // here it is scenery, so the tour is marked as already seen.
+  await page.addInitScript(() => localStorage.setItem('planner-tour-done', '1'));
 });
 
 test('the manifest promises an installable app', async ({ request }) => {
@@ -155,7 +159,50 @@ test('the app registers its service worker and hands the page over to it', async
   expect((await page.evaluate(() => navigator.serviceWorker.controller?.scriptURL)) ?? '').toContain('/sw.js');
 });
 
+/**
+ * The update flow, read out of the worker itself.
+ *
+ * A worker that skipped waiting on install would activate the moment a deploy
+ * landed, fire `controllerchange`, and the app reloads on that — the page would
+ * disappear under whoever is typing, and a navigation already in flight is
+ * aborted. The swap has to be the reader's tap in the "new version" toast, so
+ * the one thing this asserts is that the install handler waits.
+ */
+test('an update waits for the reader instead of reloading under them', async ({ request }) => {
+  const source = await (await request.get('/sw.js')).text();
+  const install = /addEventListener\('install',\s*\(event\)\s*=>\s*\{([\s\S]*?)\n\}\);/.exec(source);
+  expect(install, 'the worker still has an install handler').not.toBeNull();
+  expect(install![1].includes('skipWaiting'), 'install must not force the swap').toBe(false);
+
+  const message = /addEventListener\('message',\s*\(event\)\s*=>\s*\{([\s\S]*?)\n\}\);/.exec(source);
+  expect(message, 'the worker still answers messages').not.toBeNull();
+  expect(message![1]).toContain('SKIP_WAITING');
+});
+
+/**
+ * Reload, once more if the browser aborts the first attempt.
+ *
+ * `context.setOffline(false)` flips the network back inside the browser, and a
+ * navigation issued in the next few milliseconds can be aborted mid-flight —
+ * the service worker's own fetch is cut before it answers, and Playwright
+ * reports `net::ERR_ABORTED`. That is the harness racing the browser, not the
+ * app failing to serve the shell, so the check gets a second, settled attempt.
+ */
+async function reloadSettled(page: Page): Promise<Awaited<ReturnType<Page['reload']>>> {
+  try {
+    return await page.reload();
+  } catch (error) {
+    if (!/ERR_ABORTED|frame was detached/.test(String(error))) throw error;
+    await expectPlannerReady(page);
+    return await page.reload();
+  }
+}
+
 test('with the network down the app still opens, and an edit still sticks', async ({ page, context }) => {
+  // Two boots, a service worker install and an offline navigation: the default
+  // 30 s is not enough on a cold CI runner, and the timeout it reports hides
+  // which of those steps was slow.
+  test.setTimeout(60_000);
   await primeServiceWorker(page);
 
   await context.setOffline(true);
@@ -179,15 +226,27 @@ test('with the network down the app still opens, and an edit still sticks', asyn
 
     // Routing is local too: moving between screens is a hash change, and the
     // task is really in the board rather than only on the screen it was typed on.
-    await page.goto('/#/tasks');
-    await page.getByRole('button', { name: 'Select', exact: true }).click();
+    // The move is a tap on the sidebar, the way a reader would — a full
+    // navigation to another path while offline is a browser-level race (the
+    // service worker serves the cached shell, and Chrome occasionally drops a
+    // navigation it started during the offline flip), not a route the app has.
+    await page.getByRole('navigation', { name: 'Planner' }).getByRole('button', { name: /^Tasks/ }).click();
+    const select = page.getByRole('button', { name: 'Select', exact: true });
+    // The button only exists once the view has a task in it, so assert that
+    // separately — otherwise a task that failed to arrive reads as a click that
+    // timed out, which says nothing about where the work went.
+    await expect(select, 'the offline edit is on the tasks screen').toBeVisible({ timeout: 10_000 });
+    await select.click();
     await expect(page.getByRole('checkbox', { name: 'Select Buy milk on the way home' })).toBeVisible();
   } finally {
-    await context.setOffline(false);
+    // Best effort: if the browser is already gone the real failure is the one
+    // inside the try block, and a cleanup error must not replace it.
+    await context.setOffline(false).catch(() => undefined);
   }
 });
 
 test('coming back online updates the worker rather than serving a stale shell', async ({ page, context }) => {
+  test.setTimeout(60_000);
   await primeServiceWorker(page);
   await context.setOffline(true);
   await page.reload();
@@ -196,7 +255,7 @@ test('coming back online updates the worker rather than serving a stale shell', 
 
   // The shell is network-first: one navigation with the network back must not
   // still be answering from the cache it fell back to.
-  const response = await page.reload();
+  const response = await reloadSettled(page);
   expect(response?.status()).toBe(200);
   await expectPlannerReady(page);
 });

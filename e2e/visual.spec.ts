@@ -344,7 +344,11 @@ test.describe('the screens a signed-in person uses', () => {
   test('sign-in — en, light', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'desktop', 'the matrix runs once, at the desktop viewport');
     await openSignedOut(page, { language: 'en', theme: 'light', path: '/#/today' });
-    await expect(page.locator('.gate-title')).toBeVisible();
+    // A signed-out planner does not stop at a lock screen: the gate sends the
+    // browser to the sign-in page on the marketing site, which is what this
+    // picture has always been. Wait for the form, not for a title the gate only
+    // renders when a locked account is loaded.
+    await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
     await shoot(page, shot('signin-en-light.png'));
   });
 });

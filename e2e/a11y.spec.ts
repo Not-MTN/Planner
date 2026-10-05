@@ -62,7 +62,23 @@ const EXCEPTIONS: Record<string, string> = {
   'landmark-unique': 'labelled landmarks share a role by design',
 };
 
+/**
+ * Wait for the screen to stop moving before measuring it.
+ *
+ * The app animates views and sheets in with an opacity transition, and axe reads
+ * *computed* colours: a panel caught at 34% opacity reports the blended grey of
+ * a half-loaded screen, not the colour anybody chose. Reduced motion shortens
+ * those transitions to almost nothing; waiting for the last one to finish is
+ * what makes the measurement repeatable.
+ */
+async function settled(page: Page): Promise<void> {
+  await page
+    .waitForFunction(() => document.getAnimations().every((animation) => animation.playState !== 'running'), undefined, { timeout: 5_000 })
+    .catch(() => undefined);
+}
+
 async function analyze(page: Page): Promise<string[]> {
+  await settled(page);
   const builder = new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'best-practice']);
   for (const rule of Object.keys(EXCEPTIONS)) builder.disableRules(rule);
   const results = await builder.analyze();
@@ -122,21 +138,38 @@ test.describe('the gate and the settings sheet', () => {
   test.use({ viewport: { width: 1280, height: 900 }, locale: 'en-US', timezoneId: 'UTC' });
 
   /**
-   * The sign-in screen is reached by answering the session probe the way the
-   * server does for a stranger — 401 — rather than aborting it, because an
-   * aborted probe means "keep working offline" and never shows the gate.
+   * The screen a signed-out browser visitor actually lands on.
+   *
+   * The in-app gate (`AccountGate`) answers a 401 by sending the tab to
+   * `/login`, and it shows its own startup screen for a few hundred
+   * milliseconds before that — scanning that flash would be a race, and a race
+   * is a test that fails on a slow runner for no reason. `/login` is the
+   * stable screen a person reads, so that is the one measured here.
    */
   test('sign-in screen', async ({ page }) => {
-    await page.route('**/api/auth/session', (route) =>
-      route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Not signed in.' } }) }),
-    );
-    await page.goto('/#/today');
-    await expect(page.locator('.gate-title')).toBeVisible({ timeout: 15_000 });
+    // Reduced motion collapses the reveal animations. Measuring contrast while
+    // a panel is still fading in reads the *blended* colour and reports a
+    // failure nobody would ever see — the scan, not the animation, is the
+    // thing under test.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await bootOffline(page);
+    await page.goto('/login');
+    await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible({ timeout: 15_000 });
+    await page.evaluate(async () => {
+      await document.fonts.ready;
+    });
     expect(await analyze(page)).toEqual([]);
   });
 
   test('settings sheet, opened over the planner', async ({ page }) => {
+    // Same reason as the sign-in screen above: the sheet fades in, and an
+    // opacity mid-flight is not a colour anyone chose.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await bootOffline(page);
+    // The tour is dimmed over the app for a first-time visitor, and its overlay
+    // swallows the click below. This test is about the settings sheet, not the
+    // tour (`e2e/tour.spec.ts` covers that).
+    await page.addInitScript(() => localStorage.setItem('planner-tour-done', '1'));
     await page.goto('/#/today');
     await expect(page.locator('.quick-add input')).toBeVisible({ timeout: 15_000 });
     await page.locator('.side-tool[data-tour="settings"]').click();

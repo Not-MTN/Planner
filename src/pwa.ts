@@ -25,8 +25,21 @@ export function onUpdateAvailable(listener: () => void): () => void {
   return () => updateListeners.delete(listener);
 }
 
+/**
+ * The reader tapped Reload in the "new version" toast.
+ *
+ * `sw.js` never skips waiting on its own, so the only way a new worker takes
+ * over is this call — and the only way the page reloads is that takeover. The
+ * flag is what separates "the reader asked for the new version" from "a worker
+ * activated by itself", which happens on the first visit and again whenever the
+ * browser gets round to an update check after a stretch offline; reloading then
+ * would throw away a half-written note.
+ */
+let reloadOnTakeover = false;
+
 /** Tell the waiting worker to take over; the controllerchange below reloads. */
 export function applyUpdate(): void {
+  reloadOnTakeover = true;
   waitingWorker?.postMessage({ type: 'SKIP_WAITING' });
 }
 
@@ -57,8 +70,6 @@ export function registerPWA(): void {
   });
   if (!import.meta.env.PROD || !('serviceWorker' in navigator)) return;
   window.addEventListener('load', () => {
-    // Only reload after an *update* — never when the first worker claims the page.
-    const hadController = Boolean(navigator.serviceWorker.controller);
     navigator.serviceWorker
       .register('/sw.js')
       .then((registration) => {
@@ -75,9 +86,12 @@ export function registerPWA(): void {
       .catch(() => {
         /* offline support is a bonus; the app works without it */
       });
+    // Fires on the first visit (the new worker claims the page), after a stretch
+    // offline (the browser retries the update check and activates one), and when
+    // the reader taps Reload. Only the last of those is consent.
     let reloaded = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (reloaded || !hadController) return;
+      if (reloaded || !reloadOnTakeover) return;
       reloaded = true;
       window.location.reload();
     });

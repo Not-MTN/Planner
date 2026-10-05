@@ -110,8 +110,10 @@
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  /* `--muted` at full strength: it was faded to 0.7 for quietness, and 10px
+     bold text at that contrast is 3.1:1 — below the 4.5:1 floor, and this
+     label is a heading for the group under it (e2e/a11y.spec.ts). */
   color: var(--muted);
-  opacity: 0.7;
   margin: 18px 10px 8px;
 }
 
@@ -375,7 +377,9 @@
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  background: #22c55e;
+  /* A darker green: #22c55e under white text is 2.3:1, which is unreadable for
+     the one word that says the numbers are live. */
+  background: #15803d;
   color: white;
   padding: 3px 8px;
   border-radius: 999px;
