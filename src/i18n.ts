@@ -65,8 +65,20 @@ const EASTERN_ARABIC = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '�
  * Only ever applied to display strings — input `value`s keep ASCII digits.
  */
 export function faDigits(value: string): string {
-  if (lang !== 'fa') return value;
-  return value.replace(/[0-9]/g, (digit) => EASTERN_ARABIC[Number(digit)]);
+  return digitsIn(value, lang);
+}
+
+/**
+ * The same conversion for callers that carry the language themselves.
+ *
+ * The marketing pages keep their own `lang` (the site and the planner can be in
+ * different languages on the same screen), so they pass it in rather than
+ * relying on the module's current one.
+ */
+export function digitsIn(value: number | string, target: Lang): string {
+  const text = String(value);
+  if (target !== 'fa') return text;
+  return text.replace(/[0-9]/g, (digit) => EASTERN_ARABIC[Number(digit)]);
 }
 
 /** Display a number: Persian digits in fa, the plain number in English. */

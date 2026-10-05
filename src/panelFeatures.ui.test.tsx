@@ -113,7 +113,7 @@ function saved(): PlannerState {
   return JSON.parse(localStorage.getItem('personal-planner.v1') ?? '{}') as PlannerState;
 }
 
-async function mount(state: PlannerState, route: 'student' | 'guardian' = 'student'): Promise<void> {
+async function mount(state: PlannerState, route: 'student' | 'guardian' | 'insights' = 'student'): Promise<void> {
   window.history.replaceState(null, '', `#/${route}`);
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -125,12 +125,9 @@ async function mount(state: PlannerState, route: 'student' | 'guardian' = 'stude
       </StrictMode>,
     ),
   );
-  for (
-    let index = 0;
-    index < 6 && !document.querySelector(route === 'student' ? '.student-panel-view' : '.guardian-roster');
-    index += 1
-  )
-    await settle();
+  const ready =
+    route === 'student' ? '.student-panel-view' : route === 'guardian' ? '.guardian-roster' : '.stat-row';
+  for (let index = 0; index < 6 && !document.querySelector(ready); index += 1) await settle();
 }
 
 function studentState(): PlannerState {
@@ -341,9 +338,56 @@ describe('actionable student panel', () => {
     expect(query('.study-queue-card').textContent).toContain('صف مطالعهٔ شما');
     expect(query('.exam-agenda').textContent).toContain('امتحان‌های پیش رو');
   });
+
+  it('shows every number in the student panel in Persian digits', async () => {
+    setLang('fa');
+    await mount(studentState());
+    expect(document.documentElement.dir).toBe('rtl');
+
+    // The stat tiles and the done/planned fraction are the numbers a student
+    // reads first; Latin digits next to Persian words are the tell that a
+    // screen was translated but not finished.
+    const tiles = [...document.querySelectorAll('.panel-stat')].map((tile) => tile.textContent ?? '');
+    expect(tiles.join(' ')).toContain('۳');
+    for (const tile of tiles) expect(tile, tile).not.toMatch(/[0-9]/);
+    for (const number of document.querySelectorAll('.panel-stat strong, .student-summary-values strong')) {
+      expect(number.textContent ?? '', number.textContent ?? '').not.toMatch(/[0-9]/);
+    }
+  });
 });
 
 describe('guardian roster and planning', () => {
+  it('shows the insight tiles and the week chart in Persian digits', async () => {
+    setLang('fa');
+    await mount(studentState(), 'insights');
+    expect(document.documentElement.dir).toBe('rtl');
+
+    const tiles = [...document.querySelectorAll('.stat-num, .stat-tile .stat-hint')].map((item) => item.textContent ?? '');
+    expect(tiles.length).toBeGreaterThan(0);
+    for (const value of tiles) expect(value, value).not.toMatch(/[0-9]/);
+
+    // Chart labels are SVG text, which is easy to forget: they are still read
+    // by people, and a Persian axis labelled 2026-03 reads as a different app.
+    for (const label of document.querySelectorAll('.chart-axis-label, text[text-anchor="end"]')) {
+      expect(label.textContent ?? '', label.textContent ?? '').not.toMatch(/[0-9]/);
+    }
+  });
+
+  it('shows a guardian the same numbers as a student, in Persian digits', async () => {
+    setLang('fa');
+    await mount(guardianState(), 'guardian');
+    expect(document.documentElement.dir).toBe('rtl');
+    // Alice's week is 3 of 4 in the fixture; both numbers are rendered by the
+    // guardian's own summary markup rather than a shared component.
+    // The ring prints the percentage and the list beside it prints done/planned;
+    // both come from the guardian's own summary markup rather than a shared
+    // component, so both are worth checking.
+    const summary = query('.student-summary-values').textContent ?? '';
+    expect(summary).toContain('۳');
+    expect(summary).toContain('۷۵%');
+    expect(summary).not.toMatch(/[0-9]/);
+  });
+
   it('searches and filters the roster and recovers from a no-match result', async () => {
     await mount(guardianState(), 'guardian');
     expect(document.querySelectorAll('.student-card')).toHaveLength(4);

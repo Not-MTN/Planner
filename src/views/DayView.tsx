@@ -539,7 +539,7 @@ function WeatherCard() {
     <section className="card weather-card" aria-label={t("Weather for today")}>
       <span className="weather-icon" aria-hidden="true">{info.icon}</span>
       <div className="weather-body">
-        <strong>{data.temp}°</strong>
+        <strong>{faNum(data.temp)}°</strong>
         <span className="weather-label">{info.label}</span>
       </div>
       <p className="meta weather-meta">

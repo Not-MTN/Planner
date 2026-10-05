@@ -6,6 +6,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { COPY, type Lang } from './copy';
+import { digitsIn } from '../i18n';
 
 const RING_R = 30;
 const RING_C = 2 * Math.PI * RING_R;
@@ -73,7 +74,12 @@ export function DemoStage({ lang }: { lang: Lang }) {
         </div>
 
         <div className="demo-ringrow">
-          <svg className="demo-ring" viewBox="0 0 80 80" role="img" aria-label={`${done} of 4 done`}>
+          <svg
+            className="demo-ring"
+            viewBox="0 0 80 80"
+            role="img"
+            aria-label={lang === 'fa' ? `${digitsIn(done, lang)} از ${digitsIn(4, lang)} انجام شد` : `${done} of 4 done`}
+          >
             <circle className="ring-track" cx="40" cy="40" r={RING_R} />
             <circle
               className="ring-fill"
@@ -86,7 +92,7 @@ export function DemoStage({ lang }: { lang: Lang }) {
           </svg>
           <div>
             <p className="demo-ringnum">
-              {done}/<span>4</span>
+              {digitsIn(done, lang)}/<span>{digitsIn(4, lang)}</span>
             </p>
             <p className="demo-ringlabel">{lang === 'fa' ? 'انجام‌شده امروز' : 'done today'}</p>
           </div>
@@ -101,7 +107,7 @@ export function DemoStage({ lang }: { lang: Lang }) {
                 </svg>
               </span>
               <span className="demo-taskname">{lang === 'fa' ? task.fa : task.en}</span>
-              {task.time ? <span className="demo-time">{task.time}</span> : null}
+              {task.time ? <span className="demo-time">{digitsIn(task.time, lang)}</span> : null}
             </li>
           ))}
         </ul>
@@ -134,7 +140,7 @@ export function DemoStage({ lang }: { lang: Lang }) {
         </div>
 
         <div className="demo-score">
-          <p className="demo-scorenum">{score}%</p>
+          <p className="demo-scorenum">{digitsIn(score, lang)}%</p>
           <span className="demo-delta">{c.guardianHeroDelta}</span>
         </div>
 

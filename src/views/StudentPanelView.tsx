@@ -737,7 +737,7 @@ export function StudentPanelView() {
             <ul>
               {past.slice(0, 8).map((entry) => (
                 <li key={entry.week}>
-                  <span className="past-week">{entry.week}</span>
+                  <span className="past-week">{formatWeekRange(entry.week)}</span>
                   <span className="past-count">{t("{0} changes explained", { 0: entry.count })}</span>
                 </li>
               ))}

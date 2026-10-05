@@ -5,6 +5,7 @@
  */
 import { useEffect, useState } from 'react';
 import { COPY, type Lang } from './copy';
+import { digitsIn } from '../i18n';
 import { useParallax } from './effects';
 
 const NAV = [
@@ -107,7 +108,7 @@ export function AppWindow({ lang }: { lang: Lang }) {
                   style={{ strokeDashoffset: RING_C * (1 - done / 5) }}
                 />
                 <text x="35" y="39">
-                  {Math.round((done / 5) * 100)}%
+                  {digitsIn(Math.round((done / 5) * 100), lang)}%
                 </text>
               </svg>
             </header>

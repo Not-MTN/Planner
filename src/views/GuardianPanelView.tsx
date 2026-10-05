@@ -579,8 +579,8 @@ export function GuardianPanelView() {
                         <div>
                           <p>{t('Done')}</p>
                           <strong>
-                            {link.results.done}
-                            <small> / {link.results.planned}</small>
+                            {faNum(link.results.done)}
+                            <small> / {faNum(link.results.planned)}</small>
                           </strong>
                         </div>
                         <div>

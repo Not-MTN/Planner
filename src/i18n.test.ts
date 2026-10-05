@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { COMPLETE_LANGS, faDigits, faNum, getLang, missingKeys, setLang, t, LANGUAGES } from './i18n';
+import { COMPLETE_LANGS, digitsIn, faDigits, faNum, getLang, missingKeys, setLang, t, LANGUAGES } from './i18n';
 import { fa } from './locales/fa';
 import { fi } from './locales/fi';
 
@@ -41,6 +41,24 @@ describe('i18n', () => {
     setLang('fa');
     expect(faNum(1207)).toBe('۱۲۰۷');
     expect(faDigits('07:15')).toBe('۰۷:۱۵');
+    setLang(previous);
+  });
+  it('converts for a caller that carries its own language', () => {
+    // The marketing pages keep their own lang, so they pass it in rather than
+    // relying on whatever the planner last set.
+    expect(digitsIn(1207, 'fa')).toBe('۱۲۰۷');
+    expect(digitsIn('25 KB', 'fa')).toBe('۲۵ KB');
+    expect(digitsIn(1207, 'en')).toBe('1207');
+    expect(digitsIn('۰', 'en')).toBe('۰');
+  });
+  it('never rewrites a number in place — display only', () => {
+    const previous = getLang();
+    setLang('fa');
+    // Inputs and stored values keep ASCII digits; only what is printed changes.
+    expect(faNum(7)).not.toBe(7);
+    expect(typeof faNum(7)).toBe('string');
+    setLang('en');
+    expect(faNum(7)).toBe(7);
     setLang(previous);
   });
   it('interpolates and falls back to English', () => {

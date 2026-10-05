@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { normalizeRecoveryKey } from '../auth/crypto';
+import { faNum } from '../i18n';
 
 /**
  * The list of recovery codes shown once, at the moment an account is created or
@@ -39,8 +40,10 @@ export function RecoveryCodes({
     onConfirmedChange(matches);
   }, [matches, onConfirmedChange]);
 
-  const text = (template: string) => template.replace('{n}', String(askedNumber));
-  const all = codes.map((code, index) => `${index + 1}. ${code}`).join('\n');
+  // The number the person is being asked for follows the language like every
+  // other digit on screen; the codes themselves stay ASCII, they are keys.
+  const text = (template: string) => template.replace('{n}', String(faNum(askedNumber)));
+  const all = codes.map((code, index) => `${faNum(index + 1)}. ${code}`).join('\n');
 
   const copyAll = async () => {
     try {
@@ -65,7 +68,7 @@ export function RecoveryCodes({
   const print = () => {
     const win = window.open('', '_blank', 'noopener,noreferrer');
     if (!win) return;
-    const rows = codes.map((code, index) => `<li><span>${index + 1}</span><code>${code}</code></li>`).join('');
+    const rows = codes.map((code, index) => `<li><span>${faNum(index + 1)}</span><code>${code}</code></li>`).join('');
     win.document.write(
       `<!doctype html><html><head><meta charset="utf-8"><title>Planner recovery codes</title>` +
         `<style>` +
@@ -87,7 +90,7 @@ export function RecoveryCodes({
         <ol className="recovery-codes">
           {codes.map((code, index) => (
             <li key={code}>
-              <span className="recovery-code-num">{index + 1}</span>
+              <span className="recovery-code-num">{faNum(index + 1)}</span>
               <code dir="ltr">{code}</code>
             </li>
           ))}
@@ -117,7 +120,7 @@ export function RecoveryCodes({
           autoComplete="off"
           autoCorrect="off"
           spellCheck={false}
-          placeholder={`${askedNumber}. plnr-…`}
+          placeholder={`${faNum(askedNumber)}. plnr-…`}
         />
         <p className="auth-hint">{text(copy.authRecoveryConfirmHint)}</p>
         {matches ? <p className="recovery-ok">{copy.authRecoveryConfirmOk}</p> : null}

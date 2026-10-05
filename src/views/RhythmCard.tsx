@@ -118,7 +118,7 @@ export function RhythmCard({ today }: { today: string }) {
           <ul className="habit-links">
             {links.map((link) => (
               <li key={link.habitId}>
-                <span className={cx('link-lift', link.lift > 0 ? 'up' : 'down')}>{link.lift > 0 ? '↑' : '↓'} {Math.round(Math.abs(link.lift) * 100)}%</span>
+                <span className={cx('link-lift', link.lift > 0 ? 'up' : 'down')}>{link.lift > 0 ? '↑' : '↓'} {faNum(Math.round(Math.abs(link.lift) * 100))}%</span>
                 <Rich
                   text={t("On days you do {habit}, you finish {direction} tasks ({with} vs {without}).")}
                   values={{
