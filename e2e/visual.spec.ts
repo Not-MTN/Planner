@@ -75,11 +75,18 @@ async function seed(page: Page, language: 'en' | 'fa', theme: 'light' | 'dark'):
  * A page whose clock never moves, whose animations are off, and whose fonts are
  * loaded. Called before the first navigation so the app boots into the fixed
  * day rather than the real one.
+ *
+ * The session probe is aborted on purpose: the planner is behind the account
+ * gate, and this run has no account server to sign in to. A failed probe is a
+ * state the app handles — it renders the local planner offline instead of a
+ * sign-in screen — so the seeded state reaches the screen without faking any
+ * UI. The gate's own behaviour is covered by src/auth/gate.test.tsx.
  */
 async function open(page: Page, options: { language: 'en' | 'fa'; theme: 'light' | 'dark'; path: string }): Promise<void> {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.clock.setFixedTime(new Date(NOW));
   await seed(page, options.language, options.theme);
+  await page.route('**/api/auth/session', (route) => route.abort());
   await page.goto(options.path);
   await page.evaluate(async () => {
     await document.fonts.ready;

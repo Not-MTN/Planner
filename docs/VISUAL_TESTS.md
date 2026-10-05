@@ -56,10 +56,20 @@ Three things would otherwise make every run different:
 Screenshots are compared with `maxDiffPixelRatio: 0.002`, which tolerates the
 last bit of antialiasing noise without letting a real change through.
 
+## How the signed-in screens get on screen
+
+The planner sits behind the account gate, and CI has no account server to sign
+in to. The suite aborts the `/api/auth/session` probe, which is a state the app
+already handles: it renders the local planner offline. Nothing about the UI is
+faked — the seeded state is the state the app would show a device that signed in
+this morning and then lost its network — and the screenshots are of the real
+views. What is *not* exercised here is the gate itself, or anything that needs a
+vault (sync, panels, sharing); those keep their behaviour tests.
+
 ## What it does not cover
 
-- Anything behind an account: the sign-in gate, the settings sheet and the app
-  in a signed-in state. Those need a server (and a vault) to be meaningful, so
+- The sign-in gate itself, the unlock screen, the settings sheet and anything
+  that needs a server-backed vault. Those need a server (and a vault) to be meaningful, so
   they stay with the behaviour suites.
 - Mobile layouts beyond the one phone case. The rest of the phone matrix is
   covered by the overflow checks in `e2e/ui-layout.spec.ts`, which assert that
