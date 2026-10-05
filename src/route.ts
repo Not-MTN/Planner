@@ -133,8 +133,18 @@ export function toHash(route: Route): string {
   }
 }
 
+/**
+ * A stable identity for the visible page.
+ *
+ * `quickadd` is `today` with the caret in the quick-add box — the same page,
+ * addressed differently. They share a key on purpose: the key is what React
+ * remounts on (`Shell.tsx`, `<div key={key}>`), and remounting the view for a
+ * URL that only says "and focus the box" is how the caret kept getting thrown
+ * away mid-boot (measured: it landed in the box, then the address normalized
+ * and the view remounted under it).
+ */
 export function routeKey(route: Route): string {
-  return toHash(route);
+  return route.name === 'quickadd' ? toHash({ name: 'today' }) : toHash(route);
 }
 
 export function routeTitle(route: Route): string {

@@ -65,6 +65,17 @@ async function waitForText(needle: string, timeoutMs = 4000): Promise<void> {
   }
 }
 
+/** Wait for the caret to be somewhere specific, which the retrying watcher may take a tick to do. */
+async function waitForFocus(element: HTMLElement | null, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (document.activeElement !== element) {
+    if (Date.now() > deadline) throw new Error(`Focus never reached <${element?.className ?? 'null'}>`);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    });
+  }
+}
+
 beforeEach(() => {
   window.localStorage.clear();
   // Tests below are not about the tour; only the dedicated tour test clears this.
@@ -182,6 +193,31 @@ describe('app smoke', () => {
     act(() => example?.click());
     expect(input?.value).toBe('Call mom tomorrow 5pm #work !high');
     expect(document.querySelector('.quick-add-examples')).toBeFalsy();
+  });
+
+  it('keeps the PWA shortcut caret in quick add and normalizes the address', async () => {
+    // `#/today?qa=1` is the installed-shortcut URL. The whole difficulty is
+    // that the caret has to outlive the boot: an earlier version stripped the
+    // query from the address while the page was still mounting, the router
+    // re-read the address, the route flipped from quick-add to today — a
+    // different React key — and the view remounted under the caret that had
+    // just been placed. The browser suite saw the end state: the box on screen,
+    // the caret on `<body>`.
+    window.history.replaceState(null, '', '#/today?qa=1');
+    mountApp();
+    const input = document.querySelector<HTMLInputElement>('.quick-add input');
+    expect(input).toBeTruthy();
+    await waitForText('Personal Planner');
+    expect(document.activeElement).toBe(input);
+    // The query has done its job and is gone from the address bar...
+    expect(window.location.hash).toBe('#/today');
+    // ...and the route followed it, without remounting the view: the input is
+    // the same node and still has the caret.
+    expect(window.location.hash).not.toContain('qa=1');
+    // A render that drops focus to `<body>` (what the boot used to do) is
+    // recovered from, because the watcher is still running.
+    act(() => input?.blur());
+    await waitForFocus(input);
   });
 
   it('adds a task through smart quick add and undoes it', () => {

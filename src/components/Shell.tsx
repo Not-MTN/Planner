@@ -309,15 +309,24 @@ export function Shell() {
   //
   // The rule is "put the caret back only when nobody has it": if focus was lost
   // to the page itself, the box takes it again; if a person has focused
-  // anything else in the meantime, this backs off and never fights them.
+  // anything else in the meantime, this never fights them.
+  const [quickAddPending, setQuickAddPending] = useState(route.name === 'quickadd');
+  // Arriving at the shortcut link while the app is already open counts too.
   useEffect(() => {
-    if (route.name !== 'quickadd') return;
+    if (route.name === 'quickadd') setQuickAddPending(true);
+  }, [route.name]);
+  useEffect(() => {
+    if (!quickAddPending) return;
+    if (route.name !== 'quickadd' && route.name !== 'today') {
+      setQuickAddPending(false);
+      return;
+    }
     const find = () =>
       document.querySelector<HTMLInputElement>('.quick-add input') ??
       document.querySelector<HTMLInputElement>('input[aria-autocomplete]');
     let cancelled = false;
-    let consumed = false;
-    const nobodyHasFocus = () => {
+    let delivered = false;
+    const caretIsLoose = () => {
       const active = document.activeElement;
       return !active || active === document.body || active === document.documentElement || !document.contains(active);
     };
@@ -326,16 +335,19 @@ export function Shell() {
       const input = find();
       if (!input) return;
       if (document.activeElement !== input) {
-        if (!nobodyHasFocus()) return; // a person is using something else
+        if (!caretIsLoose()) return; // a person is using something else; leave them alone
         input.focus();
       }
-      if (!consumed && document.activeElement === input) {
-        consumed = true;
+      if (!delivered && document.activeElement === input) {
+        delivered = true;
         // The shortcut's URL is `#/today?qa=1`; once it has done its job, keep
         // the query out of the address bar so a reload does not re-trigger the
-        // whole dance.
+        // whole dance. `replaceState` fires no event, so the router is told
+        // explicitly — and because quick-add shares Today's key, normalizing
+        // the route does not remount the view the caret is sitting in.
         if (window.location.hash.includes('qa=1')) {
           window.history.replaceState(null, '', window.location.hash.replace(/[?&]qa=1/, '').replace(/\?$/, ''));
+          window.dispatchEvent(new Event('hashchange'));
         }
       }
     };
@@ -348,20 +360,30 @@ export function Shell() {
     const observer = new MutationObserver(attempt);
     observer.observe(document.body, { childList: true, subtree: true });
     const interval = window.setInterval(attempt, 200);
-    const stop = () => {
+    const deadline = window.setTimeout(stop, 10_000);
+    const onInteraction = () => stop();
+    function stop() {
+      if (cancelled) return;
       cancelled = true;
       observer.disconnect();
       window.clearInterval(interval);
       window.clearTimeout(deadline);
-      document.removeEventListener('pointerdown', stop, true);
-      document.removeEventListener('keydown', stop, true);
-    };
-    const deadline = window.setTimeout(stop, 10_000);
-    document.addEventListener('pointerdown', stop, true);
-    document.addEventListener('keydown', stop, true);
+      document.removeEventListener('pointerdown', onInteraction, true);
+      document.removeEventListener('keydown', onInteraction, true);
+      setQuickAddPending(false);
+    }
+    document.addEventListener('pointerdown', onInteraction, true);
+    document.addEventListener('keydown', onInteraction, true);
     attempt();
-    return stop;
-  }, [route.name, key]);
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+      window.clearInterval(interval);
+      window.clearTimeout(deadline);
+      document.removeEventListener('pointerdown', onInteraction, true);
+      document.removeEventListener('keydown', onInteraction, true);
+    };
+  }, [quickAddPending, route.name]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
