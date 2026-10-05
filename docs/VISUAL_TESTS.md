@@ -32,6 +32,12 @@ You rarely have to do this by hand:
 - **By hand**, if you would rather: download the `visual-baselines` artifact from
   any run, unpack it into `e2e/visual.spec.ts-snapshots/`, and commit.
 
+One wrinkle worth knowing: a baseline commit pushed by the workflow itself
+(`github-actions[bot]`, using the run's own token) does not start a new run —
+GitHub does not trigger workflows from that token, and the run it does create
+sits at "action required". It needs nothing from you; the next ordinary push
+compares against the baselines and is the run that counts.
+
 Either way, review the images in the pull request the way you would review code.
 If a picture changed and that is not the change you meant, the diff is the bug
 report. A pull request from a fork cannot push, so it only uploads the artifact —

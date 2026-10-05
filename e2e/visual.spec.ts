@@ -154,6 +154,38 @@ test.describe('key views in every direction and theme', () => {
   }
 });
 
+/**
+ * The screenshot above would catch these too — but only until someone
+ * regenerates the baselines without looking. This asserts the property itself,
+ * because both failures it guards against have already happened once:
+ *
+ *   - the day heading printed Latin day and month names inside a Persian page,
+ *     when the seed wrote `planner-lang` without the date-language preference;
+ *   - the motivation line under it stayed English, because `MOTIVATION` reaches
+ *     `t()` as a variable and the completeness test only saw literals.
+ *
+ * English *content* is fine — task titles, category names, a user's own words.
+ * The app's own copy in a Persian interface is not allowed to be Latin.
+ */
+test.describe('Persian mode renders the app’s own words in Persian', () => {
+  test.use({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1, locale: 'en-US', timezoneId: 'UTC' });
+
+  test('today — fa', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop', 'the matrix runs once, at the desktop viewport');
+    await open(page, { language: 'fa', theme: 'light', path: '/#/today' });
+    await expect(page.locator('.timeline-card')).toBeVisible();
+
+    const heading = await page.locator('h1.hero-title').innerText();
+    expect(heading, 'the day heading must be Persian').toMatch(/[\u0600-\u06FF]/);
+    expect(heading, 'the day heading must not use Latin day or month names').not.toMatch(
+      /\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|January|February|March|April|May|June|July|August|September|October|November|December)\b/,
+    );
+
+    const quote = await page.locator('.quote').innerText();
+    expect(quote, 'the motivation line must be translated').not.toMatch(/[A-Za-z]/);
+  });
+});
+
 test.describe('the phone layout in Persian, dark', () => {
   test.use({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, locale: 'en-US', timezoneId: 'UTC' });
 
