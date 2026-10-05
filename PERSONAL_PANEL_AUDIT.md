@@ -164,7 +164,7 @@ Searched the whole `src/` tree for `admin`, `teacher`, `staff`, `organization`, 
 | Spec (`SPEC.md`) | Code |
 |---|---|
 | Three roles as *capabilities* attached to an account, several at once (`SPEC.md:44-64`) | One role column, used once at signup |
-| Per-link scope presets ("Parent"/"Advisor" matrix, `SPEC.md:66-84`) | Only `kind` + `field`; no per-scope toggles |
+| Per-link scope presets ("Parent"/"Advisor" matrix) | **Cancelled, not missing** — the spec dropped the matrix on 2026-10-05; only `kind` + `field` exist, and the shipped link shares one weekly snapshot the student chooses to send (SPEC §3, §16) |
 | Settings section **"My role"** that appears when a role is active (`SPEC.md:305`) | `[NOT FOUND]` — no such section in `SettingsSheet`/`SettingsExtras` |
 | Routes `/app#/students`, `/app#/students/:id`, `/app#/my-guardians` (`SPEC.md:294-299`) | `[NOT FOUND]` — actual routes are `#/panels`, `#/student`, `#/guardian`; the spec paths fall through to `today` in `parseHash` |
 | Student panel: proposals inbox with accept/decline, private toggle, "this is too much today" button (`SPEC.md:326-330`) | `[NOT FOUND]` — student inbox is a read/tick list |
@@ -484,7 +484,7 @@ What *does* differ between users:
 | Reminders | **Fully implemented (in-app)**; OS notifications only while the app/PWA runs | `src/reminders.ts`, `SettingsSheet.tsx:166-240` |
 | Feeds / weather / templates / CSV import / ICS | **Fully implemented** | `feeds.ts`, `weather.ts`, `templates.ts`, `importers.ts`, `ics.ts` |
 | Attachments | **Fully implemented but device-local** (bytes in IndexedDB; referenced by `notes[].attachments` and encrypted state carries only refs) | `files.ts:11-18`, `idb.ts:79-104` |
-| Spec-only items (£) | **Not implemented** | see §3.3 — role capabilities/scope presets, "My role" settings, `/app#/students`, `/app#/my-guardians`, proposals inbox, bulk plan editor, change feed "changed by" |
+| Spec-only items (£) | **Not implemented — or deliberately cancelled** | see §3.3 — role capabilities, "My role" settings, `/app#/students`, `/app#/my-guardians`, proposals inbox, bulk plan editor, change feed "changed by"; per-link scope presets were cancelled in SPEC §16 on 2026-10-05 rather than left unbuilt |
 | Dead code / unused exports | none found for major modules; `seedTemplates` is used indirectly by `loadTemplates` (`templates.ts:107`) | repo-wide export-usage pass |
 
 ---
@@ -553,7 +553,7 @@ Everything below exists in the codebase but cannot be inferred from a sidebar sc
 13. **The system is account-backed and encrypted**: signup/login/recovery/passkeys/sessions, an encrypted vault, an optional sync-code sync, a *second* "shared space" sync, and guardian links with one-hop notice passing. Data may be local-only, vault-backed, or synced — the sidebar shows none of this beyond a small sync-status line.
 14. **Everything is bilingual with enforced Persian coverage** (`i18n.test.ts` fails if any `t('…')` string lacks a fa translation) and the app is fully RTL, so any navigation label in the screenshot has a matching English key in code.
 15. **Several nav decisions are user-configurable** (Settings → Navigation) and stored per device in `localStorage`.
-16. **The two legacy specs in the repo (`SPEC.md`) describe routes and role machinery that do not exist** (`/app#/students`, `/app#/my-guardians`, "My role", scope presets) — useful context, but not current architecture.
+16. **The two legacy specs in the repo (`SPEC.md`) describe routes and role machinery that do not exist** (`/app#/students`, `/app#/my-guardians`, "My role", scope presets) — useful context, but not current architecture. The scope-preset matrix has since been removed from the spec outright, so it is no longer a promise anyone can be measured against (SPEC §16, question 5).
 
 ---
 

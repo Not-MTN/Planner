@@ -38,7 +38,7 @@ users have** — read §15 before treating any phase below as a to-do list.
 | Notifications | **In-app everywhere.** Installed apps (PWA / desktop) may opt into **content-free push**. Never email. |
 | Student privacy | **Guaranteed private zone.** Items marked private are invisible to every guardian, with no override. |
 | Explaining changes | Required only for **significant** changes; one-tap reason chips plus an optional sentence. |
-| Guardian types | **Parent** and **Academic advisor** — one panel, different default scopes. |
+| Guardian types | **Parent** and **Academic advisor** — one panel; the choice is a label and a tone, not a set of permissions. Sharing is the student's call. |
 | Retention | Full detail inside the hot window; **weekly rollup to results** afterwards. |
 | AI | Assists both sides. AI and guardian changes land as **reviewable proposals**, never silent writes. |
 | Local-first | Still true. Editing works offline; signing in and signing up need a connection. |
@@ -49,11 +49,16 @@ users have** — read §15 before treating any phase below as a to-do list.
 
 ## 3. Roles
 
-> **Status: partly.** Roles and the optional panels shipped as written here — role at
-> sign-up, panel switched on, both panels can run at once, all of it toggled from
-> Panels. **Scope presets did not ship**, and the preset table below is not the
-> product: a link is a single relationship with a per-link results key, not a set of
-> per-scope toggles (see §7 and §15, phase 3).
+> **Status: roles and panels shipped; scopes and presets are cancelled.** Role at
+> sign-up, panel switched on, both panels running at once, all of it toggled from
+> Panels — exactly as written here. The **scope presets** and the per-scope toggle
+> table that used to follow were dropped on purpose, on 2026-10-05, rather than
+> postponed: a shipped link carries a per-link results key and the guardian sees only
+> the weekly snapshot the student chooses to send (`src/auth/links.ts`,
+> `src/panels.ts`). A per-scope toggle promises a guardian live, filtered access — and
+> nothing in the architecture can make that true, because the guardian's browser never
+> holds the vault key (§4). A switch with nothing behind it is worse than no switch:
+> it would read as a privacy control while the data flow stayed all-or-nothing.
 
 **Panels are optional.** The account role picked at sign-up only decides which
 panel is switched on first — it is never a mode the planner is locked into:
@@ -68,30 +73,38 @@ Roles are **capabilities attached to an account**, not mutually exclusive boxes.
 
 - **Personal** — the default. A vault with no links. This is today's app, unchanged.
 - **Student** — a vault plus outgoing links to guardians. Means: *"I'm open to being
-  linked; here are my scopes."* Without a link it behaves exactly like Personal.
-- **Guardian** — incoming links to one or many students. Parent and Advisor are scope
-  presets over the same code path. A guardian keeps their own personal planner too.
+  linked; here is what I share each week."* Without a link it behaves exactly like
+  Personal.
+- **Guardian** — incoming links to one or many students. Parent and Advisor are the same
+  code path with different copy; the type is recorded per link as `kind`
+  (`GuardianKind = 'advisor' | 'parent'`). A guardian keeps their own personal planner
+  too.
 
 An account can hold several roles at once (a PhD student is both a student of their
 advisor and a mentor to undergrads).
 
-### Scope presets
+### Sharing is the student's call, not a scope
 
-| Scope | Parent | Advisor |
-|---|---|---|
-| Plan, tasks, events | ✅ | ✅ |
-| Completions and misses | ✅ | ✅ |
-| Habits, sleep, daily essentials | ✅ | ⬜ unless study-relevant |
-| Mood check-ins | ✅ | ⬜ opt-in |
-| Focus and study time | ✅ | ✅ |
-| Subjects, deadlines, exams | ⬜ | ✅ |
-| Notes and journal | ⬜ (student shares explicitly) | ⬜ |
-| Edit the plan | ✅ | ✅ |
-| Set goals and milestones | ✅ | ✅ |
+The table this section replaced listed ten scopes per guardian type (§16, question 5).
+The shipped model has
+one sharing decision, and the student makes it: each week they may write a **headline**
+that goes out with their results, and the reason behind a change stays private. The
+guardian receives totals — planned, done, focused minutes, per-subject minutes and the
+headline — and nothing else, ever.
 
-Every scope is a per-link toggle, so a parent can switch mood off for a 17-year-old
-and an advisor can be granted it. A fourth preset (**Tutor** — one subject) can be
-added later without new machinery.
+What that means in practice:
+
+- **No per-scope toggles, and no promise of them.** Widening a guardian's view is not a
+  checkbox: it is a new data flow (the guardian would need a key to something the
+  student's device sealed), so it would be a new spec, not a setting.
+- **Revocation is per link and immediate** — unlinking stops future shares. What was
+  already shared stays with the guardian, which is what "shared" means.
+- **The guardian's type is still real**, it just does not gate anything: it picks the
+  words a student sees on the invite and the tone of the roster. A parent and an advisor
+  with the same kind of link can see the same thing — and both see only what the student
+  sends.
+- **The Tutor case is covered by the same rule**, not by a fourth preset: a mentor sees
+  the same weekly snapshot as anyone else.
 
 ---
 
@@ -144,8 +157,8 @@ entire notification feed by diffing the student's vault against its own
 | `passkeys` | user_id, credential id, public key, label |
 | `sessions` | id, user_id, device label, ip/agent, expires_at, last_seen |
 | `vaults` | owner_id, version, ciphertext, wrapped keys, updated_at |
-| `links` | guardian_id, student_id, preset, scopes[], status, created_at |
-| `invites` | code hash, from_user, to_email/username, preset, expires_at |
+| `planner_links` | id, guardian_id, student_id, student_username_lower, code_hash, wrapped_share, share_ciphertext, share_week, status, code_expires_at, note_to_student, note_to_guardian, note_week, created_at, updated_at |
+| `planner_auth_events` | id, user_id, kind, device_label, network, new_network, created_at |
 | `recovery_codes` | user_id, hash, used_at |
 
 The existing `planner_sync` table folds into `vaults`.
@@ -327,7 +340,8 @@ guardian decrypts them — the server moves ciphertext it can never open.
    guardian and the server stores the wrapped blob. The server cannot unwrap it.
 4. Unlinking stops future shares; what was already shared stays with the guardian
    (see `SECURITY.md`).
-5. There is no per-scope revocation — sharing is all-or-nothing per link.
+5. Sharing is all-or-nothing per link. Per-scope revocation was cancelled rather than
+   left open (§3): there are no scopes to revoke, so the unit of revocation is the link.
 
 ---
 
@@ -653,16 +667,16 @@ no surviving note references them.
 | **0** | Landing page, `SPEC.md` sign-off, threat model update | **Done.** Landing ships with hero, roles and an FAQ section (`src/marketing/Landing.tsx`); `SECURITY.md` holds the threat model. There is no pricing page, because there is no paid tier. |
 | **1** | Auth: name + username or email + password, recovery key, passkey enrolment, sessions, trusted devices, device revoke, claim local data | **Done**, plus TOTP second factor and biometric unlock for packaged apps, both added after this spec. Recovery is an approved device, a saved recovery key, or a passkey. |
 | **2** | Vaults: encrypted vault per account, multi-device, offline open, approved-device password recovery | **Done.** Vault, multi-device and offline / trusted-device open ship (`src/auth/vault.ts`), and an approved device can now set a new password without the old one, re-wrapping the key it already holds. The device-to-device approval relay for a device that *cannot* open the vault was not built (see §12): it has nothing to prove with, and the recovery key covers that case. |
-| **3** | Roles and linking: invites, student acceptance, scopes, presets, revocation | **Done, minus scopes and presets.** Role at sign-up, guardian invites by link or QR, student acceptance, link status and revocation all ship. Sharing is not per-scope; it is the weekly snapshot in phase 4. |
+| **3** | Roles and linking: invites, student acceptance, scopes, presets, revocation | **Done, with scopes and presets cancelled.** Role at sign-up, guardian invites by link or QR, student acceptance, link status and revocation all ship. The scope/preset half was dropped on 2026-10-05 — sharing is the weekly snapshot in phase 4, and a per-scope toggle has nothing behind it (§3, §7). |
 | **4** | Guardian read-only: roster, dashboards from archives, change feed, tombstones, attribution | **Changed on purpose.** The guardian gets a roster and **weekly results the student chooses to share** (`src/views/GuardianPanelView.tsx`) — not a live scoped dashboard. There is no change feed and no tombstone list, and a compare-two-students view was not built (§16). |
 | **5** | Write access: plan editor, proposals, reasons, undo, audit log, shared timeline | **Partly, and lighter than this spec.** A guardian composes a plan or suggests a goal; both land in the student's inbox, where the student ticks items off and accepts or declines (`StudentPanelView.tsx`, `src/panels.ts`). The student's own planner items are never written to. Proposals as a separate review object, undo, the audit log and a shared timeline were not built. |
 | **6** | AI on both sides: proposals, weekly narrative, risk flags | **Done, with the AI drafting rather than deciding.** The personal AI coach ships in full (plan, weekly review, saved memory). Guardians get `generateGuardianGuidance` — a summary, open questions, and one encouraging line — and, as of 2026-10-05, `draftGuardianProposal`: the AI fills the plan or goal composer with steps drawn only from the shared weekly totals, the guardian edits it, and the student accepts or declines it in their inbox like any other suggestion (`GuardianPlanComposer.tsx`, `GuardianGoalForm.tsx`). An AI draft never sends itself and never writes to the student's planner. |
 | **7** | Extras: templates, syllabus → term plan, optional push for installed apps, meeting one-pager | **Done, as of 2026-10-05.** Templates, ICS/CSV/JSON import and opt-in content-free push for installed apps already shipped. A pasted syllabus now becomes a term plan (`src/syllabus.ts` + Settings → Connections → "Plan a term from a syllabus") — weeks and dated assessments are read out, shown back, and only added when asked. The guardian side gained the meeting one-pager: an agenda printed from the shared weekly results (`src/advising.ts`, "Meeting one-pager" on a student card). |
 
-**Not built, in one list:** the device-to-device approval relay, guardian scopes
-and presets, live scoped dashboards / change feed / tombstones, proposals as a
-separate review object, undo, the shared audit log, and the guardian compare
-view. Guardian AI *drafting*, the syllabus → term-plan importer and the meeting
+**Not built, in one list:** the device-to-device approval relay, live scoped
+dashboards / change feed / tombstones, proposals as a separate review object, undo,
+the shared audit log, and the guardian compare view. Guardian scopes and presets are
+**not** on this list: they were cancelled, not deferred (see §3 for why). Guardian AI *drafting*, the syllabus → term-plan importer and the meeting
 one-pager now ship; what is still missing on the AI side is the student-facing
 proposal variant (the student's own AI proposing planner items), which the
 coach's drafts already approximate.
@@ -686,21 +700,28 @@ Answered questions are recorded here rather than deleted, so nobody re-opens the
    The salt and recovery-start endpoints answer with a deterministic decoy for
    unknown accounts, and sign-up is rate-limited; `username_taken` on sign-up is the
    one remaining signal, and it is inherent to letting people pick a name.
+5. *Per-scope guardian toggles and presets — build them, or delete them from the
+   spec?* — **Deleted, on 2026-10-05.** The shipped link shares one weekly snapshot the
+   student chooses to send, and the guardian's browser never holds the vault key, so a
+   scope toggle would gate data flows that do not exist. Building it would mean
+   redesigning the sharing model first (a new spec), and shipping the switch without
+   the flow would misrepresent a privacy control. §3 now documents sharing as the
+   student's call and §7 records the link as the unit of revocation.
 
 **Still open**
 
-5. **A guardian compare-two-students view.** Not built (phase 4). Needs a decision
+6. **A guardian compare-two-students view.** Not built (phase 4). Needs a decision
    about what is fair to compare across two different students before it needs code.
-6. **Minimum age, and an under-13 parent-managed mode.** Nothing in the code or the
+7. **Minimum age, and an under-13 parent-managed mode.** Nothing in the code or the
    data model records age or consent. This is a product and legal decision before a
    school rollout, not an engineering one.
-7. **Anything that must outlive the retention window for school records.** Weekly
+8. **Anything that must outlive the retention window for school records.** Weekly
    results are snapshots the student shares and everything else stays on the device;
    a records-retention story would be new scope.
-8. **Whether `FocusHistory`, `StatsWidget`, `WeeklyReview` and `MatrixView` are
+9. **Whether `FocusHistory`, `StatsWidget`, `WeeklyReview` and `MatrixView` are
    provisional** — nothing in the code marks them either way
    (`PERSONAL_PANEL_AUDIT.md` §15).
-9. ~~**Approved-device password recovery**~~ — built on 2026-10-05: an approved
+10. ~~**Approved-device password recovery**~~ — built on 2026-10-05: an approved
    device whose vault key is in hand sets a new password from Settings → Account
    and rotates the recovery keys in the same step. What remains unbuilt is the
    *relay* for a device that cannot open the vault at all, which the recovery key
@@ -748,6 +769,7 @@ roughly in the order it would pay off.
 
 **Deliberately not planned**
 
-A live scoped guardian dashboard with a change feed, tombstones and an audit log — the
-shipped model is snapshot-based and the audits show it is the safer product (SPEC §15,
-phase 4) — and a paid tier, which is why the landing page has no pricing page.
+A live scoped guardian dashboard with a change feed, tombstones and an audit log, and
+the per-scope guardian toggles that would come with it — the shipped model is
+snapshot-based and the audits show it is the safer product (SPEC §3, §15 phase 4) — and
+a paid tier, which is why the landing page has no pricing page.
