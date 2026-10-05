@@ -21,23 +21,21 @@ and subpixel layout differ between machines: a baseline captured locally fails
 on the runner for reasons that have nothing to do with the change. The runner
 image is the single reference.
 
-To make or refresh them:
+You rarely have to do this by hand:
 
-1. Run **Actions → Visual regression → Run workflow** on your branch with
-   `update_baselines` ticked.
-2. Download the `visual-baselines` artifact when the run finishes.
-3. Unpack its contents into `e2e/visual.spec.ts-snapshots/` and commit them.
-4. Review the images in the pull request the way you would review code. If a
-   picture changed and that is not the change you meant, the diff is the bug
-   report.
+- **A branch with no baselines yet.** The workflow notices the directory is
+  empty, writes the baselines, commits them to that branch and stays green. The
+  next run is a real comparison.
+- **A change that is meant to move every picture** (a spacing scale, a font).
+  Run **Actions → Visual regression → Run workflow** on your branch with
+  `update_baselines` ticked; it regenerates and commits them the same way.
+- **By hand**, if you would rather: download the `visual-baselines` artifact from
+  any run, unpack it into `e2e/visual.spec.ts-snapshots/`, and commit.
 
-Runs on a branch where no baselines are committed yet do not fail: the workflow
-notices the directory is empty, writes the baselines, stays green and uploads
-them as the same artifact. That first green run *is* step 1 above, so a fresh
-clone needs no special handling — commit the artifact and the job becomes a real
-gate from the next run on. (A local `npm run test:e2e:visual` before that still
-fails with "A snapshot doesn't exist"; run it with `:update` once you have the
-artifact.)
+Either way, review the images in the pull request the way you would review code.
+If a picture changed and that is not the change you meant, the diff is the bug
+report. A pull request from a fork cannot push, so it only uploads the artifact —
+a maintainer commits that one.
 
 ## Why the pictures are comparable at all
 

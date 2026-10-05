@@ -6,11 +6,21 @@
 # on one machine fails on another for reasons nobody can fix. The runner image
 # is the single reference.
 #
-# To (re)create baselines, run this workflow on a branch with the
-# `update_baselines` input set, download the `visual-baselines` artifact it
-# uploads, and commit its contents to e2e/visual.spec.ts-snapshots/. Review the
-# images in the pull request the way you would review code.
+# The workflow mostly looks after itself: on a branch where no baselines are
+# committed yet it writes them, commits them and pushes them to that branch, so
+# the next run compares against a real reference instead of starting empty. The
+# `update_baselines` input does the same thing on purpose, for the times a change
+# is meant to move every picture.
+#
+# Either way the images also come back as the `visual-baselines` artifact, and
+# they should be reviewed in the pull request the way code is: a picture that
+# changed when you did not mean it to is a bug report that writes itself.
 name: Visual regression
+
+permissions:
+  # Used for one thing: committing fresh baselines to a same-repo branch. A pull
+  # request from a fork gets a read-only token, so it only uploads the artifact.
+  contents: write
 
 on:
   pull_request:
@@ -39,7 +49,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
+      # On a pull request the default checkout is the merge commit, and baselines
+      # committed on top of that would be wrong to push back. Check out the
+      # branch tip instead, from whichever repository owns it.
       - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
 
       - uses: actions/setup-node@v4
         with:
@@ -77,7 +93,8 @@ jobs:
         run: npm run test:e2e:visual
 
       # On a first run the images are the deliverable; on a regeneration they are
-      # what the maintainer commits. Uploaded either way, even if the run failed.
+      # what the branch gets. Uploaded either way, even if the run failed, so the
+      # images can be looked at even when the push could not happen.
       - name: Upload baselines
         if: always() && (inputs.update_baselines || steps.baselines.outputs.missing == 'true')
         uses: actions/upload-artifact@v4
@@ -86,6 +103,28 @@ jobs:
           path: e2e/visual.spec.ts-snapshots/
           if-no-files-found: warn
           retention-days: 30
+
+      # Only after a clean generation, and never for a fork (its token cannot
+      # push): a half-written set of pictures must not become the reference.
+      - name: Commit the baselines to the branch
+        if: >-
+          success() && (inputs.update_baselines || steps.baselines.outputs.missing == 'true') &&
+          (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        env:
+          # Through the environment, not interpolated into the script: a branch
+          # name is attacker-controlled text in a pull request. The workflow
+          # linter (npm run lint:workflows) fails on the inline form.
+          BASELINE_BRANCH: ${{ github.event.pull_request.head.ref || github.ref_name }}
+        run: |
+          if [ -z "$(git status --porcelain e2e/visual.spec.ts-snapshots)" ]; then
+            echo "Baselines are already committed — nothing to do."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add e2e/visual.spec.ts-snapshots
+          git commit -m "Add the visual baselines, generated on CI"
+          git push origin "HEAD:$BASELINE_BRANCH"
 
       # On a mismatch: the diff images and the HTML report say which pixel moved.
       - name: Upload the failure report
