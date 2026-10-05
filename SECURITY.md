@@ -9,13 +9,19 @@ Planner uses a local-first, privacy-preserving design, but no software can hones
 - Markdown is rendered as React elements rather than injected HTML; links are limited to HTTP(S) and open with `noopener noreferrer`.
 - The Groq proxy never exposes the API key, accepts only the narrow JSON shape Planner sends, permits only the configured model and data-URL images, caps request and response sizes, rejects cross-origin browser requests, and applies a best-effort per-client rate limit.
 - The sync API accepts only a validated hash-shaped sync id and bounded ciphertext. Planner content is encrypted in the browser with AES-GCM before it reaches Neon; the database does not receive the sync code or plaintext planner.
+- Accounts keep that property. The password is stretched in the browser (Argon2id) before it is sent, the server stores only a salted verifier, and the planner is sealed with a per-account data key that exists unwrapped only inside the browser. The server stores ciphertext and wrapped copies of that key — never the key itself.
+- The data key can be wrapped by the password, by a passkey (WebAuthn) or by both. A passkey never leaves the platform authenticator; only wrapped-key material comes back from it. Optional TOTP sits in front of either sign-in method, and recovery codes are verified one-way: using one rotates the password wrappers, replaces the recovery codes and revokes the account's sessions.
+- The packaged apps can hold that key in the OS keychain/keystore behind the current biometric set (`biometryCurrentSet` on iOS, a biometric-bound Keystore key on Android), so adding or removing a fingerprint or face invalidates it. Turning biometric unlock off, signing out, deleting the account or switching accounts removes it.
+- Content-free push: a notification says a reminder is due and nothing about the planner, the payload is not retained, and the subscription endpoint is the only identifier the server keeps for it.
+- Deep links and invite links are routes, not secrets: a packaged app accepts an incoming link only because Android App Links / iOS Universal Links have already verified the app against the host's published association files, and the vault key never travels in a URL.
 - Account recovery checks a SHA-256 verifier of a randomly generated, high-entropy recovery key; the database stores only a separately salted scrypt verifier, not a reusable proof. The recovery key and vault key stay in the browser; a successful recovery rotates the password wrappers and revokes existing sessions.
 - AI memory is explicit and user-controlled. It is stored with the planner, sent to Groq only for a plan or review request, and can be edited or forgotten.
 - No secrets belong in the browser bundle. Keep `GROQ_API_KEY` and `DATABASE_URL` server-side and never use a `VITE_` prefix for them.
 
 ## Important limits
 
-- Local browser storage is protected by the browser/OS profile, not by a server login. Use full-disk encryption, a strong device passcode, a current browser, and a trusted device.
+- Local browser storage is protected by the browser/OS profile. Accounts protect the server's copy of the vault, not a device that is already unlocked: a stolen device with an open session exposes the decrypted planner in that profile. Use full-disk encryption, a strong device passcode, a current browser, and a trusted device, and sign out (or revoke the device from Settings) if it is lost.
+- Guardian sharing is snapshot-based and one-way once read: a guardian with a downloaded or exported weekly result keeps that copy even after the link is revoked.
 - Anyone who obtains the sync code can decrypt that synced planner. Treat the code like a password and do not put it in screenshots, tickets, or chat.
 - Text and images intentionally sent to the AI coach are processed by Groq through the server proxy. Do not save or submit information you are not comfortable sharing with that provider.
 - The in-process API limiter is an abuse brake, not a global WAF. High-risk public deployments should put a durable edge rate limiter, monitoring, dependency scanning, and secret rotation in front of Vercel.
@@ -24,3 +30,5 @@ Planner uses a local-first, privacy-preserving design, but no software can hones
 ## Reporting a vulnerability
 
 Please do not publish an exploitable issue before it is fixed. Use a private GitHub Security Advisory for this repository, including reproduction steps, affected route or component, impact, and a suggested fix when possible. Never include real planner exports, sync codes, API keys, or personal data in a report.
+
+*Reviewed against the shipped build on 2026-10-05: the account, vault, passkey, TOTP, biometric, push and deep-link surfaces above are all in the code today.*

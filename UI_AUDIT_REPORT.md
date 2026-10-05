@@ -383,6 +383,11 @@ button, a, [role='button'], .seg, .chip, .dot-btn, .heat-cell { touch-action: ma
 
 ## 11. Critical Issues Requiring Fix
 
+> **Status (2026-10-05): every item below is addressed.** The fixes are itemised in
+> §15; two of the twelve were verified-already-correct rather than changed. §13 now
+> lists what still has no automated coverage, and §12 is the one recommendation that
+> was only partly adopted.
+
 ### 🔴 High Priority
 
 1. **Missing `viewport-fit=cover`** in `index.html`
@@ -418,6 +423,12 @@ button, a, [role='button'], .seg, .chip, .dot-btn, .heat-cell { touch-action: ma
 ---
 
 ## 12. Recommended Token Unification
+
+> **Status: partly adopted.** The radius, max-width, card-padding and breakpoint drift
+> was fixed (§15, items 3/5/6/9) and the app's own scale lives in `tokens.css`. The
+> *spacing*, *touch-target* and *transition* scales below were never extracted into
+> shared tokens — `tokens.css` has no `--space-*`, `--touch-target` or `--transition-*`
+> — so read this as a suggestion for the next pass, not a description of the code.
 
 Create a shared token file imported by both app and marketing:
 
@@ -466,15 +477,22 @@ Create a shared token file imported by both app and marketing:
 
 ## 13. Test Coverage Gaps
 
+*Re-checked 2026-10-05. The three screenshot-level gaps closed with the visual suite;
+two remain.*
+
 | Area | Test File | Coverage |
 |------|-----------|----------|
 | Contrast ratios | `contrast.test.ts` | ✅ |
-| Persian UI | `app.fa.test.tsx` | ✅ Basic render |
-| Responsive | — | ❌ No visual regression |
-| Dark mode | — | ❌ No automated test |
-| Touch targets | — | ❌ No automated test |
-| RTL layout | — | ❌ No automated test |
+| Persian UI | `app.fa.test.tsx`, `i18n.test.ts` | ✅ Render plus digit/translation guards |
+| Dark mode | `e2e/visual.spec.ts` | ✅ Light and dark shots of Today, Tasks, Insights and the landing page |
+| RTL layout | `e2e/visual.spec.ts` | ✅ Same views in `fa`, asserting `html[dir=rtl]` before the shot |
+| Responsive | `e2e/visual.spec.ts` | ✅ One phone case (390×844); the desktop matrix runs at 1280×900 |
+| Touch targets | — | ❌ No automated check |
 | PWA install | — | ❌ No E2E test |
+| Native shells | `src/shared/deepLinks.test.ts`, `src/auth/*.test.ts` | ✅ Deep-link routing and biometric logic unit-tested; `native.yml` compiles Android/iOS but never runs them |
+
+Screenshot baselines are generated on CI, not in the repo — see
+`docs/VISUAL_TESTS.md` for the loop and for what the suite deliberately omits.
 
 ---
 
@@ -490,7 +508,9 @@ The Planner UI is **well-engineered and production-ready** for the core app expe
 
 ## 15. Remediation Log
 
-All items below were implemented, verified with `tsc --noEmit`, `vite build`, and the full Vitest suite (46 files / 406 tests passing).
+All items below were implemented and verified with `tsc --noEmit`, `vite build`, and
+the full Vitest suite. *(The run at the time was 46 files / 406 tests; the suite is
+now 91 files / 886 passing, 1 skipped — re-verified 2026-10-05.)*
 
 ### High priority — Fixed
 
@@ -534,8 +554,23 @@ All items below were implemented, verified with `tsc --noEmit`, `vite build`, an
 
 ### Known gaps (open)
 
-- Raw JSX counters (e.g. `3/5 steps`, stat tiles) still render Latin digits in Persian mode — dates, times, and numbers inside translated sentences are converted.
-- No visual-regression or automated RTL/dark-mode screenshot tests yet.
+- **Touch targets** — nothing measures the 44px floor automatically; it is still a
+  review-time judgement.
+- **PWA install** — no E2E test covers installability, the manifest or the service
+  worker (the visual suite runs in a browser tab, not an installed app).
+- **`font-size-adjust`** (low priority, item 10) remains open; the fonts still load
+  with `display: swap`.
+- **Optional, manual**: the visual suite needs its baselines generated once on CI
+  before it can fail locally — `docs/VISUAL_TESTS.md` has the steps.
+
+### Gaps closed since this report
+
+- **Raw JSX counters in Persian mode** — fixed. `faDigits()`/`faNum()` now cover stat
+  tiles, step counters, recovery codes and the marketing demo windows; `digitsIn()`
+  exists for contexts that carry their own language (`src/i18n.ts`).
+- **Visual regression, RTL and dark mode** — fixed. `e2e/visual.spec.ts` takes 15
+  screenshots (Today / Tasks / Insights × en/fa × light/dark, one phone case, two
+  landing-page shots) and runs on CI via `.github/workflows/visual.yml`.
 
 ---
 

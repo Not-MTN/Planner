@@ -621,17 +621,20 @@ API surface: §1.2 list; route table `src/server/apiRouter.ts:63-137`.
 
 ## 15. Uncertainties / Open Questions
 
-| # | Question | Why unclear |
+*Re-checked against the code on 2026-10-05. Four are now closed, three are answered
+as far as the code can answer them, and two remain genuinely open.*
+
+| # | Question | Status |
 |---|---|---|
-| 1 | Which exact sidebar item does the screenshot label **برنامه** refer to — the `Plan` group header (`fa.ts:686`) or `Plans/برنامه‌ها` (`fa.ts:701`)? | Both exist; without the pixels this cannot be resolved. The same applies to **تمرکز** (`Focus` group) and **پیگیری** (`Track` group vs the Student panel's "Tracking" card). |
-| 2 | Screenshot has both "اعلان‌ها" and "حالت روشن/تاریک" as list items; in code these are footer tools, not nav items. | Layout ordering cannot be verified from the description alone. `[UNCLEAR]` |
-| 3 | Whether the sidebar in the screenshot included the Panels group. | Depends on the account's panel flags, which are per-user data. |
-| 4 | Whether any deployment currently has `GROQ_API_KEY`, `DATABASE_URL`, VAPID keys and a scheduler configured. | Deployment env, not code. Every AI/sync/push feature states its own degradation. |
-| 5 | Whether `WeeklyReview`'s reflection field is *intended* to be ephemeral. | No comment states intent; it is simply never read (`WeeklyReview.tsx:5-8`). `[UNCLEAR]` |
-| 6 | Whether the legacy `/`+hash redirect gap (§11) has real users. | Depends on bookmarks/history; the PWA shortcuts all point at `/app#/…`, so it is probably rare. `[PARTIALLY CONFIRMED]` |
-| 7 | Whether `SPEC.md` remains the intended direction (it describes features the code does not have). | Only README/SPEC wording; no issue tracker in this checkout. `[UNCLEAR]` |
-| 8 | Whether the `FocusHistory`/`StatsWidget`/`WeeklyReview`/`MatrixView` widgets are provisional. | Their style and `as any` usage suggest an earlier iteration; nothing in code marks them deprecated. `[UNCLEAR]` |
-| 9 | Stated role→panel mapping for users who signed up *before* the role picker existed. | `vault.ts:136` hard-codes `role: 'personal'` for one offline path; other legacy paths are not auditable from code alone. `[UNCLEAR]` |
+| 1 | Which sidebar item **برنامه** referred to — the `Plan` group header or `Plans`/`برنامه‌ها`? | **Closed.** Both exist and always did: `Plan` is a group label, `Plans` is a page under it (`Shell.tsx`, `fa.ts`). The screenshot's ambiguity was in the pixels, and the sidebar has been rebuilt since; nothing in the code needs changing. |
+| 2 | Screenshot listed "اعلان‌ها" and "حالت روشن/تاریک" as list items, but code has them as footer tools. | **Closed.** By design: notifications and theme open sheets from the sidebar footer and were never nav destinations (`Shell.tsx`). |
+| 3 | Did the screenshot's sidebar include the Panels group? | **Closed.** Conditional by design: the group appears only when the account has a panel enabled (`Shell.tsx`, `navigationPrefs.ts`), so both versions of the screenshot are correct. |
+| 4 | Does any deployment have `GROQ_API_KEY`, `DATABASE_URL`, VAPID keys and a scheduler? | **Still unknown from code** — it is a deployment fact. Every one of those features states its own degradation, which is the part this audit could verify. |
+| 5 | Is `WeeklyReview`'s reflection field meant to be ephemeral? | **Decided: yes.** It is written into the printed/exported weekly report and never persisted (`WeeklyReview.tsx`; `REPORT.md` §7 keeps "save it as a note" as a possible future). |
+| 6 | Does the legacy `/`+hash redirect gap have real users? | **Answered as far as code can.** The redirect lives in `bootTarget()` (`src/main.tsx`) and is unit-tested; whether old bookmarks still arrive cannot be measured from this checkout. |
+| 7 | Is `SPEC.md` still the intended direction? | **Yes.** It remains the reference for the role and panel model, and it has now been reconciled with the shipped build (SPEC §15–§16). Where it disagreed, the code wins. |
+| 8 | Are `FocusHistory`/`StatsWidget`/`WeeklyReview`/`MatrixView` provisional? | **Still open.** Nothing in the code deprecates or marks them; they are reachable and tested. Re-listed as SPEC §16 Q8. |
+| 9 | How are roles mapped for users who signed up before the role picker? | **Answered.** Sign-up requires the picker (`Auth.tsx`); the only fallback is `role: 'personal'` on one offline path (`vault.ts`), which is harmless because the authenticated UI never reads the role (§16). |
 
 ---
 
@@ -650,3 +653,15 @@ with a fourth, small surface — the **Panels chooser** (`#/panels`) — that sw
 **Roles.** Accounts carry `personal | student | guardian`, stored server-side and required at signup, but the role has exactly one runtime effect: it pre-enables a panel inside the newly created encrypted state. Nothing in the authenticated UI reads it. The Personal Panel's navigation is therefore **universal** — it varies only by (a) the per-device sidebar visibility preferences and (b) whether the student/guardian panels are switched on, which adds the conditional `Panels` group (Student / Guardian / All panels) to the sidebar, tiles to the mobile More sheet, and cards to Today.
 
 **What must be accounted for before redesigning the navigation.** Any navigation decision has to cover: 10 primary pages (9 hideable, Today pinned); 3 group labels (Plan / Focus / Track); a conditional 3-item panel group; at least 15 non-sidebar destinations and utilities (Day view, Weekly Review in two forms, focus overlay, palette, notifications, quick add, Settings with ~19 sub-areas, Panels chooser, account/sign-out); a *different* mobile structure (tab bar + More) that deliberately ignores the sidebar prefs; a keyboard surface (⌘K, /, N, T, M, R, ?) that partially disagrees with the on-screen shortcut sheets; a fixed palette destination list that omits Panels/Student/Guardian/Day/Notifications; and a live AI/panel/sharing layer whose features are only ever reachable *inside* pages. The Personal Panel is a 10-destination navigation attached to a product with roughly 60 reachable features, 28 backend endpoints, 16 route targets plus 7 legacy hash aliases, 2 optional sub-panels with their own navigation surfaces, 1 account system, 2 sync systems and 1 encrypted guardian-sharing system — so the sidebar is a *partial* index of the product rather than a map of it.
+
+---
+
+*Re-checked 2026-10-05. The navigation described above is unchanged — still ten
+pinned-or-hideable primary pages, three group labels, the conditional Panels group and
+the same mobile structure — so every count in this summary still holds. What changed
+around it: biometric unlock and deep links in the packaged apps, TOTP as a second
+factor, Persian digits everywhere a number renders, a visual-regression suite for
+RTL and both themes (`docs/VISUAL_TESTS.md`), and the accounts/vault model no longer
+requiring the "no accounts" wording this audit was written against. Nothing here
+invalidates the navigation analysis; re-run it if the sidebar groups are ever
+re-cut.*

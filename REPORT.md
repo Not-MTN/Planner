@@ -226,10 +226,22 @@ All existing tests pass: `app.test.tsx (26)`, `planner.test.ts (38)`, `features.
 
 ## 7. Remaining & Future
 
-- Server `authStore.ts` still memory-only in dev; prod Neon persists. Could add Redis for dev, but client persistence now masks it.
-- Passkey auto-enrol after sign-up already exists; could add auto-login via passkey on landing.
-- Weekly Review could persist reflection to notes.
-- Focus History could add streaks.
+*Reconciled with the shipped build on 2026-10-05. Two of these four shipped; two are
+still the honest answer.*
+
+- **Server `authStore.ts` is memory-only in dev — still true, and now intentional.**
+  `/api/auth/status` reports `storage: "temporary"` for it, dev and preview accounts
+  are forgotten on restart, and production has no fallback at all (`storage: "none"`,
+  every account endpoint 503s). Redis is not planned; the status endpoint is how a
+  developer finds out.
+- **Passkey auto-login from the landing/sign-in page — shipped.** The sign-in form
+  offers one-touch passkey sign-in (`withPasskey` in `src/marketing/Auth.tsx`) which
+  opens the vault directly when the passkey carries the wrapped key.
+- **Weekly Review reflection → notes — still open.** The reflection is written into
+  the *printed/exported* weekly report and is never saved back to the planner
+  (`src/components/WeeklyReview.tsx`).
+- **Focus History streaks — shipped.** Per-habit current/longest streaks, and a
+  "Day streak" tile on Insights (`src/views/InsightsView.tsx`).
 
 ---
 

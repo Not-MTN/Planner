@@ -408,6 +408,11 @@ hiding. All fixed:
 
 ## 8b. Two defects found during the audit but left out of the report
 
+> **Status: both fixed and regression-tested.** X1's guard is covered by
+> `src/server/icsProxy.test.ts` (including a hostname that resolves to `127.0.0.1`
+> and one that does not resolve); X2's whole-sentence rule is guarded by
+> `src/i18n.test.ts`. Nothing here is an open finding.
+
 Both were left out of §2–§4 on purpose, then fixed after being raised
 explicitly.
 
@@ -465,6 +470,11 @@ Fixed by making **one translatable unit per sentence**:
 ---
 
 ## 7. Suggested order of work
+
+> **Status: done, in this order.** All six steps were completed (the findings are in
+> §8; the linter now exists — `eslint.config.js`, run by `npm run lint:workflows` and
+> CI), so treat this as the record of why the order was chosen, not a queue.
+> §8b and the second pass below are likewise closed.
 
 1. **H1** (`toggleTask` repeat/un-complete) — the only finding that can silently
    corrupt user data patterns over time.
@@ -571,3 +581,11 @@ Two real bugs found and fixed:
 ## D. Where it stands
 
 675 tests, 1 skipped. TypeScript and ESLint clean.
+
+> **Status at 2026-10-05:** 91 files / **886 passing, 1 skipped**
+> (`npm test`), `tsc --noEmit` and `eslint .` clean, and four workflows lint green.
+> Since this pass: the accounts/vault/TOTP build, biometric unlock and deep links in
+> the packaged apps, a Persian-digit sweep (`digitsIn`), and the visual-regression
+> suite for RTL and both themes (`docs/VISUAL_TESTS.md`). No finding in this audit is
+> known to be open; the ones deliberately left open are itemised in §8b and
+> `UI_AUDIT_REPORT.md` §13.
