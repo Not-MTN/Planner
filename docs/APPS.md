@@ -604,6 +604,51 @@ variables next to the Web Push keys.
 
 Everything else — the entire planner — works, because it is the same code.
 
+### 9.2 Testing on a real device
+
+CI proves the apps compile (`.github/workflows/native.yml`) and launch on a
+virtual device (`.github/workflows/device-smoke.yml`: an Android emulator and an
+iOS simulator, install, launch, and one deep link each). Three things a virtual
+device cannot test, and the checklist for each on hardware you are holding:
+
+1. **Biometric unlock.** It is a Keystore/Keychain operation with a user
+   presence check, so an emulator either has no enrolled fingerprint or
+   fakes one.
+   - Android: enroll a fingerprint in the device's Security settings, sign in
+     once, then turn on **Unlock with fingerprint or face** (Settings →
+     Account). Lock the device and reopen Planner: the prompt must appear, and
+     cancelling it must leave the vault locked rather than open. `adb logcat -s
+     BiometricPrompt PlannerBiometric` shows the plugin's own lines.
+   - iOS: enroll Face ID (Settings → Face ID & Passcode), then the same flow.
+     A failed or cancelled prompt must fall back to the password, never to an
+     open vault.
+   - Both: the key is device-bound. Reinstalling the app must *not* unlock with
+     a stale biometric enrolment.
+2. **Push delivery.** `docs/APPS.md` §9.1 sets the server side up; the device
+   must be a real one (or an emulator with Play services for FCM).
+   - Android: turn on **Background notifications**, then `adb shell dumpsys
+     notification` lists the `planner-reminders` channel. Force-stop the app
+     (`adb shell am force-stop com.notmtn.planner`) and wait for a scheduled
+     time: the alert arrives, and tapping it opens Planner on the day view.
+   - iOS: the APNs sandbox is what a Debug build talks to, so a TestFlight or
+     Release build must be used to check production. Watch
+     `xcrun simctl spawn booted log stream --predicate 'process == "App"'` for
+     the registration callback.
+   - Both: the alert is one generic sentence. If task, event or habit text ever
+     appears in it, that is a bug worth stopping for.
+3. **Deep links.** Association files need a live domain and platform
+   verification, so a link must be checked against a deployment, not a host
+   file.
+   - On the device, open the deployment's address with `/app#/today` at the
+     end: it must open the app on the day view, not a browser tab.
+   - `adb shell dumpsys package domain-preferred-apps` (Android) and
+     **Settings → Developer → Associated Domains Development** (iOS) show
+     whether the platform verified the domain; `docs/APPS.md` §3 covers what
+     the server has to serve for that to succeed.
+
+The store copy and the privacy answers are in §10 and §11; the runbook that
+ties a release together is `docs/RELEASING.md`.
+
 ## 10. Store listing copy, ready to paste
 
 **Title:** Planner — calm daily planning

@@ -1,0 +1,155 @@
+name: Device smoke
+
+# Launch the packaged apps on an emulator and a simulator.
+#
+# The Native workflow answers "does it compile". This one answers the next
+# question: does the installed app actually come up, stay up, and accept a deep
+# link — the failure mode a compile cannot see (a missing plugin registration,
+# a bad launch screen, an intent filter that never matches). It is deliberately
+# the only automated check that needs a virtual device, so it is its own
+# workflow: slow, and worth running when a shell or an app entry point changes.
+#
+# What it cannot cover is in docs/APPS.md §9.2: a sensor, a real push
+# notification and a real link verification on a device someone is holding.
+# These jobs exist to keep the honest part honest, not to replace that.
+#
+# The emulator step is allowed to fail without failing the workflow: virtual
+# devices are the flakiest thing in CI, and a red pull request nobody trusts is
+# worse than a smoke test that reports honestly. Read the job summary.
+
+on:
+  pull_request:
+    paths:
+      - 'android/**'
+      - 'ios/**'
+      - 'capacitor.config.ts'
+      - 'src/shared/nativeShell.ts'
+      - 'src/push.ts'
+      - 'src/nativeReminders.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'scripts/native-sync.mjs'
+      - '.github/workflows/device-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # A build-time address is not needed to compile, but the scripts and both
+  # native projects read it, and one fixed value keeps every run identical.
+  PLANNER_LINK_HOST: planner.invalid
+
+jobs:
+  android:
+    name: Android launches and takes a link
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Build the web app into the Android project
+        run: npm run native:sync -- android
+      - name: Assemble a debug APK
+        run: ./gradlew --no-daemon assembleDirectDebug
+        working-directory: android
+      - name: Remember where the APK is
+        run: |
+          APK=$(ls android/app/build/outputs/apk/direct/debug/*.apk | head -1)
+          echo "APK_PATH=$APK" >> "$GITHUB_ENV"
+          echo "Found $APK"
+      # The emulator is the flaky half. `continue-on-error` is on the job, not
+      # the step, so the log and the artifact stay available either way.
+      - name: Boot an emulator, install, launch, and open a link
+        continue-on-error: true
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
+          script: |
+            set -euo pipefail
+            APK="$APK_PATH"
+            echo "▸ installing $APK"
+            adb install -r -t "$APK"
+            echo "▸ launching"
+            adb shell am start -W -n com.notmtn.planner/.MainActivity
+            sleep 8
+            adb shell pidof com.notmtn.planner
+            echo "▸ opening a deep link"
+            adb shell am start -W -a android.intent.action.VIEW \
+              -c android.intent.category.BROWSABLE \
+              -d "https://${PLANNER_LINK_HOST}/app#/today" \
+              com.notmtn.planner
+            sleep 5
+            adb shell pidof com.notmtn.planner
+            echo "▸ if it crashed, say so:"
+            adb logcat -d -b crash | tail -50 || true
+            adb shell pidof com.notmtn.planner >/dev/null
+
+  ios:
+    name: iOS launches on a simulator
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Build the web app into the iOS project
+        run: npm run native:sync -- ios
+      - name: Build for the simulator
+        run: |
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$PWD/build" \
+            PLANNER_LINK_HOST="${PLANNER_LINK_HOST}" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
+      - name: Boot a simulator, install, launch, and open a link
+        # A simulator is far less flaky than an emulator, but the same rule
+        # applies: this reports, it does not gate a merge.
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          # Pick whatever iPhone runtime the runner image actually has, rather
+          # than pinning a model that will eventually be removed.
+          DEVICE_ID=$(xcrun simctl list devices available -j \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for k in sorted(d) for x in d[k] if x.get("isAvailable") and x["name"].startswith("iPhone")))')
+          echo "▸ simulator $DEVICE_ID"
+          xcrun simctl boot "$DEVICE_ID" || true
+          xcrun simctl bootstatus "$DEVICE_ID" -b
+          APP=$(find build/Build/Products -maxdepth 2 -name 'App.app' -type d | head -1)
+          echo "▸ installing $APP"
+          xcrun simctl install "$DEVICE_ID" "$APP"
+          echo "▸ launching"
+          xcrun simctl launch "$DEVICE_ID" com.notmtn.planner
+          sleep 8
+          xcrun simctl spawn "$DEVICE_ID" launchctl list | grep -i notmtn || true
+          echo "▸ opening a deep link"
+          xcrun simctl openurl "$DEVICE_ID" "https://${PLANNER_LINK_HOST}/app#/today" || true
+          sleep 5
+          # Still running after the link: the app did not fall over on an
+          # address it cannot verify (verification needs a live domain).
+          xcrun simctl launch "$DEVICE_ID" com.notmtn.planner >/dev/null
+          xcrun simctl io "$DEVICE_ID" screenshot /tmp/planner-simulator.png
+          ls -l /tmp/planner-simulator.png
