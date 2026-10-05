@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
 import { usePlanner } from '../context';
 import { sendPlan } from '../auth/links';
+import { draftGuardianProposal, friendlyGroqError } from '../ai';
 import { isValidISODate } from '../dates';
 import { PlusIcon, TrashIcon } from '../icons';
 import { t } from '../i18n';
@@ -36,6 +37,7 @@ export function GuardianPlanComposer({
   }));
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [drafting, setDrafting] = useState(false);
   const subjectListId = useId();
   const end = isValidISODate(draft.start) ? planEnd(draft) : '';
   const count = draft.items.filter((item) => item.title.trim()).length;
@@ -71,6 +73,56 @@ export function GuardianPlanComposer({
         onConfirm: apply,
       });
     } else apply();
+  };
+
+  /**
+   * Ask the AI for a first draft, from the weekly results alone.
+   *
+   * It fills the form; it does not send anything. The guardian reads it, edits
+   * what is wrong, and the student still accepts or declines in their panel —
+   * which is the same promise the hand-written composer makes, and the reason
+   * the AI is allowed anywhere near a suggestion at all.
+   */
+  const draftWithAi = async () => {
+    if (drafting || sending || !link.results) return;
+    const apply = async () => {
+      setDrafting(true);
+      setError(null);
+      try {
+        const result = await draftGuardianProposal({
+          results: link.results!,
+          history: link.history,
+          kind: 'plan',
+        });
+        setDraft((current) => ({
+          ...current,
+          title: result.title || current.title,
+          note: result.note || current.note,
+          items: result.steps.length
+            ? result.steps.map((step) => ({
+                ...emptyPlanStep(),
+                title: step.title,
+                subject: step.subject ?? '',
+                minutes: step.minutes ? String(step.minutes) : '',
+              }))
+            : current.items,
+        }));
+      } catch (caught) {
+        setError(friendlyGroqError(caught));
+      } finally {
+        setDrafting(false);
+      }
+    };
+    if (draft.title.trim() || draft.note.trim() || draft.items.some((item) => item.title.trim())) {
+      requestConfirm({
+        title: t('Replace this draft?'),
+        body: t('The AI draft replaces the unsent title, note, and steps. You can edit everything before sending.'),
+        confirmLabel: t('Use AI draft'),
+        onConfirm: () => void apply(),
+      });
+      return;
+    }
+    await apply();
   };
 
   const submit = async (event: React.FormEvent) => {
@@ -132,7 +184,18 @@ export function GuardianPlanComposer({
           <button type="button" className="btn btn-ghost btn-tiny" onClick={() => template('balanced')}>
             {t('Balanced study')}
           </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-tiny"
+            disabled={drafting || sending || !link.results}
+            onClick={() => void draftWithAi()}
+          >
+            {drafting ? t('Drafting…') : t('Draft with AI')}
+          </button>
         </div>
+        <p className="hint">
+          {t('An AI draft reads the weekly results they shared — never their tasks or notes. Read it before you send it.')}
+        </p>
         <Field label={t('What is this plan?')}>
           <input
             className="input"

@@ -638,13 +638,15 @@ no surviving note references them.
 | **3** | Roles and linking: invites, student acceptance, scopes, presets, revocation | **Done, minus scopes and presets.** Role at sign-up, guardian invites by link or QR, student acceptance, link status and revocation all ship. Sharing is not per-scope; it is the weekly snapshot in phase 4. |
 | **4** | Guardian read-only: roster, dashboards from archives, change feed, tombstones, attribution | **Changed on purpose.** The guardian gets a roster and **weekly results the student chooses to share** (`src/views/GuardianPanelView.tsx`) — not a live scoped dashboard. There is no change feed and no tombstone list, and a compare-two-students view was not built (§16). |
 | **5** | Write access: plan editor, proposals, reasons, undo, audit log, shared timeline | **Partly, and lighter than this spec.** A guardian composes a plan or suggests a goal; both land in the student's inbox, where the student ticks items off and accepts or declines (`StudentPanelView.tsx`, `src/panels.ts`). The student's own planner items are never written to. Proposals as a separate review object, undo, the audit log and a shared timeline were not built. |
-| **6** | AI on both sides: proposals, weekly narrative, risk flags | **Partly.** The personal AI coach ships in full (plan, weekly review, saved memory). Guardians get `generateGuardianGuidance` — a summary, a focus, and one `watchOut` risk line (`src/ai.ts`). AI-authored proposals were not built. |
+| **6** | AI on both sides: proposals, weekly narrative, risk flags | **Done, with the AI drafting rather than deciding.** The personal AI coach ships in full (plan, weekly review, saved memory). Guardians get `generateGuardianGuidance` — a summary, open questions, and one encouraging line — and, as of 2026-10-05, `draftGuardianProposal`: the AI fills the plan or goal composer with steps drawn only from the shared weekly totals, the guardian edits it, and the student accepts or declines it in their inbox like any other suggestion (`GuardianPlanComposer.tsx`, `GuardianGoalForm.tsx`). An AI draft never sends itself and never writes to the student's planner. |
 | **7** | Extras: templates, syllabus → term plan, optional push for installed apps, meeting one-pager | **Mostly.** Templates, ICS/CSV/JSON import and opt-in content-free push for installed apps all ship. No syllabus → term-plan importer; no meeting one-pager. |
 
 **Not built, in one list:** the device-to-device approval relay, guardian scopes
-and presets, live scoped dashboards / change feed / tombstones, proposals, undo,
-the shared audit log, AI proposals, syllabus import, meeting one-pager, and
-guardian compare view. Everything else in this document exists in some form.
+and presets, live scoped dashboards / change feed / tombstones, proposals as a
+separate review object, undo, the shared audit log, syllabus import, the meeting
+one-pager, and the guardian compare view. Guardian AI *drafting* now ships; what
+is still missing is the student-facing variant (the student's own AI proposing
+planner items), which the coach's drafts already approximate.
 
 ---
 
@@ -713,8 +715,9 @@ roughly in the order it would pay off.
 
 4. ~~**Approved-device password recovery**~~ Done (phase 2 above): Settings →
    Account → *Set a new password* re-wraps the key the device already holds.
-5. **Guardian AI proposals** — draft a plan or a note from the same weekly totals
-   `generateGuardianGuidance` already reads, with the student accepting or declining.
+5. ~~**Guardian AI proposals**~~ Done: `draftGuardianProposal` fills the plan and
+   goal composers from the same weekly totals `generateGuardianGuidance` reads,
+   and the student accepts or declines the send like any other suggestion.
 6. **Guardian compare-two-students view**, once the fairness question in §16 is
    answered.
 

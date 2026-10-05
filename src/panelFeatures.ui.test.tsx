@@ -66,6 +66,15 @@ vi.mock('./ai', async (importOriginal) => ({
     questions: ['What would help with revision?'],
     encouragement: 'You made room to focus.',
   })),
+  // The draft the AI would return for Alice's shared results: one step on a
+  // subject she actually shared, one on a subject nobody shared (which the
+  // normalizer would have dropped, but here proves the form is filled from the
+  // draft as-is and the guardian can edit it).
+  draftGuardianProposal: vi.fn(async () => ({
+    title: 'Physics revision',
+    note: 'A steady week — keep the evenings light.',
+    steps: [{ title: 'Practice chapter 4', subject: 'Physics', minutes: 25 }],
+  })),
 }));
 
 let root: Root | null = null;
@@ -427,6 +436,37 @@ describe('guardian roster and planning', () => {
     ]);
     expect(saved().panels.guardian.links.find((link) => link.id === 'nina')?.plans[0].title).toBe('Physics revision');
     expect(document.querySelector('.guardian-plan-composer')).toBeNull();
+  });
+
+  it('lets the guardian draft a plan with AI, edit it, and send it as a suggestion', async () => {
+    const { draftGuardianProposal } = await import('./ai');
+    await mount(guardianState(), 'guardian');
+    const alice = [...document.querySelectorAll('.student-card')].find(
+      (card) => card.querySelector('.student-name')?.textContent === 'Alice',
+    )!;
+    await click('View student', alice);
+    await click('A week', alice);
+
+    await click('Draft with AI', alice);
+    // Filled from the draft, not sent: the title, the note and the step all
+    // arrive in the form the guardian was already looking at.
+    expect(query<HTMLInputElement>('.guardian-plan-composer input').value).toBe('Physics revision');
+    expect(query<HTMLTextAreaElement>('.guardian-plan-composer textarea').value).toContain('keep the evenings light');
+    expect(query<HTMLInputElement>('input[aria-label="Step 1 title"]').value).toBe('Practice chapter 4');
+    expect(query<HTMLInputElement>('input[aria-label="Step 1 subject"]').value).toBe('Physics');
+    expect(query<HTMLInputElement>('input[aria-label="Step 1 minutes"]').value).toBe('25');
+    // The AI sees the shared weekly results, and the panel says so where the
+    // guardian is deciding to use it.
+    expect(vi.mocked(draftGuardianProposal).mock.calls[0][0].results?.weekOf).toBe(weekOf());
+    expect(alice.textContent).toContain('never their tasks or notes');
+
+    // The guardian edits the draft before it goes anywhere — this is the point
+    // of drafting into the form rather than sending on the student's behalf.
+    setValue('input[aria-label="Step 1 title"]', 'Practice chapter 4 twice');
+    await click('Send the plan', alice);
+    expect(vi.mocked(sendPlan).mock.calls[0][2].items).toEqual([
+      { title: 'Practice chapter 4 twice', subject: 'Physics', minutes: 25, date: null },
+    ]);
   });
 
   it('offers editable starters and prevents sending dates outside the selected plan', async () => {

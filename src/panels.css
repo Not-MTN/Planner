@@ -293,6 +293,14 @@
   gap: 12px;
 }
 
+/* "Draft with AI" sits beside Cancel; both are small and neither should wrap. */
+.ggoal-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
 .ggoal-steps {
   display: flex;
   flex-direction: column;

@@ -312,6 +312,10 @@
   overflow-wrap: anywhere;
 }
 @media (pointer: coarse) {
+  /* The grouped destination tiles were 42px — a comfortable cursor target and
+     two pixels short of a thumb. `e2e/touch-targets.spec.ts` grades every
+     `.more-list button` at 44px, and the tiles are the rows people tap most. */
+  .more-list .more-tile { min-height: 44px; }
   .more-list .more-actions button { min-height: 44px; }
 }
 

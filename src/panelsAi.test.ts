@@ -149,6 +149,81 @@ describe('the guardian panel AI', () => {
     expect(payload.earlierWeeks).toEqual([{ weekOf: day(-7), planned: 9, done: 4, focusMinutes: 210 }]);
   });
 
+  it('drafts a proposal from the same totals-only payload, and from nothing else', async () => {
+    const { draftGuardianProposal } = await import('./ai');
+    let sent: string | null = null;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        sent = String(init?.body ?? '');
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    title: 'A lighter week',
+                    note: 'They finished most of what they planned.',
+                    steps: [{ title: 'Review the mock paper', subject: 'Thermodynamics', minutes: 45 }],
+                  }),
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }),
+    );
+
+    const draft = await draftGuardianProposal({ results, history: [], kind: 'plan' });
+    expect(draft.title).toBe('A lighter week');
+    expect(draft.steps).toEqual([{ title: 'Review the mock paper', subject: 'Thermodynamics', minutes: 45 }]);
+
+    // The whole request — system prompt and payload — carries no task title, no
+    // note body and no id, exactly like the guidance call it borrows its
+    // payload from. This is the test that should fail if someone later decides
+    // a proposal needs "a bit more context".
+    const body = sent ?? '';
+    for (const secret of ['SECRET-TASK-TITLE', 'SECRET-NOTE-TITLE', 'SECRET-JOURNAL-BODY', 'SECRET-NOTE-BODY', 'task-in-week']) {
+      expect(body).not.toContain(secret);
+    }
+    expect(body).toContain('draftKind');
+    // What it *is* allowed to see: the subject they shared and their headline.
+    expect(body).toContain('Thermodynamics');
+    expect(body).toContain('Dropped chemistry to protect the mock exams.');
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps a drafted proposal inside what the composer can send', async () => {
+    const { normalizeProposalDraft } = await import('./ai');
+    const draft = normalizeProposalDraft(
+      {
+        title: '  Revision  ',
+        note: '  Keep   it light.  ',
+        steps: [
+          { title: '  Rewrite the summary  ', subject: 'thermodynamics', minutes: 400 },
+          { title: '   ', subject: 'Physics', minutes: 30 },
+          { title: 'Past paper', subject: 'Underwater basket weaving', minutes: 2 },
+          { title: 'Flashcards', subject: null, minutes: null },
+          { title: 'One', subject: null, minutes: 15 },
+          { title: 'Two', subject: null, minutes: 15 },
+          { title: 'Three', subject: null, minutes: 15 },
+          { title: 'Four', subject: null, minutes: 15 },
+          { title: 'Five', subject: null, minutes: 15 },
+        ],
+      },
+      ['Thermodynamics'],
+    );
+    expect(draft.title).toBe('Revision');
+    expect(draft.note).toBe('Keep it light.');
+    // Six steps at most; blanks dropped; the invented subject and the
+    // impossible minutes are corrected rather than passed on.
+    expect(draft.steps).toHaveLength(6);
+    expect(draft.steps[0]).toEqual({ title: 'Rewrite the summary', subject: 'Thermodynamics', minutes: 240 });
+    expect(draft.steps[1]).toEqual({ title: 'Past paper', subject: null, minutes: 5 });
+    expect(draft.steps[2]).toEqual({ title: 'Flashcards', subject: null, minutes: null });
+  });
+
   it('keeps history short, so a prompt cannot grow without limit', () => {
     const history = Array.from({ length: 40 }, (_unused, index) => ({
       ...results,

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { usePlanner } from '../context';
 import { sendGoal } from '../auth/links';
+import { draftGuardianProposal, friendlyGroqError } from '../ai';
 import { t } from '../i18n';
 import { GOAL_STEPS_MAX } from '../types';
 import type { GuardianLink } from '../types';
@@ -21,9 +22,33 @@ export function GuardianGoalForm({ link, onClose }: { link: GuardianLink; onClos
   const [target, setTarget] = useState('');
   const [steps, setSteps] = useState<string[]>(['', '']);
   const [sending, setSending] = useState(false);
+  const [drafting, setDrafting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const filled = steps.filter((step) => step.trim());
+
+  /**
+   * Fill the form from a draft based on the shared weekly results.
+   *
+   * No target date is filled in: the AI is told not to invent deadlines, and a
+   * date is the one field a student would read as a commitment. The guardian
+   * adds one if they mean it.
+   */
+  const draftWithAi = async () => {
+    if (drafting || sending || !link.results) return;
+    setDrafting(true);
+    setError(null);
+    try {
+      const result = await draftGuardianProposal({ results: link.results, history: link.history, kind: 'goal' });
+      if (result.title) setTitle(result.title);
+      if (result.note) setNote(result.note);
+      if (result.steps.length) setSteps(result.steps.map((step) => step.title));
+    } catch (caught) {
+      setError(friendlyGroqError(caught));
+    } finally {
+      setDrafting(false);
+    }
+  };
 
   const patchStep = (index: number, value: string) => {
     setSteps((current) => current.map((step, at) => (at === index ? value : step)));
@@ -68,10 +93,23 @@ export function GuardianGoalForm({ link, onClose }: { link: GuardianLink; onClos
           <p className="chart-title">{t('Suggest a goal')}</p>
           <p className="chart-note">{t('They choose whether to take it on. Nothing is added to their planner until they agree.')}</p>
         </div>
-        <button type="button" className="btn btn-ghost btn-tiny" onClick={onClose}>
-          {t('Cancel')}
-        </button>
+        <div className="ggoal-form-actions">
+          <button
+            type="button"
+            className="btn btn-ghost btn-tiny"
+            disabled={drafting || sending || !link.results}
+            onClick={() => void draftWithAi()}
+          >
+            {drafting ? t('Drafting…') : t('Draft with AI')}
+          </button>
+          <button type="button" className="btn btn-ghost btn-tiny" onClick={onClose}>
+            {t('Cancel')}
+          </button>
+        </div>
       </div>
+      <p className="chart-note">
+        {t('An AI draft reads the weekly results they shared — never their tasks or notes. Read it before you send it.')}
+      </p>
 
       <Field label={t('The goal')}>
         <input
