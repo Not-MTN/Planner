@@ -316,9 +316,7 @@ export function Shell() {
       document.querySelector<HTMLInputElement>('.quick-add input') ??
       document.querySelector<HTMLInputElement>('input[aria-autocomplete]');
     let cancelled = false;
-    let attempts = 0;
     let consumed = false;
-    let timer = 0;
     const nobodyHasFocus = () => {
       const active = document.activeElement;
       return !active || active === document.body || active === document.documentElement || !document.contains(active);
@@ -326,30 +324,43 @@ export function Shell() {
     const attempt = () => {
       if (cancelled) return;
       const input = find();
-      if (input && (document.activeElement === input || nobodyHasFocus())) {
-        if (document.activeElement !== input) input.focus();
-        if (!consumed && document.activeElement === input) {
-          consumed = true;
-          // The shortcut's URL is `#/today?qa=1`; once it has done its job,
-          // keep the query out of the address bar so a reload does not
-          // re-trigger the whole dance.
-          if (window.location.hash.includes('qa=1')) {
-            window.history.replaceState(null, '', window.location.hash.replace(/[?&]qa=1/, '').replace(/\?$/, ''));
-          }
+      if (!input) return;
+      if (document.activeElement !== input) {
+        if (!nobodyHasFocus()) return; // a person is using something else
+        input.focus();
+      }
+      if (!consumed && document.activeElement === input) {
+        consumed = true;
+        // The shortcut's URL is `#/today?qa=1`; once it has done its job, keep
+        // the query out of the address bar so a reload does not re-trigger the
+        // whole dance.
+        if (window.location.hash.includes('qa=1')) {
+          window.history.replaceState(null, '', window.location.hash.replace(/[?&]qa=1/, '').replace(/\?$/, ''));
         }
       }
-      // ~6 seconds is enough for a cold boot on a slow phone; after that the
-      // box is visible and a person can put the caret there themselves.
-      if (attempts < 40) {
-        attempts += 1;
-        timer = window.setTimeout(attempt, 150);
-      }
     };
-    timer = window.setTimeout(attempt, 120);
-    return () => {
+    // Watching, not a countdown: the boot can replace the input after any
+    // number of seconds, and a timer that had already given up is how the caret
+    // kept ending up on `<body>` (measured). So a mutation observer plus a slow
+    // interval keep the promise until the person touches anything — a real
+    // tap or key press ends it immediately — or ten seconds pass, whichever
+    // comes first.
+    const observer = new MutationObserver(attempt);
+    observer.observe(document.body, { childList: true, subtree: true });
+    const interval = window.setInterval(attempt, 200);
+    const stop = () => {
       cancelled = true;
-      window.clearTimeout(timer);
+      observer.disconnect();
+      window.clearInterval(interval);
+      window.clearTimeout(deadline);
+      document.removeEventListener('pointerdown', stop, true);
+      document.removeEventListener('keydown', stop, true);
     };
+    const deadline = window.setTimeout(stop, 10_000);
+    document.addEventListener('pointerdown', stop, true);
+    document.addEventListener('keydown', stop, true);
+    attempt();
+    return stop;
   }, [route.name, key]);
 
   useEffect(() => {
