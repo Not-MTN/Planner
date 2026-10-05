@@ -378,7 +378,16 @@
 }
 .empty-compact .empty-mark svg { width: 17px; height: 17px; }
 .empty-compact .empty-title { font-size: 16px; }
-.empty-compact > .btn { min-height: 34px; margin-top: 3px; }
+/* The compact empty states are the one place a button is asked to be shorter
+   than the app's 40px base — sensible with a cursor, and under the thumb floor
+   on a phone, where this button is exactly the tap that has to land. So the
+   small size is cursor-only; with a finger the touch rules win.
+   (Measured, not assumed: `e2e/touch-targets.spec.ts` failed on these three
+   buttons — Add event / Add task / Add habit — at 110×34, 98×34 and 105×34.) */
+.empty-compact > .btn { margin-top: 3px; }
+@media (pointer: fine) {
+  .empty-compact > .btn { min-height: 34px; }
+}
 
 .day-completed { margin-top: 10px; border-top: 1px solid var(--line); }
 .day-completed summary {

@@ -29,6 +29,8 @@ function route(path: string, method: string, body?: string): Promise<Response> {
       return import('../server/authApi').then((m) => m.handleRecoveryStart(request, store));
     case 'POST /api/auth/recovery/complete':
       return import('../server/authApi').then((m) => m.handleRecoveryComplete(request, store));
+    case 'POST /api/auth/recovery/update':
+      return import('../server/authApi').then((m) => m.handleRecoveryUpdate(request, store));
     case 'POST /api/auth/login':
       return import('../server/authApi').then((m) => m.handleLogin(request, store));
     case 'GET /api/auth/session':
@@ -164,6 +166,47 @@ describe('accounts end to end', () => {
     const session = await signIn(recoveryUser.username, replacementPassword, false);
     expect(session.user.username).toBe(recoveryUser.username);
     expect((await decryptVault())?.tasks[0]?.title).toBe('Finish the maths homework');
+  }, 60_000);
+
+  it('sets a new password from the approved device, with the vault staying readable', async () => {
+    const { signUp, signIn, endSession, decryptVault, changePasswordFromDevice, adoptSession, getActiveSession, AuthError } = await import('./session');
+    const approvedUser = { ...USER, username: 'device1', email: 'device1@example.com' };
+    const { recoveryCodes: firstCodes } = await signUp({
+      ...approvedUser,
+      role: 'personal',
+      password: PASSWORD,
+      initialState: sampleState(),
+      remember: false,
+    });
+
+    // The device is unlocked and holds the key (the usual state in Settings);
+    // no old password and no recovery code are involved.
+    const oldCode = firstCodes[0];
+    const replacementCodes = await changePasswordFromDevice('a-brand-new-long-password');
+    expect(replacementCodes.length).toBe(firstCodes.length);
+    replacementCodes.forEach((code) => expect(code).toMatch(/^plnr(-[A-Z2-9]{4}){5}$/));
+
+    // The old password, and the codes that came with it, are both spent...
+    const session = getActiveSession();
+    expect(session).not.toBeNull();
+    endSession();
+    await expect(signIn(approvedUser.username, PASSWORD, false)).rejects.toBeInstanceOf(AuthError);
+    const { resetPasswordWithRecovery } = await import('./session');
+    await expect(
+      resetPasswordWithRecovery(approvedUser.username, String(oldCode), 'yet-another-long-password'),
+    ).rejects.toBeInstanceOf(AuthError);
+
+    // ...and the new password opens the same vault, from a device that never
+    // held the key.
+    const fresh = await signIn(approvedUser.username, 'a-brand-new-long-password', false);
+    expect(fresh.user.username).toBe(approvedUser.username);
+    expect((await decryptVault())?.tasks[0]?.title).toBe('Finish the maths homework');
+
+    // A device without the key anywhere cannot use this tier: it has to offer
+    // a recovery code instead. (Nothing is cached on this fresh session, and
+    // the test environment has no IndexedDB.)
+    adoptSession(fresh.user, fresh.dek, fresh.vault, null);
+    await expect(changePasswordFromDevice('another-brand-new-password')).rejects.toMatchObject({ code: 'no_device_key' });
   }, 60_000);
 
   it('signs in with the email address instead of the username', async () => {

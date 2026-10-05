@@ -33,7 +33,7 @@ users have** — read §15 before treating any phase below as a to-do list.
 |---|---|
 | Accounts | **Required** of any build with a server address: sign in or sign up first, no anonymous mode. A build compiled without one (`local_only_build`) opens the planner offline with no account at all and says so — see §14. |
 | Sign-in | Username **or** email + password. **Passkey** (phone PIN, fingerprint, face, or desktop biometric) — offered at sign-up, strongly encouraged. |
-| Recovery | Three tiers: **password → approved trusted device → recovery key**. The recovery key is shown once at sign-up, re-viewable and downloadable from the panel. |
+| Recovery | Three tiers, all built: **password → approved device that still holds the key → recovery key**. A trusted device sets a new password from Settings without the old one (it re-wraps the key it already holds) and rotates the recovery keys at the same time; the recovery key is shown once at sign-up, re-viewable and downloadable from the panel. |
 | Encryption | End-to-end. Server stores ciphertext only. |
 | Notifications | **In-app everywhere.** Installed apps (PWA / desktop) may opt into **content-free push**. Never email. |
 | Student privacy | **Guaranteed private zone.** Items marked private are invisible to every guardian, with no override. |
@@ -239,15 +239,23 @@ call a recovery key a passkey.
   unwrap locally → decrypt vault.
 - **Change password** — needs the current password only. The DEK is simply
   re-wrapped; nothing is re-encrypted. (The recovery key is *not* needed for this.)
-- **Forgot password** — three ways back in, tried in order:
-  1. **A trusted device that is already signed in.** The new device asks for
-     help; the phone/tablet shows *"Someone is signing in to your planner"*,
-     unlocks with PIN/face/fingerprint, and approves. The wrapped DEK travels to
-     the new device encrypted to that device's own key — the server relays bytes
-     it cannot read. The user then sets a new password.
+- **Forgot password** — three ways back in, in the order they are worth trying:
+  1. **An approved device that still opens the vault.** Settings → Account →
+     *Set a new password*: the device already holds the vault key, so it
+     re-wraps that key for a password the person will remember. No old password
+     and no code are asked for; the old password stops working, the recovery
+     keys are replaced in the same step and shown once, and other approved
+     devices keep working because the vault key itself never changes
+     (`changePasswordFromDevice`, `src/auth/session.ts`).
   2. **A passkey**, where one was registered.
   3. **The recovery key** — the last resort. Unwraps the DEK, then set a new
      password and a new recovery key.
+
+  (The device-to-device *approval* relay described in this spec's earlier draft
+  — a new device asking a signed-in one for help — was never built and is not
+  needed: a device that cannot open the vault has nothing to prove with, and the
+  recovery key covers the fresh-device case. What ships is the tier that does
+  not need a second device.)
 
   There is no email reset link, because no email can decrypt a vault. This is
   stated plainly in the UI rather than hidden.
@@ -625,18 +633,18 @@ no surviving note references them.
 | Phase | Scope | Status |
 |---|---|---|
 | **0** | Landing page, `SPEC.md` sign-off, threat model update | **Done.** Landing ships with hero, roles and an FAQ section (`src/marketing/Landing.tsx`); `SECURITY.md` holds the threat model. There is no pricing page, because there is no paid tier. |
-| **1** | Auth: name + username or email + password, recovery key, passkey enrolment, sessions, trusted devices, device revoke, claim local data | **Done**, plus TOTP second factor and biometric unlock for packaged apps, both added after this spec. Recovery is password **or** a saved recovery key. |
-| **2** | Vaults: encrypted vault per account, multi-device, offline open, approved-device password recovery | **Partly.** Vault, multi-device and offline / trusted-device open all ship (`src/auth/vault.ts`). Recovery through an *approved device* was never built: the cached key opens the vault it already holds and cannot authorise a new one. |
+| **1** | Auth: name + username or email + password, recovery key, passkey enrolment, sessions, trusted devices, device revoke, claim local data | **Done**, plus TOTP second factor and biometric unlock for packaged apps, both added after this spec. Recovery is an approved device, a saved recovery key, or a passkey. |
+| **2** | Vaults: encrypted vault per account, multi-device, offline open, approved-device password recovery | **Done.** Vault, multi-device and offline / trusted-device open ship (`src/auth/vault.ts`), and an approved device can now set a new password without the old one, re-wrapping the key it already holds. The device-to-device approval relay for a device that *cannot* open the vault was not built (see §12): it has nothing to prove with, and the recovery key covers that case. |
 | **3** | Roles and linking: invites, student acceptance, scopes, presets, revocation | **Done, minus scopes and presets.** Role at sign-up, guardian invites by link or QR, student acceptance, link status and revocation all ship. Sharing is not per-scope; it is the weekly snapshot in phase 4. |
 | **4** | Guardian read-only: roster, dashboards from archives, change feed, tombstones, attribution | **Changed on purpose.** The guardian gets a roster and **weekly results the student chooses to share** (`src/views/GuardianPanelView.tsx`) — not a live scoped dashboard. There is no change feed and no tombstone list, and a compare-two-students view was not built (§16). |
 | **5** | Write access: plan editor, proposals, reasons, undo, audit log, shared timeline | **Partly, and lighter than this spec.** A guardian composes a plan or suggests a goal; both land in the student's inbox, where the student ticks items off and accepts or declines (`StudentPanelView.tsx`, `src/panels.ts`). The student's own planner items are never written to. Proposals as a separate review object, undo, the audit log and a shared timeline were not built. |
 | **6** | AI on both sides: proposals, weekly narrative, risk flags | **Partly.** The personal AI coach ships in full (plan, weekly review, saved memory). Guardians get `generateGuardianGuidance` — a summary, a focus, and one `watchOut` risk line (`src/ai.ts`). AI-authored proposals were not built. |
 | **7** | Extras: templates, syllabus → term plan, optional push for installed apps, meeting one-pager | **Mostly.** Templates, ICS/CSV/JSON import and opt-in content-free push for installed apps all ship. No syllabus → term-plan importer; no meeting one-pager. |
 
-**Not built, in one list:** approved-device password recovery, guardian scopes and
-presets, live scoped dashboards / change feed / tombstones, proposals, undo, the
-shared audit log, AI proposals, syllabus import, meeting one-pager, and guardian
-compare view. Everything else in this document exists in some form.
+**Not built, in one list:** the device-to-device approval relay, guardian scopes
+and presets, live scoped dashboards / change feed / tombstones, proposals, undo,
+the shared audit log, AI proposals, syllabus import, meeting one-pager, and
+guardian compare view. Everything else in this document exists in some form.
 
 ---
 
@@ -671,8 +679,11 @@ Answered questions are recorded here rather than deleted, so nobody re-opens the
 8. **Whether `FocusHistory`, `StatsWidget`, `WeeklyReview` and `MatrixView` are
    provisional** — nothing in the code marks them either way
    (`PERSONAL_PANEL_AUDIT.md` §15).
-9. **Approved-device password recovery** — the last unbuilt piece of the recovery
-   model; today the tiers are password and recovery key.
+9. ~~**Approved-device password recovery**~~ — built on 2026-10-05: an approved
+   device whose vault key is in hand sets a new password from Settings → Account
+   and rotates the recovery keys in the same step. What remains unbuilt is the
+   *relay* for a device that cannot open the vault at all, which the recovery key
+   already covers.
 
 ---
 
@@ -692,15 +703,16 @@ roughly in the order it would pay off.
 1. ~~Commit the visual baselines.~~ Done: the workflow generated them, committed
    them to this branch and the next run compared against them green
    (`e2e/visual.spec.ts-snapshots/`, `docs/VISUAL_TESTS.md`).
-2. **A touch-target check in the visual suite** — the last UI property with no
-   machine watching it (`UI_AUDIT_REPORT.md` §13).
+2. ~~**A touch-target check in the visual suite**~~ Done:
+   `e2e/touch-targets.spec.ts` grades the thumb and dense-control floors in the
+   phone project.
 3. **Persist the Weekly Review reflection** as a note if people ask for it; today it
    exists only inside the exported report (`REPORT.md` §7).
 
 **Engineering — larger**
 
-4. **Approved-device password recovery** — the last unbuilt tier of the recovery
-   model (phase 2 above).
+4. ~~**Approved-device password recovery**~~ Done (phase 2 above): Settings →
+   Account → *Set a new password* re-wraps the key the device already holds.
 5. **Guardian AI proposals** — draft a plan or a note from the same weekly totals
    `generateGuardianGuidance` already reads, with the student accepting or declining.
 6. **Guardian compare-two-students view**, once the fairness question in §16 is

@@ -14,6 +14,7 @@ import { useSignOut } from './useSignOut';
 import { accountUser, forgetAccountUser } from '../auth/vault';
 import { deviceCacheSupported, forgetDevice, listTrustedUserIds } from '../auth/device';
 import {
+  changePasswordFromDevice,
   confirmTotpSetup,
   deleteAccount,
   disableTotp,
@@ -783,6 +784,40 @@ function AccountSection() {
   const [rotationError, setRotationError] = useState('');
   const [newCodes, setNewCodes] = useState<string[] | null>(null);
   const [codesConfirmed, setCodesConfirmed] = useState(false);
+  // Which action produced the codes in the modal: replacing them, or setting a
+  // new password from this device. The list is identical; the sentence around
+  // it is not.
+  const [codesReason, setCodesReason] = useState<'rotation' | 'password'>('rotation');
+  const [changing, setChanging] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [repeatPassword, setRepeatPassword] = useState('');
+  const [changeBusy, setChangeBusy] = useState(false);
+  const [changeError, setChangeError] = useState('');
+
+  const requestPasswordChange = () => {
+    if (changeBusy) return;
+    if (newPassword.length < 10) {
+      setChangeError(t("Use at least 10 characters."));
+      return;
+    }
+    if (newPassword !== repeatPassword) {
+      setChangeError(t("The two passwords do not match."));
+      return;
+    }
+    setChangeBusy(true);
+    setChangeError('');
+    void changePasswordFromDevice(newPassword)
+      .then((codes) => {
+        setCodesReason('password');
+        setNewCodes(codes);
+        setCodesConfirmed(false);
+        setChanging(false);
+        setNewPassword('');
+        setRepeatPassword('');
+      })
+      .catch((error: unknown) => setChangeError(error instanceof Error ? error.message : t("The password could not be changed.")))
+      .finally(() => setChangeBusy(false));
+  };
 
   const requestRotation = () => {
     if (rotationBusy || !rotationPassword) return;
@@ -790,6 +825,7 @@ function AccountSection() {
     setRotationError('');
     void regenerateRecoveryCodes(rotationPassword)
       .then((codes) => {
+        setCodesReason('rotation');
         setNewCodes(codes);
         setCodesConfirmed(false);
         setRotating(false);
@@ -840,6 +876,59 @@ function AccountSection() {
               <ExitIcon size={15} /> {t("Sign out")}
             </button>
           </div>
+          {getActiveSession() ? (
+            <div className="set-actions account-password-actions">
+              {!changing ? (
+                <button
+                  type="button"
+                  className="btn btn-soft"
+                  onClick={() => { setChanging(true); setChangeError(''); setNewPassword(''); setRepeatPassword(''); }}
+                >
+                  {t("Set a new password")}
+                </button>
+              ) : (
+                <div className="account-password-form">
+                  {/* The third recovery tier: this device already holds the
+                      vault key, so it can re-wrap that key for a password the
+                      person will remember. No old password, no recovery code —
+                      and no way to do it from a device that cannot open the
+                      vault. */}
+                  <p className="set-hint">
+                    {t("This device already holds your vault key, so it can set a new password without the old one. Your recovery codes are replaced at the same time, and your other devices keep working.")}
+                  </p>
+                  <label className="field">
+                    <span>{t("New password")}</span>
+                    <input
+                      className="input"
+                      type="password"
+                      autoComplete="new-password"
+                      value={newPassword}
+                      onChange={(event) => setNewPassword(event.target.value)}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>{t("Repeat new password")}</span>
+                    <input
+                      className="input"
+                      type="password"
+                      autoComplete="new-password"
+                      value={repeatPassword}
+                      onChange={(event) => setRepeatPassword(event.target.value)}
+                    />
+                  </label>
+                  {changeError ? <p className="set-hint is-error" role="alert">{changeError}</p> : null}
+                  <div className="set-actions">
+                    <button type="button" className="btn btn-ghost" disabled={changeBusy} onClick={() => { setChanging(false); setNewPassword(''); setRepeatPassword(''); }}>
+                      {t("Cancel")}
+                    </button>
+                    <button type="button" className="btn btn-soft" disabled={changeBusy || !newPassword || !repeatPassword} onClick={requestPasswordChange}>
+                      {changeBusy ? t("Changing…") : t("Set new password")}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
           {getActiveSession() ? (
             <div className="set-actions account-recovery-actions">
               {!rotating ? (
@@ -925,10 +1014,16 @@ function AccountSection() {
           onClose={() => {
             if (!codesConfirmed) return;
             setNewCodes(null);
-            flash(t("Recovery codes replaced. The old set no longer works."));
+            flash(codesReason === 'password'
+              ? t("Password changed. The old password and the old recovery codes no longer work.")
+              : t("Recovery codes replaced. The old set no longer works."));
           }}
         >
-          <p className="set-hint">{t("Save these now. They are shown only once, and the codes you had before no longer open your account.")}</p>
+          <p className="set-hint">
+            {codesReason === 'password'
+              ? t("Save these now. Your new password works from here on, and these are the only recovery codes that do.")
+              : t("Save these now. They are shown only once, and the codes you had before no longer open your account.")}
+          </p>
           <RecoveryCodes
             codes={newCodes}
             copy={{
@@ -952,7 +1047,12 @@ function AccountSection() {
               type="button"
               className="btn btn-primary"
               disabled={!codesConfirmed}
-              onClick={() => { setNewCodes(null); flash(t("Recovery codes replaced. The old set no longer works.")); }}
+              onClick={() => {
+                setNewCodes(null);
+                flash(codesReason === 'password'
+                  ? t("Password changed. The old password and the old recovery codes no longer work.")
+                  : t("Recovery codes replaced. The old set no longer works."));
+              }}
             >
               {t("Done")}
             </button>

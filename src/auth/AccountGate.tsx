@@ -625,7 +625,7 @@ export function AccountGate() {
 
               <p className="gate-note">
                 {t(
-                  'Your planner is encrypted, so we cannot reset it for you. Use the recovery key you saved when you signed up.',
+                  'Your planner is encrypted, so we cannot reset it for you. Use a recovery key, or — on a device that still opens your planner — set a new password in Settings, Account.',
                 )}
               </p>
             </form>

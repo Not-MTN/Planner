@@ -22,7 +22,7 @@ import {
   unwrapKeyRaw,
   wrapRawKey,
 } from './crypto';
-import { forgetDevice, rememberOnDevice } from './device';
+import { forgetDevice, recallFromDevice, rememberOnDevice } from './device';
 import { forgetBiometricKey } from './biometric';
 import type { PlannerState } from '../types';
 
@@ -118,6 +118,14 @@ export type AuthErrorCode =
   | 'invite_expired'
   /** A code typed during set-up or removal did not match. */
   | 'totp_invalid'
+  /** The password offered is long enough to be worth protecting. */
+  | 'weak_password'
+  /**
+   * No vault key on this device: the approved-device tiers all need the key
+   * itself, and this browser neither holds it in memory nor in its device
+   * cache. Recovery codes are the way in from here.
+   */
+  | 'no_device_key'
   | 'unknown';
 
 /**
@@ -596,6 +604,59 @@ export async function regenerateRecoveryCodes(password: string): Promise<string[
     return recoveryCodes;
   } finally {
     raw?.fill(0);
+  }
+}
+
+/**
+ * Set a new password from an approved device — the third tier of recovery,
+ * for the person who has forgotten their password but is still on the device
+ * that holds their vault key.
+ *
+ * No recovery code is asked for because the device can already open the vault:
+ * the key in hand is the proof, and it is also the only thing that can re-wrap
+ * the vault key for a password the person will remember. The server sees a
+ * new salt, a new auth verifier and a new wrapped key; it never sees the key,
+ * the password, or any plaintext.
+ *
+ * Two consequences worth stating in the UI:
+ * - the old password stops working (the verifier is replaced);
+ * - the recovery codes are replaced as well, and the new set is shown once.
+ *   Codes and password are the same lock on the same key, so rotating both in
+ *   one step leaves nothing of the forgotten password behind.
+ *
+ * The vault key itself does not change, so other approved devices and the
+ * copy already synced to the server keep working untouched.
+ */
+export async function changePasswordFromDevice(newPassword: string): Promise<string[]> {
+  const current = active;
+  if (!current) throw new AuthError('unauthenticated', 'Unlock your planner first.');
+  if (newPassword.length < 10) throw new AuthError('weak_password', 'Use at least 10 characters.');
+
+  // The in-memory copy is the usual source (every unlock path adopts one); the
+  // device cache is the fallback, because being trusted is what this tier is.
+  // Either way it is copied before use: the original has to survive for passkey
+  // enrolment, and this function must not zero it on the way out.
+  let raw = current.dekRaw ? new Uint8Array(current.dekRaw) : null;
+  if (!raw) raw = (await recallFromDevice(current.user.id))?.raw ?? null;
+  if (!raw) {
+    throw new AuthError(
+      'no_device_key',
+      'This device does not hold your vault key right now. Use a recovery code instead.',
+    );
+  }
+
+  try {
+    const salt = newSalt();
+    const { authToken, kek } = await deriveFromPassword(newPassword, salt);
+    const wrappedDek = await wrapRawKey(raw, kek);
+    const { recoveryCodes, body } = await rotateRecoveryCodes(raw, { salt, authToken, wrappedDek });
+    await request<{ ok: true }>('/api/auth/recovery/update', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    return recoveryCodes;
+  } finally {
+    raw.fill(0);
   }
 }
 
