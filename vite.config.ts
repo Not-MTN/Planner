@@ -411,6 +411,10 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [appOrigins(), react(), groqProxyPlugin(apiKey, model, visionModel), syncApi(databaseUrl), authApi(databaseUrl), icsApi(), pushApi(pushEnv), apiFallback()],
     build: {
+      // `scripts/bundle-budget.mjs` keys its baseline by module, not by the
+      // content hash in each filename, and this is where it learns that
+      // mapping. The file is inert: nothing fetches it at runtime.
+      manifest: true,
       rollupOptions: {
         output: {
           manualChunks: {

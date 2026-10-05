@@ -11,6 +11,8 @@ npm run dev
 
 Other scripts: `npm run typecheck`, `npm test`, `npm run build`, `npm run test:e2e` (browser tests — run `npx playwright install chromium` once first). `npm run test:e2e:visual` compares screenshots of the key screens in Persian/RTL and both themes against committed baselines; see [docs/VISUAL_TESTS.md](docs/VISUAL_TESTS.md) for how the baselines are made and why they are generated on CI.
 
+The browser suites cover more than the pictures: `e2e/a11y.spec.ts` runs axe over every screen in both languages and themes and fails on serious or critical violations (with the few deliberate exceptions listed in the file), `e2e/pwa.spec.ts` checks the manifest, every icon at the size it claims, service-worker registration, and that the app still opens and saves work with the network switched off, and `e2e/touch-targets.spec.ts` measures the visible controls against the 44 px thumb minimum. `npm run check:bundle-budget` weighs what a browser downloads against a committed baseline (`scripts/bundle-budget.mjs`), and `npm run check:visual-baselines` says whether a screenshot needs regenerating before the suite does.
+
 Contributing? [CONTRIBUTING.md](CONTRIBUTING.md) has the setup, the traps, and what a change is expected to come with.
 
 See [SECURITY.md](SECURITY.md) for the threat model, deployment hardening, privacy boundaries, and vulnerability reporting process. No app can be guaranteed unhackable; protect the device, browser profile, sync code, and server secrets too.
@@ -431,8 +433,29 @@ Turn it off any time under **Settings → Crash reports**; the choice is remembe
 | Endpoint | Method | Purpose |
 | --- | --- | --- |
 | `/api/report` | POST | Accepts one crash report, logs it, answers `204` with no body |
+| `/api/report/recent` | GET | Reads reports back, grouped by message. Requires `REPORT_DASHBOARD_SECRET` |
 
 Logs are the sink that always exists: each report is one structured `[planner:report]` line, which Vercel (or any host) captures and forwards to log drains. To also get them somewhere you read, set `ERROR_REPORT_WEBHOOK` to a URL that accepts a JSON POST — on Vercel under **Project → Settings → Environment Variables**, locally in `.env.local`. A webhook that is down never fails report intake.
+
+### Reading them back, and being told
+
+A log line tells you nothing about *how often*, and a release that breaks every page is invisible in a list of one-line errors. With `DATABASE_URL` set, reports are also stored (the newest 500 rows; older ones are pruned) and can be read back:
+
+```bash
+curl -H "Authorization: Bearer $REPORT_DASHBOARD_SECRET" \
+  "$PLANNER_APP_URL/api/report/recent?window=24h"      # JSON
+open "$PLANNER_APP_URL/api/report/recent?format=html"   # the same thing, as a page
+```
+
+The JSON groups by message — `count`, `first`, `last`, the releases and areas it was seen in — newest group first. The page says the same in a table, marks hot rows in red, and is deliberately self-contained: inline styles, no scripts, no external anything, so it still works when the rest of the deployment does not.
+
+**Alerting** is the alert rule plus whatever can fetch a URL:
+
+- A message that happens **5 times in an hour** (the defaults, next to the counting code in `src/server/reportApi.ts`) is listed in `alerts`, and a webhook gets exactly one extra post with `"kind": "alert"` as it crosses — once per crossing, not once per report.
+- `npm run check:reports` polls that endpoint and exits `1` when `alerts` is non-empty, naming each message. It needs `PLANNER_APP_URL` and `REPORT_DASHBOARD_SECRET`.
+- `.github/workflows/reports.yml` runs that check every two hours. Set the `PLANNER_APP_URL` variable and the `REPORT_DASHBOARD_SECRET` secret on the repository and a bad release becomes a failing scheduled run — a notification, not a dashboard nobody opens. Until the secret is set the job says it is not configured and stays green.
+
+The dashboard is off unless `REPORT_DASHBOARD_SECRET` is set, and that secret is the only credential; every response is `no-store` and the page is `noindex`.
 
 ## Notes
 

@@ -49,7 +49,7 @@ import {
   readSessionToken,
 } from './authApi.js';
 import { authStore, hashToken } from './authStore.js';
-import { handleReport } from './reportApi.js';
+import { handleReport, handleReportOverview } from './reportApi.js';
 import { resolveProviders } from './aiProviders.js';
 import { handleICS } from './icsProxy.js';
 import { handleSync, handleSyncStatus, neonStore } from './sync.js';
@@ -68,6 +68,8 @@ export interface ApiEnv {
   AI_DAILY_REQUESTS?: string;
   /** Optional: forwards each crash report somewhere you actually read. */
   ERROR_REPORT_WEBHOOK?: string;
+  /** Optional: turns on the read-only crash-report dashboard at /api/report/recent. */
+  REPORT_DASHBOARD_SECRET?: string;
   /**
    * Every AI provider variable, passed through as read. The proxy resolves
    * providers from this rather than from a fixed list, so adding a key means
@@ -222,7 +224,9 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
     case '/api/push/dispatch':
       return (request) => handlePushDispatch(request, env);
     case '/api/report':
-      return (request) => handleReport(request, env.ERROR_REPORT_WEBHOOK);
+      return (request) => handleReport(request, env.ERROR_REPORT_WEBHOOK, env.DATABASE_URL);
+    case '/api/report/recent':
+      return (request) => handleReportOverview(request, env);
     default:
       return null;
   }

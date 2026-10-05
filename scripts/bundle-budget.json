@@ -1,0 +1,42 @@
+{
+  "updated": "2026-10-05",
+  "tolerancePercent": 10,
+  "note": "Compressed (gzip) bundle sizes of build output, keyed by module or chunk name with the content hash stripped (see scripts/bundle-budget.mjs). `limits` are the numbers not to cross; `measured` is the baseline a chunk may not exceed by more than tolerancePercent. Rewrite with `npm run check:bundle-budget -- --update` in a commit that explains why. Caps do not move on their own.",
+  "limits": {
+    "totalGzipBytes": 640000,
+    "entryGzipBytes": 200000,
+    "chunkGzipBytes": 170000
+  },
+  "measured": {
+    "index.html [entry]": 151157,
+    "AccountGate": 116233,
+    "AccountGate.css": 33960,
+    "src/marketing/Site.tsx": 33786,
+    "theme": 26391,
+    "src/views/AIView.tsx": 18262,
+    "assets/Site.css": 16548,
+    "src/views/GuardianPanelView.tsx": 15641,
+    "ai": 14966,
+    "src/views/StudentPanelView.tsx": 9139,
+    "assets/index.css": 8369,
+    "src/views/CalendarView.tsx": 5914,
+    "src/views/InsightsView.tsx": 5866,
+    "vendor": 4339,
+    "panels.css": 3619,
+    "node_modules/@capacitor/core/dist/index.js": 3427,
+    "node_modules/@capacitor/camera/dist/esm/index.js": 3350,
+    "src/views/PlansView.tsx": 2565,
+    "charts": 2037,
+    "src/views/PanelsView.tsx": 1862,
+    "sw.js": 1582,
+    "node_modules/@capacitor/local-notifications/dist/esm/web.js": 1369,
+    "DraftRefine": 493,
+    "node_modules/@capacitor/app/dist/esm/web.js": 405,
+    "theme-init.js": 395,
+    "node_modules/@capacitor/local-notifications/dist/esm/index.js": 387,
+    "node_modules/@capacitor-community/speech-recognition/dist/esm/index.js": 276,
+    "node_modules/@capacitor/app/dist/esm/index.js": 264,
+    "node_modules/@capacitor-community/speech-recognition/dist/esm/web.js": 243,
+    "node_modules/@capacitor/push-notifications/dist/esm/index.js": 119
+  }
+}

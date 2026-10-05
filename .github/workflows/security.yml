@@ -44,3 +44,12 @@ jobs:
       # image, a dependency that bundles its own copy of something).
       - name: Keep the payload inside its budget
         run: npm run size:report -- --check 5
+      # The payload is what an installer carries; this is what a browser
+      # downloads — the entry script and stylesheet, compressed, plus every
+      # chunk. A dependency that doubles the entry bundle is invisible in the
+      # payload total and very visible on a phone. The baseline it compares
+      # against is committed (scripts/bundle-budget.json); the caps in that file
+      # are the hard limits, and a chunk may not grow past the tolerance without
+      # someone running `npm run check:bundle-budget -- --update` on purpose.
+      - name: Keep the downloaded bundle inside its budget
+        run: npm run check:bundle-budget

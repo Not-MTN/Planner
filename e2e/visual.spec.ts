@@ -24,6 +24,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { createEmptyState, type PlannerState } from '../src/types';
 import { addEvent, addGoal, addHabit, addNote, addTask, toggleTask } from '../src/mutate';
+import { LANGUAGES, MATRIX_VIEWS as VIEWS, THEMES, matrixShot, shot } from './visual-shots';
 
 /** Thursday. The app is frozen here for the whole file. */
 const TODAY = '2026-03-12';
@@ -65,8 +66,7 @@ function seededState(): PlannerState {
  * reach. The seeds below are the ones the language switcher itself writes
  * (`SettingsSheet.tsx`, `src/dates.ts`).
  */
-async function seed(page: Page, language: 'en' | 'fa', theme: 'light' | 'dark'): Promise<void> {
-  const state = seededState();
+async function seed(page: Page, language: 'en' | 'fa', theme: 'light' | 'dark', state = seededState()): Promise<void> {
   const display = { dateLanguage: language === 'fa' ? 'fa' : 'en-GB', timeFormat: '24h', jalali: false };
   await page.addInitScript(
     ([key, value, lang, mode, prefs, weekStart]) => {
@@ -93,10 +93,10 @@ async function seed(page: Page, language: 'en' | 'fa', theme: 'light' | 'dark'):
  * sign-in screen — so the seeded state reaches the screen without faking any
  * UI. The gate's own behaviour is covered by src/auth/gate.test.tsx.
  */
-async function open(page: Page, options: { language: 'en' | 'fa'; theme: 'light' | 'dark'; path: string }): Promise<void> {
+async function open(page: Page, options: { language: 'en' | 'fa'; theme: 'light' | 'dark'; path: string; state?: PlannerState }): Promise<void> {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.clock.setFixedTime(new Date(NOW));
-  await seed(page, options.language, options.theme);
+  await seed(page, options.language, options.theme, options.state);
   await page.route('**/api/auth/session', (route) => route.abort());
   await page.goto(options.path);
   await page.evaluate(async () => {
@@ -124,15 +124,6 @@ async function shoot(page: Page, name: string): Promise<void> {
   });
 }
 
-const VIEWS = [
-  { name: 'today', path: '/#/today', ready: '.timeline-card' },
-  { name: 'tasks', path: '/#/tasks', ready: '.view .page-head' },
-  { name: 'insights', path: '/#/insights', ready: '.stat-row' },
-] as const;
-
-const THEMES = ['light', 'dark'] as const;
-const LANGUAGES = ['en', 'fa'] as const;
-
 test.describe('key views in every direction and theme', () => {
   // Baselines are captured at one fixed desktop viewport; the mobile layout is
   // covered below with a single RTL, dark case rather than a second matrix.
@@ -147,7 +138,7 @@ test.describe('key views in every direction and theme', () => {
           test.skip(testInfo.project.name !== 'desktop', 'the matrix runs once, at the desktop viewport');
           await open(page, { language, theme, path: view.path });
           await expect(page.locator(view.ready)).toBeVisible();
-          await shoot(page, `${view.name}-${language}-${theme}.png`);
+          await shoot(page, matrixShot(view.name, language, theme));
         });
       }
     }
@@ -194,7 +185,7 @@ test.describe('the phone layout in Persian, dark', () => {
     await open(page, { language: 'fa', theme: 'dark', path: '/#/today' });
     await expect(page.locator('.timeline-card')).toBeVisible();
     await expect(page.locator('.tabbar')).toBeVisible();
-    await shoot(page, 'phone-today-fa-dark.png');
+    await shoot(page, shot('phone-today-fa-dark.png'));
   });
 });
 
@@ -210,7 +201,7 @@ test.describe('the marketing page', () => {
       await document.fonts.ready;
     });
     await expect(page.locator('.hero-title')).toBeVisible();
-    await shoot(page, 'landing-en-light.png');
+    await shoot(page, shot('landing-en-light.png'));
   });
 
   test('landing — fa, dark', async ({ page }, testInfo) => {
@@ -227,6 +218,133 @@ test.describe('the marketing page', () => {
       await document.fonts.ready;
     });
     await expect(page.locator('.hero-title')).toBeVisible();
-    await shoot(page, 'landing-fa-dark.png');
+    await shoot(page, shot('landing-fa-dark.png'));
+  });
+});
+
+/**
+ * The screens behind the sign-in gate.
+ *
+ * The rest of this file photographs the local planner: a session probe is
+ * aborted and the bundled copy renders. That leaves the screens a signed-in
+ * person actually spends time in — the panels, the settings sheet, and the gate
+ * itself — with no picture watching them, which is exactly where a refactor
+ * breaks the layout of something nobody opens while developing.
+ *
+ * Two mechanisms, both deliberate:
+ *
+ *   - The panels are part of the planner state, so seeding `panels.student` /
+ *     `panels.guardian` reaches them without an account. That is the same
+ *     fixture `e2e/panels.spec.ts` uses, and it is the honest shape: the panels
+ *     work offline because the data is local.
+ *   - The sign-in screen is reached by answering the session probe the way the
+ *     server does for a stranger — `401` — instead of aborting it. Aborting is
+ *     "the server is unreachable, keep working offline"; a 401 is "no session",
+ *     which is what a first-time visitor gets.
+ */
+async function openSignedOut(page: Page, options: { language: 'en' | 'fa'; theme: 'light' | 'dark'; path: string; state?: PlannerState }): Promise<void> {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.clock.setFixedTime(new Date(NOW));
+  await seed(page, options.language, options.theme, options.state);
+  await page.route('**/api/auth/session', (route) =>
+    route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Not signed in.' } }) }),
+  );
+  await page.goto(options.path);
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+  });
+  await expect(page.locator('html')).toHaveAttribute('dir', options.language === 'fa' ? 'rtl' : 'ltr');
+  await page.evaluate(
+    () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+  );
+}
+
+/**
+ * The same shape of fixture `e2e/panels.spec.ts` uses: a student with two
+ * subjects and a headline, and a guardian with one linked student and a week of
+ * results. Fixed ids and dates, so the pictures are the same on every run.
+ */
+function panelState(): PlannerState {
+  const state = seededState();
+  state.panels.student = {
+    ...state.panels.student,
+    enabled: true,
+    field: 'Natural sciences',
+    grade: 'school-11',
+    subjects: [
+      { id: 'physics', name: 'Physics', accent: 'blue', examDate: '2026-03-20', targetMinutes: 120 },
+      { id: 'maths', name: 'Mathematics', accent: 'sage', examDate: null, targetMinutes: 180 },
+    ],
+    explanations: [
+      { id: 'headline', weekOf: '2026-03-09', summary: 'A steady week', reason: '', createdAt: NOW },
+    ],
+  };
+  state.panels.guardian = {
+    ...state.panels.guardian,
+    enabled: true,
+    kind: 'advisor',
+    field: 'Science',
+    links: [
+      {
+        id: 'alice',
+        username: 'alice',
+        displayName: 'Alice Bennett',
+        status: 'linked',
+        linkId: '11111111-1111-1111-1111-111111111111',
+        wrappedShareKey: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=',
+        code: null,
+        history: [],
+        plans: [],
+        results: {
+          weekOf: '2026-03-09',
+          planned: 5,
+          done: 3,
+          focusMinutes: 90,
+          subjects: [{ name: 'Physics', minutes: 90 }],
+          headline: 'A steady week',
+          updatedAt: NOW,
+        },
+      },
+    ],
+  };
+  return state;
+}
+
+test.describe('the screens a signed-in person uses', () => {
+  test.use({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1, locale: 'en-US', timezoneId: 'UTC' });
+
+  test('student panel — en, light', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop', 'the matrix runs once, at the desktop viewport');
+    await open(page, { language: 'en', theme: 'light', path: '/#/student', state: panelState() });
+    await expect(page.locator('.student-panel-view')).toBeVisible();
+    await shoot(page, shot('student-panel-en-light.png'));
+  });
+
+  test('guardian roster — fa, dark', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop', 'the matrix runs once, at the desktop viewport');
+    await open(page, { language: 'fa', theme: 'dark', path: '/#/guardian', state: panelState() });
+    await expect(page.locator('.guardian-roster')).toBeVisible();
+    await shoot(page, shot('guardian-roster-fa-dark.png'));
+  });
+
+  test('settings — sync and backup — en, light', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop', 'the matrix runs once, at the desktop viewport');
+    await open(page, { language: 'en', theme: 'light', path: '/#/today' });
+    await expect(page.locator('.timeline-card')).toBeVisible();
+    await page.locator('.side-tool[data-tour="settings"]').click();
+    await expect(page.locator('#set-tab-sync')).toBeVisible();
+    await page.locator('#set-tab-sync').click();
+    // The retention window is the newest section here, and the reason this
+    // screenshot exists: a settings row that overflows its column is invisible
+    // to every behavioural test.
+    await expect(page.getByText('How long detail is kept')).toBeVisible();
+    await shoot(page, shot('settings-sync-en-light.png'));
+  });
+
+  test('sign-in — en, light', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop', 'the matrix runs once, at the desktop viewport');
+    await openSignedOut(page, { language: 'en', theme: 'light', path: '/#/today' });
+    await expect(page.locator('.gate-title')).toBeVisible();
+    await shoot(page, shot('signin-en-light.png'));
   });
 });

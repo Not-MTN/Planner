@@ -68,18 +68,20 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
-      # A fresh checkout has no baselines — they are generated on this runner and
-      # committed back. So the first run writes them instead of failing, and the
-      # artifact it uploads is what gets committed. Once one set exists, a
-      # mismatch is a real failure.
-      - name: Check for committed baselines
+      # A fresh checkout, or one where a screenshot was just added, has no
+      # baseline for it — Playwright writes the file and fails the test, which
+      # is correct locally and useless here. `check:visual-baselines` answers
+      # the real question instead ("is any picture missing?") and the answer
+      # regenerates and commits a fresh set once. After that, a mismatch is a
+      # real failure.
+      - name: Check the baselines are complete
         id: baselines
         run: |
-          if [ -n "$(find e2e/visual.spec.ts-snapshots -name '*.png' -print -quit 2>/dev/null)" ]; then
+          if npm run --silent check:visual-baselines; then
             echo "missing=false" >> "$GITHUB_OUTPUT"
           else
             echo "missing=true" >> "$GITHUB_OUTPUT"
-            echo "::notice title=No visual baselines yet::This run writes them and uploads the visual-baselines artifact; commit it to e2e/visual.spec.ts-snapshots/ to turn this job into a real gate."
+            echo "::notice title=Visual baselines are incomplete::This run writes the full set and commits it to e2e/visual.spec.ts-snapshots/; the next push is the run that compares."
           fi
 
       # The suite serves the app from a production build (playwright.config.ts),

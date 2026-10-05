@@ -1,6 +1,8 @@
 {
   "name": "Planner — calm daily planning",
   "short_name": "Planner",
+  "lang": "en",
+  "dir": "ltr",
   "description": "A calm, local-first planner for your day, habits, and goals.",
   "start_url": "/app#/today",
   "display": "standalone",

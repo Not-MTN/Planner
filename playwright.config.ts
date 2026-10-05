@@ -19,7 +19,9 @@ export default defineConfig({
     { name: 'desktop', use: { ...devices['Desktop Chrome'] } },
     // The visual suite sets its own viewports and is captured once, in one
     // browser: running it in both projects would mean two sets of baselines
-    // for the same screens (e2e/visual.spec.ts).
-    { name: 'mobile', use: { ...devices['Pixel 7'] }, testIgnore: /visual\.spec\.ts/ },
+    // for the same screens (e2e/visual.spec.ts). The PWA suite is about the
+    // service worker and the manifest, which behave the same at two widths —
+    // running it twice would double the slowest file for no extra coverage.
+    { name: 'mobile', use: { ...devices['Pixel 7'] }, testIgnore: /\.visual\.spec\.ts|\.pwa\.spec\.ts/ },
   ],
 });

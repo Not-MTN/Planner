@@ -107,7 +107,18 @@ To see where the payload goes, and to catch a regression:
 ```bash
 npm run build && npm run size:report            # where the megabytes are
 npm run size:report -- --check 5                # fail above a 5 MB payload
+npm run check:bundle-budget                     # what a browser downloads, per chunk
 ```
+
+The last one is a different measurement: `size:report` weighs the payload an
+installer carries, while `check:bundle-budget` weighs what the browser actually
+fetches — the entry script and stylesheet out of `index.html` plus every chunk,
+gzipped, against a committed baseline in `scripts/bundle-budget.json`. A chunk
+may not grow more than 10% without `npm run check:bundle-budget -- --update` in a
+commit that says why, and the `limits` in that file are hard caps CI enforces on
+every build (`security.yml`). The baseline is keyed by module — Vite's
+`.vite/manifest.json`, enabled in `vite.config.ts` for exactly this — because
+filenames carry a content hash that changes on every edit.
 
 The remaining artwork in `public/img/` is byte-for-byte the original photography.
 WebP is the next 1.6 MB and it was tried and undone: converting those files and

@@ -62,10 +62,15 @@ describe('apiRoute table', () => {
       '/api/sync/status',
       '/api/ai/chat/completions',
       '/api/ai/status',
+      '/api/push/config',
+      '/api/push/device',
+      '/api/push/dispatch',
+      '/api/report',
+      '/api/report/recent',
     ];
     for (const path of paths) expect(apiRoute(path, NO_ENV), path).not.toBeNull();
 
-    for (const path of ['/api', '/api/auth', '/api/auth/nope', '/api/sync/nope', '/api/ai', '/api/not-a-route']) {
+    for (const path of ['/api', '/api/auth', '/api/auth/nope', '/api/sync/nope', '/api/ai', '/api/report/nope', '/api/not-a-route']) {
       expect(apiRoute(path, NO_ENV), path).toBeNull();
     }
   });
@@ -78,6 +83,11 @@ describe('handleApiRequest', () => {
     expect(response.headers.get('content-type')).toContain('application/json');
     expect(response.headers.get('x-content-type-options')).toBe('nosniff');
     await expect(response.json()).resolves.toEqual({ error: { message: 'Not found.' } });
+  });
+
+  it('keeps the crash-report dashboard unlisted until a deployment arms it', async () => {
+    const response = await handleApiRequest(request('/api/report/recent'), NO_ENV);
+    expect(response.status).toBe(404);
   });
 
   it('serves /api/auth/status without a database', async () => {
