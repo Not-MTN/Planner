@@ -582,7 +582,7 @@ Two real bugs found and fixed:
 
 675 tests, 1 skipped. TypeScript and ESLint clean.
 
-> **Status at 2026-10-05:** 91 files / **886 passing, 1 skipped**
+> **Status at 2026-10-05:** 91 files / **888 passing, 1 skipped**
 > (`npm test`), `tsc --noEmit` and `eslint .` clean, and four workflows lint green.
 > Since this pass: the accounts/vault/TOTP build, biometric unlock and deep links in
 > the packaged apps, a Persian-digit sweep (`digitsIn`), and the visual-regression

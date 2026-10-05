@@ -689,11 +689,9 @@ roughly in the order it would pay off.
 
 **Engineering — small**
 
-1. **Commit the visual baselines.** The workflow bootstraps them: the first run on
-   a branch with no snapshots writes them, stays green and uploads
-   `visual-baselines`. Commit that artifact to `e2e/visual.spec.ts-snapshots/` and
-   the job becomes a real gate (`docs/VISUAL_TESTS.md`). Until then, a *local*
-   `npm run test:e2e:visual` still fails with "snapshot doesn't exist".
+1. ~~Commit the visual baselines.~~ Done: the workflow generated them, committed
+   them to this branch and the next run compared against them green
+   (`e2e/visual.spec.ts-snapshots/`, `docs/VISUAL_TESTS.md`).
 2. **A touch-target check in the visual suite** — the last UI property with no
    machine watching it (`UI_AUDIT_REPORT.md` §13).
 3. **Persist the Weekly Review reflection** as a note if people ask for it; today it

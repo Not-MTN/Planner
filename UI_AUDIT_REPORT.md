@@ -510,7 +510,7 @@ The Planner UI is **well-engineered and production-ready** for the core app expe
 
 All items below were implemented and verified with `tsc --noEmit`, `vite build`, and
 the full Vitest suite. *(The run at the time was 46 files / 406 tests; the suite is
-now 91 files / 886 passing, 1 skipped — re-verified 2026-10-05.)*
+now 91 files / 888 passing, 1 skipped — re-verified 2026-10-05.)*
 
 ### High priority — Fixed
 
@@ -560,8 +560,9 @@ now 91 files / 886 passing, 1 skipped — re-verified 2026-10-05.)*
   worker (the visual suite runs in a browser tab, not an installed app).
 - **`font-size-adjust`** (low priority, item 10) remains open; the fonts still load
   with `display: swap`.
-- **Optional, manual**: the visual suite needs its baselines generated once on CI
-  before it can fail locally — `docs/VISUAL_TESTS.md` has the steps.
+- **Local runs**: the committed baselines were captured on the CI runner, so
+  `npm run test:e2e:visual` on another machine may report font-level differences.
+  Compare on CI; `docs/VISUAL_TESTS.md` explains why.
 
 ### Gaps closed since this report
 
@@ -570,7 +571,9 @@ now 91 files / 886 passing, 1 skipped — re-verified 2026-10-05.)*
   exists for contexts that carry their own language (`src/i18n.ts`).
 - **Visual regression, RTL and dark mode** — fixed. `e2e/visual.spec.ts` takes 15
   screenshots (Today / Tasks / Insights × en/fa × light/dark, one phone case, two
-  landing-page shots) and runs on CI via `.github/workflows/visual.yml`.
+  landing-page shots), asserts that Persian mode carries no Latin day, month or
+  motivation text, and runs on CI via `.github/workflows/visual.yml` — baselines
+  committed, so a mismatch now fails the run.
 
 ---
 
