@@ -2067,4 +2067,12 @@ export const fi: Record<string, string> = {
   "⌘K (or /) finds tasks, notes and events, jumps to any page, and adds new things without lifting your hands from the keyboard.": "⌘K (tai /) löytää tehtävät, muistiinpanot ja tapahtumat, hyppää mille tahansa sivulle ja lisää uusia asioita nostamatta käsiä näppäimistöltä.",
   "⌘Z takes anything back, mistakes are just steps, and a rest day never breaks a streak.": "⌘Z palauttaa mitä tahansa, virheet ovat vain askelia, eikä lepopäivä koskaan katkaise putkea.",
   "📌 Unpin": "📌 Poista kiinnitys",
+  "Another device changed the same thing. Review it in Settings → Sync.": "Toinen laite muutti samaa asiaa. Tarkista se kohdassa Asetukset → Synkronointi.",
+  "{0} things were changed on two devices. Review them in Settings → Sync.": "{0} asiaa muutettiin kahdella laitteella. Tarkista ne kohdassa Asetukset → Synkronointi.",
+  "Settings — {0} change(s) to review": "Asetukset — {0} muutosta tarkistettavana",
+  "Review {0} change(s) from another device": "Tarkista {0} muutos toiselta laitteelta",
+  "The difference is in the details this screen does not show.": "Ero on yksityiskohdissa, joita tämä näkymä ei näytä.",
+  "Time": "Aika",
+  "Target": "Tavoite",
+  "Empty": "Tyhjä",
 };

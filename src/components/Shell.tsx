@@ -117,6 +117,7 @@ export function Shell() {
     closePalette,
     settingsOpen,
     openSettings,
+    syncConflicts,
     startFocus,
     syncStatus,
     undo,
@@ -597,7 +598,13 @@ export function Shell() {
               <BellIcon size={17} />
               {unreadNotifications > 0 ? <span className="rail-badge" aria-hidden="true" /> : null}
             </button>
-            <button type="button" className="rail-btn rail-util" aria-label={t("Settings")} title={t("Settings")} onClick={openSettings}>
+            <button
+              type="button"
+              className="rail-btn rail-util"
+              aria-label={syncConflicts.length ? t("Settings — {0} change(s) to review", { 0: syncConflicts.length }) : t("Settings")}
+              title={t("Settings")}
+              onClick={() => openSettings(syncConflicts.length ? 'sync' : 'account')}
+            >
               <SlidersIcon size={17} />
             </button>
             <button type="button" className="rail-btn rail-util" aria-label={t("How it works")} title={t("How Planner works")} onClick={() => requestTour()}>
@@ -620,10 +627,27 @@ export function Shell() {
             <span>{t("Notifications")}</span>
             {unreadNotifications > 0 ? <span className="notification-badge">{unreadNotifications > 9 ? `9+` : faNum(unreadNotifications)}</span> : null}
           </button>
-          <button type="button" className="side-tool" data-tour="settings" onClick={openSettings} title={t("Settings")}>
+          <button
+            type="button"
+            className="side-tool"
+            data-tour="settings"
+            // With a conflict waiting, the badge and the notice both point at
+            // the one tab that can resolve it.
+            onClick={() => openSettings(syncConflicts.length ? 'sync' : 'account')}
+            title={t("Settings")}
+            // A merge that dropped someone's edit has to be visible from
+            // wherever they are, not only on the tab that lists it.
+            aria-label={syncConflicts.length ? t("Settings — {0} change(s) to review", { 0: syncConflicts.length }) : t("Settings")}
+          >
             <SlidersIcon size={16} />
             <span>{t("Settings")}</span>
+            {syncConflicts.length ? <span className="notification-badge conflict-badge">{syncConflicts.length > 9 ? '9+' : faNum(syncConflicts.length)}</span> : null}
           </button>
+          {syncConflicts.length ? (
+            <button type="button" className="conflict-notice" onClick={() => openSettings('sync')}>
+              {t("Review {0} change(s) from another device", { 0: syncConflicts.length })}
+            </button>
+          ) : null}
           <button type="button" className="side-tool side-help" onClick={() => requestTour()} title={t("How Planner works")}>
             <HelpIcon size={16} />
             <span>{t("How it works")}</span>

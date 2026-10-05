@@ -2216,4 +2216,12 @@ export const fa: Record<string, string> = {
   "Reading the setting from the app…": "خواندن این تنظیم از برنامه…",
   "Reminders keep arriving after you close the window. A tray icon brings Planner back, and Quit Planner stops it for good.": "پس از بستن پنجره هم یادآورها می‌رسند. نماد سینی، Planner را برمی‌گرداند و «خروج از Planner» آن را برای همیشه می‌بندد.",
   "Planner quits when you close the window, so reminders only arrive while it is open.": "با بستن پنجره Planner بسته می‌شود، پس یادآورها فقط تا وقتی برنامه باز است می‌رسند.",
+  "Another device changed the same thing. Review it in Settings → Sync.": "دستگاه دیگری همین مورد را تغییر داد. آن را در تنظیمات → همگام‌سازی بررسی کنید.",
+  "{0} things were changed on two devices. Review them in Settings → Sync.": "{0} مورد روی دو دستگاه تغییر کرد. آن‌ها را در تنظیمات → همگام‌سازی بررسی کنید.",
+  "Settings — {0} change(s) to review": "تنظیمات — {0} تغییر برای بررسی",
+  "Review {0} change(s) from another device": "بررسی {0} تغییر از دستگاه دیگر",
+  "The difference is in the details this screen does not show.": "تفاوت در جزئیاتی است که این صفحه نشان نمی‌دهد.",
+  "Time": "زمان",
+  "Target": "هدف",
+  "Empty": "خالی",
 };

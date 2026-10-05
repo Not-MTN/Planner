@@ -11,6 +11,7 @@ import { FeedsSection, RetentionSection, SecuritySection, SharedSpaceSection, Sy
 import { BiometricSetting } from './BiometricSetting';
 import { isReportingEnabled, setReportingEnabled } from '../reporting';
 import { useSignOut } from './useSignOut';
+import type { ConflictField } from '../sync';
 import { accountUser, forgetAccountUser } from '../auth/vault';
 import { deviceCacheSupported, forgetDevice, listTrustedUserIds } from '../auth/device';
 import {
@@ -30,7 +31,7 @@ import {
   type DeviceSession,
   type TotpSetup,
 } from '../auth/session';
-import { DATE_LANGUAGES, formatStamp, todayISO, type DateLanguage } from '../dates';
+import { DATE_LANGUAGES, formatEdited, formatStamp, formatWeekdayShort, todayISO, type DateLanguage } from '../dates';
 import { downloadBusyICS, downloadICS, parseICS } from '../ics';
 import { canInstall, isInstalled, onInstallChange, promptInstall } from '../pwa';
 import { desktopPreferences, isDesktopShell, onDesktopPreferences, setDesktopBackground } from '../desktop';
@@ -148,8 +149,27 @@ function NavigationSection() {
  * back. Everything here is a choice the person makes — there is no automatic
  * way to know which of two edited sentences was meant.
  */
+/** The field names, as literals so they are part of the translation set. */
+function conflictFieldLabel(field: ConflictField): string {
+  if (field === 'title') return t('Title');
+  if (field === 'due') return t('Due');
+  if (field === 'time') return t('Time');
+  if (field === 'priority') return t('Priority');
+  if (field === 'category') return t('Category');
+  if (field === 'amount') return t('Target');
+  if (field === 'progress') return t('Progress');
+  return t('Note');
+}
+
+/** A date field reads as a date; everything else is shown as written. */
+function conflictValue(field: ConflictField, value: string): string {
+  if (!value) return t('Empty');
+  if (field !== 'due' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  return `${formatWeekdayShort(value)} ${formatEdited(value).split(' · ')[0]}`;
+}
+
 function ConflictList() {
-  const { syncConflicts, keepConflictVersion, dismissConflict, dismissAllConflicts } = usePlanner();
+  const { syncConflicts, conflictChanges, keepConflictVersion, dismissConflict, dismissAllConflicts } = usePlanner();
   if (syncConflicts.length === 0) return null;
   return (
     <div
@@ -165,24 +185,43 @@ function ConflictList() {
         {t("Both this device and another one had edited these since they last met. The newest is in your planner; the other is kept here until you decide.")}
       </p>
       <ul className="sync-conflict-list">
-        {syncConflicts.map((conflict) => (
-          <li key={`${conflict.kind}:${conflict.item.id}:${conflict.lostAt}`} className="sync-conflict">
-            <div>
-              <p className="sync-conflict-title">{conflict.title || t("Untitled")}</p>
-              <p className="sync-conflict-when">
-                {t("Other version edited {0}", { 0: formatStamp(conflict.lostAt) })}
-              </p>
-            </div>
-            <div className="sync-conflict-actions">
-              <button type="button" className="btn btn-tiny" onClick={() => keepConflictVersion(conflict)}>
-                {t("Use the other version")}
-              </button>
-              <button type="button" className="btn btn-tiny btn-ghost" onClick={() => dismissConflict(conflict)}>
-                {t("Keep what I have")}
-              </button>
-            </div>
-          </li>
-        ))}
+        {syncConflicts.map((conflict) => {
+          const changes = conflictChanges(conflict);
+          return (
+            <li key={`${conflict.kind}:${conflict.item.id}:${conflict.lostAt}`} className="sync-conflict">
+              <div className="sync-conflict-head">
+                <p className="sync-conflict-title">{conflict.title || t("Untitled")}</p>
+                <p className="sync-conflict-when">
+                  {t("Other version edited {0}", { 0: formatStamp(conflict.lostAt) })}
+                </p>
+              </div>
+              {changes.length ? (
+                <dl className="sync-conflict-diff">
+                  {changes.map((change) => (
+                    <div className="sync-conflict-row" key={`${change.field}:${change.mine}:${change.theirs}`}>
+                      <dt>{conflictFieldLabel(change.field)}</dt>
+                      <dd className="mine">{conflictValue(change.field, change.mine)}</dd>
+                      <dd className="theirs">{conflictValue(change.field, change.theirs)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : (
+                // Two shapes can differ in a way no person-facing field shows
+                // (a milestone list, a repeat rule). Say so rather than showing
+                // an empty comparison that looks like a bug.
+                <p className="set-hint">{t("The difference is in the details this screen does not show.")}</p>
+              )}
+              <div className="sync-conflict-actions">
+                <button type="button" className="btn btn-tiny" onClick={() => keepConflictVersion(conflict)}>
+                  {t("Use the other version")}
+                </button>
+                <button type="button" className="btn btn-tiny btn-ghost" onClick={() => dismissConflict(conflict)}>
+                  {t("Keep what I have")}
+                </button>
+              </div>
+            </li>
+          );
+        })}
       </ul>
       <div className="set-actions">
         <button type="button" className="btn btn-ghost btn-small" onClick={dismissAllConflicts}>
@@ -219,6 +258,10 @@ function SyncSection() {
           />
         </p>
       ) : null}
+      {/* Always shown, whether or not sync is on right now: a conflict outlives
+          the setting that produced it, and hiding the only screen that can
+          resolve it would leave the stored version stranded. */}
+      <ConflictList />
       {sync.code ? (
         <>
           <div className="set-row">
@@ -244,7 +287,6 @@ function SyncSection() {
               </button>
             </div>
           </div>
-          <ConflictList />
           <div className="set-actions">
             <button type="button" className="btn btn-ghost" onClick={stopSync}>{t("Turn off on this device")}</button>
             <button
@@ -1570,7 +1612,7 @@ function ActivitySection() {
   );
 }
 
-type SettingsTab = 'account' | 'appearance' | 'language' | 'reminders' | 'sync' | 'connections' | 'app';
+export type SettingsTab = 'account' | 'appearance' | 'language' | 'reminders' | 'sync' | 'connections' | 'app';
 
 /*
  * Settings grew to twenty sections, and one long scroll buries all of them:
@@ -1591,6 +1633,7 @@ export function SettingsSheet() {
   const planner = usePlanner();
   const {
     settingsOpen,
+    settingsTab,
     closeSettings,
     themeMode,
     setThemeMode,
@@ -1603,7 +1646,13 @@ export function SettingsSheet() {
     requestConfirm,
   } = planner;
   const importFile = useImportFile(importText);
-  const [tab, setTab] = useState<SettingsTab>('account');
+  const [tab, setTab] = useState<SettingsTab>(settingsTab);
+
+  // Something outside the sheet asked for a particular tab — a conflict notice
+  // wants Sync, the install prompt wants App — so follow it while open.
+  useEffect(() => {
+    if (settingsOpen) setTab(settingsTab);
+  }, [settingsOpen, settingsTab]);
   const tabRefs = useRef<Partial<Record<SettingsTab, HTMLButtonElement | null>>>({});
 
   // Arrow keys move along the tabs, as a tab list is expected to. Only the

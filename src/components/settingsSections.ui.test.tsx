@@ -16,7 +16,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { App } from '../App';
 import { STORAGE_KEY, serialize } from '../storage';
 import { addDays, startOfWeek, todayISO } from '../dates';
-import { addTask, toggleTask } from '../mutate';
+import { addTask, toggleTask, updateTask } from '../mutate';
 import { createEmptyState } from '../types';
 import { RETENTION_KEY } from '../retention';
 import { loadWeekStart, setWeekStart } from '../dates';
@@ -297,5 +297,71 @@ describe('the desktop background setting', () => {
     delete (window as DesktopWindow).plannerDesktop;
     delete (window as DesktopWindow).Capacitor;
     expect(await setDesktopBackground(true)).toBeNull();
+  });
+});
+
+/**
+ * A merge that dropped someone's edit has to be visible without opening
+ * Settings, and it has to say *what* is different — "History essay" twice is
+ * not a decision anyone can make.
+ */
+describe('a change two devices disagreed about', () => {
+  const MADE = '2026-09-24T09:00:00.000Z';
+  const LOST_AT = '2026-09-25T10:00:00.000Z';
+
+  function seedDivergedTask(): void {
+    // The planner holds the version that won the merge (edited later); the
+    // stored conflict holds the one that lost.
+    const base = addTask(createEmptyState(), { title: 'History essay', priority: 'medium', dueDate: null, dueTime: null, category: 'personal', note: '', goalId: null }, 'essay', MADE);
+    const kept = updateTask(base, 'essay', { title: 'History essay plan', dueDate: '2026-05-13' }, '2026-09-25T11:00:00.000Z');
+    const losing = updateTask(base, 'essay', { dueDate: '2026-05-12' }, '2026-09-25T10:00:00.000Z');
+    window.localStorage.setItem(STORAGE_KEY, serialize(kept));
+    window.localStorage.setItem(
+      'planner-sync-conflicts',
+      JSON.stringify([{ kind: 'task', title: 'History essay', lostAt: LOST_AT, item: losing.tasks[0] }]),
+    );
+    act(() => root?.unmount());
+    container?.remove();
+    root = null;
+    mountApp();
+  }
+
+  it('shows a notice outside Settings, and the difference inside it', async () => {
+    seedDivergedTask();
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 900));
+    });
+    await waitForText('Today');
+    // The count is on the Settings tool and in a sentence beside it, so it is
+    // visible from any screen rather than only on the tab that lists it.
+    await waitForText('from another device');
+    expect(document.querySelector('.side-tool[data-tour="settings"] .conflict-badge')?.textContent).toBe('1');
+
+    click('.conflict-notice');
+    await waitForText('Changed on two devices');
+    // The comparison: the version in the planner, and the one that lost.
+    const rows = [...document.querySelectorAll('.sync-conflict-row')];
+    const titles = rows.map((row) => row.textContent ?? '');
+    expect(titles.some((row) => row.includes('History essay plan') && row.includes('History essay'))).toBe(true);
+    // The date is shown as a date, not as the ISO string it is stored as.
+    const due = rows.find((row) => row.querySelector('dt')?.textContent === 'Due')?.textContent ?? '';
+    expect(due).toContain('13');
+    expect(due).toContain('12');
+  });
+
+  it('keeps the other version when asked, and forgets the conflict', async () => {
+    seedDivergedTask();
+    await waitForText('Today');
+    click('.side-tool[data-tour="settings"]');
+    await waitForText('Changed on two devices');
+    clickByText('Use the other version');
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    });
+
+    const state = JSON.parse(saved()) as { tasks: { title: string }[] };
+    expect(state.tasks[0].title).toBe('History essay');
+    expect(window.localStorage.getItem('planner-sync-conflicts')).toBeNull();
   });
 });

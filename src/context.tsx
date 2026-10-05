@@ -80,9 +80,30 @@ import {
   type ReminderSettings,
 } from './reminders';
 import { appendNotifications } from './notificationCenter';
+import type { SettingsTab } from './components/SettingsSheet';
 import { backgroundPushEnabled, refreshBackgroundPushSchedule } from './push';
 import { buildSampleState } from './sample';
-import { CONFLICT_LIMIT, EMPTY_SYNC, type MergeConflict, SyncError, type SyncSettings, deleteRemote, generateCode, loadSyncSettings, mergeStates, normalizeCode, restoreConflict, saveSyncSettings, syncConfigured, syncOnce } from './sync';
+import {
+  deleteRemote,
+  describeConflict,
+  EMPTY_SYNC,
+  generateCode,
+  keyOfConflict,
+  loadConflicts,
+  loadSyncSettings,
+  mergeConflictLists,
+  mergeStates,
+  normalizeCode,
+  restoreConflict,
+  saveConflicts,
+  saveSyncSettings,
+  syncConfigured,
+  syncOnce,
+  SyncError,
+  type ConflictChange,
+  type MergeConflict,
+  type SyncSettings,
+} from './sync';
 import {
   EMPTY_SHARED,
   isSharedNote,
@@ -184,7 +205,9 @@ interface PlannerContextValue {
   openPalette: () => void;
   closePalette: () => void;
   settingsOpen: boolean;
-  openSettings: () => void;
+  /** Which tab the sheet is on, so a notice can open the one it is about. */
+  settingsTab: SettingsTab;
+  openSettings: (tab?: SettingsTab) => void;
   closeSettings: () => void;
   focus: FocusSession | null;
   startFocus: (session: FocusSession) => void;
@@ -199,6 +222,7 @@ interface PlannerContextValue {
   syncMessage: string | null;
   /** Versions that lost a merge, waiting to be looked at. */
   syncConflicts: MergeConflict[];
+  conflictChanges: (conflict: MergeConflict) => ConflictChange[];
   /** Put the version that lost back, and send it to the other devices. */
   keepConflictVersion: (conflict: MergeConflict) => void;
   dismissConflict: (conflict: MergeConflict) => void;
@@ -332,11 +356,6 @@ const PRAISES = [
   () => t("You did the thing. ⭐"),
 ];
 
-/** Two conflicts are the same disagreement: the same thing, edited at the same moment. */
-function keyOfConflict(conflict: MergeConflict): string {
-  return `${conflict.kind}:${conflict.item.id}:${conflict.lostAt}`;
-}
-
 export function PlannerProvider({ children, initialState }: { children: ReactNode; initialState?: PlannerState | null }) {
   // `initialState` wins when the planner was opened from an encrypted vault.
   const [boot] = useState(() =>
@@ -356,6 +375,7 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
   const [accent, setAccent] = useState<Accent>(() => loadAccent('sage'));
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('account');
   const [focus, setFocus] = useState<FocusSession | null>(null);
   const [confettiSeed, setConfettiSeed] = useState(0);
   const [sync, setSyncState] = useState<SyncSettings>(() => loadSyncSettings());
@@ -363,7 +383,9 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   // Versions that lost a merge. Shown rather than thrown away: sync that
   // silently discards an edit is sync people turn off.
-  const [syncConflicts, setSyncConflicts] = useState<MergeConflict[]>([]);
+  // Conflicts survive a reload: the sync that finds one runs on its own, and a
+  // disagreement that disappears with the tab is a lost edit nobody saw.
+  const [syncConflicts, setSyncConflicts] = useState<MergeConflict[]>(() => loadConflicts());
   const [syncAvailable, setSyncAvailable] = useState<boolean | null>(null);
   const [display, setDisplayState] = useState(() => loadDisplayPrefs());
   const [weekStart, setWeekStartState] = useState<WeekStart>(() => loadWeekStart());
@@ -730,9 +752,17 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
       setSyncMessage(null);
       if (outcome.conflicts.length) {
         setSyncConflicts((current) => {
-          const seen = new Set(current.map(keyOfConflict));
-          return [...current, ...outcome.conflicts.filter((item) => !seen.has(keyOfConflict(item)))].slice(-CONFLICT_LIMIT);
+          const next = mergeConflictLists(current, outcome.conflicts);
+          saveConflicts(next);
+          return next;
         });
+        // A conflict is not a background event. Say so where the user is,
+        // not only on the settings tab they may never open.
+        flash(
+          outcome.conflicts.length === 1
+            ? t("Another device changed the same thing. Review it in Settings → Sync.")
+            : t("{0} things were changed on two devices. Review them in Settings → Sync.", { 0: outcome.conflicts.length }),
+        );
       }
       if (arrived > 0) flash(t("{0} new {1} merged from your other devices.", { 0: arrived, 1: arrived === 1 ? t("item") : t("items") }));
     } catch (caught) {
@@ -768,7 +798,11 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
   const keepConflictVersion = useCallback(
     (conflict: MergeConflict) => {
       commit((current) => restoreConflict(current, conflict));
-      setSyncConflicts((current) => current.filter((item) => keyOfConflict(item) !== keyOfConflict(conflict)));
+      setSyncConflicts((current) => {
+        const next = current.filter((item) => keyOfConflict(item) !== keyOfConflict(conflict));
+        saveConflicts(next);
+        return next;
+      });
       updateSync({ ...syncRef.current, dirty: true });
       flash(t("Kept the other version of “{0}”.", { 0: conflict.title }));
       scheduleSync(400);
@@ -777,10 +811,23 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
   );
 
   const dismissConflict = useCallback((conflict: MergeConflict) => {
-    setSyncConflicts((current) => current.filter((item) => keyOfConflict(item) !== keyOfConflict(conflict)));
+    setSyncConflicts((current) => {
+      const next = current.filter((item) => keyOfConflict(item) !== keyOfConflict(conflict));
+      saveConflicts(next);
+      return next;
+    });
   }, []);
 
-  const dismissAllConflicts = useCallback(() => setSyncConflicts([]), []);
+  const dismissAllConflicts = useCallback(() => {
+    saveConflicts([]);
+    setSyncConflicts([]);
+  }, []);
+
+  /** What the version in the planner and the version that lost differ by. */
+  const conflictChanges = useCallback(
+    (conflict: MergeConflict): ConflictChange[] => describeConflict(stateRef.current, conflict),
+    [],
+  );
 
 
   // ── Shared space (second encrypted room for "Shared" category items) ────────
@@ -1330,7 +1377,11 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     openPalette: () => setPaletteOpen(true),
     closePalette: () => setPaletteOpen(false),
     settingsOpen,
-    openSettings: () => setSettingsOpen(true),
+    settingsTab,
+    openSettings: (tab: SettingsTab = 'account') => {
+      setSettingsTab(tab);
+      setSettingsOpen(true);
+    },
     closeSettings: () => setSettingsOpen(false),
     focus,
     startFocus: (session) => setFocus(session),
@@ -1347,6 +1398,7 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     syncStatus,
     syncMessage,
     syncConflicts,
+    conflictChanges,
     keepConflictVersion,
     dismissConflict,
     dismissAllConflicts,
@@ -1517,7 +1569,7 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     },
     setIntention: (date, text) => commit((current) => setIntentionIn(current, date, text)),
     logMood: (date, value, taskId) => commit((current) => setMoodIn(current, date, value, taskId)),
-  }), [state, ready, error, notice, saveBlocked, route, navigate, composer, confirm, startFresh, exportData, retentionWeeks, importText, loadSample, flash, dismissNotice, praise, undo, redo, canUndo, canRedo, themeMode, accent, paletteOpen, settingsOpen, focus, confettiSeed, celebrate, clearCompletedTasks, commit, reminders, setReminders, weekStart, setWeekStart, display, setDisplay, sync, syncStatus, syncMessage, syncConflicts, keepConflictVersion, dismissConflict, dismissAllConflicts, syncAvailable, startSync, stopSync, runSync, deleteCloudCopy, shared, sharedStatus, sharedMessage, startShared, stopShared, runSharedSync, feeds, addFeed, removeFeed, refreshFeeds, weather, setWeather, recordTombstone, updatePanels, setPanelEnabled, runRollUp]);
+  }), [state, ready, error, notice, saveBlocked, route, navigate, composer, confirm, startFresh, exportData, retentionWeeks, importText, loadSample, flash, dismissNotice, praise, undo, redo, canUndo, canRedo, themeMode, accent, paletteOpen, settingsOpen, settingsTab, focus, confettiSeed, celebrate, clearCompletedTasks, commit, reminders, setReminders, weekStart, setWeekStart, display, setDisplay, sync, syncStatus, syncMessage, syncConflicts, conflictChanges, keepConflictVersion, dismissConflict, dismissAllConflicts, syncAvailable, startSync, stopSync, runSync, deleteCloudCopy, shared, sharedStatus, sharedMessage, startShared, stopShared, runSharedSync, feeds, addFeed, removeFeed, refreshFeeds, weather, setWeather, recordTombstone, updatePanels, setPanelEnabled, runRollUp]);
 
   return <PlannerContext.Provider value={value}>{children}</PlannerContext.Provider>;
 }

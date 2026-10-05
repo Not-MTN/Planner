@@ -106,6 +106,12 @@ How it works: the sync code never leaves your devices. The browser derives an AE
 | `/api/sync/status` | GET | `{ configured: boolean }` |
 | `/api/sync` | GET / PUT / DELETE | Read, compare-and-swap write, or delete the encrypted blob (`X-Sync-Id` header) |
 
+### When two devices change the same thing
+
+If both devices edited the *same* item since they last met, the newest edit wins — but the edit that lost is not thrown away. It is written to `planner-sync-conflicts` in the device's own storage (at most 20, newest first) and the merge says so: a badge on **Settings**, a line reading *Review 1 change from another device* on whatever screen you are on, and a **Changed on two devices** list under **Settings → Sync**. Each row compares the two versions field by field (title, due date and time, priority, category, amount, progress, note body) so you can see what actually differs instead of choosing between two identical-looking titles, then either **Keep what I have** or **Use the other version** — the stored copy is whole, so putting it back restores every field, not just the one shown. There is also **Keep what I have for all of them**.
+
+A conflict outlives the setting that produced it: turning sync off hides the code and the buttons, never the list. Stored conflicts are validated on read — a malformed row is ignored rather than trusted, and a conflict with nothing visible to compare still says so rather than showing an empty table.
+
 ### Accounts use the same database
 
 Sign-in (and guardian linking later) needs the **same `DATABASE_URL`** — there is nothing else to provision, because the API creates its tables on first use just like `planner_sync`. The schema is in `db/auth.sql` if you prefer to run it yourself.
