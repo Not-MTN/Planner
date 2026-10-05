@@ -2110,4 +2110,6 @@ export const fa: Record<string, string> = {
   "Open settings": "باز کردن تنظیمات",
   "Close dialog": "بستن پنجره",
   "Your AI provider key is working — the account has just run out of free allowance. Add a payment method with the provider, or wait for the free allowance to reset, then try again. No redeploy needed.": "کلید هوش مصنوعی شما کار می‌کند — اما سهمیهٔ رایگان حساب تمام شده است. یک روش پرداخت در حساب ارائه‌دهنده اضافه کنید، یا تا بازنشانی سهمیهٔ رایگان صبر کنید و دوباره تلاش کنید. نیازی به استقرار دوباره نیست.",
+  "Open weekly review": "گشودن مرور هفتگی",
+  "Show these shortcuts": "نمایش این میان‌برها",
 };
