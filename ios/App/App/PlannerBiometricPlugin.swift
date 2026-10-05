@@ -90,7 +90,10 @@ public class PlannerBiometricPlugin: CAPPlugin, CAPBridgedPlugin {
             call.resolve()
         case errSecAuthFailed, errSecUserCanceled:
             call.reject("Unlock cancelled.", "cancelled")
-        case errSecNotAvailable, errSecInteractionNotAllowed, errSecPasscodeNotSet:
+        // The item is only there when the device has a passcode; without one
+        // the Keychain answers as unavailable, which is a device that cannot
+        // hold this unlock rather than a failure of the check.
+        case errSecNotAvailable, errSecInteractionNotAllowed:
             call.reject("This device cannot check you right now.", "unavailable")
         default:
             call.reject("That could not be turned on just now.", "failed")
@@ -121,7 +124,10 @@ public class PlannerBiometricPlugin: CAPPlugin, CAPBridgedPlugin {
             // `.biometryCurrentSet` throws the item away when the enrolled face
             // or fingers change, so this is the invalidated case, not a bug.
             call.reject("The saved unlock is no longer on this device.", "invalidated")
-        case errSecNotAvailable, errSecInteractionNotAllowed, errSecPasscodeNotSet:
+        // The item is only there when the device has a passcode; without one
+        // the Keychain answers as unavailable, which is a device that cannot
+        // hold this unlock rather than a failure of the check.
+        case errSecNotAvailable, errSecInteractionNotAllowed:
             call.reject("This device cannot check you right now.", "unavailable")
         default:
             call.reject("That did not unlock your planner.", "failed")
