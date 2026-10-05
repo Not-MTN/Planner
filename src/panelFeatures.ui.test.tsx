@@ -490,6 +490,41 @@ describe('guardian roster and planning', () => {
     expect(sendPlan).not.toHaveBeenCalled();
   });
 
+  it('prints the meeting one-pager from the shared results alone', async () => {
+    const written: string[] = [];
+    const open = vi.spyOn(window, 'open').mockReturnValue({
+      document: {
+        open: () => undefined,
+        write: (chunk: string) => written.push(chunk),
+        close: () => undefined,
+      },
+      focus: () => undefined,
+      print: () => undefined,
+    } as unknown as Window);
+    try {
+      await mount(guardianState(), 'guardian');
+      const alice = [...document.querySelectorAll('.student-card')].find(
+        (card) => card.querySelector('.student-name')?.textContent === 'Alice',
+      )!;
+      await click('View student', alice);
+      await click('Meeting one-pager', alice);
+      const page = written.join('');
+      // A page of its own, built from the week Alice shared.
+      expect(open).toHaveBeenCalled();
+      expect(page).toContain('Advising meeting');
+      expect(page).toContain('Alice');
+      expect(page).toContain('Physics');
+      expect(page).toContain('75');
+      expect(page).toContain('never tasks or notes');
+      // The student's private planner is not reachable from the guardian side
+      // at all — these markers only exist in the student fixture.
+      expect(page).not.toContain('PRIVATE_TASK_TITLE');
+      expect(page).not.toContain('PRIVATE_REASON');
+    } finally {
+      open.mockRestore();
+    }
+  });
+
   it('turns an AI question into an editable message and sends it to the shared circle', async () => {
     await mount(guardianState(), 'guardian');
     const alice = [...document.querySelectorAll('.student-card')].find(

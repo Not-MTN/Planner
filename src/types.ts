@@ -523,6 +523,50 @@ export interface GuardianLink {
   expiresAt?: string | null;
 }
 
+/**
+ * A week that has left the retention window, kept as numbers.
+ *
+ * Deliberately content-free: counts, minutes and averages only, the same shape
+ * §11 specifies. Old charts read these instead of raw history, which is what
+ * lets the detail behind them be dropped without the past disappearing.
+ */
+export interface ArchivedDay {
+  date: string;
+  ratio: number | null;
+  mood: number | null;
+  plannedMinutes: number;
+  focusMinutes: number;
+}
+
+export interface ArchivedHabit {
+  habitId: string;
+  name: string;
+  done: number;
+  target: number;
+  streakEnd: number;
+}
+
+export interface ArchivedGoal {
+  goalId: string;
+  title: string;
+  milestoneDone: number;
+  milestoneTotal: number;
+}
+
+export interface WeekArchive {
+  weekStart: string;
+  days: ArchivedDay[];
+  tasksDone: number;
+  tasksTotal: number;
+  eventsDone: number;
+  eventsTotal: number;
+  habits: ArchivedHabit[];
+  focusMinutes: number;
+  focusSessions: number;
+  moodAverage: number | null;
+  goals: ArchivedGoal[];
+}
+
 export interface PlannerState {
   tasks: Task[];
   events: PlannerEvent[];
@@ -540,6 +584,8 @@ export interface PlannerState {
   moods: MoodEntry[];
   intentions: Record<string, string>;
   focusLog: FocusLog[];
+  /** Weeks that have left the retention window, newest last. See src/retention.ts. */
+  archives?: WeekArchive[];
   panels: Panels;
 }
 
@@ -636,6 +682,7 @@ export function createEmptyState(): PlannerState {
     intentions: {},
     moods: [],
     focusLog: [],
+    archives: [],
     panels: createEmptyPanels(),
   };
 }

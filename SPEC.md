@@ -476,9 +476,16 @@ matches the "installed apps may notify" rule exactly.
 
 ## 11. Retention and the weekly rollup
 
-> **Status: client-side only.** The weekly rollup shipped (shared results, AI weekly
-> review); the configurable hot window and server-side folding did not — everything
-> lives on the device and nothing expires by itself.
+> **Status: client-side, and now real (2026-10-05).** The hot window is a setting
+> (`src/retention.ts`, Settings → Sync & backup): 1 / 2 / 4 / 12 weeks or keep
+> everything. Detail outside it is rolled up into `WeekArchive` rows and dropped —
+> individual focus sessions, raw moods, habit tick marks, the reasons on change
+> notes, the bodies of old AI drafts, and the note/subtask text of work finished
+> long ago. Anything unfinished, undated, in the future, or **created inside the
+> window** is never touched, so importing a syllabus for a term already under way
+> cannot have its topics pruned the moment they arrive. Server-side folding stays
+> out on purpose: the server cannot read the vault, so it cannot fold what it
+> cannot see.
 
 Planners are about now and next, so **detail is temporary, results are permanent.**
 
@@ -538,23 +545,34 @@ no surviving note references them.
   produces identical output, so a race between the student's and a guardian's client
   is harmless under last-write-wins.
 - It runs when the app is opened on or after the following Monday, with a **2-day
-  grace period** so a Sunday-night check-in still counts.
-- **Export before rollup**: a "Download this week in full" option, and a
-  "keep everything" setting for users who want it (with an honest size warning).
+  grace period** (`GRACE_DAYS`) so a Sunday-night check-in still counts, and again
+  whenever the app returns to the foreground. It is idempotent, so a second run in
+  the same week writes nothing.
+- Every week since the oldest surviving item gets a row, but only weeks something
+  actually happened in: an empty record per dormant week would grow the vault
+  without saying anything, and the charts already draw the gaps.
+- **Export before rollup**: the backup export in Settings → Sync & backup is the
+  full-fidelity copy, and the "keep everything" setting turns the window off
+  entirely (with an honest size warning next to it about the 3 MB sync cap).
 - Schools that need records can set a longer window; nothing is deleted without the
-  owner having had the chance to export it.
+  owner having had the chance to export it. The window is per device (it describes
+  how *this* device stores detail) and is deliberately not synced: a school device
+  can keep twelve weeks while a phone keeps two.
 
 ---
 
 ## 12. AI on both sides
 
-> **Status: partial.** The student side shipped as the AI coach — rebalancing,
-> breaking work down, weekly review, saved memory, voice and Persian — but the two
-> advisor-facing rows in the table did not: nothing drafts an "explain this plan"
-> note, and an exam-date back-plan is only whatever the general planner produces,
-> with no dedicated flow. On the guardian side, `generateGuardianGuidance` returns a
-> narrative, one focus and one `watchOut` risk line computed from weekly totals;
-> drafting a plan or a message for a guardian was not built.
+> **Status: mostly shipped.** The student side is the AI coach — rebalancing,
+> breaking work down, weekly review, saved memory, voice and Persian. Two
+> student rows are still approximations: nothing drafts an "explain this plan"
+> note, and an exam-date back-plan is whatever the general planner produces
+> rather than a dedicated flow. On the guardian side, `generateGuardianGuidance`
+> returns a narrative, open questions and one encouraging line from weekly
+> totals, `draftGuardianProposal` fills the plan and goal composers with a draft
+> the guardian edits and sends (2026-10-05), and the last row — the agenda for
+> the next advising meeting — prints as a one-pager built from the shared weekly
+> results alone (`src/advising.ts`).
 
 | Student | Guardian |
 |---|---|
@@ -639,14 +657,15 @@ no surviving note references them.
 | **4** | Guardian read-only: roster, dashboards from archives, change feed, tombstones, attribution | **Changed on purpose.** The guardian gets a roster and **weekly results the student chooses to share** (`src/views/GuardianPanelView.tsx`) — not a live scoped dashboard. There is no change feed and no tombstone list, and a compare-two-students view was not built (§16). |
 | **5** | Write access: plan editor, proposals, reasons, undo, audit log, shared timeline | **Partly, and lighter than this spec.** A guardian composes a plan or suggests a goal; both land in the student's inbox, where the student ticks items off and accepts or declines (`StudentPanelView.tsx`, `src/panels.ts`). The student's own planner items are never written to. Proposals as a separate review object, undo, the audit log and a shared timeline were not built. |
 | **6** | AI on both sides: proposals, weekly narrative, risk flags | **Done, with the AI drafting rather than deciding.** The personal AI coach ships in full (plan, weekly review, saved memory). Guardians get `generateGuardianGuidance` — a summary, open questions, and one encouraging line — and, as of 2026-10-05, `draftGuardianProposal`: the AI fills the plan or goal composer with steps drawn only from the shared weekly totals, the guardian edits it, and the student accepts or declines it in their inbox like any other suggestion (`GuardianPlanComposer.tsx`, `GuardianGoalForm.tsx`). An AI draft never sends itself and never writes to the student's planner. |
-| **7** | Extras: templates, syllabus → term plan, optional push for installed apps, meeting one-pager | **Mostly.** Templates, ICS/CSV/JSON import and opt-in content-free push for installed apps all ship. No syllabus → term-plan importer; no meeting one-pager. |
+| **7** | Extras: templates, syllabus → term plan, optional push for installed apps, meeting one-pager | **Done, as of 2026-10-05.** Templates, ICS/CSV/JSON import and opt-in content-free push for installed apps already shipped. A pasted syllabus now becomes a term plan (`src/syllabus.ts` + Settings → Connections → "Plan a term from a syllabus") — weeks and dated assessments are read out, shown back, and only added when asked. The guardian side gained the meeting one-pager: an agenda printed from the shared weekly results (`src/advising.ts`, "Meeting one-pager" on a student card). |
 
 **Not built, in one list:** the device-to-device approval relay, guardian scopes
 and presets, live scoped dashboards / change feed / tombstones, proposals as a
-separate review object, undo, the shared audit log, syllabus import, the meeting
-one-pager, and the guardian compare view. Guardian AI *drafting* now ships; what
-is still missing is the student-facing variant (the student's own AI proposing
-planner items), which the coach's drafts already approximate.
+separate review object, undo, the shared audit log, and the guardian compare
+view. Guardian AI *drafting*, the syllabus → term-plan importer and the meeting
+one-pager now ship; what is still missing on the AI side is the student-facing
+proposal variant (the student's own AI proposing planner items), which the
+coach's drafts already approximate.
 
 ---
 

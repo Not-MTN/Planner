@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { KEEP_EVERYTHING, loadRetentionWeeks, normalizeRetention, retentionIdle, rollUp, saveRetentionWeeks } from './retention';
 import { addBreadcrumb, reportCaught } from './reporting';
 import { parseHash, toHash, type Route } from './route';
 import { downloadState, loadFrom, parseBackup, sanitizeState, saveTo, serialize, STORAGE_FULL, STORAGE_KEY } from './storage';
@@ -101,7 +102,7 @@ import { loadWeatherSettings, saveWeatherSettings, type WeatherSettings } from '
 import { applyTheme, loadAccent, loadThemeMode, resolvedMode, type ThemeMode } from './theme';
 import type { Accent } from './constants';
 import { createEmptyState, type AIDeclinedKind, type AIMemoryInput, type AttachmentRef, type ComposerState, type EventInput, type FixedCommitmentInput, type GoalInput, type HabitInput, type MoodValue, type NoteInput, type Panels, type PlannerState, type SavedAIPlanInput, type StudentSubject, type TaskInput } from './types';
-import { t } from './i18n';
+import { t, tn } from './i18n';
 import { isNativeMobileShell } from './shared/nativeShell';
 import { listenForNativeNotificationTaps, syncNativeReminders } from './nativeReminders';
 import { saveStudentSubject as saveStudentSubjectIn } from './panelFeatures';
@@ -150,6 +151,13 @@ interface PlannerContextValue {
   dismissError: () => void;
   startFresh: () => void;
   exportData: () => void;
+  /**
+   * How many weeks stay at full fidelity: 1 / 2 / 4 / 12, or 0 for "keep
+   * everything". Everything older is rolled up into a week archive and its
+   * detail dropped. See `src/retention.ts`.
+   */
+  retentionWeeks: number;
+  setRetentionWeeks: (weeks: number) => void;
   importText: (text: string) => void;
   loadSample: () => void;
   panels: Panels;
@@ -364,6 +372,7 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
   const [feeds, setFeedsState] = useState<CalendarFeed[]>(() => loadFeeds());
   const [weather, setWeatherState] = useState<WeatherSettings>(() => loadWeatherSettings());
   const stateRef = useRef(state);
+  const [retentionWeeks, setRetentionWeeksState] = useState(() => loadRetentionWeeks());
   stateRef.current = state;
   const historyRef = useRef<PlannerState[]>([]);
   const futureRef = useRef<PlannerState[]>([]);
@@ -836,6 +845,66 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
 
   // Any local change marks the copy dirty and schedules an upload.
   const firstState = useRef(true);
+  /**
+   * The weekly rollup (SPEC §11).
+   *
+   * Runs on boot and again when the window is changed, and re-checks whenever
+   * the app comes back to the foreground — a session left open over a Sunday
+   * should still roll the week over. Both the archive and the pruning are
+   * idempotent, so a second run in the same week does nothing at all.
+   */
+  const runRollUp = useCallback(
+    (weeks: number, announce = false) => {
+      const result = rollUp(stateRef.current, weeks, todayISO());
+      if (retentionIdle(result)) return;
+      commit(() => result.state);
+      const { explanations, focusSessions, moods, checkIns, taskDetails, eventDetails, planBodies, weeksArchived } = result.dropped;
+      const tidied = explanations + focusSessions + moods + checkIns + taskDetails + eventDetails + planBodies;
+      // Silence when only an archive was written: a bookkeeping row is not news,
+      // and a toast that appears on boot to say nothing happened is worse than
+      // no toast at all.
+      if (tidied > 0) {
+        // The archive count can be zero here: a week that was already rolled up
+        // can still be the week whose detail has only now aged out — so the
+        // sentence has to work without a number in it.
+        flash(
+          weeksArchived > 0
+            ? tn(weeksArchived, 'Rolled up {count} finished week — results kept, detail tidied.', 'Rolled up {count} finished weeks — results kept, detail tidied.')
+            : t('Tidied old detail — results kept.'),
+        );
+      } else if (announce) {
+        flash(t('That window is already in effect — nothing older to tidy.'));
+      }
+    },
+    [commit, flash],
+  );
+
+  /*
+   * A fresh window applies immediately, including the wider one ("keep
+   * everything" stops rolling up, but nothing already archived comes back).
+   *
+   * It is keyed on `state` as well, and that is what makes it work at all: the
+   * first render happens before the saved planner has been read back, so a
+   * boot-only effect would look at an empty planner and see nothing to roll up.
+   * Re-checking on every change is cheap — the check walks the state and, when
+   * the week in front of it is already done, returns without writing anything.
+   */
+  useEffect(() => {
+    runRollUp(retentionWeeks);
+  }, [retentionWeeks, runRollUp, state]);
+
+  useEffect(() => {
+    const check = () => {
+      if (document.visibilityState === 'visible') runRollUp(retentionWeeks);
+    };
+    window.addEventListener('focus', check);
+    document.addEventListener('visibilitychange', check);
+    return () => {
+      window.removeEventListener('focus', check);
+      document.removeEventListener('visibilitychange', check);
+    };
+  }, [retentionWeeks, runRollUp]);
+
   useEffect(() => {
     if (firstState.current) {
       firstState.current = false;
@@ -1214,6 +1283,16 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     },
     startFresh,
     exportData,
+    retentionWeeks,
+    setRetentionWeeks: (weeks: number) => {
+      const next = normalizeRetention(weeks);
+      saveRetentionWeeks(next);
+      setRetentionWeeksState(next);
+      // Applying the window is a user action, so it gets an answer even when
+      // there is nothing to tidy: silence after picking a number reads as a
+      // setting that did not take. Turning pruning *off* needs no announcement.
+      if (next !== KEEP_EVERYTHING) runRollUp(next, true);
+    },
     importText,
     loadSample,
     flash,
@@ -1418,7 +1497,7 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     },
     setIntention: (date, text) => commit((current) => setIntentionIn(current, date, text)),
     logMood: (date, value, taskId) => commit((current) => setMoodIn(current, date, value, taskId)),
-  }), [state, ready, error, notice, saveBlocked, route, navigate, composer, confirm, startFresh, exportData, importText, loadSample, flash, dismissNotice, praise, undo, redo, canUndo, canRedo, themeMode, accent, paletteOpen, settingsOpen, focus, confettiSeed, celebrate, clearCompletedTasks, commit, reminders, setReminders, weekStart, setWeekStart, display, setDisplay, sync, syncStatus, syncMessage, syncConflicts, keepConflictVersion, dismissConflict, dismissAllConflicts, syncAvailable, startSync, stopSync, runSync, deleteCloudCopy, shared, sharedStatus, sharedMessage, startShared, stopShared, runSharedSync, feeds, addFeed, removeFeed, refreshFeeds, weather, setWeather, recordTombstone, updatePanels, setPanelEnabled]);
+  }), [state, ready, error, notice, saveBlocked, route, navigate, composer, confirm, startFresh, exportData, retentionWeeks, importText, loadSample, flash, dismissNotice, praise, undo, redo, canUndo, canRedo, themeMode, accent, paletteOpen, settingsOpen, focus, confettiSeed, celebrate, clearCompletedTasks, commit, reminders, setReminders, weekStart, setWeekStart, display, setDisplay, sync, syncStatus, syncMessage, syncConflicts, keepConflictVersion, dismissConflict, dismissAllConflicts, syncAvailable, startSync, stopSync, runSync, deleteCloudCopy, shared, sharedStatus, sharedMessage, startShared, stopShared, runSharedSync, feeds, addFeed, removeFeed, refreshFeeds, weather, setWeather, recordTombstone, updatePanels, setPanelEnabled, runRollUp]);
 
   return <PlannerContext.Provider value={value}>{children}</PlannerContext.Provider>;
 }

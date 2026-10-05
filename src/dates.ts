@@ -39,7 +39,11 @@ let weekStart: WeekStart = 1;
 
 export function loadWeekStart(): WeekStart {
   try {
-    const raw = Number(localStorage.getItem(WEEK_START_KEY));
+    // `Number(null)` is 0, which is Sunday — so the "nothing stored yet" case
+    // has to be checked before the conversion, or a fresh device silently
+    // starts the week on Sunday instead of the documented Monday default.
+    const stored = localStorage.getItem(WEEK_START_KEY);
+    const raw = stored === null ? 1 : Number(stored);
     weekStart = raw === 0 || raw === 6 ? raw : 1;
   } catch {
     weekStart = 1;

@@ -1034,6 +1034,14 @@
   border-bottom: 1px solid var(--line);
   box-shadow: 0 12px 18px -18px color-mix(in srgb, var(--ink) 45%, transparent);
 }
+/* Syllabus → term plan: what the parser read, shown back before it is added. */
+.syllabus-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
 .sheet-settings .sheet-head { margin-bottom: 10px; }
 /* The strip is the reason the header has to stick: a panel can be switched
    from anywhere in a long section. */

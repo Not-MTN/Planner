@@ -7,7 +7,7 @@ import { Rich } from './Rich';
 import { Modal } from './ui';
 import { RecoveryCodes } from './RecoveryCodes';
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { FeedsSection, SecuritySection, SharedSpaceSection, TaskImportSection, TemplatesSection, WeatherSection } from './SettingsExtras';
+import { FeedsSection, RetentionSection, SecuritySection, SharedSpaceSection, SyllabusSection, TaskImportSection, TemplatesSection, WeatherSection } from './SettingsExtras';
 import { BiometricSetting } from './BiometricSetting';
 import { isReportingEnabled, setReportingEnabled } from '../reporting';
 import { useSignOut } from './useSignOut';
@@ -1676,6 +1676,7 @@ export function SettingsSheet() {
         {tab === 'sync' ? (
           <>
             <SyncSection />
+            <RetentionSection />
             <SharedSpaceSection />
       <section className="set-section">
         <h3 className="kicker">{t("Your data")}</h3>
@@ -1715,6 +1716,7 @@ export function SettingsSheet() {
             <CalendarExchangeSection />
             <FeedsSection />
             <TaskImportSection />
+            <SyllabusSection />
             <WeatherSection />
             <TemplatesSection />
           </>
