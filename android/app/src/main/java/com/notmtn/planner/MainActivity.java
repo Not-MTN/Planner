@@ -16,6 +16,11 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(PlannerUpdaterPlugin.class);
+        // Unlock with a fingerprint or face: the vault key lives in the
+        // Keystore behind the platform's own check (docs/APPS.md §9). A plugin
+        // compiled into this app has to be named here; the ones that come from
+        // node_modules are registered from the generated list instead.
+        registerPlugin(PlannerBiometricPlugin.class);
         super.onCreate(savedInstanceState);
     }
 

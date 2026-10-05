@@ -16,6 +16,20 @@ vi.mock('../shared/updateRuntime', async (importOriginal) => ({
   checkPackagedUpdate: startupUpdate.checkPackagedUpdate,
 }));
 
+// The platform plugin behind "unlock with your face or finger". A device with
+// no hardware is the default, so the rest of these cases never see the button.
+const platform = vi.hoisted(() => ({
+  isAvailable: vi.fn(),
+  hasKey: vi.fn(),
+  save: vi.fn(),
+  read: vi.fn(),
+  forget: vi.fn(),
+}));
+vi.mock('@capacitor/core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@capacitor/core')>()),
+  registerPlugin: () => platform,
+}));
+
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 
@@ -42,6 +56,15 @@ async function mount(): Promise<void> {
   }
 }
 
+/** Let the promises behind a click settle — the unlock path is a chain. */
+async function settle(): Promise<void> {
+  for (let index = 0; index < 6; index += 1) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+  }
+}
+
 function clickButton(label: string): void {
   const button = [...document.querySelectorAll('button')].find((item) => (item.textContent ?? '').includes(label));
   if (!button) throw new Error(`No button labelled "${label}"`);
@@ -56,6 +79,11 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 beforeEach(() => {
   startupUpdate.checkPackagedUpdate.mockReset().mockResolvedValue({ status: 'unavailable', version: null, offer: null });
+  platform.isAvailable.mockReset().mockResolvedValue({ available: false, kind: 'biometrics' });
+  platform.hasKey.mockReset().mockResolvedValue({ present: false });
+  platform.save.mockReset().mockResolvedValue(undefined);
+  platform.read.mockReset().mockResolvedValue({ value: 'AAAA' });
+  platform.forget.mockReset().mockResolvedValue(undefined);
   window.localStorage.clear();
   window.localStorage.setItem('planner-tour-done', '1');
   window.sessionStorage.clear();
@@ -135,6 +163,50 @@ describe('account gate', () => {
     expect(document.querySelector('input[type="password"]')).not.toBeNull();
     // The planner itself must not be reachable yet.
     expect(text()).not.toContain('Personal Planner');
+  });
+
+  it('offers the stored unlock on a phone, asks the platform for it, and never strands anyone', async () => {
+    (window as Window & { Capacitor?: unknown }).Capacitor = {
+      isNativePlatform: () => true,
+      getPlatform: () => 'ios',
+    };
+    platform.isAvailable.mockResolvedValue({ available: true, kind: 'face' });
+    platform.hasKey.mockResolvedValue({ present: true });
+    // A packaged app that was told where its server lives: the local-copy
+    // build is a different screen, and this is the ordinary phone case.
+    vi.stubGlobal('__PLANNER_API_ORIGIN__', 'https://api.example.com');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        if (url.includes('/api/auth/session')) {
+          return jsonResponse({
+            user: { id: 'u1', username: 'omid', email: null, displayName: 'Omid', role: 'student', createdAt: new Date().toISOString() },
+          });
+        }
+        // The vault is not reachable in this test: the platform check still
+        // has to happen, and the password form has to still be there after.
+        if (url.includes('/api/auth/vault')) return new Response('missing', { status: 404 });
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    await mount();
+
+    expect(text()).toContain('Unlock with Face ID');
+    // With a biometric unlock stored there is nothing silent to arm as well.
+    expect(text()).not.toContain('Keep this device signed in');
+
+    clickButton('Unlock with Face ID');
+    await settle();
+
+    // Pressing the button is what asks the platform to identify its owner; the
+    // rest of this test cannot decide what the server says afterwards. What it
+    // can decide is that a failure leaves the password form in place, with the
+    // button still offered — nobody is stranded on a screen they cannot use.
+    expect(platform.read).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('.gate-error')).not.toBeNull();
+    expect(document.querySelector('input[type="password"]')).not.toBeNull();
+    expect(text()).toContain('Unlock with Face ID');
   });
 
   it('shows the shared account, connection and version checks while the account request is pending', async () => {

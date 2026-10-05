@@ -8,6 +8,7 @@ import { Modal } from './ui';
 import { RecoveryCodes } from './RecoveryCodes';
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { FeedsSection, SecuritySection, SharedSpaceSection, TaskImportSection, TemplatesSection, WeatherSection } from './SettingsExtras';
+import { BiometricSetting } from './BiometricSetting';
 import { isReportingEnabled, setReportingEnabled } from '../reporting';
 import { useSignOut } from './useSignOut';
 import { accountUser, forgetAccountUser } from '../auth/vault';
@@ -1502,6 +1503,7 @@ export function SettingsSheet() {
         {tab === 'account' ? (
           <>
             <AccountSection />
+            <BiometricSetting />
             <SecuritySection />
             <TwoFactorSection />
             <DevicesSection />

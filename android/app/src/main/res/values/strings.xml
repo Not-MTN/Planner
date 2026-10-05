@@ -4,4 +4,7 @@
     <string name="title_activity_main">Planner</string>
     <string name="package_name">com.notmtn.planner</string>
     <string name="custom_url_scheme">com.notmtn.planner</string>
+    <!-- The platform prompt for biometric unlock. JS passes the app-language
+         title when it can; these are the fallback and the button beside it. -->
+    <string name="biometric_use_password">Use password</string>
 </resources>

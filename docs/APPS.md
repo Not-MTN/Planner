@@ -554,8 +554,28 @@ Named plainly, because each one is a real feature and none of them is hidden:
   is the part only a deployment can do: serving the two association files, and
   for iOS having the Associated Domains capability enabled on the App ID. Until
   then a link opens in the browser, which still works.
-- **Biometric unlock** (`@capacitor/biometric-*`) instead of typing the
-  password each launch.
+- **Biometric unlock is shipped**, and it is part of this repository rather than
+  a plugin package: `android/app/src/main/java/com/notmtn/planner/PlannerBiometricPlugin.java`
+  and `ios/App/App/PlannerBiometricPlugin.swift` are registered by the shells
+  (`MainActivity` on Android, `PlannerBridgeViewController` in
+  `ios/App/App/SceneDelegate.swift` on iOS). Turning it on in **Settings →
+  Account** hands the vault key to the Android Keystore / iOS Keychain behind
+  `setUserAuthenticationRequired` / `.biometryCurrentSet`, so the platform's own
+  face or fingerprint check is what releases it — Planner never sees a
+  fingerprint, and nothing biometric leaves the device. Three consequences
+  worth knowing:
+    - It is off by default, and turning it on needs the password once: the key
+      is only in memory right after a password unlock. On the same device it
+      replaces the silent "keep this device signed in" copy, because a phone
+      that opens with a face should not also open without one.
+    - Re-enrolling a face or fingerprint, or changing the password, retires the
+      stored key (`invalidated`). The app says so and asks for the password
+      rather than trying again.
+    - Turning the setting off, or signing out, deletes it. Locking the planner
+      keeps it — that is the point of the feature.
+  The Android build adds `androidx.biometric` (see `android/variables.gradle`);
+  iOS needs no extra dependency, only the `NSFaceIDUsageDescription` entry
+  already in `Info.plist`. Store/privacy wording is at the end of §10.
 
 Everything else — the entire planner — works, because it is the same code.
 
@@ -576,6 +596,24 @@ Everything else — the entire planner — works, because it is the same code.
 > and there are no accounts to create unless you want one.
 >
 > Persian and English, light and dark, phone, tablet and desktop.
+>
+> In the phone apps you can open it with Face ID or your fingerprint instead of
+> typing your password. That key stays on your device, and signing out removes
+> it.
 
 **Keywords (App Store):** planner,tasks,habits,goals,notes,offline,private,encrypted,calendar,focus
 **Category:** Productivity
+
+**Privacy notes for the store questionnaires (Apple App Privacy / Play Data
+Safety and, on Apple, the Face ID usage reason):**
+
+- Planner does not collect, store or transmit biometric data. Face ID, Touch ID
+  and fingerprint matching happens in the operating system; what the app
+  receives after a successful check is its own vault key.
+- The optional biometric unlock keeps that key in the platform's protected
+  store (Android Keystore / iOS Keychain) on that device only. It is off by
+  default, can be turned off in Settings at any time, and is deleted when the
+  person signs out.
+- `NSFaceIDUsageDescription` in `ios/App/App/Info.plist` is deliberately worded
+  for the prompt Apple shows: *Planner uses Face ID to open your planner
+  without typing your password.*

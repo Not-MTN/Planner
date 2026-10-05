@@ -23,6 +23,7 @@ import {
   wrapRawKey,
 } from './crypto';
 import { forgetDevice, rememberOnDevice } from './device';
+import { forgetBiometricKey } from './biometric';
 import type { PlannerState } from '../types';
 
 const LAST_USER_KEY = 'planner-last-user-id';
@@ -438,6 +439,10 @@ export async function signIn(identifier: string, password: string, remember = tr
   }
 
   const raw = await unwrapKeyRaw(result.wrappedDek, kek);
+  // Read before the device cache is rewritten below: whoever was signed in
+  // last may have left a biometric unlock on this phone, and it belongs to
+  // them, not to the account signing in now.
+  const previousUser = getLastUserId();
   if (remember) await rememberOnDevice(result.user.id, raw);
   else {
     // Even if not remembering the vault key, we still want to clear any old device cache for other accounts
@@ -447,6 +452,7 @@ export async function signIn(identifier: string, password: string, remember = tr
       if (last && last !== result.user.id) await forgetDevice(last);
     } catch {}
   }
+  if (previousUser && previousUser !== result.user.id) await forgetBiometricKey();
   // importDek clears its copy; keep one for passkey enrolment on this page.
   const dekRaw = new Uint8Array(raw);
   const dek = await importDek(raw, false);
@@ -713,6 +719,7 @@ export async function completeTotpSignIn(code: string): Promise<ActiveSession> {
   pendingSecondFactor = null;
 
   const raw = await unwrapKeyRaw(result.wrappedDek, pending.kek);
+  const previousUser = getLastUserId();
   if (pending.remember) await rememberOnDevice(result.user.id, raw);
   else {
     try {
@@ -720,6 +727,7 @@ export async function completeTotpSignIn(code: string): Promise<ActiveSession> {
       if (last && last !== result.user.id) await forgetDevice(last);
     } catch {}
   }
+  if (previousUser && previousUser !== result.user.id) await forgetBiometricKey();
   const dekRaw = new Uint8Array(raw);
   const dek = await importDek(raw, false);
   active = { user: result.user, dek, dekRaw, vault: result.vault };
@@ -837,6 +845,7 @@ export async function deleteAccount(password: string): Promise<void> {
   } catch {
     /* the account and server session are already gone */
   }
+  await forgetBiometricKey();
 }
 
 export async function signOut(): Promise<void> {
@@ -844,6 +853,7 @@ export async function signOut(): Promise<void> {
   forget(active);
   active = null;
   clearPersistedAuth();
+  await forgetBiometricKey();
   try {
     await forgetDevice(userId);
   } catch {}

@@ -9,7 +9,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { t } from '../i18n';
 import { App } from '../App';
-import { accountUser, bootAccount, signOut, unlockWithPassword, type AccountBoot } from './vault';
+import { accountUser, bootAccount, signOut, unlockWithBiometrics, unlockWithPassword, type AccountBoot } from './vault';
+import {
+  BiometricError,
+  biometricAvailability,
+  biometricEnrolled,
+  biometricKindLabel,
+  biometricShell,
+  type BiometricKind,
+} from './biometric';
 import { AuthError, getLastUserId } from './session';
 import { isNativeShell } from '../shared/nativeShell';
 import { currentVersion, type PackagedUpdateCheckResult } from '../shared/updates';
@@ -302,6 +310,9 @@ export function AccountGate() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  // What this device calls its biometric check, or null when it has none.
+  const [biometric, setBiometric] = useState<{ kind: BiometricKind; enrolled: boolean } | null>(null);
+  const [bioBusy, setBioBusy] = useState(false);
   const [caps, setCaps] = useState(false);
   const [leaving, setLeaving] = useState(false);
   // Set when someone chooses the local planner from an offline or blocked
@@ -364,6 +375,29 @@ export function AccountGate() {
   // The planner is for people who are signed in.
   useEffect(() => {
     if (boot?.status === 'signed-out') window.location.assign('/login');
+  }, [boot]);
+
+  /**
+   * Asking the device what it can do, once the unlock screen is the one being
+   * shown. Nothing here prompts: whether a fingerprint is available, and
+   * whether a key for this account is already stored, are both silent
+   * questions, and a device without the hardware simply never sees the button.
+   */
+  useEffect(() => {
+    if (boot?.status !== 'locked' || !biometricShell()) return;
+    let live = true;
+    void (async () => {
+      const availability = await biometricAvailability();
+      if (!availability.available) {
+        if (live) setBiometric(null);
+        return;
+      }
+      const enrolled = await biometricEnrolled();
+      if (live) setBiometric({ kind: availability.kind, enrolled });
+    })();
+    return () => {
+      live = false;
+    };
   }, [boot]);
 
   // Back online after an offline boot? Reload so the vault can take over.
@@ -440,7 +474,7 @@ export function AccountGate() {
     if (busy) return;
     setBusy(true);
     setError(null);
-    void unlockWithPassword(password, remember).then(
+    void unlockWithPassword(password, biometric?.enrolled ? false : remember).then(
       (result) => {
         setStartup((current) => withAccountCheck(current, accountStatusForBoot(result), connectionStatusForBoot(result)));
         // A short goodbye: the gate fades out instead of snapping to the app.
@@ -458,6 +492,41 @@ export function AccountGate() {
             ? err.message
             : t('That password did not unlock this planner.'),
         );
+      },
+    );
+  };
+
+  /**
+   * The fast way in: the OS holds the vault key behind its own check, and this
+   * is the press that asks for it. A cancelled prompt leaves everything as it
+   * was; a key the OS has invalidated is already gone (see auth/biometric), so
+   * the password form is the answer either way.
+   */
+  const unlockBiometric = () => {
+    if (bioBusy) return;
+    setBioBusy(true);
+    setError(null);
+    void unlockWithBiometrics(t('Unlock your planner')).then(
+      (result) => {
+        setStartup((current) => withAccountCheck(current, accountStatusForBoot(result), connectionStatusForBoot(result)));
+        if (result.status === 'ready') {
+          setLeaving(true);
+          window.setTimeout(() => setBoot(result), 240);
+          return;
+        }
+        setBioBusy(false);
+        setBoot(result);
+      },
+      (err: unknown) => {
+        setBioBusy(false);
+        const code = err instanceof BiometricError ? err.code : null;
+        // Changing their mind is not an error worth a sentence: the form is
+        // still there, already focused in most cases.
+        if (code === 'cancelled') return;
+        // A key the OS has thrown away, or a device that cannot check at all,
+        // will not do better on the next press. Take the button away.
+        if (code === 'invalidated' || code === 'unavailable' || code === 'unsupported') setBiometric(null);
+        setError(err instanceof Error && err.message ? err.message : t('That did not unlock your planner.'));
       },
     );
   };
@@ -509,12 +578,28 @@ export function AccountGate() {
               </label>
               {caps && !showPassword ? <p className="gate-caps">{t('Caps Lock is on.')}</p> : null}
 
-              <label className="gate-check">
-                <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />
-                {t('Keep this device signed in')}
-              </label>
+              {/* Two fast ways in, and only one of them at a time: a phone
+                  that opens the planner with a face or a finger does not also
+                  keep an unguarded copy that would open it without asking. */}
+              {biometric?.enrolled ? (
+                <p className="gate-note">{t('This device opens with {0}.', { 0: biometricKindLabel(biometric.kind) })}</p>
+              ) : (
+                <label className="gate-check">
+                  <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />
+                  {t('Keep this device signed in')}
+                </label>
+              )}
 
               {error && <p className="gate-error">{error}</p>}
+
+              {biometric?.enrolled ? (
+                <div className="gate-actions">
+                  <button type="button" className="btn btn-soft" disabled={bioBusy || busy} onClick={unlockBiometric}>
+                    {bioBusy ? <span className="gate-spinner" aria-hidden="true" /> : null}
+                    {t('Unlock with {0}', { 0: biometricKindLabel(biometric.kind) })}
+                  </button>
+                </div>
+              ) : null}
 
               <div className="gate-actions">
                 <button className="btn btn-primary" type="submit" disabled={busy || !password}>

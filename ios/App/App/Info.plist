@@ -31,6 +31,10 @@
 			</array>
 		</dict>
 	</array>
+	<!-- Face ID is only used to unlock the vault with the key the OS keeps for
+	     this device; turning the setting off removes it (docs/APPS.md §9). -->
+	<key>NSFaceIDUsageDescription</key>
+	<string>Planner uses Face ID to open your planner without typing your password.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Planner uses the microphone only when you start voice input.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
