@@ -89,6 +89,10 @@ test('the tour only reopens from the how-it-works buttons', async ({ page }) => 
   }
   const bubble = page.locator('[data-tour-bubble]');
   await expect(bubble).toBeVisible();
+  // A tour that was reopened starts at the language picker — it has not been
+  // answered in this session — where the skip button reads "Skip the tour".
+  const english = bubble.getByRole('button', { name: /English/ });
+  if (await english.count()) await english.click();
   await bubble.getByRole('button', { name: 'Skip tour' }).click();
   await expect(bubble).toHaveCount(0);
 });
@@ -100,7 +104,8 @@ test('the Why Planner sheet opens from settings and offers the tour', async ({ p
   await page.locator('[data-tour="settings"]').click();
   const dialog = page.getByRole('dialog');
   // "New here?" moved into the App tab when settings grew its tab bar.
-  await dialog.getByRole('tab', { name: 'App' }).click();
+  // `exact` because "App" is a prefix of "Appearance".
+  await dialog.getByRole('tab', { name: 'App', exact: true }).click();
   await expect(dialog).toContainText('New here?');
   await dialog.getByRole('button', { name: 'Why Planner?' }).click();
   // The settings sheet closes and the About sheet opens; naming the content

@@ -16,7 +16,28 @@ test.beforeEach(async ({ page }) => {
 
 test('PWA quick-add shortcut drops the caret into quick add', async ({ page }) => {
   await page.goto('/#/today?qa=1');
-  await expect(page.locator('.quick-add input')).toBeFocused({ timeout: 5000 });
+  // Ten seconds, not five: the app retries the focus while the boot settles
+  // (Shell.tsx), and this assertion should fail for a real reason rather than
+  // for being impatient.
+  try {
+    await expect(page.locator('.quick-add input')).toBeFocused({ timeout: 10_000 });
+  } catch (error) {
+    // The next run should not have to guess. "inactive" alone does not say
+    // whether the box was on screen, or what was holding the caret instead.
+    const state = await page.evaluate(() => {
+      const box = document.querySelector<HTMLInputElement>('.quick-add input');
+      const rect = box?.getBoundingClientRect();
+      const active = document.activeElement as HTMLElement | null;
+      return {
+        hash: window.location.hash,
+        boxPresent: Boolean(box),
+        boxOnScreen: Boolean(rect && rect.width > 0 && rect.height > 0),
+        active: active ? `${active.tagName.toLowerCase()}.${String(active.className || '')}`.slice(0, 80) : 'none',
+        activeLabel: (active?.getAttribute('aria-label') ?? active?.textContent ?? '').trim().slice(0, 40),
+      };
+    });
+    throw new Error(`${(error as Error).message}\ncaret state: ${JSON.stringify(state)}`);
+  }
 });
 
 test('the Today journal creates a journal note for the day', async ({ page }) => {
@@ -27,7 +48,9 @@ test('the Today journal creates a journal note for the day', async ({ page }) =>
   await expect(page.getByText('A few lines for this day')).toBeVisible();
   await page.locator('.journal-inline').fill('Met Bibi for coffee. Sun all day.');
   await page.locator('.journal-inline').blur();
-  await expect(page.getByText('Saved')).toBeVisible();
+  // `.journal-saved` specifically: "Saved" alone also matches the sidebar's
+  // "Saved on this device".
+  await expect(page.locator('.journal-saved')).toBeVisible();
   await page.reload();
   await expect(page.locator('.journal-inline')).toHaveValue('Met Bibi for coffee. Sun all day.');
   const kind = await page.evaluate(
@@ -144,8 +167,11 @@ test('any file — including music — can be attached to a note', async ({ page
   // `data-autofocus` field, so `getByRole('dialog').last()` plus one input was
   // ambiguous (five matches). The note editor is the sheet with the attachment
   // row the rest of this test uses.
+  // All five composer forms are mounted inside the sheet and the four that are
+  // not the open type are wrapped in `hidden`, so only one autofocus field is
+  // on screen — the note's title.
   const dialog = page.locator('.sheet', { has: page.locator('.attach-editor') }).last();
-  await dialog.locator('input[data-autofocus]').first().fill('Studio');
+  await dialog.locator('input[data-autofocus]:visible').first().fill('Studio');
   await dialog.locator('.attach-editor input[type="file"]').setInputFiles([
     { name: 'melody.mp3', mimeType: 'audio/mpeg', buffer: Buffer.from('ID3' + '0'.repeat(2048)) },
     { name: 'score.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4' + 'x'.repeat(100)) },

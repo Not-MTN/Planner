@@ -23,8 +23,10 @@ test('voice chat: talk to the AI, get an answer, and a plan draft', async ({ pag
       speak: (u: { onend?: (() => void) | null }) => u.onend?.(),
     };
   });
-  await page.route('**/api/groq/status', (route) => route.fulfill({ status: 200, json: { configured: true } }));
-  await page.route('**/api/groq/chat/completions', (route) => route.fulfill({
+  // The browser talks to the provider-neutral routes; `/api/groq/*` is only a
+  // legacy alias kept for already-installed bundles (src/ai.ts).
+  await page.route('**/api/ai/status', (route) => route.fulfill({ status: 200, json: { configured: true } }));
+  await page.route('**/api/ai/chat/completions', (route) => route.fulfill({
     status: 200,
     json: {
       choices: [{ message: { content: JSON.stringify({ reply: 'Soft tomorrow, one breath before the gym.', followUp: null, draft: { summary: 'Soft tomorrow', tasks: [{ title: 'Gym bag', date: new Date(Date.now() + 864e5).toISOString().slice(0, 10), priority: 'low', category: 'health' }], events: [], habits: [], suggestions: [] } }) } }],
