@@ -1,0 +1,182 @@
+/**
+ * Visual regression, in the two directions this app actually breaks.
+ *
+ * Everything else in e2e/ checks behaviour: a button works, a task moves, the
+ * layout stays inside the viewport. None of that notices a screen that is
+ * correct but *wrong to look at* — the mirrored padding that never got its RTL
+ * override, a dark theme where a card kept its light background, Persian digits
+ * that turned back into Latin ones. Those are exactly the changes a refactor
+ * makes by accident, and this file is the net under them.
+ *
+ * Three rules keep the pictures comparable between runs:
+ *
+ *   1. The clock is frozen (2026-03-12, 09:20 UTC) and the state is seeded, so
+ *      "Today" is the same day with the same tasks on every run and on every
+ *      machine. A screenshot test that depends on the real date is a test that
+ *      fails tomorrow.
+ *   2. Animations are disabled and the fonts are awaited before the shutter, so
+ *      a half-faded card or a fallback font never becomes the baseline.
+ *   3. Baselines are generated where they are compared: CI. Font rendering
+ *      differs between machines, so `npm run test:e2e:visual:update` in the
+ *      Visual regression workflow is how a new baseline is made, and the
+ *      artifact it uploads is what gets committed. See docs/VISUAL_TESTS.md.
+ */
+import { expect, test, type Page } from '@playwright/test';
+import { createEmptyState, type PlannerState } from '../src/types';
+import { addEvent, addGoal, addHabit, addNote, addTask, toggleTask } from '../src/mutate';
+
+/** Thursday. The app is frozen here for the whole file. */
+const TODAY = '2026-03-12';
+const NOW = '2026-03-12T09:20:00.000Z';
+const TOMORROW = '2026-03-13';
+
+/**
+ * A small, deliberately ordinary planner: enough of every kind of card to have
+ * something on screen, and fixed ids and dates so two runs produce two identical
+ * pictures.
+ */
+function seededState(): PlannerState {
+  let state = createEmptyState();
+
+  state = addTask(state, { title: 'Finish the physics problem set', priority: 'high', dueDate: TODAY, dueTime: '17:00', category: 'Study', note: '', goalId: null, estimatedMinutes: 45 }, 'task-physics', NOW);
+  state = addTask(state, { title: 'Water the plants', priority: 'low', dueDate: TODAY, dueTime: null, category: 'Home', note: '', goalId: null }, 'task-plants', NOW);
+  state = addTask(state, { title: 'Read chapter four', priority: 'medium', dueDate: TOMORROW, dueTime: null, category: 'Study', note: 'Notes in the margin are fine.', goalId: null, repeat: 'weekly' }, 'task-read', NOW);
+  state = toggleTask(state, 'task-plants', NOW, TODAY, 'task-plants-next');
+
+  state = addEvent(state, { title: 'Chemistry lab', date: TODAY, startTime: '10:00', endTime: '11:30', category: 'Study', note: '', important: true }, 'event-lab', NOW);
+  state = addEvent(state, { title: 'Football practice', date: TODAY, startTime: '16:00', endTime: '17:30', category: 'Sport', note: '', important: false }, 'event-football', NOW);
+
+  state = addHabit(state, { name: 'Read for twenty minutes', icon: 'book', accent: 'sage', frequency: { type: 'daily' }, unit: { label: 'pages', target: 10 } }, 'habit-read', NOW, TODAY);
+  state = addHabit(state, { name: 'Walk outside', icon: 'walk', accent: 'blue', frequency: { type: 'weekdays' } }, 'habit-walk', NOW, TODAY);
+
+  state = addGoal(state, { title: 'Pass the spring exams', description: 'Steady revision beats a panicked week.', horizon: 'short', deadline: '2026-06-01', milestone: 'Physics: finish the problem sets', milestoneDue: '2026-04-01' }, 'goal-exams', 'milestone-physics', NOW);
+  state = addNote(state, { title: 'Things that helped', body: 'Short sessions after school. The phone in another room.', kind: 'journal', date: TODAY, pinned: true }, 'note-help', NOW);
+
+  return state;
+}
+
+/** Everything the app reads before its first paint, written in one go. */
+async function seed(page: Page, language: 'en' | 'fa', theme: 'light' | 'dark'): Promise<void> {
+  const state = seededState();
+  await page.addInitScript(
+    ([key, value, lang, mode]) => {
+      localStorage.clear();
+      localStorage.setItem('planner-tour-done', '1');
+      localStorage.setItem('planner-lang', lang as string);
+      localStorage.setItem('planner-theme', mode as string);
+      localStorage.setItem('planner-week-start', '1');
+      localStorage.setItem(key as string, value as string);
+    },
+    ['personal-planner.v1', JSON.stringify({ version: 1, exportedAt: NOW, ...state }), language, theme] as const,
+  );
+}
+
+/**
+ * A page whose clock never moves, whose animations are off, and whose fonts are
+ * loaded. Called before the first navigation so the app boots into the fixed
+ * day rather than the real one.
+ */
+async function open(page: Page, options: { language: 'en' | 'fa'; theme: 'light' | 'dark'; path: string }): Promise<void> {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.clock.setFixedTime(new Date(NOW));
+  await seed(page, options.language, options.theme);
+  await page.goto(options.path);
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+  });
+  await expect(page.locator('html')).toHaveAttribute('dir', options.language === 'fa' ? 'rtl' : 'ltr');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', options.theme);
+  // Two frames after the last layout change, so nothing is captured mid-paint.
+  await page.evaluate(
+    () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+  );
+}
+
+/**
+ * The shots themselves. `animations: 'disabled'` fast-forwards CSS transitions
+ * and animations to their end state; the toast is masked because it is the one
+ * element that appears and disappears on a timer.
+ */
+async function shoot(page: Page, name: string): Promise<void> {
+  await expect(page).toHaveScreenshot(name, {
+    animations: 'disabled',
+    caret: 'hide',
+    mask: [page.locator('.toast')],
+    maxDiffPixelRatio: 0.002,
+  });
+}
+
+const VIEWS = [
+  { name: 'today', path: '/#/today', ready: '.timeline-card' },
+  { name: 'tasks', path: '/#/tasks', ready: '.view .page-head' },
+  { name: 'insights', path: '/#/insights', ready: '.stat-row' },
+] as const;
+
+const THEMES = ['light', 'dark'] as const;
+const LANGUAGES = ['en', 'fa'] as const;
+
+test.describe('key views in every direction and theme', () => {
+  // Baselines are captured at one fixed desktop viewport; the mobile layout is
+  // covered below with a single RTL, dark case rather than a second matrix.
+  test.skip(({ browserName }) => browserName !== 'chromium', 'screenshots are captured in Chromium only');
+
+  test.use({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1, locale: 'en-US', timezoneId: 'UTC' });
+
+  for (const view of VIEWS) {
+    for (const language of LANGUAGES) {
+      for (const theme of THEMES) {
+        test(`${view.name} — ${language}, ${theme}`, async ({ page }, testInfo) => {
+          test.skip(testInfo.project.name !== 'desktop', 'the matrix runs once, at the desktop viewport');
+          await open(page, { language, theme, path: view.path });
+          await expect(page.locator(view.ready)).toBeVisible();
+          await shoot(page, `${view.name}-${language}-${theme}.png`);
+        });
+      }
+    }
+  }
+});
+
+test.describe('the phone layout in Persian, dark', () => {
+  test.use({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, locale: 'en-US', timezoneId: 'UTC' });
+
+  test('today — fa, dark, phone', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop', 'the phone case sets its own viewport');
+    await open(page, { language: 'fa', theme: 'dark', path: '/#/today' });
+    await expect(page.locator('.timeline-card')).toBeVisible();
+    await expect(page.locator('.tabbar')).toBeVisible();
+    await shoot(page, 'phone-today-fa-dark.png');
+  });
+});
+
+test.describe('the marketing page', () => {
+  test.use({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1, locale: 'en-US', timezoneId: 'UTC' });
+
+  test('landing — en, light', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop', 'the matrix runs once, at the desktop viewport');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.clock.setFixedTime(new Date(NOW));
+    await page.goto('/');
+    await page.evaluate(async () => {
+      await document.fonts.ready;
+    });
+    await expect(page.locator('.hero-title')).toBeVisible();
+    await shoot(page, 'landing-en-light.png');
+  });
+
+  test('landing — fa, dark', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop', 'the matrix runs once, at the desktop viewport');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.clock.setFixedTime(new Date(NOW));
+    await page.addInitScript(() => {
+      localStorage.clear();
+      localStorage.setItem('planner-lang', 'fa');
+      localStorage.setItem('planner-theme', 'dark');
+    });
+    await page.goto('/');
+    await page.evaluate(async () => {
+      await document.fonts.ready;
+    });
+    await expect(page.locator('.hero-title')).toBeVisible();
+    await shoot(page, 'landing-fa-dark.png');
+  });
+});

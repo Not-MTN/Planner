@@ -1,0 +1,86 @@
+# Visual regression: the screens in e2e/visual.spec.ts, compared against
+# committed baselines.
+#
+# Baselines are generated *here* rather than on a laptop on purpose: font
+# rendering and subpixel layout differ between machines, so a baseline captured
+# on one machine fails on another for reasons nobody can fix. The runner image
+# is the single reference.
+#
+# To (re)create baselines, run this workflow on a branch with the
+# `update_baselines` input set, download the `visual-baselines` artifact it
+# uploads, and commit its contents to e2e/visual.spec.ts-snapshots/. Review the
+# images in the pull request the way you would review code.
+name: Visual regression
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'e2e/**'
+      - 'index.html'
+      - 'public/**'
+      - 'playwright.config.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/visual.yml'
+  workflow_dispatch:
+    inputs:
+      update_baselines:
+        description: 'Regenerate the baseline images and upload them as an artifact'
+        type: boolean
+        default: false
+
+concurrency:
+  group: visual-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  visual:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # The suite serves the app from a production build (playwright.config.ts),
+      # so the screenshots show what ships rather than what the dev server does.
+      - name: Run the visual suite
+        run: |
+          if [ "${{ inputs.update_baselines }}" = "true" ]; then
+            npm run test:e2e:visual:update
+          else
+            npm run test:e2e:visual
+          fi
+
+      # A missing baseline fails the run above; the images it produced are what
+      # the maintainer commits, so they are uploaded either way.
+      - name: Upload baselines
+        if: always() && inputs.update_baselines
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-baselines
+          path: e2e/visual.spec.ts-snapshots/
+          if-no-files-found: warn
+          retention-days: 30
+
+      # On a mismatch: the diff images and the HTML report say which pixel moved.
+      - name: Upload the failure report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-report
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 14

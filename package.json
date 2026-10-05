@@ -21,7 +21,9 @@
     "lint:workflows": "node scripts/lint-workflows.mjs",
     "check:downloads": "node scripts/check-downloads.mjs",
     "size:report": "node scripts/report-sizes.mjs",
-    "android:keystore": "node scripts/android-keystore.mjs"
+    "android:keystore": "node scripts/android-keystore.mjs",
+    "test:e2e:visual": "playwright test e2e/visual.spec.ts",
+    "test:e2e:visual:update": "playwright test e2e/visual.spec.ts --update-snapshots"
   },
   "dependencies": {
     "@capacitor-community/speech-recognition": "^7.0.1",
