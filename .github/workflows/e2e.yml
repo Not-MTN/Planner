@@ -1,0 +1,64 @@
+# The behaviour suites: everything in e2e/ except the visual comparisons, which
+# have their own workflow because they carry committed baselines.
+#
+# These specs used to run nowhere. The visual suite's workflow was the only
+# thing driving a browser, so a regression in the tour, the panels or the phone
+# layout would have been found by a person, on a phone, after release.
+name: Browser tests
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'e2e/**'
+      - 'index.html'
+      - 'public/**'
+      - 'playwright.config.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/e2e.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # playwright.config.ts builds the app and serves the production bundle, so
+      # these tests exercise what ships rather than what the dev server does.
+      #
+      # One project, not two: ui-layout.spec.ts already drives 320/390/768/1024/
+      # 1440 by setting its own viewports, and the visual suite has a phone case.
+      # Running the same specs a second time in a Pixel 7 shape doubles the
+      # runtime for little extra signal. The `mobile` project stays for local
+      # runs: `npm run test:e2e -- --project=mobile`.
+      - name: Run the browser suites
+        run: npm run test:e2e -- --project=desktop
+
+      - name: Upload the failure report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-report
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 14

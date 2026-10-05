@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
+import { bootOffline } from './support';
 test('voice chat: talk to the AI, get an answer, and a plan draft', async ({ page }) => {
+  await bootOffline(page);
   await page.addInitScript(() => {
     class FakeRecognition {
       lang = ''; interimResults = true; continuous = false;

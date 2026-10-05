@@ -1,9 +1,11 @@
 import { expect, test } from '@playwright/test';
+import { bootOffline } from './support';
 
 const yesterday = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
 const today = new Date().toISOString().slice(0, 10);
 
 test.beforeEach(async ({ page }) => {
+  await bootOffline(page);
   await page.goto('/#/today');
   await page.evaluate(() => {
     localStorage.clear();

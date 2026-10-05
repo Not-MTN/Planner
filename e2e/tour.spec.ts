@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
+import { bootOffline } from './support';
 
 test.beforeEach(async ({ page }) => {
+  await bootOffline(page);
   await page.goto('/#/today');
   await page.evaluate(() => localStorage.clear());
   await page.reload();
