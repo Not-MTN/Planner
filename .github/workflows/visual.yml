@@ -52,20 +52,34 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
-      # The suite serves the app from a production build (playwright.config.ts),
-      # so the screenshots show what ships rather than what the dev server does.
-      - name: Run the visual suite
+      # A fresh checkout has no baselines — they are generated on this runner and
+      # committed back. So the first run writes them instead of failing, and the
+      # artifact it uploads is what gets committed. Once one set exists, a
+      # mismatch is a real failure.
+      - name: Check for committed baselines
+        id: baselines
         run: |
-          if [ "${{ inputs.update_baselines }}" = "true" ]; then
-            npm run test:e2e:visual:update
+          if [ -n "$(find e2e/visual.spec.ts-snapshots -name '*.png' -print -quit 2>/dev/null)" ]; then
+            echo "missing=false" >> "$GITHUB_OUTPUT"
           else
-            npm run test:e2e:visual
+            echo "missing=true" >> "$GITHUB_OUTPUT"
+            echo "::notice title=No visual baselines yet::This run writes them and uploads the visual-baselines artifact; commit it to e2e/visual.spec.ts-snapshots/ to turn this job into a real gate."
           fi
 
-      # A missing baseline fails the run above; the images it produced are what
-      # the maintainer commits, so they are uploaded either way.
+      # The suite serves the app from a production build (playwright.config.ts),
+      # so the screenshots show what ships rather than what the dev server does.
+      - name: Generate the visual baselines
+        if: inputs.update_baselines || steps.baselines.outputs.missing == 'true'
+        run: npm run test:e2e:visual:update
+
+      - name: Run the visual suite
+        if: ${{ !inputs.update_baselines && steps.baselines.outputs.missing != 'true' }}
+        run: npm run test:e2e:visual
+
+      # On a first run the images are the deliverable; on a regeneration they are
+      # what the maintainer commits. Uploaded either way, even if the run failed.
       - name: Upload baselines
-        if: always() && inputs.update_baselines
+        if: always() && (inputs.update_baselines || steps.baselines.outputs.missing == 'true')
         uses: actions/upload-artifact@v4
         with:
           name: visual-baselines

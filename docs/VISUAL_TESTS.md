@@ -31,9 +31,13 @@ To make or refresh them:
    picture changed and that is not the change you meant, the diff is the bug
    report.
 
-A run without committed baselines fails with "A snapshot doesn't exist", and the
-artifact from that same run is what you commit — the workflow does not gate on
-baselines existing.
+Runs on a branch where no baselines are committed yet do not fail: the workflow
+notices the directory is empty, writes the baselines, stays green and uploads
+them as the same artifact. That first green run *is* step 1 above, so a fresh
+clone needs no special handling — commit the artifact and the job becomes a real
+gate from the next run on. (A local `npm run test:e2e:visual` before that still
+fails with "A snapshot doesn't exist"; run it with `:update` once you have the
+artifact.)
 
 ## Why the pictures are comparable at all
 
