@@ -300,14 +300,16 @@ export function Shell() {
   useEffect(() => onAboutRequest(() => setAboutOpen(true)), []);
 
   // The PWA shortcut / #/today?qa=1 deep link: drop the caret straight into
-  // quick add. This has to survive the boot, which is why it is a loop rather
-  // than a timer: the account gate swaps itself for the planner, the vault
-  // lands, the day re-renders — and each of those can unmount the input the
-  // caret just went into, or steal focus on its way out. A single 120ms timer
-  // lost that race and left the caret nowhere. So: retry while the box does not
-  // exist, and require the focus to hold for a few checks in a row before
-  // believing it, then stop (never fight a person who has since clicked
-  // somewhere else).
+  // quick add. This has to survive the boot, which is why it keeps watch rather
+  // than firing once: the account gate swaps itself for the planner, the vault
+  // lands, the day re-renders — and each of those can replace the input the
+  // caret just went into, dropping focus to `<body>` (measured: the caret went
+  // into the box, then the boot finished and took it away). A single 120ms
+  // timer never had a chance.
+  //
+  // The rule is "put the caret back only when nobody has it": if focus was lost
+  // to the page itself, the box takes it again; if a person has focused
+  // anything else in the meantime, this backs off and never fights them.
   useEffect(() => {
     if (route.name !== 'quickadd') return;
     const find = () =>
@@ -315,27 +317,30 @@ export function Shell() {
       document.querySelector<HTMLInputElement>('input[aria-autocomplete]');
     let cancelled = false;
     let attempts = 0;
-    let held = 0;
+    let consumed = false;
     let timer = 0;
+    const nobodyHasFocus = () => {
+      const active = document.activeElement;
+      return !active || active === document.body || active === document.documentElement || !document.contains(active);
+    };
     const attempt = () => {
       if (cancelled) return;
       const input = find();
-      if (input) {
+      if (input && (document.activeElement === input || nobodyHasFocus())) {
         if (document.activeElement !== input) input.focus();
-        held = document.activeElement === input ? held + 1 : 0;
-        if (held >= 3) {
+        if (!consumed && document.activeElement === input) {
+          consumed = true;
           // The shortcut's URL is `#/today?qa=1`; once it has done its job,
           // keep the query out of the address bar so a reload does not
           // re-trigger the whole dance.
           if (window.location.hash.includes('qa=1')) {
             window.history.replaceState(null, '', window.location.hash.replace(/[?&]qa=1/, '').replace(/\?$/, ''));
           }
-          return; // done: focus has survived three checks
         }
       }
-      // ~4.5 seconds is enough for a cold boot on a slow phone; after that the
+      // ~6 seconds is enough for a cold boot on a slow phone; after that the
       // box is visible and a person can put the caret there themselves.
-      if (attempts < 30) {
+      if (attempts < 40) {
         attempts += 1;
         timer = window.setTimeout(attempt, 150);
       }

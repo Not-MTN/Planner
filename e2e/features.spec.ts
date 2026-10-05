@@ -180,7 +180,11 @@ test('any file — including music — can be attached to a note', async ({ page
   await dialog.getByRole('button', { name: 'Add note' }).click();
   const card = page.locator('.note-card', { hasText: 'Studio' });
   await expect(card).toBeVisible();
-  await expect(card.locator('.attach-chip')).toHaveCount(1); // collapsed card shows the file row minus… (image excluded)
+  // Both survive the collapse: the audio player carries its own chip and the
+  // PDF one of its own. (The old expectation of one predates the audio
+  // attachment growing a chip of its own — AttachmentList renders every non-
+  // image file.)
+  await expect(card.locator('.attach-chip')).toHaveCount(2);
   await page.reload();
   await expect(page.locator('.note-card', { hasText: 'Studio' })).toContainText('Studio');
   const audio = page.locator('.note-card audio');
