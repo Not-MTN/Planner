@@ -15,13 +15,14 @@ Other entry points:
 
 | Command | What it does |
 |---|---|
-| `npm test` | The unit suite (Vitest). ~3 minutes. |
+| `npm test` | The unit suite (Vitest). ~2.5 minutes. |
 | `npm run typecheck` | `tsc --noEmit`. |
 | `npm run lint` | ESLint, including the workflow files. |
 | `npm run build` | Typecheck, Vite build, then writes `dist/.well-known/*` for deep links when the env has the fingerprints. |
 | `npm run test:e2e` | Playwright against a production build (needs `npx playwright install chromium` once). |
 | `npm run test:e2e:visual` | Screenshot comparison against the committed baselines — see [docs/VISUAL_TESTS.md](docs/VISUAL_TESTS.md). |
 | `npm run size:report` | What every installer and the website carry. `-- --check 5` fails past the CI budget. |
+| `npm run check:toolchain` | `engines.node`, the Node version every workflow installs, and `.github/dependabot.yml`, checked against each other. |
 | `npm run check:deployment` | Asks a live deployment whether accounts, sync, push and the deep-link files are set up. |
 
 There is no database to install: accounts fall back to an in-memory store in
@@ -66,11 +67,13 @@ breaks without it.
 
 ## Traps worth knowing before you trip on them
 
-- **State is shared between tests.** Each test file gets its own module registry,
-  so a suite that changes the language, theme or display preferences must reset
-  them in `afterEach`. Turning off isolation (`isolate: false`) to save the ~30 s
-  of module setup was measured and rejected: 31 tests across 12 files leaked
-  each other's language and theme. Keep the reset discipline instead.
+- **State is shared between tests, on purpose.** `isolate: false` lets files
+  share a worker and a module registry (worth about a minute of `npm test`), and
+  the price is that a `vi.mock`, a stubbed global or a written localStorage key
+  outlives the file that made it. `src/testSetup.ts` clears all three between
+  files; a test that needs a clean slate resets it itself, in `beforeEach`, and
+  the suite has to pass as a whole — a file that only passes alone is a file
+  that is leaving something behind.
 - **Baselines are made on CI, not locally.** Font rendering differs between
   machines; a baseline captured on your laptop fails on the runner for reasons
   nobody can fix. The visual workflow generates and commits them.
@@ -86,15 +89,8 @@ breaks without it.
 
 ## Releasing
 
-1. Make sure `main` is green: typecheck, tests, build, visual, native compiles.
-2. Tag it (`git tag v1.2.0 && git push --tags`). The Apps workflow builds the
-   Windows/macOS/Linux installers and the Android/iOS artefacts from the tag and
-   attaches them to a release.
-3. The release job runs `npm run check:downloads` first, so a renamed artefact
-   fails the build instead of leaving the website pointing at nothing.
-4. `npm run check:deployment` against production, once, by hand: it checks the
-   account API, sync, push and both deep-link files from the outside.
-
-Installer filenames are deliberately fixed (no version numbers) because the
-website links to `releases/latest/download/<file>`. For the same reason
-`PLANNER_VERSION_NAME` carries the version instead.
+The short version: make `main` green, tag it, let the Apps workflow build and
+attach the installers, then check the deployment from the outside. The full
+runbook — what each workflow does, which repository variables and secrets it
+needs, and the order the store submissions go in — is in
+[docs/RELEASING.md](docs/RELEASING.md).
