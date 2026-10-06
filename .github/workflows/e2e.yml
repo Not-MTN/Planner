@@ -50,14 +50,18 @@ jobs:
       # runtime for little extra signal. The `mobile` project stays for local
       # runs: `npm run test:e2e -- --project=mobile`.
       - name: Run the browser suites
-        run: npm run test:e2e -- --project=desktop
+        # Two reporters on purpose. `line` is the one a person reads in the log;
+        # `github` turns each failure into a check annotation, which is what
+        # shows up on the pull request without opening the run at all — the job
+        # log sits behind signed blob storage and cannot be read everywhere.
+        run: npm run test:e2e -- --project=desktop --reporter=line,github
 
       # The one spec that needs a real touch shape. It asserts the coarse-pointer
       # sizing in styles.css, which only applies when the browser emulates a
       # finger — so it skips under the desktop project above and runs here, in
       # the Pixel 7 project, where `pointer: coarse` matches.
       - name: Run the touch-target measurements
-        run: npx playwright test e2e/touch-targets.spec.ts --project=mobile
+        run: npx playwright test e2e/touch-targets.spec.ts --project=mobile --reporter=line,github
 
       - name: Upload the failure report
         if: failure()
