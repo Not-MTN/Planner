@@ -3,8 +3,6 @@
  * Missing translations fall back to English, so nothing ever renders blank.
  * Placeholders use braces: t('{count} tasks', { count: 3 }).
  */
-import { fa } from './locales/fa';
-import { fi } from './locales/fi';
 
 export type Lang = 'en' | 'fa' | 'fi';
 export const LANGUAGES: { id: Lang; label: string; dir: 'ltr' | 'rtl' }[] = [
@@ -24,7 +22,56 @@ export const LANGUAGES: { id: Lang; label: string; dir: 'ltr' | 'rtl' }[] = [
 export const COMPLETE_LANGS: Lang[] = ['fa', 'fi'];
 
 const LANG_KEY = 'planner-lang';
-const DICTS: Record<Lang, Record<string, string>> = { en: {}, fa, fi };
+
+/**
+ * Dictionaries arrive on demand, not with the app.
+ *
+ * They are the largest strings in the build — a couple of hundred kilobytes of
+ * text between them — and a reader uses exactly one of them, or none. Importing
+ * them here put all of that in the entry bundle, where every visitor downloaded
+ * Persian and Finnish before the first screen and the entry went over its
+ * budget. Each one is a separate chunk now, fetched once for the language that
+ * is actually being read (`loadDictionary`).
+ *
+ * The cost of that trade is the moment between import and load: `t()` falls
+ * back to the English key, which is why the app waits for the dictionary before
+ * it renders (src/main.tsx) rather than painting and filling in later.
+ */
+const LOADERS: Record<Exclude<Lang, 'en'>, () => Promise<Record<string, string>>> = {
+  fa: () => import('./locales/fa').then((module) => module.fa),
+  fi: () => import('./locales/fi').then((module) => module.fi),
+};
+
+const DICTS: Record<Lang, Record<string, string>> = { en: {}, fa: {}, fi: {} };
+const loading = new Map<Lang, Promise<void>>();
+
+/** Is the dictionary for `target` here? English is the fallback, so it always is. */
+export function dictionaryLoaded(target: Lang): boolean {
+  return target === 'en' || Object.keys(DICTS[target]).length > 0;
+}
+
+/**
+ * Fetch a language's dictionary, once.
+ *
+ * Safe to call from anywhere and as often as you like: repeat calls share the
+ * one request. A failure is not an error the reader should see — English keys
+ * still render — so the promise resolves (and `dictionaryLoaded` stays false).
+ */
+export function loadDictionary(target: Lang): Promise<void> {
+  if (target === 'en') return Promise.resolve();
+  const existing = loading.get(target);
+  if (existing) return existing;
+  const request = LOADERS[target]()
+    .then((dictionary) => {
+      DICTS[target] = dictionary;
+    })
+    .catch(() => {
+      /* the English key is the fallback: a missing chunk is a slower app, not a broken one */
+    });
+  loading.set(target, request);
+  return request;
+}
+
 let lang: Lang = 'en';
 
 export function getLang(): Lang {
@@ -42,6 +89,10 @@ export function loadLang(): Lang {
 
 export function setLang(next: Lang): void {
   lang = next;
+  // The planner reloads after a language change, so this is belt and braces for
+  // any caller that does not (and for the reload's own window, where the
+  // dictionary is already in the module cache).
+  void loadDictionary(next);
   try {
     localStorage.setItem(LANG_KEY, next);
   } catch {

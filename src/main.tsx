@@ -61,9 +61,22 @@ function bootTarget(): 'app' | 'site' {
 }
 
 const target = bootTarget();
-// Loaded on demand: the i18n module pulls the whole Persian dictionary, which
-// the marketing site never needs.
-if (target === 'app') void import('./i18n').then((module) => module.applyDocumentLang());
+// Loaded on demand: the i18n module and the dictionary for the language being
+// read. The marketing site needs neither — it prints numbers through `digitsIn`
+// and keeps its own copy (src/marketing/copy.ts).
+if (target === 'app') {
+  void import('./i18n')
+    .then(async (module) => {
+      module.applyDocumentLang();
+      // Awaited, not fired and forgotten: every string on the first screen comes
+      // out of this dictionary, and rendering before it lands paints a frame of
+      // English over a Persian or Finnish app.
+      await module.loadDictionary(module.getLang());
+    })
+    .catch(() => {
+      /* the English keys still render */
+    });
+}
 // Must run before anything else issues a request: inside a packaged app the
 // API lives on another origin, and every `/api/...` call in the app is
 // rewritten to reach it, session cookie included.
@@ -82,7 +95,24 @@ if (!root) throw new Error('Root element missing');
 
 root.innerHTML = '';
 
-createRoot(root).render(
+/**
+ * The first paint.
+ *
+ * The app's dictionary request is in flight (above) and this is what waits for
+ * it: React cannot mount a translated screen until the translations are here,
+ * and `import()` chains resolve before any microtask the app schedules, so one
+ * `await` on the dictionary is enough to put it ahead of the render.
+ */
+async function boot(): Promise<void> {
+  if (target === 'app') {
+    const i18n = await import('./i18n');
+    await i18n.loadDictionary(i18n.getLang());
+  }
+  render();
+}
+
+function render(): void {
+  createRoot(root as HTMLElement).render(
   <StrictMode>
     <Suspense
       fallback={
@@ -98,4 +128,7 @@ createRoot(root).render(
       </ErrorBoundary>
     </Suspense>
   </StrictMode>,
-);
+  );
+}
+
+void boot();

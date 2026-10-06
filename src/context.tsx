@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { KEEP_EVERYTHING, loadRetentionWeeks, normalizeRetention, retentionIdle, rollUp, saveRetentionWeeks } from './retention';
 import { addBreadcrumb, reportCaught } from './reporting';
 import { parseHash, toHash, type Route } from './route';
-import { downloadState, loadFrom, parseBackup, sanitizeState, saveTo, serialize, STORAGE_FULL, STORAGE_KEY } from './storage';
+import { downloadState, loadFrom, parseBackup, sanitizeState, saveTo, serialize, storageFullMessage, STORAGE_KEY } from './storage';
 import { flushVaultPush, scheduleVaultPush } from './auth/vault';
 import { readNotices, refreshResults, shareWeeklyResults, syncLinks, syncStudentInbox } from './auth/links';
 import { idbRead, idbWrite, savedAt } from './idb';
@@ -477,7 +477,7 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     const serialized = serialize(next);
     void idbWrite(serialized);
     const saveError = saveTo(localStorage, next);
-    if (saveError === STORAGE_FULL && typeof indexedDB !== 'undefined') {
+    if (saveError === storageFullMessage() && typeof indexedDB !== 'undefined') {
       // localStorage is full — IndexedDB holds the copy instead (it has far more room).
       if (!idbOnly.current) {
         idbOnly.current = true;

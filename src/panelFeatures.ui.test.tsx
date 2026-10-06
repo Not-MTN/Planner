@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { addDays, setWeekStart, todayISO } from './dates';
-import { setLang } from './i18n';
+import { loadDictionary, setLang } from './i18n';
 import { addTask, logFocus } from './mutate';
 import { weekOf, withLinkPlan } from './panels';
 import { shortWeek } from './components/charts';
@@ -342,6 +342,8 @@ describe('actionable student panel', () => {
 
   it('renders the new study controls in Persian', async () => {
     setLang('fa');
+    // Dictionaries are fetched on demand (src/i18n.ts).
+    await loadDictionary('fa');
     await mount(studentState());
     expect(document.documentElement.dir).toBe('rtl');
     expect(query('.study-queue-card').textContent).toContain('صف مطالعهٔ شما');

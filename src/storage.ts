@@ -8,7 +8,12 @@ import { t } from './i18n';
 import { downloadBlob } from './download';
 
 export const STORAGE_KEY = 'personal-planner.v1';
-export const STORAGE_FULL = t("Browser storage is full, so that change was not saved.");
+/** The message a failed write shows. A function, not a constant: dictionaries
+ *  arrive after this module is evaluated (src/i18n.ts), so a string captured
+ *  here would be English for every language. */
+export function storageFullMessage(): string {
+  return t("Browser storage is full, so that change was not saved.");
+}
 const MAX_BACKUP = 2_000_000;
 const PRIORITY_SET = new Set<string>(PRIORITIES.map((item) => item.id));
 const ACCENT_SET = new Set<string>(ACCENTS);
@@ -1000,7 +1005,7 @@ export function saveTo(storage: Pick<Storage, 'setItem'>, state: PlannerState): 
     return null;
   } catch (error) {
     const name = error && typeof error === 'object' && 'name' in error ? String(error.name) : '';
-    if (name === 'QuotaExceededError') return STORAGE_FULL;
+    if (name === 'QuotaExceededError') return storageFullMessage();
     return t("That change could not be saved in this browser.");
   }
 }
