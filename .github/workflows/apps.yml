@@ -173,7 +173,7 @@ jobs:
           PLANNER_API_ORIGIN: ${{ env.API_ORIGIN }}
           PLANNER_VERSION_NAME: ${{ env.VERSION_NAME }}
       - name: Upload installers
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: planner-desktop-${{ matrix.target }}
           path: |
@@ -408,7 +408,7 @@ jobs:
           cp android/app/build/outputs/bundle/playRelease/app-play-release.aab artifacts/app-play-release.aab
           ls -la artifacts
       - name: Upload Android builds
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: planner-android
           path: |
@@ -470,7 +470,7 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent Planner.xcarchive Planner-ios.xcarchive.zip
           ls -la
       - name: Upload the iOS build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: planner-ios
           path: |
