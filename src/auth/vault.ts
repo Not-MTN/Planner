@@ -20,6 +20,7 @@ import {
   signOut as apiSignOut,
 } from './session';
 import { forgetDevice, getLastTrustedUserId, recallFromDevice, rememberOnDevice } from './device';
+import { BiometricError, forgetBiometricKey, readBiometricKey } from './biometric';
 import { mergeStates } from '../sync';
 import type { PlannerState } from '../types';
 import type { PublicUser } from '../shared/authContract';
@@ -72,6 +73,9 @@ export function lock(): void {
 export async function signOut(): Promise<void> {
   const userId = getActiveSession()?.user.id ?? getLastUserId() ?? undefined;
   endSession();
+  // Signing out means the next person to pick up this phone cannot open the
+  // planner with a face that is already enrolled on it.
+  await forgetBiometricKey();
   await forgetDevice(userId);
   try {
     localStorage.removeItem(LAST_USER_INFO_KEY);
@@ -217,6 +221,44 @@ export async function unlockWithPassword(password: string, remember: boolean): P
 
   adoptSession(session, dek, { version: result.vault.version, ciphertext: result.vault.ciphertext }, dekRaw);
   return { status: 'ready', user: session, state, version: result.vault.version };
+}
+
+/**
+ * Opens the vault with the key the operating system has been holding behind a
+ * face or a fingerprint. No password, and no wrapped copy from the server: the
+ * platform store holds the vault key itself, so the server only supplies the
+ * ciphertext it always did.
+ *
+ * Failure is told apart rather than flattened. A cancelled prompt leaves
+ * everything as it was; a key the OS has thrown away (the enrolled fingers or
+ * face changed) is deleted here, because it can never work again and a retry
+ * would only fail the same way.
+ */
+export async function unlockWithBiometrics(reason?: string): Promise<AccountBoot> {
+  const session = await fetchSession();
+  if (!session) return { status: 'signed-out' };
+
+  // This is the call that asks the device to identify its owner.
+  const raw = await readBiometricKey(reason);
+  try {
+    const vault = await pullVault();
+    if (!vault) {
+      throw new BiometricError('failed', 'Your planner could not be opened on this device. Use your password instead.');
+    }
+    // importDek clears its copy; keep one for passkey enrolment on this page.
+    const dekRaw = new Uint8Array(raw);
+    const dek = await importDek(raw, false);
+    const state = await decryptState(vault.ciphertext, dek).catch(async () => {
+      // The vault no longer opens with this key — the password was changed,
+      // which makes a new one. Keeping it would fail identically next time.
+      await forgetBiometricKey();
+      throw new BiometricError('invalidated', 'This device\u2019s saved unlock is out of date. Enter your password once to turn it on again.');
+    });
+    adoptSession(session, dek, { version: vault.version, ciphertext: vault.ciphertext }, dekRaw);
+    return { status: 'ready', user: session, state, version: vault.version };
+  } finally {
+    raw.fill(0);
+  }
 }
 
 /* --------------------------------------------------------------- saving back */

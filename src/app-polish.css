@@ -312,6 +312,10 @@
   overflow-wrap: anywhere;
 }
 @media (pointer: coarse) {
+  /* The grouped destination tiles were 42px — a comfortable cursor target and
+     two pixels short of a thumb. `e2e/touch-targets.spec.ts` grades every
+     `.more-list button` at 44px, and the tiles are the rows people tap most. */
+  .more-list .more-tile { min-height: 44px; }
   .more-list .more-actions button { min-height: 44px; }
 }
 
@@ -378,7 +382,16 @@
 }
 .empty-compact .empty-mark svg { width: 17px; height: 17px; }
 .empty-compact .empty-title { font-size: 16px; }
-.empty-compact > .btn { min-height: 34px; margin-top: 3px; }
+/* The compact empty states are the one place a button is asked to be shorter
+   than the app's 40px base — sensible with a cursor, and under the thumb floor
+   on a phone, where this button is exactly the tap that has to land. So the
+   small size is cursor-only; with a finger the touch rules win.
+   (Measured, not assumed: `e2e/touch-targets.spec.ts` failed on these three
+   buttons — Add event / Add task / Add habit — at 110×34, 98×34 and 105×34.) */
+.empty-compact > .btn { margin-top: 3px; }
+@media (pointer: fine) {
+  .empty-compact > .btn { min-height: 34px; }
+}
 
 .day-completed { margin-top: 10px; border-top: 1px solid var(--line); }
 .day-completed summary {
@@ -1021,6 +1034,14 @@
   border-bottom: 1px solid var(--line);
   box-shadow: 0 12px 18px -18px color-mix(in srgb, var(--ink) 45%, transparent);
 }
+/* Syllabus → term plan: what the parser read, shown back before it is added. */
+.syllabus-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
 .sheet-settings .sheet-head { margin-bottom: 10px; }
 /* The strip is the reason the header has to stick: a panel can be switched
    from anywhere in a long section. */
@@ -1049,4 +1070,73 @@
 .recovery.reveal-in,
 .field.reveal-in {
   animation: rise 0.42s var(--ease) both;
+}
+
+/* A merge that dropped someone's edit: a badge on Settings, and a one-line
+   notice beside it so the count is a sentence rather than a number. */
+.conflict-badge {
+  margin-inline-start: 6px;
+}
+
+.conflict-notice {
+  margin: 6px 10px 2px;
+  padding: 7px 10px;
+  border: 1px solid var(--line, rgba(128, 128, 128, 0.35));
+  border-radius: 10px;
+  background: var(--surface-2, rgba(128, 128, 128, 0.08));
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: start;
+  cursor: pointer;
+}
+
+.conflict-notice:hover {
+  border-color: var(--accent);
+}
+
+/* The comparison itself: current version first, the one that lost beside it. */
+.sync-conflict-diff {
+  margin: 8px 0 0;
+  display: grid;
+  gap: 4px;
+}
+
+.sync-conflict-row {
+  display: grid;
+  grid-template-columns: minmax(64px, auto) 1fr 1fr;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12.5px;
+}
+
+.sync-conflict-row dt {
+  color: var(--muted);
+}
+
+.sync-conflict-row dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.sync-conflict-row dd.mine {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.sync-conflict-row dd.theirs {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--muted) 50%, transparent);
+}
+
+@media (max-width: 520px) {
+  .sync-conflict-row {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .sync-conflict-row dt {
+    font-weight: 600;
+  }
 }

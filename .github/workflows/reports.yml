@@ -1,0 +1,58 @@
+name: Crash reports
+
+# The alerting half of crash reporting. The app already accepts reports and logs
+# them; this asks the deployment every couple of hours whether any message has
+# crossed the threshold, and a failing scheduled run is the notification.
+#
+# Configure it once, on the repository:
+#   - variable  PLANNER_APP_URL            e.g. https://planner.example.com
+#   - secret    REPORT_DASHBOARD_SECRET    the same value the deployment sets
+# Until the secret exists the job reports "not configured" and stays green — a
+# scheduled workflow that fails because it was never set up teaches people to
+# ignore it.
+#
+# The threshold itself (5 occurrences in an hour by default) lives in
+# `src/server/reportApi.ts`, next to the code that counts it.
+
+on:
+  schedule:
+    - cron: '17 */2 * * *'
+  workflow_dispatch:
+    inputs:
+      window:
+        description: How far back to look (e.g. 6h, 7d)
+        required: false
+        default: 24h
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reports
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: secret
+        env:
+          SECRET: ${{ secrets.REPORT_DASHBOARD_SECRET }}
+        run: |
+          if [ -z "$SECRET" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::REPORT_DASHBOARD_SECRET is not set — nothing to check. See README, “Crash reporting”."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.secret.outputs.configured == 'true'
+        env:
+          PLANNER_APP_URL: ${{ vars.PLANNER_APP_URL }}
+          REPORT_DASHBOARD_SECRET: ${{ secrets.REPORT_DASHBOARD_SECRET }}
+        run: |
+          if [ -z "$PLANNER_APP_URL" ]; then
+            echo "::notice::PLANNER_APP_URL is not set — nothing to check."
+            exit 0
+          fi
+          node scripts/check-reports.mjs --window="${{ inputs.window || '24h' }}"

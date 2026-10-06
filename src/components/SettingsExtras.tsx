@@ -3,7 +3,9 @@ import { cx } from '../cx';
 import { usePlanner } from '../context';
 import { UploadIcon } from '../icons';
 import { parseTaskCSV } from '../importers';
-import { displayTime, formatEdited, formatStamp } from '../dates';
+import { parseSyllabus, syllabusToTasks, type SyllabusParse } from '../syllabus';
+import { KEEP_EVERYTHING, RETENTION_CHOICES } from '../retention';
+import { displayTime, formatEdited, formatFullDate, formatStamp, todayISO } from '../dates';
 import { geocode } from '../weather';
 import { loadTemplates, removeTemplate, saveTemplates, type PlannerTemplate } from '../templates';
 import { PasskeyError, listPasskeys, passkeysSupported, registerPasskey, removePasskey, type ListedPasskey } from '../auth/passkey';
@@ -403,6 +405,204 @@ export function TaskImportSection() {
             .finally(() => setBusy(false));
         }}
       />
+    </section>
+  );
+}
+
+// ── Retention window ─────────────────────────────────────────────────────
+
+/**
+ * How long detail is kept.
+ *
+ * The window is the whole promise of §11 made visible: inside it nothing is
+ * touched, outside it a week becomes numbers. The section states plainly what
+ * happens, because "your data may be pruned" is not something anyone should
+ * have to infer from a changelog — and it counts what has been rolled up so far
+ * so the setting is checkable rather than merely believed.
+ */
+export function RetentionSection() {
+  const { retentionWeeks, setRetentionWeeks, state } = usePlanner();
+  const archived = state.archives?.length ?? 0;
+
+  return (
+    <section className="set-section">
+      <h3 className="kicker">{t('How long detail is kept')}</h3>
+      <p className="set-hint">
+        {t('Weeks inside the window keep everything — notes, reasons, focus sessions. Older weeks keep their results and lose the detail behind them. Anything unfinished or in the future is never touched.')}
+      </p>
+      <div className="segmented" role="radiogroup" aria-label={t('How long detail is kept')}>
+        {RETENTION_CHOICES.map((weeks) => (
+          <button
+            key={weeks}
+            type="button"
+            role="radio"
+            aria-checked={retentionWeeks === weeks}
+            className={cx('seg', retentionWeeks === weeks && 'on')}
+            onClick={() => setRetentionWeeks(weeks)}
+          >
+            {weeks === 1 ? t('1 week') : t('{0} weeks', { 0: weeks })}
+          </button>
+        ))}
+        <button
+          type="button"
+          role="radio"
+          aria-checked={retentionWeeks === KEEP_EVERYTHING}
+          className={cx('seg', retentionWeeks === KEEP_EVERYTHING && 'on')}
+          onClick={() => setRetentionWeeks(KEEP_EVERYTHING)}
+        >
+          {t('Keep everything')}
+        </button>
+      </div>
+      {retentionWeeks === KEEP_EVERYTHING ? (
+        <p className="set-hint">
+          {t('Keeping everything means the vault keeps growing: a busy year is a few megabytes, and cloud sync has a 3 MB cap. Export a backup now and then.')}
+        </p>
+      ) : null}
+      <p className="set-hint">
+        {archived > 0
+          ? tn(archived, '{count} week has been rolled up so far — numbers only, never your notes.', '{count} weeks have been rolled up so far — numbers only, never your notes.')
+          : t('Nothing has been rolled up yet.')}
+      </p>
+    </section>
+  );
+}
+
+// ── Syllabus → term plan ─────────────────────────────────────────────────
+
+/**
+ * A pasted syllabus becomes a term plan.
+ *
+ * The reading happens in `syllabus.ts`, which returns the weeks and the
+ * assessments it understood and counts what it did not. This section shows
+ * that reading back before anything is added — a term plan is a dozen tasks
+ * appearing at once, and a wrong week is much cheaper to catch here than in
+ * the calendar. Nothing reaches the planner until "Add to planner".
+ */
+export function SyllabusSection() {
+  const { state, importTaskList, flash } = usePlanner();
+  const [text, setText] = useState('');
+  const [subject, setSubject] = useState('');
+  const [parsed, setParsed] = useState<SyllabusParse | null>(null);
+  const [reading, setReading] = useState(false);
+  const subjects = state.panels.student.subjects;
+
+  const read = () => {
+    setReading(true);
+    // Reading is synchronous — the flag exists so a long paste cannot feel
+    // like a dead button, not because there is anything to await.
+    const result = parseSyllabus(text, todayISO());
+    setReading(false);
+    if (result.weeks.length === 0 && result.assessments.length === 0) {
+      setParsed(null);
+      flash(t('Nothing in that text looked like a term plan. A week line has to say which week it is.'));
+      return;
+    }
+    setParsed(result);
+  };
+
+  const add = () => {
+    if (!parsed) return;
+    importTaskList(syllabusToTasks(parsed, { subject, category: 'learning', weeklyMinutes: 60 }));
+    setParsed(null);
+    setText('');
+  };
+
+  return (
+    <section className="set-section">
+      <h3 className="kicker">{t('Plan a term from a syllabus')}</h3>
+      <p className="set-hint">
+        {t('Paste a course outline and each teaching week becomes a task, each dated exam or assignment its own. Nothing is added until you press Add.')}
+      </p>
+      <div className="field">
+        <textarea
+          dir="auto"
+          rows={6}
+          value={text}
+          placeholder={t('Paste the syllabus here')}
+          aria-label={t('Paste the syllabus here')}
+          onChange={(event) => {
+            setText(event.target.value);
+            setParsed(null);
+          }}
+        />
+      </div>
+      <div className="set-row">
+        <div className="field">
+          <p className="set-label">{t('Subject (optional)')}</p>
+          <input
+            value={subject}
+            list="syllabus-subjects"
+            aria-label={t('Subject (optional)')}
+            placeholder={t('Physics')}
+            onChange={(event) => setSubject(event.target.value)}
+          />
+          <datalist id="syllabus-subjects">
+            {subjects.map((item) => (
+              <option key={item.id} value={item.name} />
+            ))}
+          </datalist>
+        </div>
+        <span className="set-actions">
+          <button type="button" className="btn btn-soft" disabled={reading || text.trim() === ''} onClick={read}>
+            {reading ? t('Reading the syllabus…') : t('Read the syllabus')}
+          </button>
+        </span>
+      </div>
+
+      {parsed ? (
+        <div className="syllabus-preview" role="status">
+          <p className="set-label">
+            {t('Syllabus read: {0} and {1}.', {
+              0: tn(parsed.weeks.length, '{count} teaching week', '{count} teaching weeks'),
+              1: tn(parsed.assessments.length, '{count} assessment', '{count} assessments'),
+            })}
+          </p>
+          {parsed.weeks.length > 0 ? (
+            <ul className="feed-list">
+              {parsed.weeks.slice(0, 8).map((week) => (
+                <li key={week.week} className="feed-item">
+                  <div className="feed-copy">
+                    <strong>{t('Week {0}', { 0: week.week })}</strong>
+                    <small className="set-hint">
+                      {[week.title, week.start ? formatFullDate(week.start) : null].filter(Boolean).join(' · ')}
+                    </small>
+                  </div>
+                </li>
+              ))}
+              {parsed.weeks.length > 8 ? (
+                <li className="feed-item">
+                  <small className="set-hint">{tn(parsed.weeks.length - 8, '{count} more week', '{count} more weeks')}</small>
+                </li>
+              ) : null}
+            </ul>
+          ) : null}
+          {parsed.assessments.length > 0 ? (
+            <ul className="feed-list">
+              {parsed.assessments.map((item, index) => (
+                <li key={`${item.title}-${index}`} className="feed-item">
+                  <div className="feed-copy">
+                    <strong>{item.title}</strong>
+                    <small className="set-hint">
+                      {[item.date ? formatFullDate(item.date) : t('No date'), item.weight !== null ? t('{0}% of the grade', { 0: item.weight }) : null]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </small>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {parsed.unread > 0 ? (
+            <p className="set-hint">{tn(parsed.unread, '{count} dated line was left out — only lines that name their week become weeks.', '{count} dated lines were left out — only lines that name their week become weeks.')}</p>
+          ) : null}
+          <p className="set-hint">{t('Dates such as 05/03 are read as day/month. Check the dates on the calendar after adding.')}</p>
+          <div className="set-actions">
+            <button type="button" className="btn btn-primary" onClick={add}>
+              {t('Add to planner')}
+            </button>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

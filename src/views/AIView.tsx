@@ -607,7 +607,7 @@ export function AIView() {
           <span className={cx('chip', groqConfigured ? 'ai-connected' : 'ai-disconnected')}>
             <span className="status-dot" />{groqConfigured === null ? t("Checking Groq key…") : groqConfigured ? t("Groq connected") : 'GROQ_API_KEY needed'}
           </span>
-          <button type="button" className="btn btn-soft btn-small" onClick={openSettings}>{t("AI settings")}</button>
+          <button type="button" className="btn btn-soft btn-small" onClick={() => openSettings('app')}>{t("AI settings")}</button>
         </div>
       </header>
 

@@ -52,6 +52,9 @@
   margin: 0 auto;
   padding: 30px 0 var(--content-padding-bottom, 120px);
 }
+/* Where the skip link lands. It is focused programmatically, so a ring around
+   the whole page would be noise rather than a focus indicator (Shell.tsx). */
+.content:focus { outline: none; }
 .view { display: flex; flex-direction: column; gap: 20px; }
 .view-enter { animation: rise 0.4s var(--ease); }
 .stack { display: flex; flex-direction: column; gap: 20px; }
@@ -459,6 +462,12 @@ h1, .page-head h1 {
   align-items: center;
   justify-content: center;
   gap: 7px;
+  /* A button with no variant used to fall through to the browser's own button
+     face. In dark mode that is a mid grey (#6b6b6b), which put the app's light
+     text at 4.2:1 — and a system widget in the middle of a design system. */
+  background: var(--surface);
+  border-color: var(--line-strong);
+  color: var(--ink);
   min-height: 40px;
   padding: 0 18px;
   border-radius: 999px;
@@ -2004,7 +2013,7 @@ h1, .page-head h1 {
 }
 .bar-col.is-today .bar { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
 .bar-col small { font-size: 11px; font-weight: 700; color: var(--muted); }
-.bar-col .bar-date { font-size: 9.5px; opacity: 0.7; }
+.bar-col .bar-date { font-size: 9.5px; }
 .progress-list { display: flex; flex-direction: column; gap: 14px; }
 .progress-line { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; font-weight: 600; margin-bottom: 5px; }
 .progress-line small { color: var(--muted); font-weight: 650; font-variant-numeric: tabular-nums; }
@@ -3861,7 +3870,13 @@ html, body { overflow-x: clip; }
 /* ── Thumbs are bigger than a mouse pointer ─────────────────────────────── */
 /* The smallest controls in the app are comfortable with a cursor and fiddly
    with a thumb, so they grow on touch devices. Forty-four pixels is the size
-   Apple and Google both recommend for a reliable tap. */
+   Apple and Google both recommend for a reliable tap.
+
+   Kept honest by e2e/touch-targets.spec.ts, which measures the phone chrome in
+   the Pixel 7 project and asserts 44px there (24px for the deliberately dense
+   row controls). Its first run, on a *mouse* emulation, measured what a cursor
+   gets: 36×36 for the bar's round icons, 34×34 for the dictate mic, 30–40px for
+   the buttons. The rules below are what closes the gap for a finger. */
 @media (pointer: coarse) {
   .btn-tiny,
   .icon-btn.round,
@@ -3883,8 +3898,20 @@ html, body { overflow-x: clip; }
     margin-inline: -8px;
   }
 
-  .btn-small {
-    min-height: 40px;
+  /* 40px is a comfortable cursor target and two pixels short of a thumb. */
+  .btn:not(.btn-tiny) {
+    min-height: 44px;
+  }
+
+  /* The dictate mic is an `.icon-btn` but not a round one, so the rule above
+     never reached it. Everything else in the quick-add row can follow. */
+  .quick-add button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .mobile-bar .brand {
+    min-height: 44px;
   }
 }
 

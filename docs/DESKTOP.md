@@ -54,9 +54,8 @@ and the whole planner work identically to the website.
   deployment sends, so `connect-src` allows your API origin and the weather
   service and nothing else.
 - Reminders fire while the app is running (a normal system notification, using
-  the page's own notification API). Reminders while the app is closed would
-  need a background service or a tray process — not implemented, and not
-  pretended otherwise.
+  the page's own notification API), and — with **background mode** on — while
+  the window is closed too. See §9.
 - Packaged **Windows** builds check `planner-update.json` at startup. When a
   newer release exists, the app downloads the fixed-name installer, checks its
   declared size and SHA-256, then offers the NSIS in-place update. NSIS keeps
@@ -108,7 +107,18 @@ To see where the payload goes, and to catch a regression:
 ```bash
 npm run build && npm run size:report            # where the megabytes are
 npm run size:report -- --check 5                # fail above a 5 MB payload
+npm run check:bundle-budget                     # what a browser downloads, per chunk
 ```
+
+The last one is a different measurement: `size:report` weighs the payload an
+installer carries, while `check:bundle-budget` weighs what the browser actually
+fetches — the entry script and stylesheet out of `index.html` plus every chunk,
+gzipped, against a committed baseline in `scripts/bundle-budget.json`. A chunk
+may not grow more than 10% without `npm run check:bundle-budget -- --update` in a
+commit that says why, and the `limits` in that file are hard caps CI enforces on
+every build (`security.yml`). The baseline is keyed by module — Vite's
+`.vite/manifest.json`, enabled in `vite.config.ts` for exactly this — because
+filenames carry a content hash that changes on every edit.
 
 The remaining artwork in `public/img/` is byte-for-byte the original photography.
 WebP is the next 1.6 MB and it was tried and undone: converting those files and
@@ -165,3 +175,32 @@ anywhere, build with nothing set (`npm run desktop:dist`) and leave
 `PLANNER_APP_ORIGINS` unset on the server. The app then has no API origin in
 its bundle, never contacts anything, and says so on the sign-in screen instead
 of failing with a network error.
+
+## 9. Background mode and reminders with the window closed
+
+Closing the window usually means quitting. In Planner it means "keep my
+reminders coming": the window hides, the process stays, and a tray icon is the
+way back in.
+
+- **Setting.** Settings → App → *Keep running when the window is closed*. On by
+  default, because a close button that silently stops reminders is a worse
+  surprise than a tray icon. It is stored in the app's own preferences file
+  (`desktop-preferences.json` next to `window-state.json`), never in the planner
+  vault — it describes this installation, not your planner.
+- **Getting back in.** The tray icon's menu has *Open Planner*, the same
+  background switch, and *Quit Planner*. The File menu has *Close window* and
+  *Quit Planner* separately. Changing the switch in either place updates the
+  other, because the main process owns the value and broadcasts it.
+- **The first time**, a single notification explains that Planner is still
+  running and how to quit. It is not repeated.
+- **Reminders** are computed by the page exactly as they are for the phone
+  shells — events and timed tasks with their lead time, habits at their own
+  times, and the morning summary if it is on — and handed to the main process
+  through IPC. The main process fires a normal system notification at each
+  time, and clicking one brings the window back. Task, event and habit names
+  stay on the machine: this is an in-process call, not an upload.
+- **When background mode is off**, closing the window quits and reminders only
+  arrive while the app is open — which is what the settings screen says.
+
+Nothing here changes the browser or the phone apps: `src/desktop.ts` is a no-op
+unless `window.plannerDesktop` exists.

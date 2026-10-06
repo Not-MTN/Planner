@@ -7,12 +7,16 @@ import { Rich } from './Rich';
 import { Modal } from './ui';
 import { RecoveryCodes } from './RecoveryCodes';
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { FeedsSection, SecuritySection, SharedSpaceSection, TaskImportSection, TemplatesSection, WeatherSection } from './SettingsExtras';
+import { CalendarsSection } from './CalendarSyncSection';
+import { FeedsSection, RetentionSection, SecuritySection, SharedSpaceSection, SyllabusSection, TaskImportSection, TemplatesSection, WeatherSection } from './SettingsExtras';
+import { BiometricSetting } from './BiometricSetting';
 import { isReportingEnabled, setReportingEnabled } from '../reporting';
 import { useSignOut } from './useSignOut';
+import type { ConflictField } from '../sync';
 import { accountUser, forgetAccountUser } from '../auth/vault';
 import { deviceCacheSupported, forgetDevice, listTrustedUserIds } from '../auth/device';
 import {
+  changePasswordFromDevice,
   confirmTotpSetup,
   deleteAccount,
   disableTotp,
@@ -28,9 +32,10 @@ import {
   type DeviceSession,
   type TotpSetup,
 } from '../auth/session';
-import { DATE_LANGUAGES, formatStamp, todayISO, type DateLanguage } from '../dates';
+import { DATE_LANGUAGES, formatEdited, formatStamp, formatWeekdayShort, todayISO, type DateLanguage } from '../dates';
 import { downloadBusyICS, downloadICS, parseICS } from '../ics';
 import { canInstall, isInstalled, onInstallChange, promptInstall } from '../pwa';
+import { desktopPreferences, isDesktopShell, onDesktopPreferences, setDesktopBackground } from '../desktop';
 import { requestTour } from '../tour';
 import { requestAbout } from '../about';
 import { LEAD_CHOICES } from '../reminders';
@@ -38,7 +43,7 @@ import { getReminderPermission, requestReminderPermission, type ReminderPermissi
 import { loadSpeechLocaleId, saveSpeechLocaleId, speechAvailable, SPEECH_LOCALES } from '../speech';
 import { faNum, t, tn, getLang, setLang, LANGUAGES, type Lang } from '../i18n';
 import { loadMobileFavorites, loadNavigationPages, MAX_MOBILE_FAVORITES, moveMobileFavorite, NAVIGATION_PAGES, saveMobileFavorites, saveNavigationPages, type NavigationPage } from '../navigationPrefs';
-import { backgroundPushEnabled, configureBackgroundPush, refreshBackgroundPushSchedule } from '../push';
+import { backgroundPushEnabled, backgroundPushSupported, configureBackgroundPush, pushTransport, refreshBackgroundPushSchedule } from '../push';
 import { currentPlatform, deviceInstallActionFor } from '../marketing/downloads';
 import { isNativeMobileShell, isNativeShell, shellPlatform } from '../shared/nativeShell';
 import { RELEASES_PAGE, type UpdateOffer } from '../shared/updates';
@@ -145,8 +150,27 @@ function NavigationSection() {
  * back. Everything here is a choice the person makes — there is no automatic
  * way to know which of two edited sentences was meant.
  */
+/** The field names, as literals so they are part of the translation set. */
+function conflictFieldLabel(field: ConflictField): string {
+  if (field === 'title') return t('Title');
+  if (field === 'due') return t('Due');
+  if (field === 'time') return t('Time');
+  if (field === 'priority') return t('Priority');
+  if (field === 'category') return t('Category');
+  if (field === 'amount') return t('Target');
+  if (field === 'progress') return t('Progress');
+  return t('Note');
+}
+
+/** A date field reads as a date; everything else is shown as written. */
+function conflictValue(field: ConflictField, value: string): string {
+  if (!value) return t('Empty');
+  if (field !== 'due' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  return `${formatWeekdayShort(value)} ${formatEdited(value).split(' · ')[0]}`;
+}
+
 function ConflictList() {
-  const { syncConflicts, keepConflictVersion, dismissConflict, dismissAllConflicts } = usePlanner();
+  const { syncConflicts, conflictChanges, keepConflictVersion, dismissConflict, dismissAllConflicts } = usePlanner();
   if (syncConflicts.length === 0) return null;
   return (
     <div
@@ -162,24 +186,43 @@ function ConflictList() {
         {t("Both this device and another one had edited these since they last met. The newest is in your planner; the other is kept here until you decide.")}
       </p>
       <ul className="sync-conflict-list">
-        {syncConflicts.map((conflict) => (
-          <li key={`${conflict.kind}:${conflict.item.id}:${conflict.lostAt}`} className="sync-conflict">
-            <div>
-              <p className="sync-conflict-title">{conflict.title || t("Untitled")}</p>
-              <p className="sync-conflict-when">
-                {t("Other version edited {0}", { 0: formatStamp(conflict.lostAt) })}
-              </p>
-            </div>
-            <div className="sync-conflict-actions">
-              <button type="button" className="btn btn-tiny" onClick={() => keepConflictVersion(conflict)}>
-                {t("Use the other version")}
-              </button>
-              <button type="button" className="btn btn-tiny btn-ghost" onClick={() => dismissConflict(conflict)}>
-                {t("Keep what I have")}
-              </button>
-            </div>
-          </li>
-        ))}
+        {syncConflicts.map((conflict) => {
+          const changes = conflictChanges(conflict);
+          return (
+            <li key={`${conflict.kind}:${conflict.item.id}:${conflict.lostAt}`} className="sync-conflict">
+              <div className="sync-conflict-head">
+                <p className="sync-conflict-title">{conflict.title || t("Untitled")}</p>
+                <p className="sync-conflict-when">
+                  {t("Other version edited {0}", { 0: formatStamp(conflict.lostAt) })}
+                </p>
+              </div>
+              {changes.length ? (
+                <dl className="sync-conflict-diff">
+                  {changes.map((change) => (
+                    <div className="sync-conflict-row" key={`${change.field}:${change.mine}:${change.theirs}`}>
+                      <dt>{conflictFieldLabel(change.field)}</dt>
+                      <dd className="mine">{conflictValue(change.field, change.mine)}</dd>
+                      <dd className="theirs">{conflictValue(change.field, change.theirs)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : (
+                // Two shapes can differ in a way no person-facing field shows
+                // (a milestone list, a repeat rule). Say so rather than showing
+                // an empty comparison that looks like a bug.
+                <p className="set-hint">{t("The difference is in the details this screen does not show.")}</p>
+              )}
+              <div className="sync-conflict-actions">
+                <button type="button" className="btn btn-tiny" onClick={() => keepConflictVersion(conflict)}>
+                  {t("Use the other version")}
+                </button>
+                <button type="button" className="btn btn-tiny btn-ghost" onClick={() => dismissConflict(conflict)}>
+                  {t("Keep what I have")}
+                </button>
+              </div>
+            </li>
+          );
+        })}
       </ul>
       <div className="set-actions">
         <button type="button" className="btn btn-ghost btn-small" onClick={dismissAllConflicts}>
@@ -216,6 +259,10 @@ function SyncSection() {
           />
         </p>
       ) : null}
+      {/* Always shown, whether or not sync is on right now: a conflict outlives
+          the setting that produced it, and hiding the only screen that can
+          resolve it would leave the stored version stranded. */}
+      <ConflictList />
       {sync.code ? (
         <>
           <div className="set-row">
@@ -241,7 +288,6 @@ function SyncSection() {
               </button>
             </div>
           </div>
-          <ConflictList />
           <div className="set-actions">
             <button type="button" className="btn btn-ghost" onClick={stopSync}>{t("Turn off on this device")}</button>
             <button
@@ -432,13 +478,63 @@ function PrivacySection() {
   );
 }
 
+/**
+ * The desktop app's background mode (docs/DESKTOP.md §9).
+ *
+ * Closing a window usually means quitting; in Planner on the desktop it means
+ * "keep my reminders coming", and this is where that is made explicit. The
+ * value lives in the main process — the tray menu edits the same one — so the
+ * switch reads it back from there and follows changes it did not make.
+ */
+function DesktopBackgroundSection() {
+  const { flash } = usePlanner();
+  const [background, setBackground] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void desktopPreferences().then((current) => { if (live && current) setBackground(current.background); });
+    const stop = onDesktopPreferences((current) => { if (live) setBackground(current.background); });
+    return () => { live = false; stop(); };
+  }, []);
+
+  const choose = async (on: boolean) => {
+    setBackground(on);
+    const saved = await setDesktopBackground(on);
+    if (saved) setBackground(saved.background);
+    flash(on ? t("Planner will keep running when you close the window.") : t("Closing the window will quit Planner."));
+  };
+
+  return (
+    <section className="set-section">
+      <h3 className="kicker">{t("Background")}</h3>
+      <div className="set-row">
+        <div>
+          <p className="set-label">{t("Keep running when the window is closed")}</p>
+          <p className="set-hint">
+            {background === null
+              ? t("Reading the setting from the app…")
+              : background
+                ? t("Reminders keep arriving after you close the window. A tray icon brings Planner back, and Quit Planner stops it for good.")
+                : t("Planner quits when you close the window, so reminders only arrive while it is open.")}
+          </p>
+        </div>
+        <div className="segmented" role="radiogroup" aria-label={t("Keep running when the window is closed")}>
+          <button type="button" role="radio" aria-checked={background === false} className={cx('seg', background === false && 'on')} onClick={() => void choose(false)}>{t("Off")}</button>
+          <button type="button" role="radio" aria-checked={background === true} className={cx('seg', background === true && 'on')} onClick={() => void choose(true)}>{t("On")}</button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function BackgroundPushSection() {
   const { state, reminders, flash } = usePlanner();
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [enabled, setEnabled] = useState(backgroundPushEnabled);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const supported = typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  const supported = backgroundPushSupported();
+  const device = pushTransport() === 'device';
   useEffect(() => {
     let live = true;
     void fetch('/api/push/config', { cache: 'no-store' }).then((response) => response.json()).then((body: { configured?: boolean }) => { if (live) setConfigured(body.configured === true); }).catch(() => { if (live) setConfigured(false); });
@@ -462,7 +558,15 @@ function BackgroundPushSection() {
       <div className="set-row">
         <div>
           <p className="set-label">{enabled ? t("Background reminders are on") : t("Remind me while Planner is closed")}</p>
-          <p className="set-hint">{!supported ? t("This browser does not support push notifications.") : configured === false ? t("This server needs push keys, a database, and a scheduled delivery job before background reminders can be enabled.") : t("Sends a generic alert at scheduled times. Reminder times are uploaded; task and event titles stay on this device.")}</p>
+          <p className="set-hint">
+            {!supported
+              ? t("This browser does not support push notifications.")
+              : configured === false
+                ? t("This server needs push keys, a database, and a scheduled delivery job before background reminders can be enabled.")
+                : device
+                  ? t("Sends a generic alert at scheduled times even when the app is closed. Reminder times are uploaded; task and event titles stay on this device.")
+                  : t("Sends a generic alert at scheduled times. Reminder times are uploaded; task and event titles stay on this device.")}
+          </p>
         </div>
         <button type="button" className={cx('btn', enabled ? 'btn-soft' : 'btn-primary')} disabled={!supported || configured !== true || busy} onClick={() => void toggle()}>
           {busy ? t("Working…") : enabled ? t("Turn off") : t("Enable")}
@@ -782,6 +886,40 @@ function AccountSection() {
   const [rotationError, setRotationError] = useState('');
   const [newCodes, setNewCodes] = useState<string[] | null>(null);
   const [codesConfirmed, setCodesConfirmed] = useState(false);
+  // Which action produced the codes in the modal: replacing them, or setting a
+  // new password from this device. The list is identical; the sentence around
+  // it is not.
+  const [codesReason, setCodesReason] = useState<'rotation' | 'password'>('rotation');
+  const [changing, setChanging] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [repeatPassword, setRepeatPassword] = useState('');
+  const [changeBusy, setChangeBusy] = useState(false);
+  const [changeError, setChangeError] = useState('');
+
+  const requestPasswordChange = () => {
+    if (changeBusy) return;
+    if (newPassword.length < 10) {
+      setChangeError(t("Use at least 10 characters."));
+      return;
+    }
+    if (newPassword !== repeatPassword) {
+      setChangeError(t("The two passwords do not match."));
+      return;
+    }
+    setChangeBusy(true);
+    setChangeError('');
+    void changePasswordFromDevice(newPassword)
+      .then((codes) => {
+        setCodesReason('password');
+        setNewCodes(codes);
+        setCodesConfirmed(false);
+        setChanging(false);
+        setNewPassword('');
+        setRepeatPassword('');
+      })
+      .catch((error: unknown) => setChangeError(error instanceof Error ? error.message : t("The password could not be changed.")))
+      .finally(() => setChangeBusy(false));
+  };
 
   const requestRotation = () => {
     if (rotationBusy || !rotationPassword) return;
@@ -789,6 +927,7 @@ function AccountSection() {
     setRotationError('');
     void regenerateRecoveryCodes(rotationPassword)
       .then((codes) => {
+        setCodesReason('rotation');
         setNewCodes(codes);
         setCodesConfirmed(false);
         setRotating(false);
@@ -839,6 +978,59 @@ function AccountSection() {
               <ExitIcon size={15} /> {t("Sign out")}
             </button>
           </div>
+          {getActiveSession() ? (
+            <div className="set-actions account-password-actions">
+              {!changing ? (
+                <button
+                  type="button"
+                  className="btn btn-soft"
+                  onClick={() => { setChanging(true); setChangeError(''); setNewPassword(''); setRepeatPassword(''); }}
+                >
+                  {t("Set a new password")}
+                </button>
+              ) : (
+                <div className="account-password-form">
+                  {/* The third recovery tier: this device already holds the
+                      vault key, so it can re-wrap that key for a password the
+                      person will remember. No old password, no recovery code —
+                      and no way to do it from a device that cannot open the
+                      vault. */}
+                  <p className="set-hint">
+                    {t("This device already holds your vault key, so it can set a new password without the old one. Your recovery codes are replaced at the same time, and your other devices keep working.")}
+                  </p>
+                  <label className="field">
+                    <span>{t("New password")}</span>
+                    <input
+                      className="input"
+                      type="password"
+                      autoComplete="new-password"
+                      value={newPassword}
+                      onChange={(event) => setNewPassword(event.target.value)}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>{t("Repeat new password")}</span>
+                    <input
+                      className="input"
+                      type="password"
+                      autoComplete="new-password"
+                      value={repeatPassword}
+                      onChange={(event) => setRepeatPassword(event.target.value)}
+                    />
+                  </label>
+                  {changeError ? <p className="set-hint is-error" role="alert">{changeError}</p> : null}
+                  <div className="set-actions">
+                    <button type="button" className="btn btn-ghost" disabled={changeBusy} onClick={() => { setChanging(false); setNewPassword(''); setRepeatPassword(''); }}>
+                      {t("Cancel")}
+                    </button>
+                    <button type="button" className="btn btn-soft" disabled={changeBusy || !newPassword || !repeatPassword} onClick={requestPasswordChange}>
+                      {changeBusy ? t("Changing…") : t("Set new password")}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
           {getActiveSession() ? (
             <div className="set-actions account-recovery-actions">
               {!rotating ? (
@@ -924,10 +1116,16 @@ function AccountSection() {
           onClose={() => {
             if (!codesConfirmed) return;
             setNewCodes(null);
-            flash(t("Recovery codes replaced. The old set no longer works."));
+            flash(codesReason === 'password'
+              ? t("Password changed. The old password and the old recovery codes no longer work.")
+              : t("Recovery codes replaced. The old set no longer works."));
           }}
         >
-          <p className="set-hint">{t("Save these now. They are shown only once, and the codes you had before no longer open your account.")}</p>
+          <p className="set-hint">
+            {codesReason === 'password'
+              ? t("Save these now. Your new password works from here on, and these are the only recovery codes that do.")
+              : t("Save these now. They are shown only once, and the codes you had before no longer open your account.")}
+          </p>
           <RecoveryCodes
             codes={newCodes}
             copy={{
@@ -951,7 +1149,12 @@ function AccountSection() {
               type="button"
               className="btn btn-primary"
               disabled={!codesConfirmed}
-              onClick={() => { setNewCodes(null); flash(t("Recovery codes replaced. The old set no longer works.")); }}
+              onClick={() => {
+                setNewCodes(null);
+                flash(codesReason === 'password'
+                  ? t("Password changed. The old password and the old recovery codes no longer work.")
+                  : t("Recovery codes replaced. The old set no longer works."));
+              }}
             >
               {t("Done")}
             </button>
@@ -1410,7 +1613,7 @@ function ActivitySection() {
   );
 }
 
-type SettingsTab = 'account' | 'appearance' | 'language' | 'reminders' | 'sync' | 'connections' | 'app';
+export type SettingsTab = 'account' | 'appearance' | 'language' | 'reminders' | 'sync' | 'connections' | 'app';
 
 /*
  * Settings grew to twenty sections, and one long scroll buries all of them:
@@ -1431,6 +1634,7 @@ export function SettingsSheet() {
   const planner = usePlanner();
   const {
     settingsOpen,
+    settingsTab,
     closeSettings,
     themeMode,
     setThemeMode,
@@ -1443,7 +1647,13 @@ export function SettingsSheet() {
     requestConfirm,
   } = planner;
   const importFile = useImportFile(importText);
-  const [tab, setTab] = useState<SettingsTab>('account');
+  const [tab, setTab] = useState<SettingsTab>(settingsTab);
+
+  // Something outside the sheet asked for a particular tab — a conflict notice
+  // wants Sync, the install prompt wants App — so follow it while open.
+  useEffect(() => {
+    if (settingsOpen) setTab(settingsTab);
+  }, [settingsOpen, settingsTab]);
   const tabRefs = useRef<Partial<Record<SettingsTab, HTMLButtonElement | null>>>({});
 
   // Arrow keys move along the tabs, as a tab list is expected to. Only the
@@ -1502,6 +1712,7 @@ export function SettingsSheet() {
         {tab === 'account' ? (
           <>
             <AccountSection />
+            <BiometricSetting />
             <SecuritySection />
             <TwoFactorSection />
             <DevicesSection />
@@ -1574,6 +1785,7 @@ export function SettingsSheet() {
         {tab === 'sync' ? (
           <>
             <SyncSection />
+            <RetentionSection />
             <SharedSpaceSection />
       <section className="set-section">
         <h3 className="kicker">{t("Your data")}</h3>
@@ -1612,7 +1824,9 @@ export function SettingsSheet() {
           <>
             <CalendarExchangeSection />
             <FeedsSection />
+            <CalendarsSection />
             <TaskImportSection />
+            <SyllabusSection />
             <WeatherSection />
             <TemplatesSection />
           </>
@@ -1620,6 +1834,7 @@ export function SettingsSheet() {
 
         {tab === 'app' ? (
           <>
+            {isDesktopShell() ? <DesktopBackgroundSection /> : null}
             <InstallSection />
             <UpdateSection />
             <PrivacySection />

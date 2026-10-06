@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { COPY, type Lang } from './copy';
+import { digitsIn } from '../i18n';
 import { DemoStage } from './DemoStage';
 import { AppWindow } from './AppWindow';
 import { AiProposal, DashboardBuild, Quotes, RetentionSlider, RoleSwitcher, Stats, VisibilityMatrix } from './Showcase';
@@ -225,7 +226,7 @@ export function Landing({ lang, navigate, authed }: { lang: Lang; navigate: Nav;
                   style={{ transitionDelay: `${index * 110}ms` }}
                   {...SPOT}
                 >
-                  <span className="step-num">{index + 1}</span>
+                  <span className="step-num">{digitsIn(index + 1, lang)}</span>
                   <h3>{title}</h3>
                   <p>{[c.step1D, c.step2D, c.step3D][index]}</p>
                 </li>

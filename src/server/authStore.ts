@@ -260,6 +260,13 @@ export type CreateResult = { ok: true; user: UserRow } | { ok: false; reason: 'u
 export interface RecoveryUpdate {
   /** Verifiers for the replacement set of codes. */
   newRecoveryHashes: string[];
+  /**
+   * The replacement password: a new KDF salt and the auth verifier derived
+   * with it. For the recovery-code rotation the value is the one the account
+   * already has (the caller re-proved the password to sign in), so applying it
+   * is a no-op; for the approved-device path it is the new password, and this
+   * is what makes the old one stop working.
+   */
   kdfSalt: string;
   authToken: string;
   wrappedDek: string;
@@ -375,8 +382,11 @@ export interface AuthStore {
   /** Verify one of the account's recovery verifiers, rotate the password wraps, and revoke sessions. */
   recoverAccount(login: string, recoveryHash: string, update: RecoveryUpdate): Promise<boolean>;
   /**
-   * Rotate the recovery codes of a signed-in, already-authenticated account.
-   * The caller proved who it is with its password, so no verifier is checked.
+   * Replace the password verifier and the wrapped keys of a signed-in account,
+   * along with its recovery codes. The session is the authentication — a
+   * caller only reaches here after proving the password, or after proving it
+   * holds the vault key (the approved-device password change) — so no verifier
+   * is checked in this method.
    */
   updateRecovery?(userId: string, update: Omit<RecoveryUpdate, 'authToken'> & { authToken: string }): Promise<boolean>;
   findUserById(id: string): Promise<UserRow | null>;
@@ -775,6 +785,10 @@ export function createMemoryAuthStore(): AuthStore {
       const first = verifiers[0];
       credentials.set(userId, {
         ...current,
+        // The password verifier is replaced with the caller's: either the same
+        // password re-derived (rotation) or the new one (approved device).
+        kdfSalt: update.kdfSalt,
+        ...(await hashCredential(update.authToken)),
         recoveryHash: first?.hash ?? null,
         recoveryHashSalt: first?.salt ?? null,
         recoveryVerifiers: verifiers,
@@ -1352,10 +1366,16 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
       await ensure();
       const nextVerifiers = await hashRecoveryVerifiers(update.newRecoveryHashes);
       const first = nextVerifiers[0];
+      // The password verifier is replaced with the caller's: the same password
+      // re-derived when only the codes are rotating, or the new one when an
+      // approved device is setting it.
+      const credential = await hashCredential(update.authToken);
       const rows = (await sql`
         WITH credential_update AS (
           UPDATE planner_credentials
-          SET recovery_hash = ${first?.hash ?? null}, recovery_hash_salt = ${first?.salt ?? null},
+          SET kdf_salt = ${update.kdfSalt}, auth_hash = ${credential.authHash},
+              hash_salt = ${credential.hashSalt},
+              recovery_hash = ${first?.hash ?? null}, recovery_hash_salt = ${first?.salt ?? null},
               recovery_verifiers = ${JSON.stringify(nextVerifiers)}, updated_at = now()
           WHERE user_id = ${userId}
           RETURNING user_id

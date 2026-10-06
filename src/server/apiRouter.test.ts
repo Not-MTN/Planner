@@ -57,15 +57,21 @@ describe('apiRoute table', () => {
       '/api/auth/signup',
       '/api/auth/status',
       '/api/auth/vault',
+      '/api/caldav',
       '/api/ics',
       '/api/sync',
       '/api/sync/status',
       '/api/ai/chat/completions',
       '/api/ai/status',
+      '/api/push/config',
+      '/api/push/device',
+      '/api/push/dispatch',
+      '/api/report',
+      '/api/report/recent',
     ];
     for (const path of paths) expect(apiRoute(path, NO_ENV), path).not.toBeNull();
 
-    for (const path of ['/api', '/api/auth', '/api/auth/nope', '/api/sync/nope', '/api/ai', '/api/not-a-route']) {
+    for (const path of ['/api', '/api/auth', '/api/auth/nope', '/api/sync/nope', '/api/ai', '/api/report/nope', '/api/not-a-route']) {
       expect(apiRoute(path, NO_ENV), path).toBeNull();
     }
   });
@@ -78,6 +84,11 @@ describe('handleApiRequest', () => {
     expect(response.headers.get('content-type')).toContain('application/json');
     expect(response.headers.get('x-content-type-options')).toBe('nosniff');
     await expect(response.json()).resolves.toEqual({ error: { message: 'Not found.' } });
+  });
+
+  it('keeps the crash-report dashboard unlisted until a deployment arms it', async () => {
+    const response = await handleApiRequest(request('/api/report/recent'), NO_ENV);
+    expect(response.status).toBe(404);
   });
 
   it('serves /api/auth/status without a database', async () => {
@@ -106,8 +117,17 @@ describe('handleApiRequest', () => {
     const ics = await handleApiRequest(request('/api/ics', { method: 'POST' }), NO_ENV);
     expect(ics.status).toBe(405);
 
+    const caldav = await handleApiRequest(request('/api/caldav'), NO_ENV);
+    expect(caldav.status).toBe(405);
+
     const completions = await handleApiRequest(request('/api/ai/chat/completions'), NO_ENV);
     expect(completions.status).toBe(405);
+  });
+
+  it('routes the CalDAV proxy and lets it reject its own bad requests', async () => {
+    const noBody = await handleApiRequest(request('/api/caldav', { method: 'POST' }), NO_ENV);
+    expect(noBody.status).toBe(400);
+    await expect(noBody.json()).resolves.toMatchObject({ error: { message: 'Body must be JSON.' } });
   });
 
   it('reports sync as not configured without DATABASE_URL', async () => {

@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { addDays, setWeekStart, todayISO } from './dates';
-import { setLang } from './i18n';
+import { loadDictionary, setLang } from './i18n';
 import { addTask, logFocus } from './mutate';
 import { weekOf, withLinkPlan } from './panels';
 import { shortWeek } from './components/charts';
@@ -66,6 +66,15 @@ vi.mock('./ai', async (importOriginal) => ({
     questions: ['What would help with revision?'],
     encouragement: 'You made room to focus.',
   })),
+  // The draft the AI would return for Alice's shared results: one step on a
+  // subject she actually shared, one on a subject nobody shared (which the
+  // normalizer would have dropped, but here proves the form is filled from the
+  // draft as-is and the guardian can edit it).
+  draftGuardianProposal: vi.fn(async () => ({
+    title: 'Physics revision',
+    note: 'A steady week — keep the evenings light.',
+    steps: [{ title: 'Practice chapter 4', subject: 'Physics', minutes: 25 }],
+  })),
 }));
 
 let root: Root | null = null;
@@ -113,7 +122,7 @@ function saved(): PlannerState {
   return JSON.parse(localStorage.getItem('personal-planner.v1') ?? '{}') as PlannerState;
 }
 
-async function mount(state: PlannerState, route: 'student' | 'guardian' = 'student'): Promise<void> {
+async function mount(state: PlannerState, route: 'student' | 'guardian' | 'insights' = 'student'): Promise<void> {
   window.history.replaceState(null, '', `#/${route}`);
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -125,12 +134,9 @@ async function mount(state: PlannerState, route: 'student' | 'guardian' = 'stude
       </StrictMode>,
     ),
   );
-  for (
-    let index = 0;
-    index < 6 && !document.querySelector(route === 'student' ? '.student-panel-view' : '.guardian-roster');
-    index += 1
-  )
-    await settle();
+  const ready =
+    route === 'student' ? '.student-panel-view' : route === 'guardian' ? '.guardian-roster' : '.stat-row';
+  for (let index = 0; index < 6 && !document.querySelector(ready); index += 1) await settle();
 }
 
 function studentState(): PlannerState {
@@ -336,14 +342,63 @@ describe('actionable student panel', () => {
 
   it('renders the new study controls in Persian', async () => {
     setLang('fa');
+    // Dictionaries are fetched on demand (src/i18n.ts).
+    await loadDictionary('fa');
     await mount(studentState());
     expect(document.documentElement.dir).toBe('rtl');
     expect(query('.study-queue-card').textContent).toContain('صف مطالعهٔ شما');
     expect(query('.exam-agenda').textContent).toContain('امتحان‌های پیش رو');
   });
+
+  it('shows every number in the student panel in Persian digits', async () => {
+    setLang('fa');
+    await mount(studentState());
+    expect(document.documentElement.dir).toBe('rtl');
+
+    // The stat tiles and the done/planned fraction are the numbers a student
+    // reads first; Latin digits next to Persian words are the tell that a
+    // screen was translated but not finished.
+    const tiles = [...document.querySelectorAll('.panel-stat')].map((tile) => tile.textContent ?? '');
+    expect(tiles.join(' ')).toContain('۳');
+    for (const tile of tiles) expect(tile, tile).not.toMatch(/[0-9]/);
+    for (const number of document.querySelectorAll('.panel-stat strong, .student-summary-values strong')) {
+      expect(number.textContent ?? '', number.textContent ?? '').not.toMatch(/[0-9]/);
+    }
+  });
 });
 
 describe('guardian roster and planning', () => {
+  it('shows the insight tiles and the week chart in Persian digits', async () => {
+    setLang('fa');
+    await mount(studentState(), 'insights');
+    expect(document.documentElement.dir).toBe('rtl');
+
+    const tiles = [...document.querySelectorAll('.stat-num, .stat-tile .stat-hint')].map((item) => item.textContent ?? '');
+    expect(tiles.length).toBeGreaterThan(0);
+    for (const value of tiles) expect(value, value).not.toMatch(/[0-9]/);
+
+    // Chart labels are SVG text, which is easy to forget: they are still read
+    // by people, and a Persian axis labelled 2026-03 reads as a different app.
+    for (const label of document.querySelectorAll('.chart-axis-label, text[text-anchor="end"]')) {
+      expect(label.textContent ?? '', label.textContent ?? '').not.toMatch(/[0-9]/);
+    }
+  });
+
+  it('shows a guardian the same numbers as a student, in Persian digits', async () => {
+    setLang('fa');
+    await mount(guardianState(), 'guardian');
+    expect(document.documentElement.dir).toBe('rtl');
+    // Alice's week is 3 of 4 in the fixture; both numbers are rendered by the
+    // guardian's own summary markup rather than a shared component.
+    // The ring prints the percentage and the list beside it prints done/planned;
+    // both come from the guardian's own summary markup rather than a shared
+    // component, so both are worth checking.
+    const summary = query('.student-summary-values').textContent ?? '';
+    expect(summary).toContain('۳');
+    expect(summary).toContain('۷۵%');
+    expect(summary).not.toMatch(/[0-9]/);
+  });
+
   it('searches and filters the roster and recovers from a no-match result', async () => {
     await mount(guardianState(), 'guardian');
     expect(document.querySelectorAll('.student-card')).toHaveLength(4);
@@ -385,6 +440,37 @@ describe('guardian roster and planning', () => {
     expect(document.querySelector('.guardian-plan-composer')).toBeNull();
   });
 
+  it('lets the guardian draft a plan with AI, edit it, and send it as a suggestion', async () => {
+    const { draftGuardianProposal } = await import('./ai');
+    await mount(guardianState(), 'guardian');
+    const alice = [...document.querySelectorAll('.student-card')].find(
+      (card) => card.querySelector('.student-name')?.textContent === 'Alice',
+    )!;
+    await click('View student', alice);
+    await click('A week', alice);
+
+    await click('Draft with AI', alice);
+    // Filled from the draft, not sent: the title, the note and the step all
+    // arrive in the form the guardian was already looking at.
+    expect(query<HTMLInputElement>('.guardian-plan-composer input').value).toBe('Physics revision');
+    expect(query<HTMLTextAreaElement>('.guardian-plan-composer textarea').value).toContain('keep the evenings light');
+    expect(query<HTMLInputElement>('input[aria-label="Step 1 title"]').value).toBe('Practice chapter 4');
+    expect(query<HTMLInputElement>('input[aria-label="Step 1 subject"]').value).toBe('Physics');
+    expect(query<HTMLInputElement>('input[aria-label="Step 1 minutes"]').value).toBe('25');
+    // The AI sees the shared weekly results, and the panel says so where the
+    // guardian is deciding to use it.
+    expect(vi.mocked(draftGuardianProposal).mock.calls[0][0].results?.weekOf).toBe(weekOf());
+    expect(alice.textContent).toContain('never their tasks or notes');
+
+    // The guardian edits the draft before it goes anywhere — this is the point
+    // of drafting into the form rather than sending on the student's behalf.
+    setValue('input[aria-label="Step 1 title"]', 'Practice chapter 4 twice');
+    await click('Send the plan', alice);
+    expect(vi.mocked(sendPlan).mock.calls[0][2].items).toEqual([
+      { title: 'Practice chapter 4 twice', subject: 'Physics', minutes: 25, date: null },
+    ]);
+  });
+
   it('offers editable starters and prevents sending dates outside the selected plan', async () => {
     await mount(guardianState(), 'guardian');
     const alice = [...document.querySelectorAll('.student-card')].find(
@@ -404,6 +490,41 @@ describe('guardian roster and planning', () => {
     );
     expect(query('.guardian-plan-composer [role="alert"]').textContent).toContain('inside the plan');
     expect(sendPlan).not.toHaveBeenCalled();
+  });
+
+  it('prints the meeting one-pager from the shared results alone', async () => {
+    const written: string[] = [];
+    const open = vi.spyOn(window, 'open').mockReturnValue({
+      document: {
+        open: () => undefined,
+        write: (chunk: string) => written.push(chunk),
+        close: () => undefined,
+      },
+      focus: () => undefined,
+      print: () => undefined,
+    } as unknown as Window);
+    try {
+      await mount(guardianState(), 'guardian');
+      const alice = [...document.querySelectorAll('.student-card')].find(
+        (card) => card.querySelector('.student-name')?.textContent === 'Alice',
+      )!;
+      await click('View student', alice);
+      await click('Meeting one-pager', alice);
+      const page = written.join('');
+      // A page of its own, built from the week Alice shared.
+      expect(open).toHaveBeenCalled();
+      expect(page).toContain('Advising meeting');
+      expect(page).toContain('Alice');
+      expect(page).toContain('Physics');
+      expect(page).toContain('75');
+      expect(page).toContain('never tasks or notes');
+      // The student's private planner is not reachable from the guardian side
+      // at all — these markers only exist in the student fixture.
+      expect(page).not.toContain('PRIVATE_TASK_TITLE');
+      expect(page).not.toContain('PRIVATE_REASON');
+    } finally {
+      open.mockRestore();
+    }
   });
 
   it('turns an AI question into an editable message and sends it to the shared circle', async () => {

@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
+import { bootOffline } from './support';
 test('voice chat: talk to the AI, get an answer, and a plan draft', async ({ page }) => {
+  await bootOffline(page);
   await page.addInitScript(() => {
     class FakeRecognition {
       lang = ''; interimResults = true; continuous = false;
@@ -21,14 +23,25 @@ test('voice chat: talk to the AI, get an answer, and a plan draft', async ({ pag
       speak: (u: { onend?: (() => void) | null }) => u.onend?.(),
     };
   });
-  await page.route('**/api/groq/status', (route) => route.fulfill({ status: 200, json: { configured: true } }));
-  await page.route('**/api/groq/chat/completions', (route) => route.fulfill({
+  // The browser talks to the provider-neutral routes; `/api/groq/*` is only a
+  // legacy alias kept for already-installed bundles (src/ai.ts).
+  await page.route('**/api/ai/status', (route) => route.fulfill({ status: 200, json: { configured: true } }));
+  await page.route('**/api/ai/chat/completions', (route) => route.fulfill({
     status: 200,
     json: {
       choices: [{ message: { content: JSON.stringify({ reply: 'Soft tomorrow, one breath before the gym.', followUp: null, draft: { summary: 'Soft tomorrow', tasks: [{ title: 'Gym bag', date: new Date(Date.now() + 864e5).toISOString().slice(0, 10), priority: 'low', category: 'health' }], events: [], habits: [], suggestions: [] } }) } }],
     },
   }));
-  await page.evaluate(() => localStorage.setItem('planner-tour-done', '1'));
+  // Through an init script, not page.evaluate: this line used to run before the
+  // first navigation, on `about:blank`, where reading localStorage is a
+  // SecurityError.
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem('planner-tour-done', '1');
+    } catch {
+      // about:blank and friends have no storage; the real page will.
+    }
+  });
   await page.goto('/#/ai');
   await expect(page.getByText('Talk to your planner')).toBeVisible({ timeout: 10000 });
   await page.locator('.voice-orb').click();

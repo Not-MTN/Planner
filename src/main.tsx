@@ -2,6 +2,8 @@ import { StrictMode, Suspense, lazy } from 'react';
 import { createRoot } from 'react-dom/client';
 import { registerPWA } from './pwa';
 import { installApiOriginShim, isNativeShell } from './shared/nativeShell';
+import { installDeepLinkHandler } from './shared/deepLinks';
+import { appRouteFromHash } from './route';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { installGlobalErrorHandlers } from './reporting';
 import '@fontsource-variable/estedad';
@@ -21,6 +23,11 @@ const AccountGate = lazy(() => import('./auth/AccountGate').then((module) => ({ 
  * "/" and the auth pages are the marketing site; "/app" is the planner.
  * Old planner links ("/#/today") are redirected to "/app#/today" so bookmarks
  * and installed PWA shortcuts keep working.
+ *
+ * "Old" is not only historical: a guardian's QR code is a link to "/" with a
+ * route in its hash, which is where a scanned invite, an App Link and a shared
+ * bookmark all arrive. Every route the app knows counts, so `/` with
+ * `#/panels?invite=…` opens the invite instead of the landing page.
  */
 function bootTarget(): 'app' | 'site' {
   const path = window.location.pathname.replace(/\/+$/, '') || '/';
@@ -29,7 +36,7 @@ function bootTarget(): 'app' | 'site' {
   // on /login, and sending it back to the planner instead would bounce between
   // the two forever.
   if (path === '/login' || path === '/signup' || path === '/recover') return 'site';
-  if (path === '/' && /^#\/(today|calendar|tasks|habits|goals|notes|insights|plans|ai|day|quickadd)/.test(window.location.hash)) {
+  if (path === '/' && appRouteFromHash(window.location.hash)) {
     window.history.replaceState({}, '', `/app${window.location.hash}`);
     return 'app';
   }
@@ -54,13 +61,30 @@ function bootTarget(): 'app' | 'site' {
 }
 
 const target = bootTarget();
-// Loaded on demand: the i18n module pulls the whole Persian dictionary, which
-// the marketing site never needs.
-if (target === 'app') void import('./i18n').then((module) => module.applyDocumentLang());
+// Loaded on demand: the i18n module and the dictionary for the language being
+// read. The marketing site needs neither — it prints numbers through `digitsIn`
+// and keeps its own copy (src/marketing/copy.ts).
+if (target === 'app') {
+  void import('./i18n')
+    .then(async (module) => {
+      module.applyDocumentLang();
+      // Awaited, not fired and forgotten: every string on the first screen comes
+      // out of this dictionary, and rendering before it lands paints a frame of
+      // English over a Persian or Finnish app.
+      await module.loadDictionary(module.getLang());
+    })
+    .catch(() => {
+      /* the English keys still render */
+    });
+}
 // Must run before anything else issues a request: inside a packaged app the
 // API lives on another origin, and every `/api/...` call in the app is
 // rewritten to reach it, session cookie included.
 installApiOriginShim();
+// A link that opened this app — a guardian's invite code, or any address the
+// app recognizes — becomes the route it names. Nothing to do in a browser tab:
+// the address is already the one the page is on.
+void installDeepLinkHandler();
 registerPWA();
 // Catches what React cannot: throws in handlers and timers, and promises
 // nobody awaited. Without it a crash in the browser is invisible to us.
@@ -71,7 +95,24 @@ if (!root) throw new Error('Root element missing');
 
 root.innerHTML = '';
 
-createRoot(root).render(
+/**
+ * The first paint.
+ *
+ * The app's dictionary request is in flight (above) and this is what waits for
+ * it: React cannot mount a translated screen until the translations are here,
+ * and `import()` chains resolve before any microtask the app schedules, so one
+ * `await` on the dictionary is enough to put it ahead of the render.
+ */
+async function boot(): Promise<void> {
+  if (target === 'app') {
+    const i18n = await import('./i18n');
+    await i18n.loadDictionary(i18n.getLang());
+  }
+  render();
+}
+
+function render(): void {
+  createRoot(root as HTMLElement).render(
   <StrictMode>
     <Suspense
       fallback={
@@ -87,4 +128,7 @@ createRoot(root).render(
       </ErrorBoundary>
     </Suspense>
   </StrictMode>,
-);
+  );
+}
+
+void boot();

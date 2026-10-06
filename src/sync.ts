@@ -238,6 +238,150 @@ export interface MergeConflict {
 /** How many disagreements are worth showing. Past this, keep the most recent. */
 export const CONFLICT_LIMIT = 20;
 
+/**
+ * Two conflicts are the same disagreement: the same thing, edited at the same
+ * moment. Used to keep one row per disagreement when a sync runs twice.
+ */
+export function keyOfConflict(conflict: MergeConflict): string {
+  return `${conflict.kind}:${conflict.item.id}:${conflict.lostAt}`;
+}
+
+/**
+ * Keep the disagreements already waiting, add the new ones, newest first.
+ *
+ * A sync that resolves one conflict must not throw away the others, and a
+ * conflict that has been sitting unanswered for a week is still unanswered —
+ * so the list grows until somebody decides, bounded by `CONFLICT_LIMIT`.
+ */
+export function mergeConflictLists(existing: MergeConflict[], incoming: MergeConflict[]): MergeConflict[] {
+  const byKey = new Map<string, MergeConflict>();
+  for (const conflict of [...existing, ...incoming]) byKey.set(keyOfConflict(conflict), conflict);
+  return [...byKey.values()].sort((a, b) => b.lostAt.localeCompare(a.lostAt)).slice(0, CONFLICT_LIMIT);
+}
+
+const CONFLICTS_KEY = 'planner-sync-conflicts';
+const CONFLICT_KINDS: ConflictKind[] = ['task', 'event', 'commitment', 'note', 'goal', 'habit'];
+
+/**
+ * Disagreements that survived a reload.
+ *
+ * They are kept in storage rather than only in memory because the sync that
+ * finds one runs on its own, often while the user is looking at something
+ * else — and a conflict that vanishes when the tab closes is the same as
+ * losing the edit silently, only slower.
+ */
+export function loadConflicts(): MergeConflict[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(CONFLICTS_KEY) ?? '[]') as unknown;
+    if (!Array.isArray(raw)) return [];
+    const out: MergeConflict[] = [];
+    for (const entry of raw) {
+      if (!entry || typeof entry !== 'object') continue;
+      const conflict = entry as Partial<MergeConflict>;
+      if (!CONFLICT_KINDS.includes(conflict.kind as ConflictKind)) continue;
+      const item = conflict.item as Record<string, unknown> | undefined;
+      if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !item.id) continue;
+      if (typeof conflict.lostAt !== 'string' || !conflict.lostAt) continue;
+      out.push({
+        kind: conflict.kind as ConflictKind,
+        title: typeof conflict.title === 'string' ? conflict.title.slice(0, 200) : '',
+        lostAt: conflict.lostAt.slice(0, 40),
+        item: conflict.item as MergeConflict['item'],
+      });
+    }
+    return mergeConflictLists([], out);
+  } catch {
+    return [];
+  }
+}
+
+export function saveConflicts(conflicts: MergeConflict[]): void {
+  try {
+    if (!conflicts.length) {
+      localStorage.removeItem(CONFLICTS_KEY);
+      return;
+    }
+    localStorage.setItem(CONFLICTS_KEY, JSON.stringify(conflicts.slice(0, CONFLICT_LIMIT)));
+  } catch {
+    /* storage full or unavailable: the conflicts stay for this session */
+  }
+}
+
+/** The fields a person can see, and therefore the fields worth comparing. */
+export type ConflictField = 'title' | 'due' | 'time' | 'priority' | 'category' | 'amount' | 'progress' | 'body';
+
+export interface ConflictChange {
+  field: ConflictField;
+  /** What is in the planner now — the version that won the merge. */
+  mine: string;
+  /** The version that lost, exactly as it was written. */
+  theirs: string;
+}
+
+/** How much of a long body is shown when two versions of a note differ. */
+const BODY_PREVIEW = 80;
+
+function text(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '';
+  if (typeof value === 'boolean') return value ? 'yes' : 'no';
+  if (Array.isArray(value)) return value.map((entry) => (entry && typeof entry === 'object' ? String((entry as Record<string, unknown>).title ?? '') : String(entry))).join(', ');
+  return String(value).replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Why two versions are different, field by field.
+ *
+ * "Changed on two devices: History essay" tells someone nothing they can act
+ * on — the two versions may differ by a due date, a priority, or a sentence at
+ * the end of a note, and which one is which is the whole decision. This reads
+ * both versions and returns only what actually differs, in the order a person
+ * would look for it.
+ */
+export function describeConflict(current: PlannerState, conflict: MergeConflict): ConflictChange[] {
+  const id = conflict.item.id;
+  const collections: Record<ConflictKind, Stamped[]> = {
+    task: current.tasks,
+    event: current.events,
+    commitment: current.fixedCommitments,
+    note: current.notes,
+    goal: current.goals,
+    habit: current.habits,
+  };
+  const kept = collections[conflict.kind].find((item) => item.id === id);
+  // The item is gone from the planner (the other device deleted it, or the user
+  // did): everything the lost version still has is worth saying, which is why
+  // the removal itself does not have to be spelled out twice.
+  const mine = (kept ?? {}) as Record<string, unknown>;
+  const theirs = conflict.item as unknown as Record<string, unknown>;
+  const changes: ConflictChange[] = [];
+  const compare = (field: ConflictField, ...keys: string[]): void => {
+    const values = keys.map((key) => ({ mine: text(mine[key]), theirs: text(theirs[key]) }));
+    if (values.every((entry) => !entry.mine) && values.every((entry) => !entry.theirs)) return;
+    if (values.every((entry) => entry.mine === entry.theirs)) return;
+    const join = (side: 'mine' | 'theirs') => values.map((entry) => entry[side]).filter(Boolean).join(' · ');
+    const left = join('mine');
+    const right = join('theirs');
+    if (left === right) return;
+    changes.push({ field, mine: left, theirs: right });
+  };
+
+  compare('title', 'title', 'name');
+  compare('due', 'dueDate', 'date', 'examDate');
+  compare('time', 'dueTime', 'start', 'end');
+  compare('priority', 'priority');
+  compare('category', 'category');
+  compare('amount', 'target', 'unit', 'amount');
+  compare('progress', 'completed', 'summary');
+  for (const key of ['body', 'note', 'reason']) {
+    const left = text(mine[key]);
+    const right = text(theirs[key]);
+    if (!left && !right) continue;
+    if (left === right) continue;
+    changes.push({ field: 'body', mine: left.slice(0, BODY_PREVIEW), theirs: right.slice(0, BODY_PREVIEW) });
+  }
+  return changes;
+}
+
 /** An item as it was written, without the moment it was written. */
 function shapeOf(item: Stamped): string {
   return JSON.stringify(item, (key, value) => (key === 'updatedAt' ? undefined : value));

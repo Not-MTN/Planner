@@ -978,14 +978,16 @@
 .dash-step {
   display: flex;
   gap: 14px;
-  opacity: 0.38;
   transition: opacity 0.45s var(--ease), transform 0.45s var(--ease);
 }
 
-.dash-step.is-active,
-.dash-step.is-done {
-  opacity: 1;
-}
+/* The step you are not on is quieter, not unreadable: the block used to fade to
+   0.38, which put its heading at 2.3:1 and its paragraph at 1.7:1 — below the
+   floor for text that is still there to be read. The dot carries the
+   progression instead, and the idle heading drops to --ink-soft. */
+.dash-step:not(.is-active):not(.is-done) .dash-dot { opacity: 0.45; }
+
+.dash-step:not(.is-active):not(.is-done) h3 { color: var(--ink-soft); }
 
 .dash-step.is-active {
   transform: translateX(calc(5px * var(--dir)));

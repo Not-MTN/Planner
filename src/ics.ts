@@ -1,7 +1,7 @@
 import { isValidISODate, isValidTime, toISODate } from './dates';
 import { rruleFor } from './recurrence';
 import { downloadBlob } from './download';
-import type { EventInput, PlannerState, TaskInput } from './types';
+import type { EventInput, PlannerEvent, PlannerState, TaskInput } from './types';
 
 const BYDAY = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
 const MAX_IMPORT = 1000;
@@ -106,6 +106,58 @@ function parseDateValue(value: string, params: string): Parsed | null {
   const date = `${y}-${mo}-${d}`;
   const time = `${h}:${mi}`;
   return isValidISODate(date) && isValidTime(time) ? { date, time } : null;
+}
+
+/**
+ * One VEVENT for one planner event, as a string that can be PUT to a calendar
+ * server. `toICS` writes a whole calendar; this is the same fields for a single
+ * item, plus the bits a server wants on an item it will hand back later:
+ * a stable UID (`<id>@planner`, so the same event is never created twice) and
+ * LAST-MODIFIED, which is what two-way sync compares against the local
+ * `updatedAt` to decide which copy is newer.
+ */
+export function eventToICS(event: PlannerEvent, now = new Date()): string {
+  const lines = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Planner//Local-first planner//EN',
+    'CALSCALE:GREGORIAN',
+    'BEGIN:VEVENT',
+    `UID:${event.id}@planner`,
+    `DTSTAMP:${utcStamp(now.toISOString())}`,
+    `LAST-MODIFIED:${utcStamp(event.updatedAt)}`,
+    `DTSTART:${stamp(event.date, event.startTime)}`,
+    `DTEND:${stamp(event.date, event.endTime ?? addHour(event.startTime))}`,
+    `SUMMARY:${escapeText(event.title)}`,
+  ];
+  if (event.note) lines.push(`DESCRIPTION:${escapeText(event.note)}`);
+  lines.push(`CATEGORIES:${escapeText(event.category)}`, 'END:VEVENT', 'END:VCALENDAR');
+  return lines.map(fold).join('\r\n') + '\r\n';
+}
+
+/**
+ * When the server says it last changed this event: LAST-MODIFIED, falling back
+ * to DTSTAMP for calendars that never write the first one. Returns an ISO
+ * string, or null when the item carries neither.
+ */
+export function icsStampOf(text: string): string | null {
+  const unfolded = text.replace(/\r\n?/g, '\n').replace(/\n[ \t]/g, '');
+  const line = unfolded.split('\n').find((entry) => /^(LAST-MODIFIED|DTSTAMP)/i.test(entry));
+  if (!line) return null;
+  const value = line.slice(line.indexOf(':') + 1).trim();
+  const match = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z?)$/.exec(value);
+  if (!match) return null;
+  const [, y, mo, d, h, mi, sec, z] = match;
+  const parts = [Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(sec)] as const;
+  const at = z ? Date.UTC(...parts) : new Date(...parts).getTime();
+  return new Date(at).toISOString();
+}
+
+/** Every UID in a calendar object; empty when there is none. */
+export function icsUids(text: string): string[] {
+  return [...text.replace(/\r\n?/g, '\n').replace(/\n[ \t]/g, '').matchAll(/^UID:(.+)$/gim)]
+    .map((match) => match[1].trim())
+    .filter(Boolean);
 }
 
 export interface ICSEventInput extends EventInput {

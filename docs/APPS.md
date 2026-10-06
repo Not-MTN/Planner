@@ -122,7 +122,77 @@ PLANNER_APP_ORIGINS=capacitor://localhost,https://localhost,app://planner npm ru
 npm run check:deployment -- http://localhost:5173
 ```
 
-## 3. Android
+## 3. Links that open the app (deep links)
+
+A guardian's QR code carries an ordinary web address —
+`https://your-app.example.com/#/panels?invite=plnr-…` — because the student
+scanning it may not have installed anything yet. When they *have* installed it,
+the same address should open the app, not a browser tab. Both platforms do that
+by asking your domain which app owns its links, which is why this is a server
+setting as much as an app setting:
+
+| Platform | What it fetches | What must be true |
+| --- | --- | --- |
+| Android | `https://your-app/.well-known/assetlinks.json` | Lists package `com.notmtn.planner` and the SHA-256 fingerprint of the certificate that signed the installed APK. |
+| iPhone / iPad | `https://your-app/.well-known/apple-app-site-association` | Lists `TEAMID.com.notmtn.planner`, and the App ID has **Associated Domains** enabled in the Apple Developer portal. |
+
+Both files are written by the ordinary build — `npm run build` ends with
+`scripts/deep-link-files.mjs` — from environment variables on the deployment
+that serves them (Vercel: Project → Settings → Environment Variables, then
+redeploy):
+
+```bash
+ANDROID_SIGNING_CERT_SHA256=AA:BB:…          # the release certificate fingerprint
+IOS_TEAM_ID=AB12CD34EF                       # your Apple Developer team id
+PLANNER_LINK_HOST=your-app.example.com       # optional: printed in the build log
+```
+
+The Android value is the same one the Apps workflow already pins as a
+repository variable, and it takes a comma-separated list: add your debug
+certificate (`keytool -list -v -keystore ~/.android/debug.keystore -alias
+androiddebugkey -storepass android`) so a locally installed APK can be tested
+against the same domain. Neither file is written for a build that was not given
+these values, and nothing else about the app changes.
+
+Then check it, against the live deployment:
+
+```bash
+npm run check:deployment -- https://your-app.example.com
+```
+
+The last two lines of that report are about these files
+(`PLANNER_REQUIRE_DEEP_LINKS=1` makes a failure fail the run). Both platforms
+fetch them **without redirects** and want `Content-Type: application/json` —
+`vercel.json` sets both, and the check fails loudly if a host serves the
+extensionless Apple file as a download instead.
+
+### What the app does with a link
+
+`src/shared/deepLinks.ts` listens for `appUrlOpen`, and reads `getLaunchUrl()`
+for the case where the link *started* the app. Either way the address becomes a
+route through the ordinary hash router, so nothing is granted by arriving this
+way: a scanned invite opens the student panel with the code filled in, and
+linking still takes a press.
+
+`planner://` (the custom scheme) also works, with no domain and no verification.
+It is the fallback for a build served entirely from the device — and for a
+deployment that has not set the two files up yet.
+
+### When it does not work
+
+- **Android.** `adb shell pm get-app-links com.notmtn.planner` says whether the
+  domain is `verified`. Turning it on by hand for a test —
+  `adb shell pm set-app-links --package com.notmtn.planner 0 all your-app.example.com` —
+  is a debugging step, not a fix: verification has to pass on its own.
+- **iOS.** Apple caches its copy of the association file. Toggling the app's
+  Developer settings or reinstalling the app re-fetches it; waiting is also
+  legitimate (the cache is not permanent).
+- **The app's own origin.** In a bundled (`PLANNER_API_ORIGIN`) build the app is
+  served from `https://localhost`, so the *link* has to point at the deployment,
+  not at the app. That address is baked in at build time and shown in the
+  `npm run native:sync` summary as `its links`.
+
+## 4. Android
 
 ### Build and run
 
@@ -245,7 +315,7 @@ the in-app APK update path is for direct/sideloaded APK installs signed with
 this repository's permanent key. Play-managed installs should continue to update
 through Play.
 
-## 4. iOS
+## 5. iOS
 
 ### Build and run
 
@@ -281,7 +351,7 @@ planner's real UI — but a reviewer may still ask. When submitting, describe it
 as an offline-first planner that syncs through the user's own server, and
 mention the offline behaviour in the review notes.
 
-## 5. Regenerating icons and splash screens
+## 6. Regenerating icons and splash screens
 
 The native artwork is committed in `android/` and `ios/`. If you change the
 logo, regenerate from `resources/` (which came from `public/icon-512.png`):
@@ -295,7 +365,7 @@ adaptive icon, `resources/icon-background.png` is the paper-coloured layer,
 `resources/icon.png` is the full-bleed 1024² icon for iOS, and
 `resources/splash*.png` are the 2732² splash screens (light and dark).
 
-## 6. Releases from CI
+## 7. Releases from CI
 
 `.github/workflows/apps.yml` builds everything on demand (Actions → Apps → Run
 workflow) and for valid stable `vMAJOR.MINOR.PATCH` tags, attaching the files
@@ -390,7 +460,7 @@ per-run debug keys; later releases compare against the prior verified signer in
 the feed. A mismatch fails the release instead of publishing an APK that could
 not replace an installed copy.
 
-## 7. Updates
+## 8. Updates
 
 ### Release contract (Phase 1)
 
@@ -460,7 +530,7 @@ feed or a malformed response means “we do not know”: startup continues with 
 installed version and does not interrupt offline use. Browser tabs continue to
 update themselves through the service worker and do not use the native updater.
 
-## 8. What the shells do not do yet
+## 9. Reminders, permissions and what the shells do not do yet
 
 Named plainly, because each one is a real feature and none of them is hidden:
 
@@ -472,23 +542,114 @@ Named plainly, because each one is a real feature and none of them is hidden:
   exact-alarm permission is needed. Disabling reminders cancels the pending
   schedule. The same settings show in-app reminders as a fallback if OS
   notifications are unavailable.
-- **Web Push subscriptions** are a browser/PWA feature; they are separate from
-  the on-device reminder schedule in the mobile shells.
+- **Background reminders in the phone apps** have their own setting, the same
+  one a browser tab gets (Settings → Reminders, "Remind me while Planner is
+  closed"). A browser tab uses Web Push; a phone app registers with the
+  platform's notification service — FCM on Android, APNs on iOS — and uploads
+  its token and reminder schedule, so the server can wake the device even when
+  the app has been closed. Exactly like the Web Push path, the message is one
+  generic sentence and a deep link: no task, event or habit text ever leaves the
+  device. This needs deployment credentials (§9.1) and, on Android, a
+  `google-services.json` beside `android/app/build.gradle`; without them the
+  toggle stays disabled rather than pretending to work.
+
+### 9.1 Serving device push
+
+Both platforms are optional per deployment; a server with only Web Push keys
+keeps working, and `/api/push/config` reports which transports it can honour.
+
+| Platform | Environment variables | Also needed |
+|---|---|---|
+| Android (FCM) | `FCM_SERVICE_ACCOUNT` — the service-account JSON, as one line | `android/app/build.gradle` already applies the `com.google.gms.google-services` plugin when `google-services.json` exists; add that file (git-ignored) from the Firebase console. |
+| iOS (APNs) | `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_KEY_P8`, `APNS_BUNDLE_ID=com.notmtn.planner` | A `.p8` APNs auth key from the Apple Developer portal, and the **Push Notifications** capability switched on for the App ID. `ios/App/App/App.entitlements` already declares `aps-environment`. |
+
+The scheduler is shared with Web Push: `DATABASE_URL` holds the device tokens and
+their queued reminders, and a cron calls `/api/push/dispatch` with
+`Authorization: Bearer $CRON_SECRET`. A token the platform reports as gone is
+deleted; a job whose platform has no credentials is dropped rather than retried
+forever. `.env.example` and README's *Background push reminders* section list the
+variables next to the Web Push keys.
 - **Feature-gated access:** voice input requests microphone and speech
   recognition only when started. **Add a plan picture** opens the system photo
   picker only after an explicit tap; Android grants access to the chosen image,
   and iOS may show its Photo Library prompt then. No permission is requested at
   install or app startup.
 - **Passkeys** (see §2).
-- **Deep links.** A guardian's QR code opens `https://your-app/#/panels?invite=…`
-  in a browser. Opening that link straight into the installed app needs
-  universal links (iOS) and app links (Android), plus a file on your domain.
-- **Biometric unlock** (`@capacitor/biometric-*`) instead of typing the
-  password each launch.
+- **Deep links** are set up on the app side and documented in §3. What is left
+  is the part only a deployment can do: serving the two association files, and
+  for iOS having the Associated Domains capability enabled on the App ID. Until
+  then a link opens in the browser, which still works.
+- **Biometric unlock is shipped**, and it is part of this repository rather than
+  a plugin package: `android/app/src/main/java/com/notmtn/planner/PlannerBiometricPlugin.java`
+  and `ios/App/App/PlannerBiometricPlugin.swift` are registered by the shells
+  (`MainActivity` on Android, `PlannerBridgeViewController` in
+  `ios/App/App/SceneDelegate.swift` on iOS). Turning it on in **Settings →
+  Account** hands the vault key to the Android Keystore / iOS Keychain behind
+  `setUserAuthenticationRequired` / `.biometryCurrentSet`, so the platform's own
+  face or fingerprint check is what releases it — Planner never sees a
+  fingerprint, and nothing biometric leaves the device. Three consequences
+  worth knowing:
+    - It is off by default, and turning it on needs the password once: the key
+      is only in memory right after a password unlock. On the same device it
+      replaces the silent "keep this device signed in" copy, because a phone
+      that opens with a face should not also open without one.
+    - Re-enrolling a face or fingerprint, or changing the password, retires the
+      stored key (`invalidated`). The app says so and asks for the password
+      rather than trying again.
+    - Turning the setting off, or signing out, deletes it. Locking the planner
+      keeps it — that is the point of the feature.
+  The Android build adds `androidx.biometric` (see `android/variables.gradle`);
+  iOS needs no extra dependency, only the `NSFaceIDUsageDescription` entry
+  already in `Info.plist`. Store/privacy wording is at the end of §10.
 
 Everything else — the entire planner — works, because it is the same code.
 
-## 9. Store listing copy, ready to paste
+### 9.2 Testing on a real device
+
+CI proves the apps compile (`.github/workflows/native.yml`) and launch on a
+virtual device (`.github/workflows/device-smoke.yml`: an Android emulator and an
+iOS simulator, install, launch, and one deep link each). Three things a virtual
+device cannot test, and the checklist for each on hardware you are holding:
+
+1. **Biometric unlock.** It is a Keystore/Keychain operation with a user
+   presence check, so an emulator either has no enrolled fingerprint or
+   fakes one.
+   - Android: enroll a fingerprint in the device's Security settings, sign in
+     once, then turn on **Unlock with fingerprint or face** (Settings →
+     Account). Lock the device and reopen Planner: the prompt must appear, and
+     cancelling it must leave the vault locked rather than open. `adb logcat -s
+     BiometricPrompt PlannerBiometric` shows the plugin's own lines.
+   - iOS: enroll Face ID (Settings → Face ID & Passcode), then the same flow.
+     A failed or cancelled prompt must fall back to the password, never to an
+     open vault.
+   - Both: the key is device-bound. Reinstalling the app must *not* unlock with
+     a stale biometric enrolment.
+2. **Push delivery.** `docs/APPS.md` §9.1 sets the server side up; the device
+   must be a real one (or an emulator with Play services for FCM).
+   - Android: turn on **Background notifications**, then `adb shell dumpsys
+     notification` lists the `planner-reminders` channel. Force-stop the app
+     (`adb shell am force-stop com.notmtn.planner`) and wait for a scheduled
+     time: the alert arrives, and tapping it opens Planner on the day view.
+   - iOS: the APNs sandbox is what a Debug build talks to, so a TestFlight or
+     Release build must be used to check production. Watch
+     `xcrun simctl spawn booted log stream --predicate 'process == "App"'` for
+     the registration callback.
+   - Both: the alert is one generic sentence. If task, event or habit text ever
+     appears in it, that is a bug worth stopping for.
+3. **Deep links.** Association files need a live domain and platform
+   verification, so a link must be checked against a deployment, not a host
+   file.
+   - On the device, open the deployment's address with `/app#/today` at the
+     end: it must open the app on the day view, not a browser tab.
+   - `adb shell dumpsys package domain-preferred-apps` (Android) and
+     **Settings → Developer → Associated Domains Development** (iOS) show
+     whether the platform verified the domain; `docs/APPS.md` §3 covers what
+     the server has to serve for that to succeed.
+
+The store copy and the privacy answers are in §10 and §11; the runbook that
+ties a release together is `docs/RELEASING.md`.
+
+## 10. Store listing copy, ready to paste
 
 **Title:** Planner — calm daily planning
 **Short description (Play, ≤80):** Tasks, habits, goals and notes — encrypted, offline-first, no account needed.
@@ -505,6 +666,24 @@ Everything else — the entire planner — works, because it is the same code.
 > and there are no accounts to create unless you want one.
 >
 > Persian and English, light and dark, phone, tablet and desktop.
+>
+> In the phone apps you can open it with Face ID or your fingerprint instead of
+> typing your password. That key stays on your device, and signing out removes
+> it.
 
 **Keywords (App Store):** planner,tasks,habits,goals,notes,offline,private,encrypted,calendar,focus
 **Category:** Productivity
+
+**Privacy notes for the store questionnaires (Apple App Privacy / Play Data
+Safety and, on Apple, the Face ID usage reason):**
+
+- Planner does not collect, store or transmit biometric data. Face ID, Touch ID
+  and fingerprint matching happens in the operating system; what the app
+  receives after a successful check is its own vault key.
+- The optional biometric unlock keeps that key in the platform's protected
+  store (Android Keystore / iOS Keychain) on that device only. It is off by
+  default, can be turned off in Settings at any time, and is deleted when the
+  person signs out.
+- `NSFaceIDUsageDescription` in `ios/App/App/Info.plist` is deliberately worded
+  for the prompt Apple shows: *Planner uses Face ID to open your planner
+  without typing your password.*

@@ -16,6 +16,33 @@
 	<string>6.0</string>
 	<key>CFBundleName</key>
 	<string>$(PRODUCT_NAME)</string>
+	<!-- planner://… : the scheme this app answers to with no domain and no
+	     server. https links are claimed through the associated-domains
+	     entitlement instead (App.entitlements), which iOS verifies against
+	     /.well-known/apple-app-site-association on the link's own domain. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.notmtn.planner</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>planner</string>
+			</array>
+		</dict>
+	</array>
+	<!-- Face ID is only used to unlock the vault with the key the OS keeps for
+	     this device; turning the setting off removes it (docs/APPS.md §9). -->
+	<!-- Apple asks on every upload whether the app uses encryption, unless the
+	     answer is recorded here. Planner uses HTTPS and the platform's own
+	     WebCrypto to protect the person's own data and to authenticate them —
+	     the standard mass-market case the export rules exempt — so the honest
+	     answer is "no non-exempt encryption" and this key stops the prompt.
+	     Changing what the app does with cryptography means revisiting this. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Planner uses Face ID to open your planner without typing your password.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Planner uses the microphone only when you start voice input.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

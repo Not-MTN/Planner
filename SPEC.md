@@ -3,7 +3,13 @@
 Design spec for adding accounts, three roles, and shared student ↔ guardian planning
 on top of today's local-first, end-to-end encrypted planner.
 
-Status: **draft for review — no code written yet.**
+Status: **partly shipped — the plan and the product have to agree again.**
+
+This document is still the reference for the account, vault and panel model, but
+phases 0–5 have now been built, some of them differently than written here.
+§15 records what actually shipped and what did not; §16 keeps only the questions
+that are still open. Where this spec and the code disagree, **the code is what
+users have** — read §15 before treating any phase below as a to-do list.
 
 ---
 
@@ -25,14 +31,14 @@ Status: **draft for review — no code written yet.**
 
 | Area | Decision |
 |---|---|
-| Accounts | **Required.** Sign in or sign up before using the planner. No anonymous mode. |
+| Accounts | **Required** of any build with a server address: sign in or sign up first, no anonymous mode. A build compiled without one (`local_only_build`) opens the planner offline with no account at all and says so — see §14. |
 | Sign-in | Username **or** email + password. **Passkey** (phone PIN, fingerprint, face, or desktop biometric) — offered at sign-up, strongly encouraged. |
-| Recovery | Three tiers: **password → approved trusted device → recovery key**. The recovery key is shown once at sign-up, re-viewable and downloadable from the panel. |
+| Recovery | Three tiers, all built: **password → approved device that still holds the key → recovery key**. A trusted device sets a new password from Settings without the old one (it re-wraps the key it already holds) and rotates the recovery keys at the same time; the recovery key is shown once at sign-up, re-viewable and downloadable from the panel. |
 | Encryption | End-to-end. Server stores ciphertext only. |
 | Notifications | **In-app everywhere.** Installed apps (PWA / desktop) may opt into **content-free push**. Never email. |
 | Student privacy | **Guaranteed private zone.** Items marked private are invisible to every guardian, with no override. |
 | Explaining changes | Required only for **significant** changes; one-tap reason chips plus an optional sentence. |
-| Guardian types | **Parent** and **Academic advisor** — one panel, different default scopes. |
+| Guardian types | **Parent** and **Academic advisor** — one panel; the choice is a label and a tone, not a set of permissions. Sharing is the student's call. |
 | Retention | Full detail inside the hot window; **weekly rollup to results** afterwards. |
 | AI | Assists both sides. AI and guardian changes land as **reviewable proposals**, never silent writes. |
 | Local-first | Still true. Editing works offline; signing in and signing up need a connection. |
@@ -42,6 +48,17 @@ Status: **draft for review — no code written yet.**
 ---
 
 ## 3. Roles
+
+> **Status: roles and panels shipped; scopes and presets are cancelled.** Role at
+> sign-up, panel switched on, both panels running at once, all of it toggled from
+> Panels — exactly as written here. The **scope presets** and the per-scope toggle
+> table that used to follow were dropped on purpose, on 2026-10-05, rather than
+> postponed: a shipped link carries a per-link results key and the guardian sees only
+> the weekly snapshot the student chooses to send (`src/auth/links.ts`,
+> `src/panels.ts`). A per-scope toggle promises a guardian live, filtered access — and
+> nothing in the architecture can make that true, because the guardian's browser never
+> holds the vault key (§4). A switch with nothing behind it is worse than no switch:
+> it would read as a privacy control while the data flow stayed all-or-nothing.
 
 **Panels are optional.** The account role picked at sign-up only decides which
 panel is switched on first — it is never a mode the planner is locked into:
@@ -56,34 +73,49 @@ Roles are **capabilities attached to an account**, not mutually exclusive boxes.
 
 - **Personal** — the default. A vault with no links. This is today's app, unchanged.
 - **Student** — a vault plus outgoing links to guardians. Means: *"I'm open to being
-  linked; here are my scopes."* Without a link it behaves exactly like Personal.
-- **Guardian** — incoming links to one or many students. Parent and Advisor are scope
-  presets over the same code path. A guardian keeps their own personal planner too.
+  linked; here is what I share each week."* Without a link it behaves exactly like
+  Personal.
+- **Guardian** — incoming links to one or many students. Parent and Advisor are the same
+  code path with different copy; the type is recorded per link as `kind`
+  (`GuardianKind = 'advisor' | 'parent'`). A guardian keeps their own personal planner
+  too.
 
 An account can hold several roles at once (a PhD student is both a student of their
 advisor and a mentor to undergrads).
 
-### Scope presets
+### Sharing is the student's call, not a scope
 
-| Scope | Parent | Advisor |
-|---|---|---|
-| Plan, tasks, events | ✅ | ✅ |
-| Completions and misses | ✅ | ✅ |
-| Habits, sleep, daily essentials | ✅ | ⬜ unless study-relevant |
-| Mood check-ins | ✅ | ⬜ opt-in |
-| Focus and study time | ✅ | ✅ |
-| Subjects, deadlines, exams | ⬜ | ✅ |
-| Notes and journal | ⬜ (student shares explicitly) | ⬜ |
-| Edit the plan | ✅ | ✅ |
-| Set goals and milestones | ✅ | ✅ |
+The table this section replaced listed ten scopes per guardian type (§16, question 5).
+The shipped model has
+one sharing decision, and the student makes it: each week they may write a **headline**
+that goes out with their results, and the reason behind a change stays private. The
+guardian receives totals — planned, done, focused minutes, per-subject minutes and the
+headline — and nothing else, ever.
 
-Every scope is a per-link toggle, so a parent can switch mood off for a 17-year-old
-and an advisor can be granted it. A fourth preset (**Tutor** — one subject) can be
-added later without new machinery.
+What that means in practice:
+
+- **No per-scope toggles, and no promise of them.** Widening a guardian's view is not a
+  checkbox: it is a new data flow (the guardian would need a key to something the
+  student's device sealed), so it would be a new spec, not a setting.
+- **Revocation is per link and immediate** — unlinking stops future shares. What was
+  already shared stays with the guardian, which is what "shared" means.
+- **The guardian's type is still real**, it just does not gate anything: it picks the
+  words a student sees on the invite and the tone of the roster. A parent and an advisor
+  with the same kind of link can see the same thing — and both see only what the student
+  sends.
+- **The Tutor case is covered by the same rule**, not by a fourth preset: a mentor sees
+  the same weekly snapshot as anyone else.
 
 ---
 
 ## 4. Architecture
+
+> **Status: one line of this diagram is wrong.** The guardian's browser does **not**
+> hold the student's vault key and never decrypts the vault; it holds a per-link
+> results key that opens the weekly snapshot the student chose to share
+> (`src/auth/links.ts`). The rest — the server as a librarian that only ever stores
+> ciphertext, no server-side event table, charts and "why" computed in the browser —
+> is what shipped.
 
 ```
 ┌─ Server (Neon + Vercel Functions) ───────────────┐
@@ -108,6 +140,14 @@ entire notification feed by diffing the student's vault against its own
 
 ## 5. Data model
 
+> **Status: approximate.** The shipped schema is `db/auth.sql` and `db/schema.sql`:
+> `planner_users`, `planner_credentials`, `planner_vaults`, `planner_sessions`,
+> `planner_passkeys`, `planner_auth_events`, `planner_links` (whose `code_hash` /
+> `code_expires_at` columns absorbed the `invites` table), `planner_sync`,
+> `planner_push_subscriptions` and `planner_push_jobs`. `Attribution`,
+> `ChangeRecord`, `Tombstone` and `GuardianView` were never added; the panels carry
+> their own types in `src/types.ts`.
+
 ### Server tables
 
 | Table | Contents |
@@ -117,8 +157,8 @@ entire notification feed by diffing the student's vault against its own
 | `passkeys` | user_id, credential id, public key, label |
 | `sessions` | id, user_id, device label, ip/agent, expires_at, last_seen |
 | `vaults` | owner_id, version, ciphertext, wrapped keys, updated_at |
-| `links` | guardian_id, student_id, preset, scopes[], status, created_at |
-| `invites` | code hash, from_user, to_email/username, preset, expires_at |
+| `planner_links` | id, guardian_id, student_id, student_username_lower, code_hash, wrapped_share, share_ciphertext, share_week, status, code_expires_at, note_to_student, note_to_guardian, note_week, created_at, updated_at |
+| `planner_auth_events` | id, user_id, kind, device_label, network, new_network, created_at |
 | `recovery_codes` | user_id, hash, used_at |
 
 The existing `planner_sync` table folds into `vaults`.
@@ -171,6 +211,11 @@ across their devices for free.
 
 ## 6. Keys, passwords and sessions
 
+> **Status: shipped.** One addition to the hierarchy below: the DEK can also be
+> wrapped by a **passkey**, so a platform authenticator can open the vault without a
+> password (`src/auth/passkey.ts`), and the packaged apps can keep that key in the OS
+> keychain behind biometrics.
+
 ### Key hierarchy
 
 ```
@@ -207,15 +252,23 @@ call a recovery key a passkey.
   unwrap locally → decrypt vault.
 - **Change password** — needs the current password only. The DEK is simply
   re-wrapped; nothing is re-encrypted. (The recovery key is *not* needed for this.)
-- **Forgot password** — three ways back in, tried in order:
-  1. **A trusted device that is already signed in.** The new device asks for
-     help; the phone/tablet shows *"Someone is signing in to your planner"*,
-     unlocks with PIN/face/fingerprint, and approves. The wrapped DEK travels to
-     the new device encrypted to that device's own key — the server relays bytes
-     it cannot read. The user then sets a new password.
+- **Forgot password** — three ways back in, in the order they are worth trying:
+  1. **An approved device that still opens the vault.** Settings → Account →
+     *Set a new password*: the device already holds the vault key, so it
+     re-wraps that key for a password the person will remember. No old password
+     and no code are asked for; the old password stops working, the recovery
+     keys are replaced in the same step and shown once, and other approved
+     devices keep working because the vault key itself never changes
+     (`changePasswordFromDevice`, `src/auth/session.ts`).
   2. **A passkey**, where one was registered.
   3. **The recovery key** — the last resort. Unwraps the DEK, then set a new
      password and a new recovery key.
+
+  (The device-to-device *approval* relay described in this spec's earlier draft
+  — a new device asking a signed-in one for help — was never built and is not
+  needed: a device that cannot open the vault has nothing to prove with, and the
+  recovery key covers the fresh-device case. What ships is the tier that does
+  not need a second device.)
 
   There is no email reset link, because no email can decrypt a vault. This is
   stated plainly in the UI rather than hidden.
@@ -263,47 +316,53 @@ sign-up, sign-in, and linking need a connection.
 
 ## 7. Linking and consent
 
-**How the pairing works (built).** The guardian generates a one-time code
-(`plnr-XXXX-XXXX-XXXX`) and a per-link results key. The server keeps only
-`sha256(code)` and the key sealed *by* the code; the code itself is never stored.
-The student types it once, derives the same key, opens the sealed results key and
-re-seals it inside their own vault. From then on the student encrypts each week's
-results with that key and the guardian decrypts them — the server moves
-ciphertext it can never open.
+> **Status: the pairing paragraph is shipped; the numbered list below is not, on
+> purpose.** The shipped model has no scopes, no per-guardian public key and no DEK
+> rotation on unlink: a link carries a per-link results key, the student re-seals it
+> inside their own vault, and unlinking stops future shares — the guardian keeps what
+> was already shared (`src/auth/links.ts`, `src/panels.ts`). Items 2–5, "preview as
+> guardian", the guardian activity log and mutual watching were never built, and
+> `SPEC.md` §15 records the change.
 
+**How the pairing works (built).** The guardian generates a one-time invite code
+and a per-link results key. The server keeps only a hash of the code and the key
+sealed *by* the code; the code itself is never stored. The student enters it once,
+derives the same key, opens the sealed results key and re-seals it inside their own
+vault. From then on the student encrypts each week's results with that key and the
+guardian decrypts them — the server moves ciphertext it can never open.
 
-1. Guardian enters the student's username (or email) or generates an **invite code**
-   (short, expires in 24–72h).
-2. The student sees the request with the proposed preset and scopes, and either
-   **accepts, edits the scopes, or declines.** Nothing is visible before acceptance.
-3. On acceptance the student's client wraps the vault DEK for the guardian's public
-   key and the server stores the wrapped blob. The server cannot unwrap it.
-4. Either side can unlink at any time. Unlinking by the student **rotates the DEK**,
-   re-encrypts, and re-wraps for remaining guardians — old ciphertext becomes
-   unreadable to the removed guardian.
-5. The student can revoke a single scope without unlinking entirely.
-
-### Transparency
-
-- **Preview as guardian** — the student sees exactly what a given guardian sees.
-- **Guardian activity log** — the student can read every action a guardian took.
-- **Mutual watching** is the point: visibility runs both ways.
+1. Guardian invites the student by username or email, or hands over an invite link
+   or QR code. Pending invites expire on their own (`INVITE_TTL_DAYS = 7`), and either side can
+   unlink at any time.
+2. The student accepts — or simply does not, and the invite expires. Nothing is
+   visible before acceptance.
+3. On acceptance the student's client seals the per-link results key for that
+   guardian and the server stores the wrapped blob. The server cannot unwrap it.
+4. Unlinking stops future shares; what was already shared stays with the guardian
+   (see `SECURITY.md`).
+5. Sharing is all-or-nothing per link. Per-scope revocation was cancelled rather than
+   left open (§3): there are no scopes to revoke, so the unit of revocation is the link.
 
 ---
 
 ## 8. Panels and routes
 
+> **Status: the routes shipped differently.** The panels live under the app's own
+> hash routes, not `/students`/`my-guardians`, and there is no per-student URL — the
+> guardian picks a student inside the panel. Actual routes: `#/panels` (chooser),
+> `#/student`, `#/guardian`.
+
 ```
 /                       Landing page (marketing)
 /login  /signup  /recover
 /app#/today             Personal panel — identical for everyone
-/app#/students          Guardian: roster
-/app#/students/:id      Guardian: one student dashboard + plan editor
-/app#/my-guardians      Student: links, scopes, proposals inbox
+/app#/panels            Either role: the chooser that turns the optional panels on
+/app#/student           Student panel — plans, shared results, inbox
+/app#/guardian          Guardian panel — roster, one student at a time, composer
 ```
 
-Settings gains a **My role** section that appears only when a role is active.
-Routes are gated server-side by link status, never by a role flag from the client.
+The role is set at sign-up and pre-enables the matching panel; it is not a router.
+Access is gated server-side by link status, never by a role flag from the client.
 
 ### Guardian — roster
 
@@ -361,6 +420,10 @@ red failure badges. Framing is supportive, or students will game the data.
 ---
 
 ## 10. Change feed and "why"
+
+> **Status: not built.** There is no change feed or tombstone list in the shipped
+> panels — the guardian sees shared weekly results instead (§15, phase 4). Kept as
+> the design for a live view, if one is ever wanted.
 
 The feed is computed in the guardian's browser: items whose `updatedAt` is newer
 than the guardian's `lastSeenAt`, plus tombstones for removals.
@@ -427,6 +490,17 @@ matches the "installed apps may notify" rule exactly.
 
 ## 11. Retention and the weekly rollup
 
+> **Status: client-side, and now real (2026-10-05).** The hot window is a setting
+> (`src/retention.ts`, Settings → Sync & backup): 1 / 2 / 4 / 12 weeks or keep
+> everything. Detail outside it is rolled up into `WeekArchive` rows and dropped —
+> individual focus sessions, raw moods, habit tick marks, the reasons on change
+> notes, the bodies of old AI drafts, and the note/subtask text of work finished
+> long ago. Anything unfinished, undated, in the future, or **created inside the
+> window** is never touched, so importing a syllabus for a term already under way
+> cannot have its topics pruned the moment they arrive. Server-side folding stays
+> out on purpose: the server cannot read the vault, so it cannot fold what it
+> cannot see.
+
 Planners are about now and next, so **detail is temporary, results are permanent.**
 
 ### Hot window
@@ -485,15 +559,34 @@ no surviving note references them.
   produces identical output, so a race between the student's and a guardian's client
   is harmless under last-write-wins.
 - It runs when the app is opened on or after the following Monday, with a **2-day
-  grace period** so a Sunday-night check-in still counts.
-- **Export before rollup**: a "Download this week in full" option, and a
-  "keep everything" setting for users who want it (with an honest size warning).
+  grace period** (`GRACE_DAYS`) so a Sunday-night check-in still counts, and again
+  whenever the app returns to the foreground. It is idempotent, so a second run in
+  the same week writes nothing.
+- Every week since the oldest surviving item gets a row, but only weeks something
+  actually happened in: an empty record per dormant week would grow the vault
+  without saying anything, and the charts already draw the gaps.
+- **Export before rollup**: the backup export in Settings → Sync & backup is the
+  full-fidelity copy, and the "keep everything" setting turns the window off
+  entirely (with an honest size warning next to it about the 3 MB sync cap).
 - Schools that need records can set a longer window; nothing is deleted without the
-  owner having had the chance to export it.
+  owner having had the chance to export it. The window is per device (it describes
+  how *this* device stores detail) and is deliberately not synced: a school device
+  can keep twelve weeks while a phone keeps two.
 
 ---
 
 ## 12. AI on both sides
+
+> **Status: mostly shipped.** The student side is the AI coach — rebalancing,
+> breaking work down, weekly review, saved memory, voice and Persian. Two
+> student rows are still approximations: nothing drafts an "explain this plan"
+> note, and an exam-date back-plan is whatever the general planner produces
+> rather than a dedicated flow. On the guardian side, `generateGuardianGuidance`
+> returns a narrative, open questions and one encouraging line from weekly
+> totals, `draftGuardianProposal` fills the plan and goal composers with a draft
+> the guardian edits and sends (2026-10-05), and the last row — the agenda for
+> the next advising meeting — prints as a one-pager built from the shared weekly
+> results alone (`src/advising.ts`).
 
 | Student | Guardian |
 |---|---|
@@ -519,59 +612,164 @@ no surviving note references them.
 
 ## 13. Security
 
-- Argon2id client-side for the KEK; Argon2id again server-side on the auth token.
+> **Status: shipped, with one correction.** The stored-credential scheme is Argon2id
+> in the browser and **scrypt** on the server, not Argon2id twice; the rest of this
+> list is in the code. Deep links, passkeys, TOTP, biometric unlock and push have
+> since been added and are described in `SECURITY.md`.
+
+- Argon2id client-side for the KEK. The auth token that reaches the server is stored
+  only as a salted scrypt verifier (`N=16384`), never as a usable proof.
 - Server stores no plaintext password, no DEK, no vault content.
 - Every read is authorised server-side against `links`; roles from the client are
   never trusted.
 - Rate limiting and lockout on auth, invites, and link endpoints (reuse
   `src/server/security.ts`).
-- Guardians: passkey or 2FA strongly encouraged; they can edit someone else's data.
-- Security alerts for new devices and new links.
-- Full export and full account deletion, including the encrypted vault rows.
+- Guardians: passkey or 2FA is offered like anyone else's account. Their only write
+  path is the panel's shared plan and goal suggestions, which arrive in the student's
+  inbox to tick, accept or decline (`answerGoalSuggestion`); the student's personal
+  planner items are never touched by a guardian.
+- Alerts are in-app, never email: the account activity list records new devices,
+  new networks and recovery, and sessions can be revoked from Settings.
+- Full export and full account deletion, including the encrypted vault rows
+  (`src/auth/session.ts`).
 - CSP stays `script-src 'self'` — no third-party auth SDK is possible, so every
   piece is ours (which the encryption model wants anyway).
-- A written threat model update in `SECURITY.md` before launch.
+- The threat model update in `SECURITY.md` is written and now covers the account,
+  biometric and deep-link surfaces (reviewed 2026-10-05).
 
 ---
 
-## 14. Migration
+## 14. Migration — what happened
 
-- **Existing local data:** on first sign-in the app finds local data and offers
-  *"Keep this planner and attach it to your account"*. It is then uploaded as the
-  user's vault. Nobody loses data.
-- **Existing sync codes:** the code-derived key wraps the DEK during migration, so
-  current sync keeps working and the code stays valid until the user turns it off.
-- `README.md` and `SECURITY.md` currently promise "no accounts" — both are rewritten
-  as part of this work.
-- The zero-login path is removed, so `DATABASE_URL` becomes a hard requirement for
-  auth. The app still works fully offline once signed in.
+- **Existing local data:** shipped. Whatever the device already had travels with the
+  sign-up request (`localState` on `SignupRequest`, `src/auth/session.ts`) and becomes
+  the new account's vault, so signing in does not discard a planner.
+- **Existing sync codes:** still shipped, and still account-free. The code-derived key
+  remains the only secret on that path (`src/sync.ts`); accounts and sync codes are two
+  independent systems and a planner can use either or both.
+- **"No accounts" in the docs:** rewritten where it mattered, but the README's opening
+  paragraph and its attachments bullet still said "no accounts" long after accounts
+  shipped. Both are corrected.
+- **The zero-login path:** removed for connected builds. With a server address,
+  sign-in is unavoidable and `DATABASE_URL` is a hard production requirement —
+  `/api/auth/status` answers `storage: "none"` and every account endpoint 503s without
+  it. The one exception is a **build compiled with no server address**
+  (`local_only_build`): it opens the offline planner and tells the user there is
+  nothing to sign in to (`src/auth/AccountGate.tsx`). Accounts are required of
+  deployments, not of the source.
 
 ---
 
-## 15. Phases
+## 15. Phases — what actually shipped
 
-| Phase | Scope |
-|---|---|
-| **0** | Landing page, `SPEC.md` sign-off, threat model update |
-| **1** | Auth: name + username or email + password, recovery key (copy/download), passkey enrolment, sessions, trusted devices, device revoke, claim local data |
-| **2** | Vaults: encrypted vault per account, multi-device, offline open, approved-device password recovery |
-| **3** | Roles and linking: invites, student acceptance, scopes, presets, revocation |
-| **4** | Guardian read-only: roster, dashboards from archives, change feed, tombstones, attribution |
-| **5** | Write access: plan editor, proposals, reasons, undo, audit log, shared timeline |
-| **6** | AI on both sides: proposals, weekly narrative, risk flags |
-| **7** | Extras: templates, syllabus → term plan, optional push for installed apps, meeting one-pager |
+| Phase | Scope | Status |
+|---|---|---|
+| **0** | Landing page, `SPEC.md` sign-off, threat model update | **Done.** Landing ships with hero, roles and an FAQ section (`src/marketing/Landing.tsx`); `SECURITY.md` holds the threat model. There is no pricing page, because there is no paid tier. |
+| **1** | Auth: name + username or email + password, recovery key, passkey enrolment, sessions, trusted devices, device revoke, claim local data | **Done**, plus TOTP second factor and biometric unlock for packaged apps, both added after this spec. Recovery is an approved device, a saved recovery key, or a passkey. |
+| **2** | Vaults: encrypted vault per account, multi-device, offline open, approved-device password recovery | **Done.** Vault, multi-device and offline / trusted-device open ship (`src/auth/vault.ts`), and an approved device can now set a new password without the old one, re-wrapping the key it already holds. The device-to-device approval relay for a device that *cannot* open the vault was not built (see §12): it has nothing to prove with, and the recovery key covers that case. |
+| **3** | Roles and linking: invites, student acceptance, scopes, presets, revocation | **Done, with scopes and presets cancelled.** Role at sign-up, guardian invites by link or QR, student acceptance, link status and revocation all ship. The scope/preset half was dropped on 2026-10-05 — sharing is the weekly snapshot in phase 4, and a per-scope toggle has nothing behind it (§3, §7). |
+| **4** | Guardian read-only: roster, dashboards from archives, change feed, tombstones, attribution | **Changed on purpose.** The guardian gets a roster and **weekly results the student chooses to share** (`src/views/GuardianPanelView.tsx`) — not a live scoped dashboard. There is no change feed and no tombstone list, and a compare-two-students view was not built (§16). |
+| **5** | Write access: plan editor, proposals, reasons, undo, audit log, shared timeline | **Partly, and lighter than this spec.** A guardian composes a plan or suggests a goal; both land in the student's inbox, where the student ticks items off and accepts or declines (`StudentPanelView.tsx`, `src/panels.ts`). The student's own planner items are never written to. Proposals as a separate review object, undo, the audit log and a shared timeline were not built. |
+| **6** | AI on both sides: proposals, weekly narrative, risk flags | **Done, with the AI drafting rather than deciding.** The personal AI coach ships in full (plan, weekly review, saved memory). Guardians get `generateGuardianGuidance` — a summary, open questions, and one encouraging line — and, as of 2026-10-05, `draftGuardianProposal`: the AI fills the plan or goal composer with steps drawn only from the shared weekly totals, the guardian edits it, and the student accepts or declines it in their inbox like any other suggestion (`GuardianPlanComposer.tsx`, `GuardianGoalForm.tsx`). An AI draft never sends itself and never writes to the student's planner. |
+| **7** | Extras: templates, syllabus → term plan, optional push for installed apps, meeting one-pager | **Done, as of 2026-10-05.** Templates, ICS/CSV/JSON import and opt-in content-free push for installed apps already shipped. A pasted syllabus now becomes a term plan (`src/syllabus.ts` + Settings → Connections → "Plan a term from a syllabus") — weeks and dated assessments are read out, shown back, and only added when asked. The guardian side gained the meeting one-pager: an agenda printed from the shared weekly results (`src/advising.ts`, "Meeting one-pager" on a student card). |
+
+**Not built, in one list:** the device-to-device approval relay, live scoped
+dashboards / change feed / tombstones, proposals as a separate review object, undo,
+the shared audit log, and the guardian compare view. Guardian scopes and presets are
+**not** on this list: they were cancelled, not deferred (see §3 for why). Guardian AI *drafting*, the syllabus → term-plan importer and the meeting
+one-pager now ship; what is still missing on the AI side is the student-facing
+proposal variant (the student's own AI proposing planner items), which the
+coach's drafts already approximate.
 
 ---
 
 ## 16. Open questions
 
-1. Is the landing page static marketing, or does it also handle pricing/FAQ?
-2. Should a guardian be able to see two students side by side (compare view)?
-3. Minimum age, and does the app need a parent-managed mode for under-13s?
-4. Does anything need to survive for school record-keeping beyond the configurable
-   retention window?
-5. Usernames are public-ish and can be enumerated — acceptable, or make them
-   non-discoverable and invite-only?
-6. Is a **display name** required at sign-up? Guardians need something human to see
-   in their roster, but a real name is more identifying than a nickname.
-7. Should push ship in phase 7, or earlier alongside the installed-app build?
+Answered questions are recorded here rather than deleted, so nobody re-opens them.
+
+**Answered during the build**
+
+1. *Static marketing or pricing/FAQ?* — **Static marketing with an FAQ.** Four
+   questions ship in `src/marketing/Landing.tsx` and `copy.ts`; no pricing page,
+   because there is no paid tier.
+2. *Is a display name required at sign-up?* — **Yes.** The form collects a name and
+   it is what a guardian sees in the roster (`src/marketing/Auth.tsx`).
+3. *Should push ship in phase 7, or earlier?* — **It already shipped**, as an opt-in,
+   content-free push for installed apps only (`src/push.ts`, `src/server/pushApi.ts`).
+4. *Usernames are enumerable — acceptable, or invite-only?* — **Handled in the API.**
+   The salt and recovery-start endpoints answer with a deterministic decoy for
+   unknown accounts, and sign-up is rate-limited; `username_taken` on sign-up is the
+   one remaining signal, and it is inherent to letting people pick a name.
+5. *Per-scope guardian toggles and presets — build them, or delete them from the
+   spec?* — **Deleted, on 2026-10-05.** The shipped link shares one weekly snapshot the
+   student chooses to send, and the guardian's browser never holds the vault key, so a
+   scope toggle would gate data flows that do not exist. Building it would mean
+   redesigning the sharing model first (a new spec), and shipping the switch without
+   the flow would misrepresent a privacy control. §3 now documents sharing as the
+   student's call and §7 records the link as the unit of revocation.
+
+**Still open**
+
+6. **A guardian compare-two-students view.** Not built (phase 4). Needs a decision
+   about what is fair to compare across two different students before it needs code.
+7. **Minimum age, and an under-13 parent-managed mode.** Nothing in the code or the
+   data model records age or consent. This is a product and legal decision before a
+   school rollout, not an engineering one.
+8. **Anything that must outlive the retention window for school records.** Weekly
+   results are snapshots the student shares and everything else stays on the device;
+   a records-retention story would be new scope.
+9. **Whether `FocusHistory`, `StatsWidget`, `WeeklyReview` and `MatrixView` are
+   provisional** — nothing in the code marks them either way
+   (`PERSONAL_PANEL_AUDIT.md` §15).
+10. ~~**Approved-device password recovery**~~ — built on 2026-10-05: an approved
+   device whose vault key is in hand sets a new password from Settings → Account
+   and rotates the recovery keys in the same step. What remains unbuilt is the
+   *relay* for a device that cannot open the vault at all, which the recovery key
+   already covers.
+
+---
+
+*Reconciled with the shipped build on 2026-10-05. The audits
+(`CODE_AUDIT.md`, `UI_AUDIT_REPORT.md`, `PERSONAL_PANEL_AUDIT.md`, `REPORT.md`)
+carry matching status notes.*
+
+---
+
+## 17. Roadmap (short, and honest about size)
+
+Nothing here is committed. It is the work the spec and the audits leave behind,
+roughly in the order it would pay off.
+
+**Engineering — small**
+
+1. ~~Commit the visual baselines.~~ Done: the workflow generated them, committed
+   them to this branch and the next run compared against them green
+   (`e2e/visual.spec.ts-snapshots/`, `docs/VISUAL_TESTS.md`).
+2. ~~**A touch-target check in the visual suite**~~ Done:
+   `e2e/touch-targets.spec.ts` grades the thumb and dense-control floors in the
+   phone project.
+3. **Persist the Weekly Review reflection** as a note if people ask for it; today it
+   exists only inside the exported report (`REPORT.md` §7).
+
+**Engineering — larger**
+
+4. ~~**Approved-device password recovery**~~ Done (phase 2 above): Settings →
+   Account → *Set a new password* re-wraps the key the device already holds.
+5. ~~**Guardian AI proposals**~~ Done: `draftGuardianProposal` fills the plan and
+   goal composers from the same weekly totals `generateGuardianGuidance` reads,
+   and the student accepts or declines the send like any other suggestion.
+6. **Guardian compare-two-students view**, once the fairness question in §16 is
+   answered.
+
+**Product / legal — decide before building**
+
+7. **Minimum age, consent, and an under-13 parent-managed mode.** Nothing records age
+   or consent today; this has to land before any school rollout.
+8. **School-records retention** beyond the weekly snapshots a student shares.
+
+**Deliberately not planned**
+
+A live scoped guardian dashboard with a change feed, tombstones and an audit log, and
+the per-scope guardian toggles that would come with it — the shipped model is
+snapshot-based and the audits show it is the safer product (SPEC §3, §15 phase 4) — and
+a paid tier, which is why the landing page has no pricing page.

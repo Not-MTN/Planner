@@ -10,6 +10,7 @@ import type { PlannerState } from '../types';
 import { RhythmCard } from './RhythmCard';
 import { FocusHistory } from '../components/FocusHistory';
 import { faDigits, faNum, t } from '../i18n';
+import { minutesLabel } from '../components/charts';
 
 export function InsightsView() {
   const { state, navigate } = usePlanner();
@@ -248,7 +249,11 @@ function PlanVsFocusCard({ state, today }: { state: PlannerState; today: string 
       </header>
       <div className="pvf-chart" role="img" aria-label={t("Estimated minutes versus focus minutes for the last 30 days")} style={{ height }}>
         {data.map((item) => (
-          <div key={item.date} className="pvf-day" title={`${formatWeekdayShort(item.date)} ${dayNumber(item.date)} ≈ ${item.planned}m / ${item.focused}m`}>
+          <div
+            key={item.date}
+            className="pvf-day"
+            title={`${formatWeekdayShort(item.date)} ${dayNumber(item.date)} ≈ ${minutesLabel(item.planned)} / ${minutesLabel(item.focused)}`}
+          >
             <span className="pvf-bar planned" style={{ height: bar(item.planned) }} />
             <span className="pvf-bar focused" style={{ height: bar(item.focused) }} />
           </div>
@@ -338,7 +343,7 @@ function TrendChart({
             {[0, 0.25, 0.5, 0.75, 1].map((ratio) => (
               <g key={ratio} className="chart-gridline">
                 <line x1={left} x2={viewWidth - right} y1={y(ratio)} y2={y(ratio)} />
-                <text x={left - 8} y={y(ratio) + 4} textAnchor="end">{Math.round(ratio * 100)}%</text>
+                <text x={left - 8} y={y(ratio) + 4} textAnchor="end">{faNum(Math.round(ratio * 100))}%</text>
               </g>
             ))}
             {plotted.map((item) => {
@@ -406,7 +411,7 @@ function CompletionDonut({ state, today, days }: { state: PlannerState; today: s
               <li key={segment.label}>
                 <span className={`donut-key ${segment.className}`} />
                 <span>{segment.label}</span>
-                <strong>{segment.value}</strong>
+                <strong>{faNum(segment.value)}</strong>
               </li>
             ))}
           </ul>

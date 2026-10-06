@@ -1,7 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { KEEP_EVERYTHING, loadRetentionWeeks, normalizeRetention, retentionIdle, rollUp, saveRetentionWeeks } from './retention';
 import { addBreadcrumb, reportCaught } from './reporting';
 import { parseHash, toHash, type Route } from './route';
-import { downloadState, loadFrom, parseBackup, sanitizeState, saveTo, serialize, STORAGE_FULL, STORAGE_KEY } from './storage';
+import { downloadState, loadFrom, parseBackup, sanitizeState, saveTo, serialize, storageFullMessage, STORAGE_KEY } from './storage';
 import { flushVaultPush, scheduleVaultPush } from './auth/vault';
 import { readNotices, refreshResults, shareWeeklyResults, syncLinks, syncStudentInbox } from './auth/links';
 import { idbRead, idbWrite, savedAt } from './idb';
@@ -79,9 +80,30 @@ import {
   type ReminderSettings,
 } from './reminders';
 import { appendNotifications } from './notificationCenter';
+import type { SettingsTab } from './components/SettingsSheet';
 import { backgroundPushEnabled, refreshBackgroundPushSchedule } from './push';
 import { buildSampleState } from './sample';
-import { CONFLICT_LIMIT, EMPTY_SYNC, type MergeConflict, SyncError, type SyncSettings, deleteRemote, generateCode, loadSyncSettings, mergeStates, normalizeCode, restoreConflict, saveSyncSettings, syncConfigured, syncOnce } from './sync';
+import {
+  deleteRemote,
+  describeConflict,
+  EMPTY_SYNC,
+  generateCode,
+  keyOfConflict,
+  loadConflicts,
+  loadSyncSettings,
+  mergeConflictLists,
+  mergeStates,
+  normalizeCode,
+  restoreConflict,
+  saveConflicts,
+  saveSyncSettings,
+  syncConfigured,
+  syncOnce,
+  SyncError,
+  type ConflictChange,
+  type MergeConflict,
+  type SyncSettings,
+} from './sync';
 import {
   EMPTY_SHARED,
   isSharedNote,
@@ -97,13 +119,33 @@ import {
   type Tombstones,
 } from './shared';
 import { fetchFeedEvents, loadFeeds, mergeFeedEvents, saveFeeds, type CalendarFeed } from './feeds';
+import {
+  CALENDAR_STALE_MINUTES,
+  MAX_CALENDARS,
+  applyCalendarPull,
+  applyCalendarRemovals,
+  loadCalendars,
+  markPushed,
+  planCalendarSync,
+  pullWindow,
+  recordFailure,
+  recordSync,
+  remoteDelete,
+  remoteDiscover,
+  remoteList,
+  remotePush,
+  saveCalendars,
+  type CalendarSubscription,
+} from './calendarSync';
 import { loadWeatherSettings, saveWeatherSettings, type WeatherSettings } from './weather';
 import { applyTheme, loadAccent, loadThemeMode, resolvedMode, type ThemeMode } from './theme';
 import type { Accent } from './constants';
 import { createEmptyState, type AIDeclinedKind, type AIMemoryInput, type AttachmentRef, type ComposerState, type EventInput, type FixedCommitmentInput, type GoalInput, type HabitInput, type MoodValue, type NoteInput, type Panels, type PlannerState, type SavedAIPlanInput, type StudentSubject, type TaskInput } from './types';
-import { t } from './i18n';
+import { t, tn } from './i18n';
 import { isNativeMobileShell } from './shared/nativeShell';
+import { isDesktopShell } from './desktop';
 import { listenForNativeNotificationTaps, syncNativeReminders } from './nativeReminders';
+import { syncDesktopReminders } from './desktop';
 import { saveStudentSubject as saveStudentSubjectIn } from './panelFeatures';
 import { isTestEnv } from './env';
 import { attachmentNotice, MAX_ATTACHMENTS_PER_NOTE, storeAttachment, sweepAttachmentBlobs } from './files';
@@ -150,6 +192,13 @@ interface PlannerContextValue {
   dismissError: () => void;
   startFresh: () => void;
   exportData: () => void;
+  /**
+   * How many weeks stay at full fidelity: 1 / 2 / 4 / 12, or 0 for "keep
+   * everything". Everything older is rolled up into a week archive and its
+   * detail dropped. See `src/retention.ts`.
+   */
+  retentionWeeks: number;
+  setRetentionWeeks: (weeks: number) => void;
   importText: (text: string) => void;
   loadSample: () => void;
   panels: Panels;
@@ -174,7 +223,9 @@ interface PlannerContextValue {
   openPalette: () => void;
   closePalette: () => void;
   settingsOpen: boolean;
-  openSettings: () => void;
+  /** Which tab the sheet is on, so a notice can open the one it is about. */
+  settingsTab: SettingsTab;
+  openSettings: (tab?: SettingsTab) => void;
   closeSettings: () => void;
   focus: FocusSession | null;
   startFocus: (session: FocusSession) => void;
@@ -189,6 +240,7 @@ interface PlannerContextValue {
   syncMessage: string | null;
   /** Versions that lost a merge, waiting to be looked at. */
   syncConflicts: MergeConflict[];
+  conflictChanges: (conflict: MergeConflict) => ConflictChange[];
   /** Put the version that lost back, and send it to the other devices. */
   keepConflictVersion: (conflict: MergeConflict) => void;
   dismissConflict: (conflict: MergeConflict) => void;
@@ -205,10 +257,21 @@ interface PlannerContextValue {
   stopShared: () => void;
   syncSharedNow: () => void;
   feeds: CalendarFeed[];
+  /** Calendars this device is allowed to change (two-way, over CalDAV). */
+  calendars: CalendarSubscription[];
+  calendarsSyncing: boolean;
   /** Validates + imports the feed once. Returns an error message, or null on success. */
   addFeed: (url: string) => Promise<string | null>;
   removeFeed: (url: string) => void;
   refreshFeeds: (force?: boolean) => void;
+  /** Ask a CalDAV address which calendars it holds. Throws with a short message. */
+  discoverCalendars: (input: { url: string; username: string; password: string }) => Promise<{ url: string; name: string }[]>;
+  /** Validates + subscribes once. Returns an error message, or null on success. */
+  addCalendar: (input: { url: string; name?: string; username: string; password: string; push: boolean }) => Promise<string | null>;
+  removeCalendar: (url: string) => void;
+  setCalendarPush: (url: string, push: boolean) => void;
+  syncCalendars: (force?: boolean) => Promise<void>;
+  syncCalendarNow: (url: string) => Promise<void>;
   weather: WeatherSettings;
   setWeather: (settings: WeatherSettings) => void;
   importTaskList: (tasks: TaskInput[]) => void;
@@ -322,11 +385,6 @@ const PRAISES = [
   () => t("You did the thing. ⭐"),
 ];
 
-/** Two conflicts are the same disagreement: the same thing, edited at the same moment. */
-function keyOfConflict(conflict: MergeConflict): string {
-  return `${conflict.kind}:${conflict.item.id}:${conflict.lostAt}`;
-}
-
 export function PlannerProvider({ children, initialState }: { children: ReactNode; initialState?: PlannerState | null }) {
   // `initialState` wins when the planner was opened from an encrypted vault.
   const [boot] = useState(() =>
@@ -346,6 +404,7 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
   const [accent, setAccent] = useState<Accent>(() => loadAccent('sage'));
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('account');
   const [focus, setFocus] = useState<FocusSession | null>(null);
   const [confettiSeed, setConfettiSeed] = useState(0);
   const [sync, setSyncState] = useState<SyncSettings>(() => loadSyncSettings());
@@ -353,7 +412,9 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   // Versions that lost a merge. Shown rather than thrown away: sync that
   // silently discards an edit is sync people turn off.
-  const [syncConflicts, setSyncConflicts] = useState<MergeConflict[]>([]);
+  // Conflicts survive a reload: the sync that finds one runs on its own, and a
+  // disagreement that disappears with the tab is a lost edit nobody saw.
+  const [syncConflicts, setSyncConflicts] = useState<MergeConflict[]>(() => loadConflicts());
   const [syncAvailable, setSyncAvailable] = useState<boolean | null>(null);
   const [display, setDisplayState] = useState(() => loadDisplayPrefs());
   const [weekStart, setWeekStartState] = useState<WeekStart>(() => loadWeekStart());
@@ -364,6 +425,7 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
   const [feeds, setFeedsState] = useState<CalendarFeed[]>(() => loadFeeds());
   const [weather, setWeatherState] = useState<WeatherSettings>(() => loadWeatherSettings());
   const stateRef = useRef(state);
+  const [retentionWeeks, setRetentionWeeksState] = useState(() => loadRetentionWeeks());
   stateRef.current = state;
   const historyRef = useRef<PlannerState[]>([]);
   const futureRef = useRef<PlannerState[]>([]);
@@ -415,7 +477,7 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     const serialized = serialize(next);
     void idbWrite(serialized);
     const saveError = saveTo(localStorage, next);
-    if (saveError === STORAGE_FULL && typeof indexedDB !== 'undefined') {
+    if (saveError === storageFullMessage() && typeof indexedDB !== 'undefined') {
       // localStorage is full — IndexedDB holds the copy instead (it has far more room).
       if (!idbOnly.current) {
         idbOnly.current = true;
@@ -719,9 +781,17 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
       setSyncMessage(null);
       if (outcome.conflicts.length) {
         setSyncConflicts((current) => {
-          const seen = new Set(current.map(keyOfConflict));
-          return [...current, ...outcome.conflicts.filter((item) => !seen.has(keyOfConflict(item)))].slice(-CONFLICT_LIMIT);
+          const next = mergeConflictLists(current, outcome.conflicts);
+          saveConflicts(next);
+          return next;
         });
+        // A conflict is not a background event. Say so where the user is,
+        // not only on the settings tab they may never open.
+        flash(
+          outcome.conflicts.length === 1
+            ? t("Another device changed the same thing. Review it in Settings → Sync.")
+            : t("{0} things were changed on two devices. Review them in Settings → Sync.", { 0: outcome.conflicts.length }),
+        );
       }
       if (arrived > 0) flash(t("{0} new {1} merged from your other devices.", { 0: arrived, 1: arrived === 1 ? t("item") : t("items") }));
     } catch (caught) {
@@ -757,7 +827,11 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
   const keepConflictVersion = useCallback(
     (conflict: MergeConflict) => {
       commit((current) => restoreConflict(current, conflict));
-      setSyncConflicts((current) => current.filter((item) => keyOfConflict(item) !== keyOfConflict(conflict)));
+      setSyncConflicts((current) => {
+        const next = current.filter((item) => keyOfConflict(item) !== keyOfConflict(conflict));
+        saveConflicts(next);
+        return next;
+      });
       updateSync({ ...syncRef.current, dirty: true });
       flash(t("Kept the other version of “{0}”.", { 0: conflict.title }));
       scheduleSync(400);
@@ -766,10 +840,23 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
   );
 
   const dismissConflict = useCallback((conflict: MergeConflict) => {
-    setSyncConflicts((current) => current.filter((item) => keyOfConflict(item) !== keyOfConflict(conflict)));
+    setSyncConflicts((current) => {
+      const next = current.filter((item) => keyOfConflict(item) !== keyOfConflict(conflict));
+      saveConflicts(next);
+      return next;
+    });
   }, []);
 
-  const dismissAllConflicts = useCallback(() => setSyncConflicts([]), []);
+  const dismissAllConflicts = useCallback(() => {
+    saveConflicts([]);
+    setSyncConflicts([]);
+  }, []);
+
+  /** What the version in the planner and the version that lost differ by. */
+  const conflictChanges = useCallback(
+    (conflict: MergeConflict): ConflictChange[] => describeConflict(stateRef.current, conflict),
+    [],
+  );
 
 
   // ── Shared space (second encrypted room for "Shared" category items) ────────
@@ -836,6 +923,66 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
 
   // Any local change marks the copy dirty and schedules an upload.
   const firstState = useRef(true);
+  /**
+   * The weekly rollup (SPEC §11).
+   *
+   * Runs on boot and again when the window is changed, and re-checks whenever
+   * the app comes back to the foreground — a session left open over a Sunday
+   * should still roll the week over. Both the archive and the pruning are
+   * idempotent, so a second run in the same week does nothing at all.
+   */
+  const runRollUp = useCallback(
+    (weeks: number, announce = false) => {
+      const result = rollUp(stateRef.current, weeks, todayISO());
+      if (retentionIdle(result)) return;
+      commit(() => result.state);
+      const { explanations, focusSessions, moods, checkIns, taskDetails, eventDetails, planBodies, weeksArchived } = result.dropped;
+      const tidied = explanations + focusSessions + moods + checkIns + taskDetails + eventDetails + planBodies;
+      // Silence when only an archive was written: a bookkeeping row is not news,
+      // and a toast that appears on boot to say nothing happened is worse than
+      // no toast at all.
+      if (tidied > 0) {
+        // The archive count can be zero here: a week that was already rolled up
+        // can still be the week whose detail has only now aged out — so the
+        // sentence has to work without a number in it.
+        flash(
+          weeksArchived > 0
+            ? tn(weeksArchived, 'Rolled up {count} finished week — results kept, detail tidied.', 'Rolled up {count} finished weeks — results kept, detail tidied.')
+            : t('Tidied old detail — results kept.'),
+        );
+      } else if (announce) {
+        flash(t('That window is already in effect — nothing older to tidy.'));
+      }
+    },
+    [commit, flash],
+  );
+
+  /*
+   * A fresh window applies immediately, including the wider one ("keep
+   * everything" stops rolling up, but nothing already archived comes back).
+   *
+   * It is keyed on `state` as well, and that is what makes it work at all: the
+   * first render happens before the saved planner has been read back, so a
+   * boot-only effect would look at an empty planner and see nothing to roll up.
+   * Re-checking on every change is cheap — the check walks the state and, when
+   * the week in front of it is already done, returns without writing anything.
+   */
+  useEffect(() => {
+    runRollUp(retentionWeeks);
+  }, [retentionWeeks, runRollUp, state]);
+
+  useEffect(() => {
+    const check = () => {
+      if (document.visibilityState === 'visible') runRollUp(retentionWeeks);
+    };
+    window.addEventListener('focus', check);
+    document.addEventListener('visibilitychange', check);
+    return () => {
+      window.removeEventListener('focus', check);
+      document.removeEventListener('visibilitychange', check);
+    };
+  }, [retentionWeeks, runRollUp]);
+
   useEffect(() => {
     if (firstState.current) {
       firstState.current = false;
@@ -994,6 +1141,127 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     commit((current) => ({ ...current, events: current.events.filter((event) => event.source?.url !== url) }));
   }, [commit, updateFeeds]);
 
+  // ── Two-way calendars (CalDAV) ─────────────────────────────────────────────
+  //
+  // A feed mirrors somebody else's calendar; this is a calendar the planner is
+  // allowed to change. The plan is drawn before anything is written (see
+  // calendarSync.ts for the rules), then the writes go out one by one, and the
+  // subscription record keeps the mapping between planner ids and remote
+  // addresses so a second run updates the same items instead of copying them.
+  const [calendars, setCalendarsState] = useState<CalendarSubscription[]>(() => loadCalendars());
+  const calendarsRef = useRef(calendars);
+  const [calendarsSyncing, setCalendarsSyncing] = useState(false);
+  const syncingRef = useRef(false);
+
+  const updateCalendars = useCallback((next: CalendarSubscription[]) => {
+    calendarsRef.current = next;
+    saveCalendars(next);
+    setCalendarsState(next);
+  }, []);
+
+  const syncCalendarNow = useCallback(async (url: string) => {
+    const subscription = calendarsRef.current.find((item) => item.url === url);
+    if (!subscription) return;
+    const credentials = { url: subscription.url, username: subscription.username, password: subscription.password };
+    const { start, end } = pullWindow();
+    try {
+      const remote = await remoteList(credentials, start, end);
+      const plan = planCalendarSync(stateRef.current, subscription, remote);
+      if (plan.pull.length > 0 || plan.removeLocal.length > 0) {
+        commit((current) => {
+          const pulled = plan.pull.reduce((next, item) => applyCalendarPull(next, subscription.url, item), current);
+          return applyCalendarRemovals(pulled, plan.removeLocal);
+        });
+      }
+      const pushed: { id: string; href: string; etag: string }[] = [];
+      const removed: { href: string }[] = [];
+      const failures: string[] = [];
+      for (const item of plan.push) {
+        try {
+          const result = await remotePush(credentials, item.data, item.href, item.etag);
+          pushed.push({ id: item.id, href: result.href, etag: result.etag });
+          commit((current) => markPushed(current, item.id, result.href, subscription.url));
+        } catch (caught) {
+          // One event the server does not want must not abandon the rest.
+          failures.push(caught instanceof Error ? caught.message : t('The calendar refused an event.'));
+        }
+      }
+      for (const item of plan.removeRemote) {
+        try {
+          await remoteDelete(credentials, item.href, item.etag);
+          removed.push({ href: item.href });
+        } catch (caught) {
+          failures.push(caught instanceof Error ? caught.message : t('The calendar refused a deletion.'));
+        }
+      }
+      const record = recordSync(subscription, plan, { pushed, removed });
+      updateCalendars(calendarsRef.current.map((item) => (item.url === url ? (failures[0] ? recordFailure(record, failures[0]) : record) : item)));
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : t('The calendar could not be synced.');
+      updateCalendars(calendarsRef.current.map((item) => (item.url === url ? recordFailure(item, message) : item)));
+    }
+  }, [commit, updateCalendars]);
+
+  const syncCalendars = useCallback(async (force = false) => {
+    if (isTestEnv() || syncingRef.current) return;
+    const due = calendarsRef.current.filter(
+      (item) => force || !item.lastSyncedAt || Date.now() - Date.parse(item.lastSyncedAt) > CALENDAR_STALE_MINUTES * 60_000,
+    );
+    if (due.length === 0) return;
+    syncingRef.current = true;
+    setCalendarsSyncing(true);
+    try {
+      for (const item of due) await syncCalendarNow(item.url);
+    } finally {
+      syncingRef.current = false;
+      setCalendarsSyncing(false);
+    }
+  }, [syncCalendarNow]);
+
+  useEffect(() => {
+    if (isTestEnv() || calendars.length === 0) return;
+    void syncCalendars(false);
+    const id = window.setInterval(() => void syncCalendars(false), 30 * 60 * 1000);
+    return () => window.clearInterval(id);
+  }, [calendars.length, syncCalendars]);
+
+  const discoverCalendars = useCallback(
+    async (input: { url: string; username: string; password: string }) => remoteDiscover(input),
+    [],
+  );
+
+  const addCalendar = useCallback(async (input: { url: string; name?: string; username: string; password: string; push: boolean }): Promise<string | null> => {
+    const url = input.url.trim();
+    if (!/^https:\/\//i.test(url)) return t('Enter the calendar address starting with https.');
+    if (calendarsRef.current.some((item) => item.url === url)) return t('That calendar is already connected.');
+    if (calendarsRef.current.length >= MAX_CALENDARS) return t('Remove a calendar before adding another one.');
+    const record: CalendarSubscription = {
+      url,
+      name: (input.name ?? '').slice(0, 120),
+      username: input.username.slice(0, 200),
+      password: input.password.slice(0, 400),
+      push: input.push,
+      addedAt: new Date().toISOString(),
+      lastSyncedAt: null,
+      lastError: null,
+      seen: [],
+      hrefs: {},
+      etags: {},
+      dropped: [],
+    };
+    updateCalendars([...calendarsRef.current, record]);
+    await syncCalendarNow(url);
+    return calendarsRef.current.find((item) => item.url === url)?.lastError ?? null;
+  }, [syncCalendarNow, updateCalendars]);
+
+  const removeCalendar = useCallback((url: string) => {
+    updateCalendars(calendarsRef.current.filter((item) => item.url !== url));
+  }, [updateCalendars]);
+
+  const setCalendarPush = useCallback((url: string, push: boolean) => {
+    updateCalendars(calendarsRef.current.map((item) => (item.url === url ? { ...item, push } : item)));
+  }, [updateCalendars]);
+
   // ── App icon badge: open items due today (and earlier) ─────────────────────
   useEffect(() => {
     if (typeof navigator === 'undefined' || !('setAppBadge' in navigator)) return;
@@ -1124,6 +1392,24 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     };
   }, [navigate]);
 
+  /**
+   * The desktop app's own hand-off (docs/DESKTOP.md §9). The main process is
+   * what outlives the window, so it gets the reminders the page has worked out
+   * and fires them with nothing on screen. The same debounce as the phone
+   * shells: a burst of edits should settle before the schedule is rebuilt.
+   */
+  const desktopReminderTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (isTestEnv() || !isDesktopShell()) return;
+    if (desktopReminderTimer.current !== null) window.clearTimeout(desktopReminderTimer.current);
+    desktopReminderTimer.current = window.setTimeout(() => {
+      void syncDesktopReminders(state, reminders);
+    }, 300);
+    return () => {
+      if (desktopReminderTimer.current !== null) window.clearTimeout(desktopReminderTimer.current);
+    };
+  }, [state, reminders]);
+
   const pushScheduleTimer = useRef<number | null>(null);
   useEffect(() => {
     if (isTestEnv() || !backgroundPushEnabled()) return;
@@ -1214,6 +1500,16 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     },
     startFresh,
     exportData,
+    retentionWeeks,
+    setRetentionWeeks: (weeks: number) => {
+      const next = normalizeRetention(weeks);
+      saveRetentionWeeks(next);
+      setRetentionWeeksState(next);
+      // Applying the window is a user action, so it gets an answer even when
+      // there is nothing to tidy: silence after picking a number reads as a
+      // setting that did not take. Turning pruning *off* needs no announcement.
+      if (next !== KEEP_EVERYTHING) runRollUp(next, true);
+    },
     importText,
     loadSample,
     flash,
@@ -1231,7 +1527,11 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     openPalette: () => setPaletteOpen(true),
     closePalette: () => setPaletteOpen(false),
     settingsOpen,
-    openSettings: () => setSettingsOpen(true),
+    settingsTab,
+    openSettings: (tab: SettingsTab = 'account') => {
+      setSettingsTab(tab);
+      setSettingsOpen(true);
+    },
     closeSettings: () => setSettingsOpen(false),
     focus,
     startFocus: (session) => setFocus(session),
@@ -1248,6 +1548,7 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     syncStatus,
     syncMessage,
     syncConflicts,
+    conflictChanges,
     keepConflictVersion,
     dismissConflict,
     dismissAllConflicts,
@@ -1264,6 +1565,14 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     syncSharedNow: () => void runSharedSync(),
     feeds,
     addFeed,
+    calendars,
+    calendarsSyncing,
+    discoverCalendars,
+    addCalendar,
+    removeCalendar,
+    setCalendarPush,
+    syncCalendars,
+    syncCalendarNow,
     removeFeed,
     refreshFeeds,
     weather,
@@ -1418,7 +1727,7 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     },
     setIntention: (date, text) => commit((current) => setIntentionIn(current, date, text)),
     logMood: (date, value, taskId) => commit((current) => setMoodIn(current, date, value, taskId)),
-  }), [state, ready, error, notice, saveBlocked, route, navigate, composer, confirm, startFresh, exportData, importText, loadSample, flash, dismissNotice, praise, undo, redo, canUndo, canRedo, themeMode, accent, paletteOpen, settingsOpen, focus, confettiSeed, celebrate, clearCompletedTasks, commit, reminders, setReminders, weekStart, setWeekStart, display, setDisplay, sync, syncStatus, syncMessage, syncConflicts, keepConflictVersion, dismissConflict, dismissAllConflicts, syncAvailable, startSync, stopSync, runSync, deleteCloudCopy, shared, sharedStatus, sharedMessage, startShared, stopShared, runSharedSync, feeds, addFeed, removeFeed, refreshFeeds, weather, setWeather, recordTombstone, updatePanels, setPanelEnabled]);
+  }), [state, ready, error, notice, saveBlocked, route, navigate, composer, confirm, startFresh, exportData, retentionWeeks, importText, loadSample, flash, dismissNotice, praise, undo, redo, canUndo, canRedo, themeMode, accent, paletteOpen, settingsOpen, settingsTab, focus, confettiSeed, celebrate, clearCompletedTasks, commit, reminders, setReminders, weekStart, setWeekStart, display, setDisplay, sync, syncStatus, syncMessage, syncConflicts, conflictChanges, keepConflictVersion, dismissConflict, dismissAllConflicts, syncAvailable, startSync, stopSync, runSync, deleteCloudCopy, shared, sharedStatus, sharedMessage, startShared, stopShared, runSharedSync, feeds, addFeed, removeFeed, refreshFeeds, calendars, calendarsSyncing, discoverCalendars, addCalendar, removeCalendar, setCalendarPush, syncCalendars, syncCalendarNow, weather, setWeather, recordTombstone, updatePanels, setPanelEnabled, runRollUp]);
 
   return <PlannerContext.Provider value={value}>{children}</PlannerContext.Provider>;
 }

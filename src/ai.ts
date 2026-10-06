@@ -1585,6 +1585,99 @@ export async function generateGuardianGuidance(options: {
   return guidance;
 }
 
+/**
+ * A plan or goal the guardian's AI has drafted for them to edit and send.
+ *
+ * Deliberately the same shape as what the composer can send, so the flow is
+ * "AI fills the form, the guardian reads it, the student decides" — never
+ * "AI writes to the student". Nothing here is sent anywhere by itself.
+ */
+export interface GuardianProposalDraft {
+  title: string;
+  note: string;
+  steps: { title: string; subject: string | null; minutes: number | null }[];
+}
+
+/** How many steps a draft may carry — the same ceiling the composer enforces. */
+const PROPOSAL_STEP_LIMIT = 6;
+
+/**
+ * Keeps a drafted proposal inside the box the guardian can actually send.
+ *
+ * Two rules matter beyond trimming: a step with no title is dropped rather
+ * than sent as an empty row, and a subject the student never shared is
+ * replaced with `null` instead of being passed on — the AI has been told not
+ * to invent one, and this is what makes that true rather than aspirational.
+ */
+export function normalizeProposalDraft(raw: unknown, knownSubjects: string[] = []): GuardianProposalDraft {
+  const record = asRecord(raw) ?? {};
+  const steps: GuardianProposalDraft['steps'] = [];
+  for (const candidate of Array.isArray(record.steps) ? record.steps : []) {
+    const step = asRecord(candidate);
+    const title = typeof step?.title === 'string' ? step.title.replace(/\s+/g, ' ').trim().slice(0, 120) : '';
+    if (!title) continue;
+    const subjectText = typeof step?.subject === 'string' ? step.subject.replace(/\s+/g, ' ').trim().slice(0, 60) : '';
+    const minutes = Number(step?.minutes);
+    // The student's own spelling, when it matches one they shared: the composer
+    // offers their subjects in a datalist, and a step tagged "thermodynamics"
+    // next to "Thermodynamics" reads like two different subjects.
+    const known = subjectText
+      ? knownSubjects.find((name) => name.trim().toLowerCase() === subjectText.toLowerCase()) ?? null
+      : null;
+    steps.push({
+      title,
+      subject: known,
+      minutes: Number.isFinite(minutes) && minutes > 0 ? Math.min(240, Math.max(5, Math.round(minutes))) : null,
+    });
+    if (steps.length >= PROPOSAL_STEP_LIMIT) break;
+  }
+  return {
+    title: tidySummary(record.title, 120, 1) || '',
+    note: tidySummary(record.note, 400, 2) || '',
+    steps,
+  };
+}
+
+/**
+ * Guardian: "draft me a plan (or a goal) I can read and send".
+ *
+ * The payload is the same weekly-totals-only shape the guidance call uses, so
+ * a draft cannot leak what the guardian is not allowed to see; the subject
+ * names in the result are the ones the student already shared. The result is
+ * a draft for the guardian to edit — the student still accepts or declines it
+ * through the ordinary panel inbox.
+ */
+export async function draftGuardianProposal(options: {
+  results: WeekResults;
+  history?: WeekResults[];
+  kind: 'plan' | 'goal';
+  signal?: AbortSignal;
+}): Promise<GuardianProposalDraft> {
+  const payload = {
+    ...buildGuardianGuidancePayload(options.results, options.history ?? []),
+    draftKind: options.kind,
+  };
+  const system =
+    'You draft a study suggestion that a parent or advisor will read, edit, and send to one student, using only weekly totals: how much was planned, how much got done, focused minutes, subject names, and any words the student chose to send. ' +
+    'You have no access to their tasks, notes, or schedule, and must never imply that you do. ' +
+    'Write 3 to 6 short, concrete steps, each tied to a subject that appears in the results; use no other subject and invent no deadlines, dates, grades, teachers, or events. ' +
+    'Minutes per step are estimates between 15 and 90. The note is one or two warm, plain sentences that frame the suggestion as an offer, not an instruction. ' +
+    'Never diagnose, never moralise, never suggest punishment or rewards. ' +
+    'Return ONLY JSON: {"title":"short name for the suggestion","note":"1-2 sentences","steps":[{"title":"what to do","subject":"subject name or null","minutes":45}]}.';
+  const raw = await groqJsonInternal(
+    system,
+    `Here are the weekly results the student chose to share, and which kind of draft is wanted.\n${JSON.stringify(payload)}`,
+    undefined,
+    options.signal,
+    1200,
+  );
+  const draft = normalizeProposalDraft(raw, options.results.subjects.map((subject) => subject.name));
+  if (!draft.title && draft.steps.length === 0) {
+    throw new Error(t('Groq returned a draft in an unexpected format. Try again.'));
+  }
+  return draft;
+}
+
 export function hasReviewActivity(state: PlannerState, range: PlanRange): boolean {
   const lastDate = addDays(range.startDate, range.days - 1);
   return state.tasks.some((task) => task.dueDate !== null && task.dueDate >= range.startDate && task.dueDate <= lastDate) ||

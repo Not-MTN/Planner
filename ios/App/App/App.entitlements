@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Universal links: the domains whose https addresses open this app.
+
+	  PLANNER_LINK_HOST is a build setting (see project.pbxproj), not a literal,
+	  so the same project builds an app for any deployment — the Apps workflow
+	  and `npm run native:sync` fill it in from PLANNER_LINK_ORIGIN,
+	  PLANNER_APP_URL or PLANNER_API_ORIGIN. Its default is a domain nobody
+	  owns, so an app built without being told where its links live is never
+	  chosen for someone else's.
+
+	  Two things have to be true beyond this file, or iOS will find the app and
+	  then ignore it: the domain must serve /.well-known/apple-app-site-association
+	  naming <TEAM_ID>.com.notmtn.planner (scripts/deep-link-files.mjs writes it
+	  from IOS_TEAM_ID), and the App ID in the Apple Developer portal must have
+	  the Associated Domains capability switched on. docs/APPS.md §3 has both.
+	-->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:$(PLANNER_LINK_HOST)</string>
+	</array>
+	<!--
+	  Push notifications (docs/APPS.md §9). The environment, not the app, is
+	  what decides between Apple's sandbox and production service: a Debug
+	  build talks to the sandbox, a Release archive to production. The APNs
+	  auth key is a server secret (APNS_KEY_P8), never shipped in the app —
+	  the device only ever hands its token to the server and waits.
+
+	  A distribution build needs the Push Notifications capability switched on
+	  for the App ID in the Apple Developer portal, or the archive is rejected
+	  for an entitlement the provisioning profile does not carry.
+	-->
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>

@@ -1,9 +1,14 @@
 /* Planner service worker — offline app shell. Planner data lives in localStorage, never here. */
-const CACHE = 'planner-shell-v4';
+const CACHE = 'planner-shell-v5';
 const SHELL = ['/', '/index.html', '/theme-init.js', '/manifest.webmanifest', '/favicon.svg'];
 
+// A new worker goes to the waiting state instead of taking over on install.
+// The page decides when to swap: it shows "A new version is ready" and posts
+// SKIP_WAITING when the reader taps Reload. Skipping waiting here would drop
+// the page out from under whatever is being typed the moment a deploy lands —
+// and the app reloads on `controllerchange`, so it is the user's tap that
+// reloads, not the deploy.
 self.addEventListener('install', (event) => {
-  self.skipWaiting();
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
 });
 

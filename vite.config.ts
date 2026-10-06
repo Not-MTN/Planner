@@ -320,7 +320,7 @@ function authApi(databaseUrl: string | undefined): Plugin {
   };
 }
 
-function pushApi(pushEnv: { DATABASE_URL?: string; VAPID_PUBLIC_KEY?: string; VAPID_PRIVATE_KEY?: string; VAPID_SUBJECT?: string; CRON_SECRET?: string }): Plugin {
+function pushApi(pushEnv: { DATABASE_URL?: string; VAPID_PUBLIC_KEY?: string; VAPID_PRIVATE_KEY?: string; VAPID_SUBJECT?: string; CRON_SECRET?: string; FCM_SERVICE_ACCOUNT?: string; APNS_KEY_ID?: string; APNS_TEAM_ID?: string; APNS_KEY_P8?: string; APNS_BUNDLE_ID?: string }): Plugin {
   const middleware: NextHandleFunction = (request, response, next) => {
     if (!request.url?.startsWith('/push/')) { next(); return; }
     const pathname = `/api${request.url}`;
@@ -373,6 +373,13 @@ export default defineConfig(({ mode }) => {
   // so their build carries the address. Empty for the website and for local
   // development, where `/api/...` stays relative.
   const apiOrigin = normalizeAppApiOrigin(env.PLANNER_API_ORIGIN || fileEnv.PLANNER_API_ORIGIN);
+  // Where a link the app hands out (a guardian's invite QR, "get the apps")
+  // should point. A packaged app is served from https://localhost, so it cannot
+  // be its own answer; the deployment that built it is. Any of the three names
+  // answers, and an explicit PLANNER_LINK_ORIGIN wins.
+  const linkOrigin = normalizeAppApiOrigin(
+    env.PLANNER_LINK_ORIGIN || fileEnv.PLANNER_LINK_ORIGIN || env.PLANNER_APP_URL || fileEnv.PLANNER_APP_URL || env.PLANNER_API_ORIGIN || fileEnv.PLANNER_API_ORIGIN,
+  );
   // The API handlers read this one straight from `process.env`, exactly as the
   // deployed function does — so a value in `.env.local` has to be put there,
   // or a shell pointed at a local dev server would be refused as cross-origin.
@@ -384,6 +391,11 @@ export default defineConfig(({ mode }) => {
     VAPID_PUBLIC_KEY: env.VAPID_PUBLIC_KEY || fileEnv.VAPID_PUBLIC_KEY,
     VAPID_PRIVATE_KEY: env.VAPID_PRIVATE_KEY || fileEnv.VAPID_PRIVATE_KEY,
     VAPID_SUBJECT: env.VAPID_SUBJECT || fileEnv.VAPID_SUBJECT,
+    FCM_SERVICE_ACCOUNT: env.FCM_SERVICE_ACCOUNT || fileEnv.FCM_SERVICE_ACCOUNT,
+    APNS_KEY_ID: env.APNS_KEY_ID || fileEnv.APNS_KEY_ID,
+    APNS_TEAM_ID: env.APNS_TEAM_ID || fileEnv.APNS_TEAM_ID,
+    APNS_KEY_P8: env.APNS_KEY_P8 || fileEnv.APNS_KEY_P8,
+    APNS_BUNDLE_ID: env.APNS_BUNDLE_ID || fileEnv.APNS_BUNDLE_ID,
     CRON_SECRET: env.CRON_SECRET || fileEnv.CRON_SECRET,
     ERROR_REPORT_WEBHOOK: env.ERROR_REPORT_WEBHOOK || fileEnv.ERROR_REPORT_WEBHOOK,
     AI_ENV: { ...env, ...fileEnv } as Record<string, string | undefined>,
@@ -392,9 +404,17 @@ export default defineConfig(({ mode }) => {
     // `__PLANNER_API_ORIGIN__` is read by src/shared/nativeShell.ts. Defining it
     // (rather than a VITE_ variable) keeps the name identical in the app, in
     // this config, and in the server-side allow-list docs.
-    define: { __PLANNER_API_ORIGIN__: JSON.stringify(apiOrigin), __APP_VERSION__: JSON.stringify(appVersion) },
+    define: {
+      __PLANNER_API_ORIGIN__: JSON.stringify(apiOrigin),
+      __PLANNER_LINK_ORIGIN__: JSON.stringify(linkOrigin),
+      __APP_VERSION__: JSON.stringify(appVersion),
+    },
     plugins: [appOrigins(), react(), groqProxyPlugin(apiKey, model, visionModel), syncApi(databaseUrl), authApi(databaseUrl), icsApi(), pushApi(pushEnv), apiFallback()],
     build: {
+      // `scripts/bundle-budget.mjs` keys its baseline by module, not by the
+      // content hash in each filename, and this is where it learns that
+      // mapping. The file is inert: nothing fetches it at runtime.
+      manifest: true,
       rollupOptions: {
         output: {
           manualChunks: {
@@ -420,6 +440,23 @@ export default defineConfig(({ mode }) => {
     test: {
       environment: 'node',
       include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'desktop/*.test.mjs', 'scripts/**/*.test.mjs'],
+      /**
+       * Files share a worker and a module registry instead of getting a fresh
+       * process each.
+       *
+       * `isolate: true` (the default) means one worker per test file — a
+       * hundred and five of them — and each one pays its own browser/node
+       * start-up and re-evaluates every module it imports. Measured on this
+       * suite, sharing is worth about a fifth of the wall time.
+       *
+       * What it costs is isolation, and the honest statement of that is
+       * `src/testSetup.ts`: a file's mocks and stubbed globals outlive it
+       * unless something clears them, so something does, after every test. The
+       * suite is the check — it has to pass in one shared registry, which is a
+       * stricter order than per-file isolation ever demanded.
+       */
+      isolate: false,
+      setupFiles: ['src/testSetup.ts'],
     },
   };
 });

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { encodeQr, qrSvgPath } from '../qr';
 import { inviteLink } from '../route';
+import { linkOrigin } from '../shared/nativeShell';
 import { t } from '../i18n';
 
 /**
@@ -9,9 +10,11 @@ import { t } from '../i18n';
  *
  * The symbol carries a link, not the bare code, because the thing a student
  * wants after scanning is their own panel with the code already in place — not
- * a string of sixteen characters to retype from memory. The link stays
- * relative to wherever this is shown, so a self-hosted copy hands out its own
- * address and not ours.
+ * a string of sixteen characters to retype from memory. The link points at
+ * whichever copy of Planner is showing it, so a self-hosted deployment hands
+ * out its own address and not ours; inside the installed app that address is
+ * the deployment's, since the app itself is served from localhost (see
+ * `linkOrigin`).
  *
  * The symbol is drawn as one path rather than a few hundred rectangles: same
  * picture, a fraction of the nodes.
@@ -20,7 +23,11 @@ export function InviteQr({ code }: { code: string }) {
   const [copied, setCopied] = useState(false);
 
   const drawing = useMemo(() => {
-    const origin = typeof window === 'undefined' ? '' : window.location.origin;
+    const origin = linkOrigin();
+    // A build with no deployment behind it has no address to hand out. A symbol
+    // pointing at the app's own localhost would scan and then go nowhere, so
+    // none is drawn — the code above still works when read out or typed.
+    if (!origin) return { link: '', path: '', viewBox: '' };
     const link = inviteLink(code, origin);
     try {
       // A symbol too big to scan is worse than no symbol, so nothing is drawn

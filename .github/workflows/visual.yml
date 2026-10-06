@@ -1,0 +1,141 @@
+# Visual regression: the screens in e2e/visual.spec.ts, compared against
+# committed baselines.
+#
+# Baselines are generated *here* rather than on a laptop on purpose: font
+# rendering and subpixel layout differ between machines, so a baseline captured
+# on one machine fails on another for reasons nobody can fix. The runner image
+# is the single reference.
+#
+# The workflow mostly looks after itself: on a branch where no baselines are
+# committed yet it writes them, commits them and pushes them to that branch, so
+# the next run compares against a real reference instead of starting empty. The
+# `update_baselines` input does the same thing on purpose, for the times a change
+# is meant to move every picture.
+#
+# Either way the images also come back as the `visual-baselines` artifact, and
+# they should be reviewed in the pull request the way code is: a picture that
+# changed when you did not mean it to is a bug report that writes itself.
+name: Visual regression
+
+permissions:
+  # Used for one thing: committing fresh baselines to a same-repo branch. A pull
+  # request from a fork gets a read-only token, so it only uploads the artifact.
+  contents: write
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'e2e/**'
+      - 'index.html'
+      - 'public/**'
+      - 'playwright.config.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/visual.yml'
+  workflow_dispatch:
+    inputs:
+      update_baselines:
+        description: 'Regenerate the baseline images and upload them as an artifact'
+        type: boolean
+        default: false
+
+concurrency:
+  group: visual-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  visual:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      # On a pull request the default checkout is the merge commit, and baselines
+      # committed on top of that would be wrong to push back. Check out the
+      # branch tip instead, from whichever repository owns it.
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # A fresh checkout, or one where a screenshot was just added, has no
+      # baseline for it — Playwright writes the file and fails the test, which
+      # is correct locally and useless here. `check:visual-baselines` answers
+      # the real question instead ("is any picture missing?") and the answer
+      # regenerates and commits a fresh set once. After that, a mismatch is a
+      # real failure.
+      - name: Check the baselines are complete
+        id: baselines
+        run: |
+          if npm run --silent check:visual-baselines; then
+            echo "missing=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "missing=true" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Visual baselines are incomplete::This run writes the full set and commits it to e2e/visual.spec.ts-snapshots/; the next push is the run that compares."
+          fi
+
+      # The suite serves the app from a production build (playwright.config.ts),
+      # so the screenshots show what ships rather than what the dev server does.
+      - name: Generate the visual baselines
+        if: inputs.update_baselines || steps.baselines.outputs.missing == 'true'
+        run: npm run test:e2e:visual:update
+
+      - name: Run the visual suite
+        if: ${{ !inputs.update_baselines && steps.baselines.outputs.missing != 'true' }}
+        run: npm run test:e2e:visual
+
+      # On a first run the images are the deliverable; on a regeneration they are
+      # what the branch gets. Uploaded either way, even if the run failed, so the
+      # images can be looked at even when the push could not happen.
+      - name: Upload baselines
+        if: always() && (inputs.update_baselines || steps.baselines.outputs.missing == 'true')
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-baselines
+          path: e2e/visual.spec.ts-snapshots/
+          if-no-files-found: warn
+          retention-days: 30
+
+      # Only after a clean generation, and never for a fork (its token cannot
+      # push): a half-written set of pictures must not become the reference.
+      - name: Commit the baselines to the branch
+        if: >-
+          success() && (inputs.update_baselines || steps.baselines.outputs.missing == 'true') &&
+          (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        env:
+          # Through the environment, not interpolated into the script: a branch
+          # name is attacker-controlled text in a pull request. The workflow
+          # linter (npm run lint:workflows) fails on the inline form.
+          BASELINE_BRANCH: ${{ github.event.pull_request.head.ref || github.ref_name }}
+        run: |
+          if [ -z "$(git status --porcelain e2e/visual.spec.ts-snapshots)" ]; then
+            echo "Baselines are already committed — nothing to do."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add e2e/visual.spec.ts-snapshots
+          git commit -m "Add the visual baselines, generated on CI"
+          git push origin "HEAD:$BASELINE_BRANCH"
+
+      # On a mismatch: the diff images and the HTML report say which pixel moved.
+      - name: Upload the failure report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-report
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 14

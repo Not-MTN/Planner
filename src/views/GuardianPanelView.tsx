@@ -9,6 +9,7 @@ import {
   CheckIcon,
   HeartIcon,
   PlusIcon,
+  PrinterIcon,
   SearchIcon,
   SlidersIcon,
   SparkIcon,
@@ -16,6 +17,10 @@ import {
   UserIcon,
 } from '../icons';
 import { friendlyGroqError, generateGuardianGuidance, type GuardianGuidance } from '../ai';
+import { advisingHtml, buildAdvisingAgenda } from '../advising';
+import { downloadBlob } from '../download';
+import { printDocument } from '../printDocument';
+import { todayISO } from '../dates';
 import { faNum, t } from '../i18n';
 import { Field, Empty } from '../components/ui';
 import { CompletionRing, FocusTrend, SubjectSplit, SubjectTrend, WeekBars, minutesLabel } from '../components/charts';
@@ -208,6 +213,25 @@ export function GuardianPanelView() {
     } finally {
       setGuiding(null);
     }
+  };
+
+  /**
+   * The agenda for the next meeting, as a page of its own.
+   *
+   * Printed rather than shown in a modal: it is meant to be in front of two
+   * people at a table, and a browser window is how that page gets paper (or a
+   * PDF). When pop-ups are blocked the same document is downloaded instead, so
+   * the button never looks like it worked while doing nothing.
+   */
+  const printAgenda = (link: GuardianLink) => {
+    const agenda = buildAdvisingAgenda({ student: link.displayName, history: link.history, results: link.results });
+    const html = advisingHtml(agenda, {
+      madeOn: todayISO(),
+      dir: document.documentElement.dir || 'ltr',
+      lang: document.documentElement.lang || 'en',
+    });
+    if (printDocument(html)) return;
+    downloadBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), `advising-${link.username || link.id}.html`);
   };
 
   const send = async (link: GuardianLink, event: React.FormEvent) => {
@@ -579,8 +603,8 @@ export function GuardianPanelView() {
                         <div>
                           <p>{t('Done')}</p>
                           <strong>
-                            {link.results.done}
-                            <small> / {link.results.planned}</small>
+                            {faNum(link.results.done)}
+                            <small> / {faNum(link.results.planned)}</small>
                           </strong>
                         </div>
                         <div>
@@ -726,6 +750,13 @@ export function GuardianPanelView() {
                                     <SparkIcon size={13} />
                                   )}
                                   {guidance[link.id] ? t('Ask again') : t('Ask')}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost btn-tiny"
+                                  onClick={() => printAgenda(link)}
+                                >
+                                  <PrinterIcon size={13} /> {t('Meeting one-pager')}
                                 </button>
                               </div>
                               {guidance[link.id] ? (

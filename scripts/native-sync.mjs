@@ -44,6 +44,10 @@ function runStep(command, args) {
 function summarize() {
   const appUrl = (process.env.PLANNER_APP_URL ?? '').trim();
   const apiOrigin = (process.env.PLANNER_API_ORIGIN ?? '').trim();
+  // Where a link the app hands out (a guardian's invite QR) has to point, and
+  // the domain whose https addresses open the app. Any of the three names
+  // answers; the packaged app is served from localhost, so it cannot be its own.
+  const linkOrigin = (process.env.PLANNER_LINK_ORIGIN ?? '').trim() || appUrl || apiOrigin;
   console.log('\n── what was built ─────────────────────────────────────────────');
   if (appUrl) {
     console.log(`  the app loads   ${appUrl}`);
@@ -61,6 +65,13 @@ function summarize() {
     console.log('  its API         none — this build is local-only: the planner works,');
     console.log('                  sign-in and sync have nowhere to go.');
     console.log('  to change that  set PLANNER_APP_URL or PLANNER_API_ORIGIN and re-run.');
+  }
+  if (linkOrigin) {
+    console.log(`  its links       ${linkOrigin} — once that domain serves the two`);
+    console.log('                  /.well-known files, its links open the app');
+    console.log('                  instead of a browser tab (docs/APPS.md §3).');
+  } else {
+    console.log('  its links       planner:// only — no deployment address to claim.');
   }
   console.log('───────────────────────────────────────────────────────────────\n');
 }

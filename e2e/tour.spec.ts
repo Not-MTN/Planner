@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
+import { bootOffline } from './support';
 
 test.beforeEach(async ({ page }) => {
+  await bootOffline(page);
   await page.goto('/#/today');
   await page.evaluate(() => localStorage.clear());
   await page.reload();
@@ -14,9 +16,11 @@ test('first visit asks for a language, then teaches the app step by step', async
 
   await bubble.getByRole('button', { name: /English/ }).click();
 
-  // Walks the day → quick add → plan … each with a spotlight.
-  await expect(bubble).toContainText('Your day at a glance');
-  await expect(bubble).toContainText('Tour 1 of 14');
+  // Walks the day → AI → drafts → tasks … each with a spotlight. The step
+  // titles are the ones in TourSheet.tsx; when the tour is reworded this is the
+  // assertion that asks whether the words are really better.
+  await expect(bubble).toContainText('Your day, at a glance');
+  await expect(bubble).toContainText('Tour 1 of 12');
   await expect(page.locator('.tour-spot')).toBeVisible();
 
   // Showcase: the page under the overlay cannot be pressed.
@@ -24,16 +28,17 @@ test('first visit asks for a language, then teaches the app step by step', async
   await expect(page.locator('.quick-add input')).not.toBeFocused();
 
   await bubble.getByRole('button', { name: 'Next' }).click();
-  await expect(bubble).toContainText('Type like you think');
+  await expect(bubble).toContainText('Talk to your AI coach');
   await bubble.getByRole('button', { name: 'Next' }).click();
-  await expect(bubble).toContainText('One tap plans the day');
+  await expect(bubble).toContainText('Every draft, kept safe');
   await bubble.getByRole('button', { name: 'Next' }).click();
-  await expect(bubble).toContainText('Your hours, gently held');
+  await expect(bubble).toContainText('All your tasks, your way');
   await bubble.getByRole('button', { name: 'Back' }).click();
-  await expect(bubble).toContainText('One tap plans the day');
+  await expect(bubble).toContainText('Every draft, kept safe');
 
-  // Walk to the end and finish.
-  for (let i = 0; i < 11; i += 1) {
+  // Walk to the end and finish: 12 steps, and we are on step 3, so nine more
+  // presses land on the last one — where the button stops saying "Next".
+  for (let i = 0; i < 9; i += 1) {
     await bubble.getByRole('button', { name: 'Next' }).click();
   }
   await expect(bubble).toContainText("That's the whole tour");
@@ -76,10 +81,18 @@ test('the tour only reopens from the how-it-works buttons', async ({ page }) => 
     await page.getByRole('button', { name: 'More' }).click();
     await page.getByRole('button', { name: 'How Planner works' }).click();
   } else {
-    await page.getByTitle('How Planner works').click();
+    // Two controls mean "how it works" on desktop — the rail icon (labelled
+    // that way) and the sidebar tool whose visible text says it — so both the
+    // title and the role name are ambiguous. The sidebar label is the one a
+    // person reads.
+    await page.locator('.side-tool.side-help').click();
   }
   const bubble = page.locator('[data-tour-bubble]');
   await expect(bubble).toBeVisible();
+  // A tour that was reopened starts at the language picker — it has not been
+  // answered in this session — where the skip button reads "Skip the tour".
+  const english = bubble.getByRole('button', { name: /English/ });
+  if (await english.count()) await english.click();
   await bubble.getByRole('button', { name: 'Skip tour' }).click();
   await expect(bubble).toHaveCount(0);
 });
@@ -90,9 +103,14 @@ test('the Why Planner sheet opens from settings and offers the tour', async ({ p
   await page.reload();
   await page.locator('[data-tour="settings"]').click();
   const dialog = page.getByRole('dialog');
+  // "New here?" moved into the App tab when settings grew its tab bar.
+  // `exact` because "App" is a prefix of "Appearance".
+  await dialog.getByRole('tab', { name: 'App', exact: true }).click();
   await expect(dialog).toContainText('New here?');
   await dialog.getByRole('button', { name: 'Why Planner?' }).click();
-  const about = page.getByRole('dialog');
+  // The settings sheet closes and the About sheet opens; naming the content
+  // keeps the locator on the sheet that is actually being asked about.
+  const about = page.getByRole('dialog').filter({ hasText: 'Private by design' });
   await expect(about).toContainText('Private by design');
   await expect(about).toContainText('Works everywhere');
   await about.getByRole('button', { name: 'Done' }).click();

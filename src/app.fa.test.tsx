@@ -10,7 +10,10 @@ describe('Persian UI', () => {
     Element.prototype.scrollIntoView = () => undefined;
     window.scrollTo = () => undefined;
     localStorage.setItem('planner-lang', 'fa');
-    const { applyDocumentLang } = await import('./i18n');
+    const { applyDocumentLang, loadDictionary } = await import('./i18n');
+    // Dictionaries arrive on demand (src/i18n.ts): the test reads Persian
+    // labels, so it waits for Persian the way the app does before its first paint.
+    await loadDictionary('fa');
     const { createRoot } = await import('react-dom/client');
     const { App } = await import('./App');
     applyDocumentLang();

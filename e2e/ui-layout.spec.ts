@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { bootOffline } from './support';
 
 type LayoutCase = {
   name: string;
@@ -17,6 +18,7 @@ const layouts: LayoutCase[] = [
 ];
 
 async function bootPlanner(page: import('@playwright/test').Page, language: LayoutCase['language'], theme: LayoutCase['theme']) {
+  await bootOffline(page);
   await page.goto('/#/today');
   await page.evaluate(({ nextLanguage, nextTheme }) => {
     localStorage.clear();

@@ -3,12 +3,17 @@ import { isBase64 } from './shared/authContract';
 import { isValidISODate, isValidTime, localDateFromTimestamp, timeToMinutes } from './dates';
 import { REPEAT_SET } from './recurrence';
 import { MAX_PLAN_DAYS } from './duration';
-import { AI_PLAN_LIMIT, GOAL_STEPS_MAX, PRAISE_KEPT, createEmptyPanels, createEmptyState, isGradeLevel, type AIDeclined, type AIDeclinedKind, type AIMemory, type AttachmentRef, type AIMemoryCategory, type ChangeNote, type EventInput, type FixedCommitment, type FocusLog, type GoalAnswer, type GoalSuggestion, type GuardianKind, type GuardianLink, type GuardianNotice, type GuardianPlan, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Panels, type PlanCadence, type PlanItem, type StudentGuardian, type StudentInbox, type StudentSubject, type Subtask, type TaskInput, type TaskRepeat, type WeekResults, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task } from './types';
+import { AI_PLAN_LIMIT, GOAL_STEPS_MAX, PRAISE_KEPT, createEmptyPanels, createEmptyState, isGradeLevel, type AIDeclined, type AIDeclinedKind, type AIMemory, type AttachmentRef, type AIMemoryCategory, type ChangeNote, type EventInput, type FixedCommitment, type FocusLog, type GoalAnswer, type GoalSuggestion, type GuardianKind, type GuardianLink, type GuardianNotice, type GuardianPlan, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Panels, type PlanCadence, type PlanItem, type StudentGuardian, type StudentInbox, type StudentSubject, type Subtask, type TaskInput, type TaskRepeat, type WeekResults, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task, type WeekArchive } from './types';
 import { t } from './i18n';
 import { downloadBlob } from './download';
 
 export const STORAGE_KEY = 'personal-planner.v1';
-export const STORAGE_FULL = t("Browser storage is full, so that change was not saved.");
+/** The message a failed write shows. A function, not a constant: dictionaries
+ *  arrive after this module is evaluated (src/i18n.ts), so a string captured
+ *  here would be English for every language. */
+export function storageFullMessage(): string {
+  return t("Browser storage is full, so that change was not saved.");
+}
 const MAX_BACKUP = 2_000_000;
 const PRIORITY_SET = new Set<string>(PRIORITIES.map((item) => item.id));
 const ACCENT_SET = new Set<string>(ACCENTS);
@@ -517,8 +522,92 @@ export function sanitizeState(raw: unknown): PlannerState | null {
     moods,
     intentions,
     focusLog: sanitizeFocusLog(source.focusLog),
+    archives: sanitizeArchives(source.archives),
     panels: sanitizePanels(source.panels),
   };
+}
+
+/**
+ * Week archives, read back defensively.
+ *
+ * An archive is a small number of numbers, and a corrupted one should cost the
+ * week it describes — not the whole planner. Anything that is not a shape this
+ * app wrote is dropped rather than repaired.
+ */
+function sanitizeArchives(value: unknown): WeekArchive[] {
+  if (!Array.isArray(value)) return [];
+  const number = (input: unknown, max = 1_000_000) =>
+    typeof input === 'number' && Number.isFinite(input) ? Math.min(max, Math.max(0, Math.round(input))) : 0;
+  const seen = new Set<string>();
+  return value
+    .flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') return [];
+      const raw = entry as Record<string, unknown>;
+      const weekStart = asString(raw.weekStart, 10);
+      if (!weekStart || !isValidISODate(weekStart) || seen.has(weekStart)) return [];
+      seen.add(weekStart);
+      const days = (Array.isArray(raw.days) ? raw.days : []).flatMap((day) => {
+        if (!day || typeof day !== 'object') return [];
+        const item = day as Record<string, unknown>;
+        const date = asString(item.date, 10);
+        if (!date || !isValidISODate(date)) return [];
+        const ratio = typeof item.ratio === 'number' && Number.isFinite(item.ratio) ? Math.min(1, Math.max(0, item.ratio)) : null;
+        const mood = typeof item.mood === 'number' && item.mood >= 1 && item.mood <= 5 ? Math.round(item.mood) : null;
+        return [{
+          date,
+          ratio,
+          mood,
+          plannedMinutes: number(item.plannedMinutes, 100_000),
+          focusMinutes: number(item.focusMinutes, 100_000),
+        }];
+      }).slice(0, 7);
+      const habits = (Array.isArray(raw.habits) ? raw.habits : []).flatMap((habit) => {
+        if (!habit || typeof habit !== 'object') return [];
+        const item = habit as Record<string, unknown>;
+        const habitId = asString(item.habitId, 80);
+        const name = asString(item.name, 60)?.trim();
+        if (!habitId || !name) return [];
+        return [{
+          habitId,
+          name,
+          done: number(item.done, 1000),
+          target: number(item.target, 1000),
+          streakEnd: number(item.streakEnd, 1000),
+        }];
+      }).slice(0, 40);
+      const goals = (Array.isArray(raw.goals) ? raw.goals : []).flatMap((goal) => {
+        if (!goal || typeof goal !== 'object') return [];
+        const item = goal as Record<string, unknown>;
+        const goalId = asString(item.goalId, 80);
+        const title = asString(item.title, 140)?.trim();
+        if (!goalId || !title) return [];
+        return [{
+          goalId,
+          title,
+          milestoneDone: number(item.milestoneDone, 1000),
+          milestoneTotal: number(item.milestoneTotal, 1000),
+        }];
+      }).slice(0, 40);
+      const moodAverage =
+        typeof raw.moodAverage === 'number' && Number.isFinite(raw.moodAverage)
+          ? Math.min(5, Math.max(1, Math.round(raw.moodAverage * 10) / 10))
+          : null;
+      return [{
+        weekStart,
+        days,
+        tasksDone: number(raw.tasksDone, 10_000),
+        tasksTotal: number(raw.tasksTotal, 10_000),
+        eventsDone: number(raw.eventsDone, 10_000),
+        eventsTotal: number(raw.eventsTotal, 10_000),
+        habits,
+        focusMinutes: number(raw.focusMinutes, 1_000_000),
+        focusSessions: number(raw.focusSessions, 10_000),
+        moodAverage,
+        goals,
+      }];
+    })
+    .sort((a, b) => a.weekStart.localeCompare(b.weekStart))
+    .slice(-520); // ten years of weeks; beyond that something is wrong, not old
 }
 
 const PANEL_EXPLANATION_LIMIT = 200;
@@ -916,7 +1005,7 @@ export function saveTo(storage: Pick<Storage, 'setItem'>, state: PlannerState): 
     return null;
   } catch (error) {
     const name = error && typeof error === 'object' && 'name' in error ? String(error.name) : '';
-    if (name === 'QuotaExceededError') return STORAGE_FULL;
+    if (name === 'QuotaExceededError') return storageFullMessage();
     return t("That change could not be saved in this browser.");
   }
 }

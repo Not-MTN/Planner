@@ -15,3 +15,12 @@ desktop/node_modules
 desktop/dist
 desktop/release
 desktop/config.json
+
+# Native push credentials (docs/APPS.md §9). Both files name a project, a
+# sender and a key id; the APNs auth key is a private key. None of them belongs
+# in the repository — each deployment supplies its own.
+google-services.json
+**/google-services.json
+GoogleService-Info.plist
+**/GoogleService-Info.plist
+*.p8

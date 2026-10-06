@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { bootOffline } from './support';
 import { addDays, todayISO } from '../src/dates';
 import { addTask, logFocus } from '../src/mutate';
 import { weekOf } from '../src/panels';
@@ -88,7 +89,7 @@ async function expectNoOverflow(page: Page): Promise<void> {
 
 test.beforeEach(async ({ page }) => {
   // Exercise the supported offline boot with the saved planner, not the sign-in flow.
-  await page.route('**/api/auth/session', (route) => route.abort());
+  await bootOffline(page);
   await page.addInitScript((state) => {
     if (localStorage.getItem('panel-e2e-seeded')) return;
     localStorage.clear();

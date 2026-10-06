@@ -1,0 +1,5 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <!-- The platform prompt speaks the phone's language, not the app's. -->
+    <string name="biometric_use_password">استفاده از رمز</string>
+</resources>

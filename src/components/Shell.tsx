@@ -117,6 +117,7 @@ export function Shell() {
     closePalette,
     settingsOpen,
     openSettings,
+    syncConflicts,
     startFocus,
     syncStatus,
     undo,
@@ -299,14 +300,91 @@ export function Shell() {
   const [aboutOpen, setAboutOpen] = useState(false);
   useEffect(() => onAboutRequest(() => setAboutOpen(true)), []);
 
-  // The PWA shortcut / #/today?qa=1 deep link: drop the caret straight into quick add.
+  // The PWA shortcut / #/today?qa=1 deep link: drop the caret straight into
+  // quick add. This has to survive the boot, which is why it keeps watch rather
+  // than firing once: the account gate swaps itself for the planner, the vault
+  // lands, the day re-renders — and each of those can replace the input the
+  // caret just went into, dropping focus to `<body>` (measured: the caret went
+  // into the box, then the boot finished and took it away). A single 120ms
+  // timer never had a chance.
+  //
+  // The rule is "put the caret back only when nobody has it": if focus was lost
+  // to the page itself, the box takes it again; if a person has focused
+  // anything else in the meantime, this never fights them.
+  const [quickAddPending, setQuickAddPending] = useState(route.name === 'quickadd');
+  // Arriving at the shortcut link while the app is already open counts too.
   useEffect(() => {
-    if (route.name !== 'quickadd') return;
-    const id = window.setTimeout(() => {
-      (document.querySelector<HTMLInputElement>('.quick-add input') ?? document.querySelector<HTMLInputElement>('input[aria-autocomplete]'))?.focus();
-    }, 120);
-    return () => window.clearTimeout(id);
-  }, [route.name, key]);
+    if (route.name === 'quickadd') setQuickAddPending(true);
+  }, [route.name]);
+  useEffect(() => {
+    if (!quickAddPending) return;
+    if (route.name !== 'quickadd' && route.name !== 'today') {
+      setQuickAddPending(false);
+      return;
+    }
+    const find = () =>
+      document.querySelector<HTMLInputElement>('.quick-add input') ??
+      document.querySelector<HTMLInputElement>('input[aria-autocomplete]');
+    let cancelled = false;
+    let delivered = false;
+    const caretIsLoose = () => {
+      const active = document.activeElement;
+      return !active || active === document.body || active === document.documentElement || !document.contains(active);
+    };
+    const attempt = () => {
+      if (cancelled) return;
+      const input = find();
+      if (!input) return;
+      if (document.activeElement !== input) {
+        if (!caretIsLoose()) return; // a person is using something else; leave them alone
+        input.focus();
+      }
+      if (!delivered && document.activeElement === input) {
+        delivered = true;
+        // The shortcut's URL is `#/today?qa=1`; once it has done its job, keep
+        // the query out of the address bar so a reload does not re-trigger the
+        // whole dance. `replaceState` fires no event, so the router is told
+        // explicitly — and because quick-add shares Today's key, normalizing
+        // the route does not remount the view the caret is sitting in.
+        if (window.location.hash.includes('qa=1')) {
+          window.history.replaceState(null, '', window.location.hash.replace(/[?&]qa=1/, '').replace(/\?$/, ''));
+          window.dispatchEvent(new Event('hashchange'));
+        }
+      }
+    };
+    // Watching, not a countdown: the boot can replace the input after any
+    // number of seconds, and a timer that had already given up is how the caret
+    // kept ending up on `<body>` (measured). So a mutation observer plus a slow
+    // interval keep the promise until the person touches anything — a real
+    // tap or key press ends it immediately — or ten seconds pass, whichever
+    // comes first.
+    const observer = new MutationObserver(attempt);
+    observer.observe(document.body, { childList: true, subtree: true });
+    const interval = window.setInterval(attempt, 200);
+    const deadline = window.setTimeout(stop, 10_000);
+    const onInteraction = () => stop();
+    function stop() {
+      if (cancelled) return;
+      cancelled = true;
+      observer.disconnect();
+      window.clearInterval(interval);
+      window.clearTimeout(deadline);
+      document.removeEventListener('pointerdown', onInteraction, true);
+      document.removeEventListener('keydown', onInteraction, true);
+      setQuickAddPending(false);
+    }
+    document.addEventListener('pointerdown', onInteraction, true);
+    document.addEventListener('keydown', onInteraction, true);
+    attempt();
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+      window.clearInterval(interval);
+      window.clearTimeout(deadline);
+      document.removeEventListener('pointerdown', onInteraction, true);
+      document.removeEventListener('keydown', onInteraction, true);
+    };
+  }, [quickAddPending, route.name]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -391,7 +469,26 @@ export function Shell() {
 
   return (
     <div className="app-shell">
-      <a className="skip" href="#content">{t("Skip to content")}</a>
+      {/*
+        `href="#content"` is the honest markup, but this app routes on the hash:
+        letting the fragment through would rewrite the address to `#content` and
+        hand the router a route called "content". So the click moves focus for
+        real — into the `<main tabIndex={-1}>` below — and the URL keeps saying
+        where the person actually is.
+      */}
+      <a
+        className="skip"
+        href="#content"
+        onClick={(event) => {
+          const main = document.getElementById('content');
+          if (!main) return;
+          event.preventDefault();
+          main.focus();
+          main.scrollIntoView({ block: 'start' });
+        }}
+      >
+        {t("Skip to content")}
+      </a>
       <aside className="sidebar">
         <button type="button" className="brand" onClick={() => navigate({ name: 'today' })}>
           <span className="brand-mark"><LeafIcon size={18} /></span>
@@ -501,7 +598,13 @@ export function Shell() {
               <BellIcon size={17} />
               {unreadNotifications > 0 ? <span className="rail-badge" aria-hidden="true" /> : null}
             </button>
-            <button type="button" className="rail-btn rail-util" aria-label={t("Settings")} title={t("Settings")} onClick={openSettings}>
+            <button
+              type="button"
+              className="rail-btn rail-util"
+              aria-label={syncConflicts.length ? t("Settings — {0} change(s) to review", { 0: syncConflicts.length }) : t("Settings")}
+              title={t("Settings")}
+              onClick={() => openSettings(syncConflicts.length ? 'sync' : 'account')}
+            >
               <SlidersIcon size={17} />
             </button>
             <button type="button" className="rail-btn rail-util" aria-label={t("How it works")} title={t("How Planner works")} onClick={() => requestTour()}>
@@ -524,10 +627,27 @@ export function Shell() {
             <span>{t("Notifications")}</span>
             {unreadNotifications > 0 ? <span className="notification-badge">{unreadNotifications > 9 ? `9+` : faNum(unreadNotifications)}</span> : null}
           </button>
-          <button type="button" className="side-tool" data-tour="settings" onClick={openSettings} title={t("Settings")}>
+          <button
+            type="button"
+            className="side-tool"
+            data-tour="settings"
+            // With a conflict waiting, the badge and the notice both point at
+            // the one tab that can resolve it.
+            onClick={() => openSettings(syncConflicts.length ? 'sync' : 'account')}
+            title={t("Settings")}
+            // A merge that dropped someone's edit has to be visible from
+            // wherever they are, not only on the tab that lists it.
+            aria-label={syncConflicts.length ? t("Settings — {0} change(s) to review", { 0: syncConflicts.length }) : t("Settings")}
+          >
             <SlidersIcon size={16} />
             <span>{t("Settings")}</span>
+            {syncConflicts.length ? <span className="notification-badge conflict-badge">{syncConflicts.length > 9 ? '9+' : faNum(syncConflicts.length)}</span> : null}
           </button>
+          {syncConflicts.length ? (
+            <button type="button" className="conflict-notice" onClick={() => openSettings('sync')}>
+              {t("Review {0} change(s) from another device", { 0: syncConflicts.length })}
+            </button>
+          ) : null}
           <button type="button" className="side-tool side-help" onClick={() => requestTour()} title={t("How Planner works")}>
             <HelpIcon size={16} />
             <span>{t("How it works")}</span>
@@ -705,7 +825,7 @@ export function Shell() {
           </div>
         </header>
         <span className="mobile-date">{formatWeekdayShort(today)} {today.slice(8)}</span>
-        <main id="content" className="content">
+        <main id="content" className="content" tabIndex={-1}>
           {!ready ? <LoadingScreen /> : (
             <>
               {error ? (
@@ -750,7 +870,10 @@ export function Shell() {
                   {route.name === 'insights' ? <InsightsView /> : null}
                   {route.name === 'ai' ? <AIView /> : null}
                   {route.name === 'plans' ? <PlansView /> : null}
-                  {route.name === 'panels' ? <PanelsView /> : null}
+                  {/* A scanned invite is addressed to the student panel — the one
+                      place that can accept it — so it renders there rather than on
+                      the chooser, even before the panel is added. */}
+                  {route.name === 'panels' ? (route.invite ? <StudentPanelView /> : <PanelsView />) : null}
                   {route.name === 'student' ? <StudentPanelView /> : null}
                   {route.name === 'guardian' ? <GuardianPanelView /> : null}
                 </Suspense>

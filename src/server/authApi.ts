@@ -495,11 +495,15 @@ export async function handleRecoveryComplete(request: Request, store: AuthStore 
 }
 
 /**
- * Replace the recovery codes of an account that is already signed in.
+ * Replace the password verifier, wrapped keys and recovery codes of an account
+ * that is already signed in.
  *
- * The caller proved who it is with its password — there is no verifier to
- * check here — so all this does is swap one set of opaque verifiers and wrapped
- * keys for another.
+ * The session is the authentication, and both callers had to prove more than a
+ * cookie to get one: the rotation flow asked for the current password, and the
+ * approved-device flow could only build a consistent set of wraps by holding
+ * the vault key itself. So there is no verifier to check here — the server
+ * swaps one set of opaque verifiers and wrapped keys for another, and never
+ * sees the password or the key.
  */
 export async function handleRecoveryUpdate(request: Request, store: AuthStore | null): Promise<Response> {
   const blocked = guard(request, 'auth-recovery-update', 8) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));

@@ -174,8 +174,11 @@ function isForbiddenName(hostname: string): boolean {
  * Refuse internal targets. Hostnames (not just IPs) are also checked, and every
  * name is resolved first: a calendar host is public by definition, so anything
  * pointing inside a network is a probe, whatever it calls itself.
+ *
+ * Exported because the CalDAV client connects to the same kind of host and must
+ * not have a second, weaker opinion about what "internal" means.
  */
-async function isForbiddenTarget(hostname: string): Promise<boolean> {
+export async function isForbiddenTarget(hostname: string): Promise<boolean> {
   const host = normaliseHost(hostname);
   if (isPrivateLiteral(host) || isForbiddenName(host)) return true;
   let addresses: Array<{ address: string }>;

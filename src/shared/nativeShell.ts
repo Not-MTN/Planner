@@ -29,6 +29,12 @@ interface CapacitorWindow extends Window {
 /** Injected by Vite from `PLANNER_API_ORIGIN` at build time; '' in the browser. */
 declare const __PLANNER_API_ORIGIN__: string;
 
+/**
+ * Injected by Vite from `PLANNER_LINK_ORIGIN`, `PLANNER_APP_URL` or
+ * `PLANNER_API_ORIGIN` — whichever the build was given. '' in the browser.
+ */
+declare const __PLANNER_LINK_ORIGIN__: string;
+
 export type ShellPlatform = 'web' | 'android' | 'ios' | 'desktop';
 
 function shellWindow(): CapacitorWindow | null {
@@ -91,6 +97,38 @@ export function configuredApiOrigin(): string {
 /** True when this build was told where its API lives. */
 export function hasConfiguredApi(): boolean {
   return configuredApiOrigin() !== '';
+}
+
+/**
+ * The address a link this app hands out should point at.
+ *
+ * In a browser tab that is simply the page's own address. Inside a packaged app
+ * it is not: the app is served from `https://localhost` (Android) or
+ * `capacitor://localhost` (iOS), and a link to either is a link to nowhere —
+ * the QR code a guardian shows would be scanned by a phone that cannot open it.
+ * So a packaged build carries its deployment's address, baked in from
+ * `PLANNER_LINK_ORIGIN` (or `PLANNER_APP_URL` / `PLANNER_API_ORIGIN`, which name
+ * the same deployment when no explicit link address was given).
+ *
+ * '' means this app has no address to hand out — an offline-only build. Callers
+ * show the code without a link rather than a link that cannot work.
+ */
+export function linkOrigin(): string {
+  let raw = '';
+  try {
+    raw = typeof __PLANNER_LINK_ORIGIN__ === 'string' ? __PLANNER_LINK_ORIGIN__ : '';
+  } catch {
+    raw = '';
+  }
+  if (raw) {
+    try {
+      return new URL(raw).origin;
+    } catch {
+      /* fall through to the address we are actually on */
+    }
+  }
+  if (isNativeShell()) return '';
+  return typeof window === 'undefined' ? '' : window.location.origin;
 }
 
 /** `/api/sync` → `https://api.example.com/api/sync` (unchanged in the browser). */

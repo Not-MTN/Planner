@@ -2,14 +2,18 @@
 
 A calm, local-first planner for your day, your week, and the days ahead — tasks, habits, goals, and notes in one beautiful place.
 
-Planner data is saved in this browser (`localStorage`, mirrored to IndexedDB). Optional **end-to-end encrypted sync** keeps devices in step through your own Neon database — there are no accounts, and the server only stores ciphertext. If you choose to use AI, the current prompt, any AI memory you explicitly saved, and the minimum schedule/check-in details needed for that request pass through the server-side proxy to Groq. Planner notes are not sent. Use **Settings → Export** for a backup file, and **Settings → Import** to bring one back.
+Planner data is saved in this browser (`localStorage`, mirrored to IndexedDB). A build with no server address runs entirely on the device, with no account at all (that is what the downloadable offline apps are). Point it at a server and you get **accounts with an end-to-end encrypted vault** — or, if you prefer, the older account-free **sync-code** path; either way the server only stores ciphertext and keeps devices in step through your own Neon database. If you choose to use AI, the current prompt, any AI memory you explicitly saved, and the minimum schedule/check-in details needed for that request pass through the server-side proxy to Groq. Planner notes are not sent. Use **Settings → Export** for a backup file, and **Settings → Import** to bring one back.
 
 ```bash
 npm install
 npm run dev
 ```
 
-Other scripts: `npm run typecheck`, `npm test`, `npm run build`, `npm run test:e2e` (browser tests — run `npx playwright install chromium` once first).
+Other scripts: `npm run typecheck`, `npm test`, `npm run build`, `npm run test:e2e` (browser tests — run `npx playwright install chromium` once first). `npm run test:e2e:visual` compares screenshots of the key screens in Persian/RTL and both themes against committed baselines; see [docs/VISUAL_TESTS.md](docs/VISUAL_TESTS.md) for how the baselines are made and why they are generated on CI.
+
+The browser suites cover more than the pictures: `e2e/a11y.spec.ts` runs axe over every screen in both languages and themes and fails on serious or critical violations (with the few deliberate exceptions listed in the file), `e2e/pwa.spec.ts` checks the manifest, every icon at the size it claims, service-worker registration, and that the app still opens and saves work with the network switched off, and `e2e/touch-targets.spec.ts` measures the visible controls against the 44 px thumb minimum. `npm run check:bundle-budget` weighs what a browser downloads against a committed baseline (`scripts/bundle-budget.mjs`), and `npm run check:visual-baselines` says whether a screenshot needs regenerating before the suite does.
+
+Contributing? [CONTRIBUTING.md](CONTRIBUTING.md) has the setup, the traps, and what a change is expected to come with.
 
 See [SECURITY.md](SECURITY.md) for the threat model, deployment hardening, privacy boundaries, and vulnerability reporting process. No app can be guaranteed unhackable; protect the device, browser profile, sync code, and server secrets too.
 
@@ -39,7 +43,9 @@ Two one-off commands make a release complete: `npm run android:keystore`
 creates the Android signing key and prints the four GitHub secrets that let
 future APKs install over earlier ones, and every build runs
 `npm run check:deployment` against your server first, so an app that could not
-sign in fails the build instead of shipping.
+sign in fails the build instead of shipping. Tagging a release is what builds
+them — [docs/RELEASING.md](docs/RELEASING.md) is the whole runbook, including
+the parts a workflow does not do for you.
 
 The website downloads them directly — the buttons in the "Get the app" section
 save the file instead of sending people to a page of links. They point at
@@ -70,6 +76,16 @@ Then prove it, before anyone installs anything:
 npm run check:deployment -- https://your-app.example.com
 ```
 
+A guardian's invite QR code is a link into the app, so the installed apps claim
+your domain: Android reads `/.well-known/assetlinks.json` and iPhone reads
+`/.well-known/apple-app-site-association` from it. The ordinary build writes
+both from two environment variables on the deployment
+(`ANDROID_SIGNING_CERT_SHA256`, `IOS_TEAM_ID`), and the same
+`check:deployment` reports whether they answer. A link opens the app when they
+do, and opens a browser tab when they do not — nothing else changes either way.
+Section 3 of [docs/APPS.md](docs/APPS.md) is the whole story, including
+`planner://` for a build with no domain at all.
+
 The full guide — build, signing, keystores, stores, CI, and what the shells do
 not do yet — is in [docs/APPS.md](docs/APPS.md). The marketing site's "Apps"
 section (`src/marketing/Platforms.tsx`) links to the release downloads; paste
@@ -91,6 +107,36 @@ How it works: the sync code never leaves your devices. The browser derives an AE
 | --- | --- | --- |
 | `/api/sync/status` | GET | `{ configured: boolean }` |
 | `/api/sync` | GET / PUT / DELETE | Read, compare-and-swap write, or delete the encrypted blob (`X-Sync-Id` header) |
+
+### Two-way calendars (CalDAV)
+
+Feeds are read-only by design. A **two-way calendar** is the other arrangement: the planner is allowed to write to it, so an event added on the Today page can appear on your phone's calendar and an event your phone adds comes back.
+
+Connect one in **Settings → Connections → Two-way calendars**: paste the calendar address (a CalDAV collection, or a server address that holds several — the app asks and lets you choose), then a username and password. The credentials are stored in this device's own storage and posted to the server only when the browser talks to `/api/caldav`, which speaks WebDAV to the calendar server on the app's behalf: the browser cannot send `PROPFIND`/`REPORT`, and calendar servers do not answer cross-origin requests.
+
+| Endpoint | Method | Purpose |
+| --- | --- | --- |
+| `/api/caldav` | POST | One action per request: `discover`, `list`, `push`, `delete` |
+
+What the sync does, and the rules it follows:
+
+- **Identity is the remote address.** A pulled event is stored with `source: { url, uid: <remote href> }`; an event this app uploads is remembered in the subscription's `hrefs` map after its first successful `PUT`. Nothing is ever matched by title or time, so a sync cannot duplicate a calendar.
+- **The newer edit wins.** Remote `LAST-MODIFIED` (or `DTSTAMP`) is compared with the local `updatedAt`; the newer side is copied over the older one. A tie means nothing happens, and an unreadable stamp is not treated as an edit.
+- **Deletions travel both ways.** Delete an event here and it is deleted remotely; delete it on the calendar and it is removed here. Deleted addresses are remembered (`dropped`) so the next sync neither re-imports nor re-creates them.
+- **Only what belongs there is uploaded.** Repeating events, generated weekly occurrences, events that came from a *different* feed or calendar, and anything outside the sync window (a month back, half a year forward) stay local. At most 30 events are uploaded per run; the next run continues.
+- **A read-only switch per calendar.** Turn *Send events I add here* off and the subscription pulls without ever writing. Reads still work; so does a remote deletion.
+- **Notes and categories stay yours.** Like feeds, the calendar owns the schedule and the title; the planner owns the note, category and importance you wrote about it. Uploaded events carry the note with them.
+- **Writes are conditional.** A `PUT`/`DELETE` carries the etag it was based on (`If-Match`, or `If-None-Match: *` for a new event), so an edit made elsewhere in between is refused with a conflict rather than overwritten — the next sync then resolves it by the newer-wins rule.
+
+The proxy refuses private, loopback, link-local and metadata addresses (names are resolved first), never follows redirects, caps the response at 4 MB and the request at 512 KB, times out after 20 s, and reports failures with a short message instead of the server's own words — a login page must never be echoed back through the app.
+
+Deleting a *feed* subscription removes the events it brought in; disconnecting a **two-way** calendar keeps the events, because they are now part of the planner's own schedule. A calendar that came from an address this app uploaded to but that you then deleted locally is deleted on the server too, not re-imported.
+
+### When two devices change the same thing
+
+If both devices edited the *same* item since they last met, the newest edit wins — but the edit that lost is not thrown away. It is written to `planner-sync-conflicts` in the device's own storage (at most 20, newest first) and the merge says so: a badge on **Settings**, a line reading *Review 1 change from another device* on whatever screen you are on, and a **Changed on two devices** list under **Settings → Sync**. Each row compares the two versions field by field (title, due date and time, priority, category, amount, progress, note body) so you can see what actually differs instead of choosing between two identical-looking titles, then either **Keep what I have** or **Use the other version** — the stored copy is whole, so putting it back restores every field, not just the one shown. There is also **Keep what I have for all of them**.
+
+A conflict outlives the setting that produced it: turning sync off hides the code and the buttons, never the list. Stored conflicts are validated on read — a malformed row is ignored rather than trusted, and a conflict with nothing visible to compare still says so rather than showing an empty table.
 
 ### Accounts use the same database
 
@@ -148,19 +194,21 @@ Panels are optional additions to the personal planner. Open **Today → See the 
 
 Both workspaces support mobile layouts, light/dark themes, keyboard controls, and Persian/RTL. Existing backups need no new schema or migration. Automated coverage includes helper and UI tests (`src/panelFeatures*.test.*`), slow-sync regression tests, and desktop/mobile browser checks (`e2e/panels.spec.ts`).
 
-## Languages (English / فارسی)
+## Languages (English / suomi / فارسی)
 
-Settings → **Language** switches the whole interface to Persian with a right-to-left layout (Vazirmatn font, mirrored arrows, logical CSS). Choosing فارسی also sets Persian day/month names and a Saturday week start; the page reloads to apply. The AI coach replies in Persian while it is selected.
+Settings → **Language** switches the whole interface; the page reloads to apply, and the choice is remembered on that device.
 
+- **Persian** renders right-to-left (Vazirmatn font, mirrored arrows, logical CSS), sets Persian day/month names and a Saturday week start, and replies in Persian from the AI coach.
+- **Finnish** is complete: every string the app can show has a translation, including the marketing pages, the notification and reminder copy, and the settings sheets. Voice input follows it (`fi-FI`), and the terms are kept consistent — *tehtävä*, *tapa*, *tavoite*, *huone*… the same word every time the same concept appears.
 - Strings are wrapped in `t('English text')` (`src/i18n.ts`); English is the key and the fallback.
-- Persian lives in `src/locales/fa.ts`. `src/i18n.test.ts` fails if any `t(...)` string lacks a translation or a placeholder like `{0}` goes missing.
+- Dictionaries live in `src/locales/fa.ts` and `src/locales/fi.ts`. `COMPLETE_LANGS` in `src/i18n.ts` lists the languages expected to cover everything, and `src/i18n.test.ts` fails if a `t(...)` string is missing from one of them or a placeholder like `{0}` goes missing from a translation. Adding a language means adding it to `LANGUAGES` first and to `COMPLETE_LANGS` only when it is finished — a partial language falls back to English rather than rendering blank.
 - Dates stay on the Gregorian calendar with Latin digits so times and ISO dates line up everywhere.
 
 ## What's inside
 
 **Nine simple places** — Today, Calendar (Week · Month · Upcoming), AI Coach, Plans, Tasks, Habits, Goals, Notes, Insights.
 
-- **A calm first-run tour** — the very first visit opens a language choice (English / فارسی), then a short showcase walks the actual pages — one stop each for Today, AI coach, Plans, Tasks, Habits, Goals, Notes, Insights, Calendar, ⌘K search, and Settings — teaching the single most useful thing on every tab instead of every button. The app is paused while it teaches, so nothing can be mispressed; Escape skips it, and it never appears again on its own. Replay from the **?** button, the More sheet, or Settings → New here. The **Why Planner?** sheet (same places) answers what makes this app worth choosing.
+- **A calm first-run tour** — the very first visit opens a language choice (English / suomi / فارسی), then a short showcase walks the actual pages — one stop each for Today, AI coach, Plans, Tasks, Habits, Goals, Notes, Insights, Calendar, ⌘K search, and Settings — teaching the single most useful thing on every tab instead of every button. The app is paused while it teaches, so nothing can be mispressed; Escape skips it, and it never appears again on its own. Replay from the **?** button, the More sheet, or Settings → New here. The **Why Planner?** sheet (same places) answers what makes this app worth choosing.
 - **Voice everywhere it counts** — dictate into the AI coach prompt (tap the mic and just describe your day, in English or فارسی) and into quick add. Uses the browser's built-in speech service, so nothing is recorded anywhere else.
 - **Accents welcome** — pick the English accent that sounds most like you (Settings → Voice: US, UK, India, Australia, Nigeria, South Africa, or Persian). The recognizer listens in that accent, keeps the engine's most confident reading of what you said, and the AI is tuned to hear misheard words, homophones, and mixed English–Persian speech without ever asking you to repeat yourself.
 - **Talk to your planner** — on the AI Coach screen, tap the big mic orb and just *say* it: “I'm wiped, make tonight easy” or «فردا روز سنگینیه.» Say how long to plan — “plan my next two weeks”, «ده روز آینده» — and it plans exactly that stretch. The AI understands tired, casual, accented, mixed English–Persian speech, answers out loud (when the browser has a voice for it), and builds the plan from the conversation for your review — no typing, no formal phrasing needed, one tap to mute.
@@ -169,7 +217,7 @@ Settings → **Language** switches the whole interface to Persian with a right-t
 - **A Plans page for every draft** — every plan the AI builds (typed or spoken, for however many days you asked) is saved automatically to **Plans**. Come back any time, open a draft, and add it to the planner when it feels right; adding marks it done and stays one undoable batch.
 - **Revise drafts in place** — don't start over when a draft is close. Type a change ("make Tuesday lighter", "move the workout to evening") or just *say* it to the voice orb, and the AI edits the plan you're looking at — keeping everything you didn't ask to change — and updates the saved copy on the Plans page in the same step.
 - **Plans that see your real week** — drafts are built around what's already true: protected weekly times, existing events, how full each day already is, overdue tasks, and recent mood check-ins. Locally, an instant check flags days that would land packed once added, items at unusual hours, and long ranges with whole days left empty — before you press Add.
-- **Any file, any note** — attach anything to a note (music, photos, PDFs…). Files up to 20 MB live in local IndexedDB storage, play inline (audio player, image previews), download back out, and travel with backups. No uploads, no accounts — your bytes never leave the device unless you sync them yourself.
+- **Any file, any note** — attach anything to a note (music, photos, PDFs…). Files up to 20 MB live in local IndexedDB storage, play inline (audio player, image previews), download back out, and travel with backups. No uploads — the bytes never leave the device unless you sync or share them yourself.
 - **Today** — one quiet page for the day: timeline with a live "now" marker, tasks, habits, notes, a daily intention, and a progress ring that celebrates when the day is complete.
 - **Daily essentials** — built-in must-do-every-day jobs (drink water, move 30 minutes, get outside, sleep by 11, tidy, vitamins) pinned to the top of Today with their own progress. First run offers them as a one-tap starter pack.
 - **Habit library** — a shelf of classic habits and routines (body, mind, home, connection) you can add in one tap, with "Add all" per group.
@@ -193,7 +241,7 @@ Settings → **Language** switches the whole interface to Persian with a right-t
 - **Milestone dates** — goal steps can have a date and show up on Upcoming.
 - **Busy calendar** — Settings can export an .ics of busy times only (titles stripped).
 - **Checklists** — break a task into steps; the row shows a progress bar and you can tick steps inline.
-- **Reminders & notification center** — optional notifications before events and timed tasks, plus a morning summary. Use the bell in the desktop sidebar or mobile top bar to reopen up to 50 recent reminders, mark them read, or clear them. Falls back to in-app toasts if notifications are blocked. (Settings → Reminders; scheduled checks run while Planner is open.)
+- **Reminders & notification center** — optional notifications before events and timed tasks, plus a morning summary. Use the bell in the desktop sidebar or mobile top bar to reopen up to 50 recent reminders, mark them read, or clear them. Falls back to in-app toasts if notifications are blocked. (Settings → Reminders.) The phone apps schedule them on the device itself; the Windows/macOS/Linux app keeps running in the background after you close the window — a setting in Settings → App, on by default, with a tray icon to reopen or quit — so the reminders still arrive; `docs/DESKTOP.md` §9 has the detail.
 - **Installable & offline** — a service worker caches the app shell, so Planner opens without a connection. Install it from Settings → App or your browser menu.
 - **Calendar files (.ics)** — export events, protected weekly times (as repeating events), and dated tasks; import from Google, Outlook, or Apple Calendar. All-day events arrive as dated tasks. **Export busy times** shares only Busy blocks.
 - **Task board** — switch Tasks between List and a Kanban Board grouped by When, Priority, or Category. Drag cards between columns to reschedule, re-prioritise, or complete. The list also has a dedicated **Inbox** for undated tasks and locally saved filter/search views.
@@ -213,6 +261,7 @@ Settings → **Language** switches the whole interface to Persian with a right-t
 - **Unit habits & rest days** — a habit can count an amount (8 glasses, 20 km) with a +1 button on Today, and any habit supports a rest day (the moon or Shift-click) that pauses the day without breaking the streak.
 - **Shared space** — a second, independently coded end-to-end encrypted sync room for whatever sits in the Shared category (groceries, household plans). Settings → Shared space: create a room, copy the code, join from other devices; deletions travel via tombstones.
 - **Calendar feeds** — subscribe to any iCalendar (.ics) URL (Google's secret address, Outlook published calendars). Events mirror read-only and refresh automatically; your own categories and notes on them survive refreshes. Settings → Calendar feeds.
+- **Two-way calendars** — connect a calendar you can write to over CalDAV (Google, iCloud, Fastmail, Nextcloud, a university server) and it stops being a one-way mirror: events you add here are uploaded, changes made elsewhere come back, and when both sides edited the same event the newer edit wins. Settings → Two-way calendars.
 - **Task import (CSV)** — import a Todoist or TickTick CSV (or any CSV with a title column); done items are skipped, dates and priorities come along. Settings → Move your tasks in.
 - **Voice quick add** — a microphone button on the quick add bar (Web Speech API) dictates straight into the parser; hidden where the browser doesn't support speech.
 - **Weather on Today** — a quiet forecast line for a place you pick once (Open-Meteo, no key, no account); never in the way, off by default. Settings → Weather on Today.
@@ -236,6 +285,20 @@ Push delivery can work while Planner is closed, but it needs server configuratio
 3. The same `DATABASE_URL` stores browser push subscriptions and reminder times. Planner only uploads scheduled times and opaque reminder IDs; notification text is generic and task/event titles stay on the device.
 4. Configure a trusted scheduler to call `GET https://<your-app>/api/push/dispatch` once per minute with `Authorization: Bearer <CRON_SECRET>`. Do not publish that secret in a URL. The endpoint rejects calls without it.
 5. In Planner, enable **Settings → Background notifications**. Browser permission and an installed/registered service worker are required. Turning it off removes the server subscription and queued reminders.
+
+Push uses the standard Web Push protocol in a browser. The **phone apps** use the
+platform's own service instead — FCM on Android, APNs on iOS — because a WebView
+cannot hold a Web Push subscription the way a browser tab can. Both transports
+share the same setting, the same job table and the same generic sentence; a phone
+registers with the OS, uploads its token and its reminder schedule, and the cron
+delivers through FCM or APNs. Add either set of credentials and `/api/push/config`
+starts offering that transport:
+
+- **Android:** `FCM_SERVICE_ACCOUNT` (the service-account JSON, one line) plus a
+  `google-services.json` in `android/app/` for the build itself.
+- **iOS:** `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_KEY_P8` (the `.p8` contents) and
+  `APNS_BUNDLE_ID=com.notmtn.planner`, plus the Push Notifications capability on
+  the App ID. `docs/APPS.md` §9.1 has the table.
 
 Push uses the standard Web Push protocol. Some hosting plans do not permit minute-level scheduled functions, so use an external scheduler if needed; without scheduled calls the browser cannot be woken at reminder time.
 
@@ -405,8 +468,29 @@ Turn it off any time under **Settings → Crash reports**; the choice is remembe
 | Endpoint | Method | Purpose |
 | --- | --- | --- |
 | `/api/report` | POST | Accepts one crash report, logs it, answers `204` with no body |
+| `/api/report/recent` | GET | Reads reports back, grouped by message. Requires `REPORT_DASHBOARD_SECRET` |
 
 Logs are the sink that always exists: each report is one structured `[planner:report]` line, which Vercel (or any host) captures and forwards to log drains. To also get them somewhere you read, set `ERROR_REPORT_WEBHOOK` to a URL that accepts a JSON POST — on Vercel under **Project → Settings → Environment Variables**, locally in `.env.local`. A webhook that is down never fails report intake.
+
+### Reading them back, and being told
+
+A log line tells you nothing about *how often*, and a release that breaks every page is invisible in a list of one-line errors. With `DATABASE_URL` set, reports are also stored (the newest 500 rows; older ones are pruned) and can be read back:
+
+```bash
+curl -H "Authorization: Bearer $REPORT_DASHBOARD_SECRET" \
+  "$PLANNER_APP_URL/api/report/recent?window=24h"      # JSON
+open "$PLANNER_APP_URL/api/report/recent?format=html"   # the same thing, as a page
+```
+
+The JSON groups by message — `count`, `first`, `last`, the releases and areas it was seen in — newest group first. The page says the same in a table, marks hot rows in red, and is deliberately self-contained: inline styles, no scripts, no external anything, so it still works when the rest of the deployment does not.
+
+**Alerting** is the alert rule plus whatever can fetch a URL:
+
+- A message that happens **5 times in an hour** (the defaults, next to the counting code in `src/server/reportApi.ts`) is listed in `alerts`, and a webhook gets exactly one extra post with `"kind": "alert"` as it crosses — once per crossing, not once per report.
+- `npm run check:reports` polls that endpoint and exits `1` when `alerts` is non-empty, naming each message. It needs `PLANNER_APP_URL` and `REPORT_DASHBOARD_SECRET`.
+- `.github/workflows/reports.yml` runs that check every two hours. Set the `PLANNER_APP_URL` variable and the `REPORT_DASHBOARD_SECRET` secret on the repository and a bad release becomes a failing scheduled run — a notification, not a dashboard nobody opens. Until the secret is set the job says it is not configured and stays green.
+
+The dashboard is off unless `REPORT_DASHBOARD_SECRET` is set, and that secret is the only credential; every response is `no-store` and the page is `noindex`.
 
 ## Notes
 

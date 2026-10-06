@@ -25,13 +25,10 @@ export function QuickAddBar({ defaultDate, placeholder }: { defaultDate?: string
     return () => query.removeEventListener('change', onChange);
   }, []);
 
-  useEffect(() => {
-    // PWA shortcut / deep link (#/today?qa=1) lands here: put the caret in the box.
-    if (typeof window !== 'undefined' && /(#\/)?today\?qa=1/.test(window.location.hash)) {
-      inputRef.current?.focus();
-      window.history.replaceState(null, '', '#/today');
-    }
-  }, []);
+  // The caret for `#/today?qa=1` is Shell.tsx's job (it keeps watch while the
+  // app settles). Stripping the query here would race it: this effect runs
+  // before the Shell's, the router re-reads the address, the route flips to
+  // `today` and the view remounts under the caret that was just placed.
   const fallback = defaultDate ?? todayISO();
   const parse = useMemo(() => (text.trim() ? parseQuickAdd(text, defaultDate ?? null) : null), [text, defaultDate]);
 

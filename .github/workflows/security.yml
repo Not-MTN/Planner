@@ -34,7 +34,26 @@ jobs:
         # A workflow GitHub rejects stops before any job starts, and the run log
         # says nothing about why. See scripts/lint-workflows.mjs.
         run: npm run lint:workflows
+      - name: Check the toolchain agrees with itself
+        # engines.node, the Node every workflow installs, and the dependabot
+        # policy; three files that state one fact. See scripts/check-toolchain.mjs.
+        run: npm run check:toolchain
       - name: Run tests
         run: npm test
       - name: Build production bundle
         run: npm run build
+      # The payload every installer and the website carry. 4.11 MB at the time
+      # this was added, so 5 MB leaves room for content and catches an
+      # accidental multi-megabyte addition (a stray video, an unoptimised
+      # image, a dependency that bundles its own copy of something).
+      - name: Keep the payload inside its budget
+        run: npm run size:report -- --check 5
+      # The payload is what an installer carries; this is what a browser
+      # downloads — the entry script and stylesheet, compressed, plus every
+      # chunk. A dependency that doubles the entry bundle is invisible in the
+      # payload total and very visible on a phone. The baseline it compares
+      # against is committed (scripts/bundle-budget.json); the caps in that file
+      # are the hard limits, and a chunk may not grow past the tolerance without
+      # someone running `npm run check:bundle-budget -- --update` on purpose.
+      - name: Keep the downloaded bundle inside its budget
+        run: npm run check:bundle-budget

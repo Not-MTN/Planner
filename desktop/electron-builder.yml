@@ -16,6 +16,10 @@ files:
   - preload.cjs
   - lib.cjs
   - config.json
+  # The tray icon the background mode shows (docs/DESKTOP.md §9). Without it a
+  # closed window would leave a process running with no way back in.
+  - build/icon.ico
+  - build/icon.png
   - dist/**/*
   - package.json
   # Source maps belong in a debug build, not in something people download.
