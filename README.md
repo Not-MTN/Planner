@@ -43,7 +43,9 @@ Two one-off commands make a release complete: `npm run android:keystore`
 creates the Android signing key and prints the four GitHub secrets that let
 future APKs install over earlier ones, and every build runs
 `npm run check:deployment` against your server first, so an app that could not
-sign in fails the build instead of shipping.
+sign in fails the build instead of shipping. Tagging a release is what builds
+them — [docs/RELEASING.md](docs/RELEASING.md) is the whole runbook, including
+the parts a workflow does not do for you.
 
 The website downloads them directly — the buttons in the "Get the app" section
 save the file instead of sending people to a page of links. They point at
