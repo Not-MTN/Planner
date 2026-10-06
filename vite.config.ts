@@ -440,6 +440,23 @@ export default defineConfig(({ mode }) => {
     test: {
       environment: 'node',
       include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'desktop/*.test.mjs', 'scripts/**/*.test.mjs'],
+      /**
+       * Files share a worker and a module registry instead of getting a fresh
+       * process each.
+       *
+       * `isolate: true` (the default) means one worker per test file — a
+       * hundred and five of them — and each one pays its own browser/node
+       * start-up and re-evaluates every module it imports. Measured on this
+       * suite, sharing is worth about a fifth of the wall time.
+       *
+       * What it costs is isolation, and the honest statement of that is
+       * `src/testSetup.ts`: a file's mocks and stubbed globals outlive it
+       * unless something clears them, so something does, after every test. The
+       * suite is the check — it has to pass in one shared registry, which is a
+       * stricter order than per-file isolation ever demanded.
+       */
+      isolate: false,
+      setupFiles: ['src/testSetup.ts'],
     },
   };
 });
