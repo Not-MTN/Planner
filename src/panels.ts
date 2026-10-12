@@ -7,6 +7,7 @@
  */
 import { addDays, parseISODate, startOfWeek, toISODate, todayISO } from './dates';
 import { t } from './i18n';
+import { completionDate } from './insights';
 import { DAY_REPORTS_KEPT, GOAL_ANSWERS_KEPT, PANEL_GOALS_KEPT, QUEUED_PLANS_KEPT } from './types';
 import type { ChangeNote, GoalAnswer, GoalSuggestion, GuardianLink, GuardianPlan, Panels, PlanCadence, PlannerState, QueuedPlan, ReportAck, StudentSubject, WeekResults } from './types';
 
@@ -330,6 +331,66 @@ export function goalAnswerOnLink(link: GuardianLink, suggestionId: string): Goal
  */
 export function openGoalSuggestions(panels: Panels): GoalSuggestion[] {
   return (panels.student.inbox.goals ?? []).filter((goal) => !goalAnswerFor(panels, goal.id));
+}
+
+/* -------------------------------------------------------------- momentum */
+
+/**
+ * Minutes focused on one day.
+ *
+ * The student's panel is the one place in the app where a number is meant to
+ * feel like encouragement rather than accounting, so it is read from the focus
+ * log alone: a session counted here is a session that really happened.
+ */
+export function focusMinutesOn(state: PlannerState, date: string): number {
+  return state.focusLog
+    .filter((entry) => entry.date === date)
+    .reduce((total, entry) => total + (entry.minutes ?? 0), 0);
+}
+
+/** The days on record with something finished or focused in them. */
+function activeDays(state: PlannerState): Set<string> {
+  const days = new Set<string>();
+  for (const entry of state.focusLog) if ((entry.minutes ?? 0) > 0) days.add(entry.date);
+  for (const task of state.tasks) {
+    const day = completionDate(task);
+    if (day) days.add(day);
+  }
+  return days;
+}
+
+/**
+ * Days of study in a row.
+ *
+ * Today is allowed to be unfinished: someone opening the panel at nine in the
+ * morning should see yesterday's streak, not a zero that punishes them for not
+ * having studied yet. So the count starts at today when today counts, and at
+ * yesterday otherwise — and a gap of a whole day ends it.
+ */
+export function studyStreak(state: PlannerState, from = todayISO()): number {
+  const days = activeDays(state);
+  let cursor = days.has(from) ? from : addDays(from, -1);
+  if (!days.has(cursor)) return 0;
+  let count = 0;
+  // 400 is a guard, not a limit anyone will meet; it keeps a corrupt date from
+  // looping forever.
+  while (days.has(cursor) && count < 400) {
+    count += 1;
+    cursor = addDays(cursor, -1);
+  }
+  return count;
+}
+
+/** Focus minutes in the week before `week` — the comparison a student reads. */
+export function previousWeekFocus(state: PlannerState, week = weekOf()): number {
+  const days = new Set<string>();
+  for (let index = 0; index < 7; index += 1) days.add(addDays(addDays(week, -7), index));
+  return state.focusLog.filter((entry) => days.has(entry.date)).reduce((total, entry) => total + (entry.minutes ?? 0), 0);
+}
+
+/** The weekly focus the student has set themselves, across every subject. */
+export function weeklyTargetMinutes(panels: Panels): number {
+  return panels.student.subjects.reduce((total, subject) => total + (subject.targetMinutes ?? 0), 0);
 }
 
 /**

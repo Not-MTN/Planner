@@ -1,17 +1,19 @@
 /**
- * The front door: personal, student, guardian — pick one and it opens.
+ * The front door: the panels you actually have.
  *
  * This is what every open and every login lands on. The personal panel is the
- * planner itself and is always ready; the student and guardian panels open
- * when they are added, and otherwise lead to where they are added (#/panels).
- * Nothing here configures anything — choosing is the whole job of this page,
- * so it stays three cards and one press each.
+ * planner itself and is always ready; the student and guardian panels appear
+ * once they have been added, because a panel is a page of its own rather than a
+ * mode to switch between. Somebody who has not added one yet sees a single Add
+ * panel tile instead of two cards announcing what they are missing.
+ *
+ * Nothing here configures anything — choosing is the whole job of this page, so
+ * it stays a row of cards and one press each.
  */
 import { usePlanner } from '../context';
-import { cx } from '../cx';
 import { todayISO } from '../dates';
 import { faNum, t } from '../i18n';
-import { HeartIcon, SlidersIcon, StudyIcon, SunIcon } from '../icons';
+import { HeartIcon, PlusIcon, SlidersIcon, StudyIcon, SunIcon } from '../icons';
 import { eventsForDate } from '../logic';
 import { gradeLabel } from '../panels';
 
@@ -24,17 +26,16 @@ export function HomeView() {
     todayEvents === 1 ? t('event') : t('events')
   }`;
 
-  const studentTag = panels.student.enabled
-    ? `${panels.student.field ?? ''}${panels.student.field && panels.student.grade ? ' · ' : ''}${
-        gradeLabel(panels.student.grade) ?? ''
-      }`
-    : t('Not added');
+  const studentTag = `${panels.student.field ?? ''}${panels.student.field && panels.student.grade ? ' · ' : ''}${
+    gradeLabel(panels.student.grade) ?? ''
+  }`;
 
-  const guardianTag = panels.guardian.enabled
-    ? `${panels.guardian.kind === 'parent' ? t('Parent') : t('Advisor')}${
-        panels.guardian.field ? ` · ${panels.guardian.field}` : ''
-      }`
-    : t('Not added');
+  const guardianTag = `${panels.guardian.kind === 'parent' ? t('Parent') : t('Advisor')}${
+    panels.guardian.field ? ` · ${panels.guardian.field}` : ''
+  }`;
+
+  const extras = (panels.student.enabled ? 1 : 0) + (panels.guardian.enabled ? 1 : 0);
+  const missing = !panels.student.enabled || !panels.guardian.enabled;
 
   return (
     <div className="view panels-view home-view">
@@ -77,65 +78,69 @@ export function HomeView() {
           </div>
         </section>
 
-        <section className={cx('card', 'panel-choice', panels.student.enabled && 'is-on')} aria-labelledby="home-student">
-          <div className="panel-choice-head">
-            <span className="panel-choice-icon accent-blue">
-              <StudyIcon size={19} />
-            </span>
-            <div>
-              <h2 className="card-title" id="home-student">
-                {t('Student panel')}
-              </h2>
-              <p className="panel-choice-tag">{studentTag}</p>
+        {panels.student.enabled ? (
+          <section className="card panel-choice is-on" aria-labelledby="home-student">
+            <div className="panel-choice-head">
+              <span className="panel-choice-icon accent-blue">
+                <StudyIcon size={19} />
+              </span>
+              <div>
+                <h2 className="card-title" id="home-student">
+                  {t('Student panel')}
+                </h2>
+                <p className="panel-choice-tag">{studentTag}</p>
+              </div>
             </div>
-          </div>
-          <ul className="panel-points">
-            <li>{t('Subjects with exam dates and a weekly focus target.')}</li>
-            <li>{t('Your week as results: what was planned, what got done, how long you focused.')}</li>
-            <li>{t('Share a weekly headline with guardians while keeping your reasons private.')}</li>
-          </ul>
-          <div className="panel-choice-actions">
-            {panels.student.enabled ? (
+            <ul className="panel-points">
+              <li>{t('Today, with a streak worth keeping.')}</li>
+              <li>{t('Subjects with exam dates and a weekly focus target.')}</li>
+              <li>{t('Share a weekly headline with guardians while keeping your reasons private.')}</li>
+            </ul>
+            <div className="panel-choice-actions">
               <button type="button" className="btn btn-primary" onClick={() => navigate({ name: 'student' })}>
                 {t('Open student panel')}
               </button>
-            ) : (
-              <button type="button" className="btn btn-primary" onClick={() => navigate({ name: 'panels' })}>
-                {t('Add student panel')}
-              </button>
-            )}
-          </div>
-        </section>
-
-        <section className={cx('card', 'panel-choice', panels.guardian.enabled && 'is-on')} aria-labelledby="home-guardian">
-          <div className="panel-choice-head">
-            <span className="panel-choice-icon accent-peach">
-              <HeartIcon size={19} />
-            </span>
-            <div>
-              <h2 className="card-title" id="home-guardian">
-                {t('Guardian panel')}
-              </h2>
-              <p className="panel-choice-tag">{guardianTag}</p>
             </div>
-          </div>
-          <ul className="panel-points">
-            <li>{t('Watch one or more students, as a parent or as an advisor.')}</li>
-            <li>{t('Weekly results only — never the detail of someone’s day.')}</li>
-            <li>{t('See the student’s latest shared headline alongside their weekly totals.')}</li>
-          </ul>
-          <div className="panel-choice-actions">
-            {panels.guardian.enabled ? (
+          </section>
+        ) : null}
+
+        {panels.guardian.enabled ? (
+          <section className="card panel-choice is-on" aria-labelledby="home-guardian">
+            <div className="panel-choice-head">
+              <span className="panel-choice-icon accent-peach">
+                <HeartIcon size={19} />
+              </span>
+              <div>
+                <h2 className="card-title" id="home-guardian">
+                  {t('Guardian panel')}
+                </h2>
+                <p className="panel-choice-tag">{guardianTag}</p>
+              </div>
+            </div>
+            <ul className="panel-points">
+              <li>{t('Watch one or more students, as a parent or as an advisor.')}</li>
+              <li>{t('Weekly results only — never the detail of someone’s day.')}</li>
+              <li>{t('Plan their week, send a note, and see how it went.')}</li>
+            </ul>
+            <div className="panel-choice-actions">
               <button type="button" className="btn btn-primary" onClick={() => navigate({ name: 'guardian' })}>
                 {t('Open guardian panel')}
               </button>
-            ) : (
-              <button type="button" className="btn btn-primary" onClick={() => navigate({ name: 'panels' })}>
-                {t('Add guardian panel')}
-              </button>
-            )}
-          </div>
-        </section>
+            </div>
+          </section>
+        ) : null}
+
+        {missing ? (
+          <button type="button" className="panel-choice panel-choice-add" onClick={() => navigate({ name: 'panels' })}>
+            <span className="panel-choice-icon">
+              <PlusIcon size={19} />
+            </span>
+            <span className="panel-choice-add-copy">
+              <strong>{extras === 0 ? t('Add a panel') : t('Add another panel')}</strong>
+              <span>{t('Student or guardian — your planner stays as it is')}</span>
+            </span>
+          </button>
+        ) : null}
       </div>
 
       <p className="panel-footnote">

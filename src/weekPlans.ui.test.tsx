@@ -143,6 +143,20 @@ async function click(label: string, scope: ParentNode = document): Promise<void>
   await settle();
 }
 
+/**
+ * One student at a time, and their plan behind the Plan tab: the composer is
+ * reached by opening the student, not from the roster card itself.
+ */
+async function openLessonsPlan(): Promise<void> {
+  const tab = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
+    (item) => (item.textContent ?? '').trim() === 'Plan',
+  );
+  if (!tab) throw new Error('No tab Plan');
+  await act(async () => tab.click());
+  await settle();
+  await click('Plan lessons');
+}
+
 function setValue(selector: string, value: string): void {
   const element = query<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(selector);
   const prototype =
@@ -286,7 +300,7 @@ describe('planning a week of lessons', () => {
     await mount(guardianState(), 'guardian');
     const nina = query('.student-card');
     await click('View student', nina);
-    await click('Plan lessons', nina);
+    await openLessonsPlan();
     expect(document.querySelector('.week-plan-composer')).not.toBeNull();
 
     setComposerSelect(0, 'science');
@@ -317,7 +331,7 @@ describe('planning a week of lessons', () => {
     await mount(guardianState(), 'guardian');
     const nina = query('.student-card');
     await click('View student', nina);
-    await click('Plan lessons', nina);
+    await openLessonsPlan();
     setValue('.week-plan-composer input', 'Nina’s week');
     await click('Send the plan');
     expect(sendPlan).not.toHaveBeenCalled();
@@ -445,7 +459,7 @@ describe('resting and the exam on the horizon', () => {
     await mount(guardianState(), 'guardian');
     const nina = query('.student-card');
     await click('View student', nina);
-    await click('Plan lessons', nina);
+    await openLessonsPlan();
 
     // The last rest chip is Sunday; the press is what matters, not its name.
     const restButtons = [...query('[aria-label="Rest days"]').querySelectorAll('button')];
@@ -789,7 +803,7 @@ describe('attaching a prep link', () => {
     await mount(guardianState(), 'guardian');
     const nina = query('.student-card');
     await click('View student', nina);
-    await click('Plan lessons', nina);
+    await openLessonsPlan();
     setValue('input[aria-label="Lesson name"]', 'Physics problems');
     await click('Add a lesson');
 
@@ -807,7 +821,7 @@ describe('attaching a prep link', () => {
     await mount(guardianState(), 'guardian');
     const nina = query('.student-card');
     await click('View student', nina);
-    await click('Plan lessons', nina);
+    await openLessonsPlan();
     setValue('input[aria-label="Lesson name"]', 'Physics problems');
     await click('Add a lesson');
 
@@ -936,7 +950,7 @@ describe('waiting out a dead signal', () => {
     await mount(guardianState(), 'guardian');
     const nina = query('.student-card');
     await click('View student', nina);
-    await click('Plan lessons', nina);
+    await openLessonsPlan();
     setValue('input[aria-label="Lesson name"]', 'Chemistry revision');
     await click('Add a lesson');
     setValue('.week-plan-composer input', 'Nina’s catch-up week');
@@ -1006,7 +1020,7 @@ describe('when the send queue is full', () => {
     await mount(guardianState([], [], [], full), 'guardian');
     const nina = query('.student-card');
     await click('View student', nina);
-    await click('Plan lessons', nina);
+    await openLessonsPlan();
     setValue('input[aria-label="Lesson name"]', 'Chemistry revision');
     await click('Add a lesson');
     setValue('.week-plan-composer input', 'One week too many');

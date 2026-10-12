@@ -104,6 +104,19 @@ async function click(label: string, scope: ParentNode = document): Promise<void>
   await settle();
 }
 
+/**
+ * A panel tab, named exactly. Not `click`: the tablet rail also has a button
+ * called “Plan”, and the tabs are the ones addressed here.
+ */
+async function clickTab(label: string): Promise<void> {
+  const tab = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
+    (item) => (item.textContent ?? '').trim() === label,
+  );
+  if (!tab) throw new Error(`No tab ${label}`);
+  await act(async () => tab.click());
+  await settle();
+}
+
 function setValue(selector: string, value: string): void {
   const element = query<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(selector);
   const prototype =
@@ -291,6 +304,7 @@ describe('actionable student panel', () => {
 
   it('edits subjects and keeps task ids, focus minutes, and categories in step', async () => {
     await mount(studentState());
+    await clickTab('Subjects');
     await click('Edit Physics');
     setValue('.subject-form input', 'Physical science');
     setValue('.subject-form input[type="number"]', '1.5');
@@ -307,6 +321,7 @@ describe('actionable student panel', () => {
 
   it('rejects duplicate subjects with an inline error instead of silently adding another tracker', async () => {
     await mount(studentState());
+    await clickTab('Subjects');
     await click('Subject');
     setValue('.subject-form input', ' physics ');
     await click('Add subject');
@@ -316,6 +331,7 @@ describe('actionable student panel', () => {
 
   it('confirms removing a subject and leaves its tasks and focus history intact', async () => {
     await mount(studentState());
+    await clickTab('Subjects');
     await click('Remove Physics');
     expect(query('[role="dialog"]').textContent).toContain('tasks, events, and focus history are kept');
     await click('Remove subject');
@@ -326,6 +342,9 @@ describe('actionable student panel', () => {
 
   it('previews exactly the weekly sharing boundary, never private task titles, reasons, or notes', async () => {
     await mount(studentState());
+    // The preview belongs to Sharing, and the charts to This week: each is one
+    // tab away rather than all of it on one scroll.
+    await clickTab('Sharing');
     const preview = query('.panel-sharing-preview');
     await act(async () => query<HTMLElement>('.panel-sharing-preview summary').click());
     expect(preview.textContent).toContain('A lighter week');
@@ -334,6 +353,7 @@ describe('actionable student panel', () => {
     expect(preview.textContent).not.toContain('PRIVATE_REASON');
     expect(preview.textContent).not.toContain('PRIVATE_NOTE');
     expect(preview.textContent).not.toContain(addDays(todayISO(), 2));
+    await clickTab('This week');
     const axis = query('.student-charts .chart-axis');
     expect(axis.firstElementChild?.textContent).toBe(shortWeek(addDays(weekOf(), -35)));
     expect(axis.lastElementChild?.textContent).toBe(shortWeek(weekOf()));
@@ -423,8 +443,10 @@ describe('guardian roster and planning', () => {
       (card) => card.querySelector('.student-name')?.textContent === 'Nina',
     )!;
     await click('View student', nina);
-    expect(nina.textContent).toContain('before their first results arrive');
-    await click('A week', nina);
+    expect(document.body.textContent).toContain('before their first results arrive');
+    // Planning is its own tab now, and the composer opens on the week — the
+    // period is chosen inside the plan rather than at the door.
+    await clickTab('Plan');
     setValue('.guardian-plan-composer input', 'Physics revision');
     setValue('input[aria-label="Step 1 title"]', 'Practice chapter 4');
     setValue('input[aria-label="Step 1 subject"]', 'Physics');
@@ -447,9 +469,9 @@ describe('guardian roster and planning', () => {
       (card) => card.querySelector('.student-name')?.textContent === 'Alice',
     )!;
     await click('View student', alice);
-    await click('A week', alice);
+    await clickTab('Plan');
 
-    await click('Draft with AI', alice);
+    await click('Draft with AI');
     // Filled from the draft, not sent: the title, the note and the step all
     // arrive in the form the guardian was already looking at.
     expect(query<HTMLInputElement>('.guardian-plan-composer input').value).toBe('Physics revision');
@@ -460,12 +482,12 @@ describe('guardian roster and planning', () => {
     // The AI sees the shared weekly results, and the panel says so where the
     // guardian is deciding to use it.
     expect(vi.mocked(draftGuardianProposal).mock.calls[0][0].results?.weekOf).toBe(weekOf());
-    expect(alice.textContent).toContain('never their tasks or notes');
+    expect(query('.guardian-plan-composer').textContent).toContain('never their tasks or notes');
 
     // The guardian edits the draft before it goes anywhere — this is the point
     // of drafting into the form rather than sending on the student's behalf.
     setValue('input[aria-label="Step 1 title"]', 'Practice chapter 4 twice');
-    await click('Send the plan', alice);
+    await click('Send the plan');
     expect(vi.mocked(sendPlan).mock.calls[0][2].items).toEqual([
       { title: 'Practice chapter 4 twice', subject: 'Physics', minutes: 25, date: null },
     ]);
@@ -477,7 +499,7 @@ describe('guardian roster and planning', () => {
       (card) => card.querySelector('.student-name')?.textContent === 'Alice',
     )!;
     await click('View student', alice);
-    await click('A week', alice);
+    await clickTab('Plan');
     await click('Exam preparation');
     expect(document.querySelectorAll('.plan-step-row')).toHaveLength(3);
     expect(query('.plan-composer-summary').textContent).toContain('1h 5m');
@@ -509,7 +531,8 @@ describe('guardian roster and planning', () => {
         (card) => card.querySelector('.student-name')?.textContent === 'Alice',
       )!;
       await click('View student', alice);
-      await click('Meeting one-pager', alice);
+      await clickTab('Support');
+      await click('Meeting one-pager');
       const page = written.join('');
       // A page of its own, built from the week Alice shared.
       expect(open).toHaveBeenCalled();
@@ -533,13 +556,16 @@ describe('guardian roster and planning', () => {
       (card) => card.querySelector('.student-name')?.textContent === 'Alice',
     )!;
     await click('View student', alice);
-    await click('Ask', alice);
-    await click('Use this question', alice);
+    await clickTab('Support');
+    await click('Ask');
+    await click('Use this question');
     expect(query<HTMLTextAreaElement>('.notice-form textarea').value).toBe('What would help with revision?');
-    await click('Send note', alice);
+    await click('Send note');
     expect(postNotice).toHaveBeenCalledWith(expect.anything(), aliceLinkId, 'What would help with revision?');
-    expect(query('.notice-card').textContent).toContain('What would help with revision?');
     expect(query<HTMLTextAreaElement>('.notice-form textarea').value).toBe('');
+    // The sent note lands where the whole circle reads it: the students page.
+    await click('All students');
+    expect(query('.notice-card').textContent).toContain('What would help with revision?');
   });
 });
 

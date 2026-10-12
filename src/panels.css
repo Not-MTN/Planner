@@ -662,3 +662,145 @@
   .week-link-edit .btn-tiny { min-height: 36px; }
   .gplan-picks .btn-small { min-height: 40px; }
 }
+
+/* ---------------------------------------------------------------- panel tabs
+   One strip per panel page, and one job per tab. It scrolls sideways on a
+   phone instead of wrapping into two rows, so the strip keeps a single tap
+   height wherever it is used. */
+.panel-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+.panel-tabs::-webkit-scrollbar { display: none; }
+.panel-tab {
+  flex: 1 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 8px 15px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 620;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.16s, color 0.16s, box-shadow 0.16s;
+}
+.panel-tab:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 5%, transparent); }
+.panel-tab.on { background: var(--surface); color: var(--accent-deep, var(--accent)); box-shadow: var(--shadow-soft); }
+.panel-tab-label { overflow: hidden; text-overflow: ellipsis; }
+.panel-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--surface);
+  font-size: 10.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.panel-tab-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--cat-peach-text); }
+.panel-tabpanel { display: flex; flex-direction: column; gap: 18px; }
+.panel-tabpanel:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+
+/* --------------------------------------------------------------- momentum
+   The student's own numbers, kept warm: a streak, this week's focus, and one
+   button that starts the next session. */
+.momentum-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--cat-blue) 10%, var(--surface)), var(--surface) 72%);
+}
+.momentum-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.momentum-flame {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border-radius: 14px;
+  color: var(--cat-peach-text);
+  background: color-mix(in srgb, var(--cat-peach) 16%, transparent);
+}
+.momentum-copy { flex: 1 1 200px; min-width: 0; }
+.momentum-streak { margin: 2px 0 0; font-family: var(--serif); font-size: clamp(20px, 2.6vw, 26px); font-weight: 600; color: var(--ink); }
+.momentum-note { margin: 4px 0 0; font-size: 12.5px; line-height: 1.6; color: var(--ink-soft); }
+.momentum-start { flex: none; }
+.momentum-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.momentum-stat { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.momentum-stat > span { font-size: 11.5px; color: var(--muted); }
+.momentum-stat > strong { font-size: clamp(17px, 2vw, 21px); font-weight: 650; color: var(--ink); font-variant-numeric: tabular-nums; }
+.momentum-delta { font-size: 11.5px; font-style: normal; color: var(--muted); }
+.momentum-delta.up { color: var(--cat-sage-text); }
+.momentum-bar { height: 7px; border-radius: 99px; overflow: hidden; background: color-mix(in srgb, var(--accent) 12%, var(--surface-2)); }
+.momentum-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width 0.3s var(--ease); }
+
+/* -------------------------------------------------- the picker's add tile */
+.panel-choice-add {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 20px;
+  text-align: start;
+  cursor: pointer;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface-2) 70%, transparent);
+  color: var(--ink);
+  font: inherit;
+  transition: transform 0.18s var(--ease), box-shadow 0.18s var(--ease), border-color 0.18s;
+}
+.panel-choice-add:hover { transform: translateY(-2px); box-shadow: var(--shadow-soft); border-color: color-mix(in srgb, var(--accent) 40%, var(--line-strong)); }
+.panel-choice-add:active { transform: scale(0.995); }
+.panel-choice-add .panel-choice-icon { background: var(--accent-soft); color: var(--accent); }
+.panel-choice-add-copy { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.panel-choice-add-copy > strong { font-size: 15px; font-weight: 640; }
+.panel-choice-add-copy > span { font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+
+/* ------------------------------------------------------ guardian, one student */
+.plan-tab-card { gap: 12px; }
+.plan-mode-switch { align-self: flex-start; }
+.support-card .guidance { margin-block-start: 0; }
+.support-goals { margin-block-start: 20px; padding-block-start: 16px; border-block-start: 1px solid var(--line); }
+.support-goals .gplan-picks { margin-block-start: 10px; }
+.support-card .praise-block { margin-block-start: 18px; }
+.student-week-card .student-headline { margin-block-start: 14px; font-size: 14.5px; }
+.guardian-panel-view .plan-tab-card .guardian-plan-composer,
+.guardian-panel-view .plan-tab-card .week-plan-composer { margin: 0; border: 0; padding: 0; background: transparent; }
+
+@media (max-width: 800px) {
+  .momentum-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .panel-tabs { border-radius: 18px; }
+  .panel-tab { padding-inline: 12px; }
+  .momentum-card { gap: 12px; }
+  .momentum-start { width: 100%; justify-content: center; }
+  .momentum-stats { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .panel-choice-add { padding: 16px; }
+}
+@media (pointer: coarse) {
+  .panel-tab { min-height: 48px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .momentum-bar > span { transition: none; }
+  .panel-choice-add:hover { transform: none; }
+}

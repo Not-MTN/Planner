@@ -114,11 +114,14 @@ test('student panels add revision tasks, focus, complete, and preserve subject e
   // Completing a queued task immediately removes its row, so assert stored completion rather than a detached checkbox.
   await page.getByRole('checkbox', { name: 'Complete Practice exam questions', exact: true }).click();
   await expect(page.locator('.study-task-list')).not.toContainText('Practice exam questions');
+  // Subjects live on their own tab, so the edit is one tab away from the queue.
+  await page.getByRole('tab', { name: 'Subjects', exact: true }).click();
   await page.getByRole('button', { name: 'Edit Physics', exact: true }).click();
   await page.locator('.subject-form').getByLabel('Subject', { exact: true }).fill('Physical science');
   await page.locator('.subject-form').getByLabel('Target hours per week').fill('1.5');
   await page.getByRole('button', { name: 'Save subject', exact: true }).click();
   await page.reload();
+  await page.getByRole('tab', { name: 'Subjects', exact: true }).click();
   await expect(page.locator('.subject-tile').first()).toContainText('Physical science');
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('personal-planner.v1') ?? '{}'));
   expect(stored.tasks.find((task: { title: string }) => task.title === 'Practice exam questions')).toMatchObject({
@@ -131,6 +134,7 @@ test('student panels add revision tasks, focus, complete, and preserve subject e
 
 test('student panels show only weekly results in the guardian preview', async ({ page }) => {
   await page.goto('/app#/student');
+  await page.getByRole('tab', { name: 'Sharing', exact: true }).click();
   await page.locator('.panel-sharing-preview summary').click();
   const preview = page.locator('.sharing-preview-body');
   await expect(preview).toContainText('A lighter week');
@@ -153,7 +157,7 @@ test('guardian panels filter the roster and offer editable dated plan starters',
   await page.getByLabel('Filter students').selectOption('all');
   const alice = page.locator('.student-card', { hasText: 'Alice Bennett' });
   await alice.getByRole('button', { name: 'View student', exact: true }).click();
-  await alice.getByRole('button', { name: 'A week', exact: true }).click();
+  await page.getByRole('tab', { name: 'Plan', exact: true }).click();
   await page.getByRole('button', { name: 'Exam preparation', exact: true }).click();
   await expect(page.locator('.plan-step-row')).toHaveCount(3);
   await expect(page.locator('.plan-composer-summary')).toContainText('1h 5m');
@@ -188,7 +192,7 @@ test('panels keep forms usable in Persian, dark mode, and narrow layouts', async
   await page.goto('/app#/guardian');
   await expect(page.locator('.guardian-roster')).toContainText('به‌روز در این هفته');
   await page.locator('.student-card').first().getByRole('button', { name: 'نمایش دانش‌آموز', exact: true }).click();
-  await page.getByRole('button', { name: 'یک هفته', exact: true }).click();
+  await page.getByRole('tab', { name: 'برنامه', exact: true }).click();
   await expect(page.locator('.guardian-plan-composer')).toBeVisible();
   await expectNoOverflow(page);
 });

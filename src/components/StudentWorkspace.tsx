@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { dayNumber, formatMonthShort, isValidISODate, todayISO } from '../dates';
@@ -18,7 +18,14 @@ function dateLabel(date: string): string {
   return `${dayNumber(date)} ${formatMonthShort(date)}`;
 }
 
-export function StudentWorkspace() {
+export function StudentWorkspace({
+  prefillSubject = null,
+  onPrefillHandled,
+}: {
+  /** Set from the Subjects tab: “Plan study” lands here with the form open. */
+  prefillSubject?: StudentSubject | null;
+  onPrefillHandled?: () => void;
+} = {}) {
   const { state, panels, addTask, toggleTask, updateTask, startFocus, openComposer, flash, undo } = usePlanner();
   const today = todayISO();
   const subjects = panels.student.subjects;
@@ -42,8 +49,21 @@ export function StudentWorkspace() {
       date: today,
       minutes: '25',
     });
+    // A task made for a subject is looked at through that subject's filter, so
+    // the row someone just wrote cannot land outside the list they are reading.
+    if (subject) setSubjectId(subject.id);
     setAddingTask(true);
   };
+
+  // “Plan study” on the Subjects tab is a request to write a task, and this is
+  // the card that writes them — so the switch happens here, once, rather than
+  // leaving a second half-built form on the other tab.
+  useEffect(() => {
+    if (!prefillSubject) return;
+    openTask(prefillSubject);
+    onPrefillHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillSubject]);
 
   const createTask = (event: React.FormEvent) => {
     event.preventDefault();
@@ -352,12 +372,11 @@ export function StudentWorkspace() {
           )}
         </section>
       </div>
-      <SubjectTracker onStudy={openTask} />
     </>
   );
 }
 
-function SubjectTracker({ onStudy }: { onStudy: (subject: StudentSubject) => void }) {
+export function SubjectTracker({ onStudy }: { onStudy?: (subject: StudentSubject) => void }) {
   const { state, panels, updatePanels, saveStudentSubject, requestConfirm, flash } = usePlanner();
   const [form, setForm] = useState<'new' | string | null>(null);
   const [draft, setDraft] = useState<SubjectDraft>(emptySubject);
@@ -559,7 +578,7 @@ function SubjectTracker({ onStudy }: { onStudy: (subject: StudentSubject) => voi
                         : t('{0} left to your target', { 0: minutesLabel(Math.max(0, target - minutes)) })
                       : t('{0} of {1} tasks done', { 0: progress.done, 1: progress.total })}
                   </span>
-                  <button type="button" className="text-btn" onClick={() => onStudy(subject)}>
+                  <button type="button" className="text-btn" onClick={() => onStudy?.(subject)}>
                     {t('Plan study')}
                   </button>
                 </div>

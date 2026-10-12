@@ -141,8 +141,15 @@ describe('optional panels', () => {
     await clickText('Open student panel');
     await waitFor(() => text().includes('This week, and what’s coming'), 10_000, 'the student panel to open');
 
-    // Add a subject and see it land.
-    await clickText('Subject');
+    // Add a subject and see it land. Subjects live on their own tab, and the
+    // tab is called Subjects — so this press has to name the button exactly.
+    await clickText('Subjects');
+    const addSubject = buttons().find((item) => (item.textContent ?? '').trim() === 'Subject');
+    if (!addSubject) throw new Error('No Add subject button');
+    await act(async () => {
+      addSubject.click();
+    });
+    await settle();
     const input = document.querySelector('.panel-form input.input') as HTMLInputElement | null;
     expect(input).toBeTruthy();
     setValue(input!, 'Physics');
@@ -191,6 +198,8 @@ describe('optional panels', () => {
     await clickText('Add student panel');
     await clickText('Open student panel');
 
+    // The coach answers from the week, so it lives on the week tab.
+    await clickText('This week');
     await clickText('Ask');
     await waitFor(() => text().includes('Revise chapter 4'), 10_000, 'the AI answer');
 
