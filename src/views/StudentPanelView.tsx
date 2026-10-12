@@ -1,26 +1,70 @@
 /**
- * The student panel: subjects and exams, this week as results, and the place to
- * explain a significant change.
+ * The student panel: four tabs, one job each.
  *
- * Guardians receive totals and the student's chosen headline. Reasons and
- * older explanations stay private in this planner.
+ *   Today    — the streak, what is left to do, and the button that starts the
+ *              next session. Everything motivational lives here.
+ *   This week— how the week actually went: results, charts, notes, and the
+ *              headline that gets shared.
+ *   Subjects — the tracked subjects with their exam dates and weekly targets.
+ *   Sharing  — who receives the weekly results, and exactly what they receive.
+ *
+ * Guardians receive totals and the student's chosen headline. Reasons and older
+ * explanations stay private in this planner, and nothing here changes anything
+ * the personal planner keeps.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
-import { BellIcon, CalendarIcon, CheckIcon, FlagIcon, HomeIcon, PrinterIcon, SlidersIcon, StopwatchIcon, StudyIcon, TrashIcon } from '../icons';
-import { faNum, t } from '../i18n';
-import { GRADE_LABELS, gradeLabel, markInboxRead, newId, openGoalSuggestions, planPeriodLabel, planProgress, splitExplanations, subjectMinutes, weeklyHistory, weekOf, weekResults, withExplanation, withPlanItemToggled, withoutExplanation } from '../panels';
+import {
+  BellIcon,
+  BookIcon,
+  CalendarIcon,
+  CheckIcon,
+  FlagIcon,
+  FlameIcon,
+  HeartIcon,
+  HomeIcon,
+  PrinterIcon,
+  SlidersIcon,
+  SparkIcon,
+  StopwatchIcon,
+  StudyIcon,
+  SunIcon,
+  TrashIcon,
+} from '../icons';
+import { faNum, t, tn } from '../i18n';
+import {
+  GRADE_LABELS,
+  focusMinutesOn,
+  gradeLabel,
+  markInboxRead,
+  newId,
+  openGoalSuggestions,
+  planPeriodLabel,
+  planProgress,
+  previousWeekFocus,
+  splitExplanations,
+  studyStreak,
+  subjectMinutes,
+  weeklyHistory,
+  weeklyTargetMinutes,
+  weekOf,
+  weekResults,
+  withExplanation,
+  withPlanItemToggled,
+  withoutExplanation,
+} from '../panels';
+import { completionDate } from '../insights';
 import { CompletionRing, FocusTrend, SubjectSplit, SubjectTrend, WeekBars, minutesLabel } from '../components/charts';
 import { normalizeLinkCode } from '../auth/crypto';
 import { friendlyGroqError, generateStudentAdvice, type StudentAdvice } from '../ai';
-import { SparkIcon } from '../icons';
 import { acceptInvitation, answerGoalSuggestion, forgetPraise, removeLink, shareWeeklyResults, syncLinks, syncStudentInbox } from '../auth/links';
 import { AuthError } from '../auth/session';
 import { PLAN_REQUESTS_KEPT } from '../types';
-import type { ChangeNote, DayReport, GoalSuggestion, GuardianPlan } from '../types';
+import type { ChangeNote, DayReport, GoalSuggestion, GuardianPlan, StudentSubject } from '../types';
 import { Field, Empty } from '../components/ui';
-import { StudentWorkspace } from '../components/StudentWorkspace';
+import { PanelTabPanel, PanelTabs, type PanelTab } from '../components/PanelTabs';
+import { StudentWorkspace, SubjectTracker } from '../components/StudentWorkspace';
 import { upcomingExams } from '../panelFeatures';
 import {
   missingReportDays,
@@ -40,8 +84,13 @@ import { StreakRepairForm } from '../components/StreakRepairForm';
 import { WeekPlanCard } from '../components/WeekPlanCard';
 import '../panels.css';
 
+type StudentTab = 'today' | 'week' | 'subjects' | 'sharing';
+
+const TAB_ID = 'student-panel';
+
 export function StudentPanelView() {
-  const { state, panels, updatePanels, addGoal, flash, navigate, setPanelEnabled, requestConfirm, route } = usePlanner();
+  const { state, panels, updatePanels, addGoal, flash, navigate, setPanelEnabled, requestConfirm, route, startFocus } = usePlanner();
+  const [tab, setTab] = useState<StudentTab>('today');
   const [editing, setEditing] = useState(false);
   const [details, setDetails] = useState({ field: panels.student.field ?? '', grade: panels.student.grade ?? '' });
   const [code, setCode] = useState('');
@@ -55,6 +104,7 @@ export function StudentPanelView() {
   const [askNote, setAskNote] = useState('');
   const [askSending, setAskSending] = useState(false);
   const [repairingLock, setRepairingLock] = useState<string | null>(null);
+  const [studyPrefill, setStudyPrefill] = useState<StudentSubject | null>(null);
   const openAsks = useMemo(() => openRequests(panels.student.requests ?? [], todayISO()), [panels.student.requests]);
 
   // Keep in step with the server: a guardian may have ended the link, or sent
@@ -89,14 +139,16 @@ export function StudentPanelView() {
 
   /**
    * Someone who scanned a QR code has already said, by scanning, that they
-   * want this link. So their code is filled in rather than typed. Saying yes
-   * still takes a press: linking hands a guardian their weekly results for as
-   * long as the link lasts, and that is not something to do on arrival.
+   * want this link. So their code is filled in rather than typed, and the panel
+   * opens on the tab where accepting it happens. Saying yes still takes a
+   * press: linking hands a guardian their weekly results for as long as the
+   * link lasts, and that is not something to do on arrival.
    */
   useEffect(() => {
     if (route.name !== 'panels' || !route.invite) return;
     setCode(route.invite);
     setScanned(true);
+    setTab('sharing');
     // The address stays as it arrived until there is an answer, and that is
     // deliberate: it is the only place the code lives. A route change remounts
     // this view by design (Shell's `view-enter` key), so a copy kept here would
@@ -215,11 +267,10 @@ export function StudentPanelView() {
   const inbox = panels.student.inbox;
   const openGoals = openGoalSuggestions(panels);
   const unreadInbox = inbox.notices.filter((notice) => !notice.read).length;
-  // Finished planned days with no report — while any exist, the panel below
-  // gives way to the lock screen, oldest day first.
+  // Finished planned days with no report — while any exist, the panel gives way
+  // to the lock screen, oldest day first.
   const missingDays = useMemo(
     () => missingReportDays(inbox.plans, panels.student.reports ?? [], todayISO()),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [inbox.plans, panels.student.reports],
   );
 
@@ -326,6 +377,28 @@ export function StudentPanelView() {
   const targets = subjects.filter((subject) => (subject.targetMinutes ?? 0) > 0);
   const targetsReached = targets.filter((subject) => subjectMinutes(state, subject, week) >= subject.targetMinutes!).length;
 
+  /* ---------------------------------------------------------- momentum */
+
+  const today = todayISO();
+  const streak = useMemo(() => studyStreak(state, today), [state, today]);
+  const doneToday = useMemo(
+    () => state.tasks.filter((task) => task.completed && completionDate(task) === today).length,
+    [state.tasks, today],
+  );
+  const lastWeekFocus = useMemo(() => previousWeekFocus(state, week), [state, week]);
+  const weekTarget = weeklyTargetMinutes(panels);
+  const targetPercent = weekTarget > 0 ? Math.min(100, Math.round((results.focusMinutes / weekTarget) * 100)) : 0;
+  const focusToday = focusMinutesOn(state, today);
+  const encouragement =
+    streak >= 7
+      ? t('Seven days of showing up. That is the hard part done.')
+      : streak >= 3
+        ? t('You have kept this going. One session at a time.')
+        : results.focusMinutes > 0
+          ? t('Short sessions add up. Start another when you are ready.')
+          : t('Every streak starts with one session. Yours can start today.');
+  const nextExam = exams[0];
+
   const addNote = () => {
     const summary = noteDraft.summary.trim();
     if (!summary) return;
@@ -341,6 +414,17 @@ export function StudentPanelView() {
     flash(t("Saved. Only the headline is included in shared results."));
   };
 
+  const tabs: Array<PanelTab<StudentTab>> = [
+    { id: 'today', label: t('Today'), icon: SunIcon },
+    {
+      id: 'week',
+      label: t('This week'),
+      icon: CalendarIcon,
+      count: unreadInbox + openGoals.length,
+    },
+    { id: 'subjects', label: t('Subjects'), icon: BookIcon },
+    { id: 'sharing', label: t('Sharing'), icon: HeartIcon },
+  ];
 
   // Someone bookmarked the panel, or turned it off on another device.
   if (!panels.student.enabled) {
@@ -418,6 +502,9 @@ export function StudentPanelView() {
     );
   }
 
+  const weekPlans = inbox.plans.filter((plan) => plan.cadence === 'week');
+  const shortPlans = inbox.plans.filter((plan) => plan.cadence !== 'week');
+
   return (
     <div className="view panels-view student-panel-view">
       <header className="view-head panel-page-head">
@@ -490,505 +577,615 @@ export function StudentPanelView() {
         </p>
       )}
 
-      <section className="panel-overview" aria-label={t("This week")}>
-        <div className="panel-stat"><span className="panel-stat-icon"><CheckIcon size={18} /></span><p>{t("Done")}</p><strong>{faNum(results.done)}<small> / {faNum(results.planned)}</small></strong><span>{t("Whole planner this week")}</span></div>
-        <div className="panel-stat"><span className="panel-stat-icon"><StopwatchIcon size={18} /></span><p>{t("Focused")}</p><strong>{minutesLabel(results.focusMinutes)}</strong><span>{t("Every focus session counts")}</span></div>
-        <div className="panel-stat"><span className="panel-stat-icon"><StudyIcon size={18} /></span><p>{t("Study targets")}</p><strong>{targets.length ? <>{faNum(targetsReached)}<small> / {faNum(targets.length)}</small></> : '—'}</strong><span>{targets.length ? t("Weekly targets reached") : t("Set a weekly target below")}</span></div>
-        <div className="panel-stat"><span className="panel-stat-icon"><FlagIcon size={18} /></span><p>{t("Next exam")}</p><strong>{exams[0] ? exams[0].days === 0 ? t("Today") : t("{0} days", { 0: exams[0].days }) : '—'}</strong><span>{exams[0]?.subject.name ?? t("No upcoming exams")}</span></div>
-      </section>
+      <PanelTabs id={TAB_ID} label={t('Student panel')} tabs={tabs} active={tab} onChange={setTab} />
 
-      <StudentWorkspace />
-
-      {panels.student.guardians.length > 0 ? (
-        <>
-        {(panels.student.praise ?? []).length > 0 ? (
-          <section className="card praise-card" aria-label={t("Kind words")}>
-            <header className="card-head">
-              <div>
-                <p className="kicker">{t("Kind words")}</p>
-                <h2 className="card-title">{t("What they said to you")}</h2>
-              </div>
-            </header>
-            <p className="praise-lead">{t("Kept here until you let them go. Not tasks — just what someone noticed.")}</p>
-            <ul className="praise-list">
-              {(panels.student.praise ?? []).slice(0, 8).map((praise) => (
-                <li key={praise.id} className="praise-item">
-                  <p className="praise-text">“{praise.summary}”</p>
-                  <p className="praise-meta">
-                    {praise.author}
-                    {praise.weekOf ? ` · ${t("Week of {0}", { 0: praise.weekOf })}` : ''}
+      <PanelTabPanel id={TAB_ID} tab={tab}>
+        {/* ------------------------------------------------------------ Today */}
+        {tab === 'today' ? (
+          <>
+            <section className="card momentum-card" aria-label={t('Your momentum')}>
+              <div className="momentum-head">
+                <span className="momentum-flame" aria-hidden="true">
+                  <FlameIcon size={20} />
+                </span>
+                <div className="momentum-copy">
+                  <p className="kicker">{t('Your momentum')}</p>
+                  <p className="momentum-streak">
+                    {streak > 0
+                      ? tn(streak, '{count} day in a row', '{count} days in a row')
+                      : t('Today is a fresh start')}
                   </p>
-                  <button
-                    type="button"
-                    className="icon-btn round"
-                    aria-label={t("Let go of these words")}
-                    onClick={() => updatePanels((latest) => forgetPraise(latest, praise.id))}
-                  >
-                    <TrashIcon size={14} />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
-
-        <section className="card inbox-card" aria-label={t("From your guardians")}>
-          <header className="card-head">
-            <div>
-              <p className="kicker">{t("From your guardians")}</p>
-              <h2 className="card-title">
-                {t("Plans and notes for you")}
-                {unreadInbox > 0 ? <span className="badge-count"> {faNum(unreadInbox)}</span> : null}
-              </h2>
-            </div>
-            {unreadInbox > 0 ? (
-              <button type="button" className="btn btn-ghost btn-tiny" onClick={() => updatePanels((latest) => markInboxRead(latest))}>
-                {t("Mark all read")}
-              </button>
-            ) : null}
-          </header>
-          <div className="week-ask-row">
-            {openAsks.length > 0 ? (
-              <>
-                <p className="hint">{t('Plan requested — waiting for your guardian.')}</p>
-                <button type="button" className="btn btn-ghost btn-tiny" onClick={cancelAsk}>
-                  {t('Cancel')}
-                </button>
-              </>
-            ) : (
-              <>
-                <input
-                  className="input"
-                  value={askNote}
-                  maxLength={140}
-                  placeholder={t('A note to go with it')}
-                  aria-label={t('A note to go with it')}
-                  onChange={(event) => setAskNote(event.target.value)}
-                />
+                  <p className="momentum-note">{encouragement}</p>
+                </div>
                 <button
                   type="button"
-                  className="btn btn-ghost btn-small"
-                  disabled={askSending}
-                  onClick={() => void askForPlan()}
+                  className="btn btn-primary btn-small momentum-start"
+                  onClick={() => startFocus({ taskId: null, title: t('Focus session'), minutes: 25 })}
                 >
-                  {t('Ask for a plan')}
+                  <StopwatchIcon size={15} />
+                  {t('Start a focus session')}
                 </button>
-              </>
-            )}
-          </div>
+              </div>
+              <div className="momentum-stats">
+                <div className="momentum-stat">
+                  <span>{t('Focused this week')}</span>
+                  <strong>{minutesLabel(results.focusMinutes)}</strong>
+                  {lastWeekFocus > 0 ? (
+                    <em className={cx('momentum-delta', results.focusMinutes >= lastWeekFocus && 'up')}>
+                      {results.focusMinutes >= lastWeekFocus ? t('More than last week') : t('Less than last week')}
+                    </em>
+                  ) : null}
+                </div>
+                <div className="momentum-stat">
+                  <span>{t('Done today')}</span>
+                  <strong>{faNum(doneToday)}</strong>
+                  <em className="momentum-delta">{focusToday > 0 ? t('Focused {0} today', { 0: minutesLabel(focusToday) }) : t('Nothing focused yet')}</em>
+                </div>
+                <div className="momentum-stat">
+                  <span>{t('Next exam')}</span>
+                  <strong>
+                    {nextExam
+                      ? nextExam.days === 0
+                        ? t('Today')
+                        : t('{0} days', { 0: faNum(nextExam.days) })
+                      : '—'}
+                  </strong>
+                  <em className="momentum-delta">{nextExam ? nextExam.subject.name : t('No upcoming exams')}</em>
+                </div>
+              </div>
+              {weekTarget > 0 ? (
+                <div
+                  className="momentum-bar"
+                  role="progressbar"
+                  aria-label={t('Weekly focus target')}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={targetPercent}
+                >
+                  <span style={{ width: `${targetPercent}%` }} />
+                </div>
+              ) : null}
+            </section>
 
-          {inbox.notices.length === 0 && inbox.plans.length === 0 && openGoals.length === 0 ? (
-            <p className="empty-note">
-              {t("Nothing yet. When a parent or advisor plans your week, suggests a goal, or leaves a note, it shows up here.")}
-            </p>
-          ) : null}
-
-          {openGoals.length > 0 ? (
-            <ul className="gplan-list">
-              {openGoals.map((goal) => (
-                <li key={goal.id} className="gplan-card ggoal-card">
-                  <div className="gplan-head">
-                    <div>
-                      <p className="gplan-kicker">
-                        {goal.target ? t("Suggested goal · aiming for {0}", { 0: goal.target }) : t("Suggested goal")}
+            {panels.student.guardians.length > 0 && (panels.student.praise ?? []).length > 0 ? (
+              <section className="card praise-card" aria-label={t("Kind words")}>
+                <header className="card-head">
+                  <div>
+                    <p className="kicker">{t("Kind words")}</p>
+                    <h2 className="card-title">{t("What they said to you")}</h2>
+                  </div>
+                </header>
+                <p className="praise-lead">{t("Kept here until you let them go. Not tasks — just what someone noticed.")}</p>
+                <ul className="praise-list">
+                  {(panels.student.praise ?? []).slice(0, 4).map((praise) => (
+                    <li key={praise.id} className="praise-item">
+                      <p className="praise-text">“{praise.summary}”</p>
+                      <p className="praise-meta">
+                        {praise.author}
+                        {praise.weekOf ? ` · ${t("Week of {0}", { 0: praise.weekOf })}` : ''}
                       </p>
-                      <p className="gplan-title">{goal.title}</p>
+                      <button
+                        type="button"
+                        className="icon-btn round"
+                        aria-label={t("Let go of these words")}
+                        onClick={() => updatePanels((latest) => forgetPraise(latest, praise.id))}
+                      >
+                        <TrashIcon size={14} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+
+            <section className="panel-overview" aria-label={t("This week")}>
+              <div className="panel-stat"><span className="panel-stat-icon"><CheckIcon size={18} /></span><p>{t("Done")}</p><strong>{faNum(results.done)}<small> / {faNum(results.planned)}</small></strong><span>{t("Whole planner this week")}</span></div>
+              <div className="panel-stat"><span className="panel-stat-icon"><StopwatchIcon size={18} /></span><p>{t("Focused")}</p><strong>{minutesLabel(results.focusMinutes)}</strong><span>{t("Every focus session counts")}</span></div>
+              <div className="panel-stat"><span className="panel-stat-icon"><StudyIcon size={18} /></span><p>{t("Study targets")}</p><strong>{targets.length ? <>{faNum(targetsReached)}<small> / {faNum(targets.length)}</small></> : '—'}</strong><span>{targets.length ? t("Weekly targets reached") : t("Set a weekly target below")}</span></div>
+              <div className="panel-stat"><span className="panel-stat-icon"><FlagIcon size={18} /></span><p>{t("Next exam")}</p><strong>{exams[0] ? exams[0].days === 0 ? t("Today") : t("{0} days", { 0: exams[0].days }) : '—'}</strong><span>{exams[0]?.subject.name ?? t("No upcoming exams")}</span></div>
+            </section>
+
+            {panels.student.guardians.length > 0 ? (
+              <section className="card student-plans-card" aria-label={t('From your guardians')}>
+                <header className="card-head">
+                  <div>
+                    <p className="kicker">{t('From your guardians')}</p>
+                    <h2 className="card-title">{t('Your plan, day by day')}</h2>
+                  </div>
+                </header>
+                <div className="week-ask-row">
+                  {openAsks.length > 0 ? (
+                    <>
+                      <p className="hint">{t('Plan requested — waiting for your guardian.')}</p>
+                      <button type="button" className="btn btn-ghost btn-tiny" onClick={cancelAsk}>
+                        {t('Cancel')}
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <input
+                        className="input"
+                        value={askNote}
+                        maxLength={140}
+                        placeholder={t('A note to go with it')}
+                        aria-label={t('A note to go with it')}
+                        onChange={(event) => setAskNote(event.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-small"
+                        disabled={askSending}
+                        onClick={() => void askForPlan()}
+                      >
+                        {t('Ask for a plan')}
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                {weekPlans.length === 0 && shortPlans.length === 0 ? (
+                  <p className="empty-note">
+                    {t("Nothing yet. When a parent or advisor plans your week, suggests a goal, or leaves a note, it shows up here.")}
+                  </p>
+                ) : null}
+
+                {weekPlans.map((plan) => (
+                  <WeekPlanCard
+                    key={plan.id}
+                    plan={plan}
+                    reports={panels.student.reports ?? []}
+                    acks={panels.student.acks ?? []}
+                    variant="student"
+                    focusMinutes={planFocusMinutes(plan, state.focusLog, state.tasks)}
+                    onToggleItem={(planId, itemId) => updatePanels((latest) => withPlanItemToggled(latest, planId, itemId))}
+                    onRollLesson={rollLessonOn}
+                    reportingDate={reporting?.planId === plan.id ? reporting.date : null}
+                    onReportDay={(date) => setReporting(date ? { planId: plan.id, date } : null)}
+                    actions={
+                      <>
+                        <button
+                          type="button"
+                          className="icon-btn round"
+                          aria-label={`${t('Print')} · ${plan.title}`}
+                          onClick={() => printWeekPlan(plan)}
+                        >
+                          <PrinterIcon size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn round"
+                          aria-label={`${t('Print timetable')} · ${plan.title}`}
+                          onClick={() => printTimetable(plan)}
+                        >
+                          <CalendarIcon size={14} />
+                        </button>
+                      </>
+                    }
+                  />
+                ))}
+
+                {shortPlans.length > 0 ? (
+                  <ul className="gplan-list">
+                    {shortPlans.map((plan) => {
+                      const progress = planProgress(plan);
+                      return (
+                        <li key={plan.id} className="gplan-card">
+                          <div className="gplan-head">
+                            <div>
+                              <p className="gplan-kicker">
+                                <span className={cx('gplan-cadence', `gplan-cadence-${plan.cadence}`)}>
+                                  {plan.cadence === 'day' ? t("Day plan") : t("Month plan")}
+                                </span>
+                                {planPeriodLabel(plan)}
+                              </p>
+                              <p className="gplan-title">{plan.title}</p>
+                            </div>
+                            <div className="gplan-progress" aria-label={t("{0} of {1} done", { 0: progress.done, 1: progress.total })}>
+                              <strong>{faNum(progress.done)}</strong>
+                              <span>/{faNum(progress.total)}</span>
+                            </div>
+                          </div>
+                          {plan.note ? <p className="gplan-note">{plan.note}</p> : null}
+                          <div className="gplan-bar" aria-hidden="true">
+                            <i style={{ width: `${progress.total ? Math.round((progress.done / progress.total) * 100) : 0}%` }} />
+                          </div>
+                          {plan.items.length > 0 ? (
+                            <ul className="gplan-items">
+                              {plan.items.map((item) => (
+                                <li key={item.id} className={cx('gplan-item', item.done && 'done')}>
+                                  <label>
+                                    <input
+                                      type="checkbox"
+                                      checked={item.done}
+                                      onChange={() => updatePanels((latest) => withPlanItemToggled(latest, plan.id, item.id))}
+                                    />
+                                    <span className="gplan-item-title">{item.title}</span>
+                                  </label>
+                                  <span className="gplan-item-meta">
+                                    {item.subject ? <span>{item.subject}</span> : null}
+                                    {item.minutes ? <span>{minutesLabel(item.minutes)}</span> : null}
+                                    {item.date ? <span>{item.date.slice(5)}</span> : null}
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : null}
+                          <p className="gplan-from">{t("From {0}", { 0: plan.author })}</p>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : null}
+              </section>
+            ) : null}
+
+            <StudentWorkspace prefillSubject={studyPrefill} onPrefillHandled={() => setStudyPrefill(null)} />
+          </>
+        ) : null}
+
+        {/* -------------------------------------------------------- This week */}
+        {tab === 'week' ? (
+          <>
+            <section className="card" aria-label={t("Tracking")}>
+              <header className="card-head">
+                <div>
+                  <p className="kicker">{t("Tracking")}</p>
+                  <h2 className="card-title">{t("The last weeks")}</h2>
+                </div>
+              </header>
+              <div className="student-charts">
+                <section className="chart-block">
+                  <p className="chart-title">{t("This week at a glance")}</p>
+                  <div className="result-row">
+                    <CompletionRing done={results.done} planned={results.planned} />
+                    <div className="result-stack">
+                      <div className="result">
+                        <p className="kicker">{t("Focused")}</p>
+                        <p className="result-num">{minutesLabel(results.focusMinutes)}</p>
+                      </div>
+                      <div className="result">
+                        <p className="kicker">{t("Peak week")}</p>
+                        <p className="result-num">{minutesLabel(Math.max(0, ...history.map((entry) => entry.focusMinutes)))}</p>
+                      </div>
                     </div>
                   </div>
-                  {goal.note ? <p className="gplan-note">{goal.note}</p> : null}
-                  {goal.steps.length > 0 ? (
-                    <ol className="ggoal-step-list">
-                      {goal.steps.map((step, index) => (
-                        <li key={index}>{step}</li>
+                </section>
+                {history.length > 1 ? (
+                  <>
+                    <section className="chart-block">
+                      <p className="chart-title">{t("Planned against done")}</p>
+                      <p className="chart-note">{t("The last {0} weeks.", { 0: history.length })}</p>
+                      <WeekBars weeks={history} />
+                      <div className="chart-keys">
+                        <span>
+                          <i className="swatch swatch-planned" aria-hidden="true" />
+                          {t("Planned")}
+                        </span>
+                        <span>
+                          <i className="swatch swatch-done" aria-hidden="true" />
+                          {t("Done")}
+                        </span>
+                      </div>
+                    </section>
+                    <section className="chart-block">
+                      <p className="chart-title">{t("Focused time")}</p>
+                      <FocusTrend weeks={history} />
+                    </section>
+                  </>
+                ) : (
+                  <p className="chart-empty">{t("Charts appear once there is more than one week to compare.")}</p>
+                )}
+                {results.subjects.length > 0 ? (
+                  <section className="chart-block">
+                    <p className="chart-title">{t("Where the time went")}</p>
+                    <SubjectSplit subjects={results.subjects} />
+                  </section>
+                ) : null}
+                {history.some((entry) => entry.subjects.length > 0) ? (
+                  <section className="chart-block">
+                    <p className="chart-title">{t("Subject by subject")}</p>
+                    <p className="chart-note">{t("Which subjects are being looked after, and which have gone quiet.")}</p>
+                    <SubjectTrend weeks={history} />
+                  </section>
+                ) : null}
+              </div>
+            </section>
+
+            {panels.student.guardians.length > 0 ? (
+              <section className="card inbox-card" aria-label={t("From your guardians")}>
+                <header className="card-head">
+                  <div>
+                    <p className="kicker">{t("From your guardians")}</p>
+                    <h2 className="card-title">
+                      {t("Notes for you")}
+                      {unreadInbox > 0 ? <span className="badge-count"> {faNum(unreadInbox)}</span> : null}
+                    </h2>
+                  </div>
+                  {unreadInbox > 0 ? (
+                    <button type="button" className="btn btn-ghost btn-tiny" onClick={() => updatePanels((latest) => markInboxRead(latest))}>
+                      {t("Mark all read")}
+                    </button>
+                  ) : null}
+                </header>
+
+                {openGoals.length > 0 ? (
+                  <ul className="gplan-list">
+                    {openGoals.map((goal) => (
+                      <li key={goal.id} className="gplan-card ggoal-card">
+                        <div className="gplan-head">
+                          <div>
+                            <p className="gplan-kicker">
+                              {goal.target ? t("Suggested goal · aiming for {0}", { 0: goal.target }) : t("Suggested goal")}
+                            </p>
+                            <p className="gplan-title">{goal.title}</p>
+                          </div>
+                        </div>
+                        {goal.note ? <p className="gplan-note">{goal.note}</p> : null}
+                        {goal.steps.length > 0 ? (
+                          <ol className="ggoal-step-list">
+                            {goal.steps.map((step, index) => (
+                              <li key={index}>{step}</li>
+                            ))}
+                          </ol>
+                        ) : null}
+                        <p className="gplan-from">{t("From {0}", { 0: goal.author })}</p>
+                        <div className="ggoal-answers">
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-small"
+                            disabled={answering === goal.id}
+                            onClick={() => void takeOnGoal(goal)}
+                          >
+                            {answering === goal.id ? <span className="spinner" aria-hidden="true" /> : null}
+                            {t("Take it on")}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-small"
+                            disabled={answering === goal.id}
+                            onClick={() => void refuseGoal(goal)}
+                          >
+                            {t("Not now")}
+                          </button>
+                        </div>
+                        <p className="hint">{t("Taking it on adds it to your goals. You can change it or drop it afterwards like any other.")}</p>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+
+                {inbox.notices.length > 0 ? (
+                  <ul className="inbox-notices">
+                    {inbox.notices.slice(0, 6).map((notice) => (
+                      <li key={notice.id} className={cx('inbox-notice', !notice.read && 'unread')}>
+                        <p className="inbox-notice-text">{notice.summary}</p>
+                        <p className="inbox-notice-meta">
+                          {notice.author}
+                          {notice.weekOf ? ` · ${t("Week of {0}", { 0: notice.weekOf })}` : ''}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+
+                {inbox.notices.length === 0 && openGoals.length === 0 ? (
+                  <p className="empty-note">
+                    {t("Nothing yet. When a parent or advisor plans your week, suggests a goal, or leaves a note, it shows up here.")}
+                  </p>
+                ) : null}
+              </section>
+            ) : null}
+
+            <section className="card" aria-label={t("AI")}>
+              <header className="card-head">
+                <div>
+                  <p className="kicker">{t("AI")}</p>
+                  <h2 className="card-title">{t("What should I do this week?")}</h2>
+                </div>
+                <button type="button" className="btn btn-outline btn-small" disabled={asking} onClick={() => void ask()}>
+                  {asking ? <span className="spinner" aria-hidden="true" /> : <SparkIcon size={14} />}
+                  {asking ? t("Thinking…") : advice ? t("Ask again") : t("Ask")}
+                </button>
+              </header>
+              <p className="view-sub">
+                {t("It reads this week's plan and what you have already finished — nothing else in your planner.")}
+              </p>
+
+              {advice ? (
+                <div className="advice">
+                  {advice.summary ? <p className="advice-summary">{advice.summary}</p> : null}
+                  {advice.focus.length > 0 ? (
+                    <ol className="advice-list">
+                      {advice.focus.map((item) => (
+                        <li key={item}>{item}</li>
                       ))}
                     </ol>
                   ) : null}
-                  <p className="gplan-from">{t("From {0}", { 0: goal.author })}</p>
-                  <div className="ggoal-answers">
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-small"
-                      disabled={answering === goal.id}
-                      onClick={() => void takeOnGoal(goal)}
-                    >
-                      {answering === goal.id ? <span className="spinner" aria-hidden="true" /> : null}
-                      {t("Take it on")}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-small"
-                      disabled={answering === goal.id}
-                      onClick={() => void refuseGoal(goal)}
-                    >
-                      {t("Not now")}
-                    </button>
-                  </div>
-                  <p className="hint">{t("Taking it on adds it to your goals. You can change it or drop it afterwards like any other.")}</p>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-
-          {inbox.notices.length > 0 ? (
-            <ul className="inbox-notices">
-              {inbox.notices.slice(0, 6).map((notice) => (
-                <li key={notice.id} className={cx('inbox-notice', !notice.read && 'unread')}>
-                  <p className="inbox-notice-text">{notice.summary}</p>
-                  <p className="inbox-notice-meta">
-                    {notice.author}
-                    {notice.weekOf ? ` · ${t("Week of {0}", { 0: notice.weekOf })}` : ''}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-
-          {inbox.plans.length > 0 ? (
-            <ul className="gplan-list">
-              {inbox.plans.map((plan) => {
-                const progress = planProgress(plan);
-                if (plan.cadence === 'week') {
-                  return (
-                    <WeekPlanCard
-                      key={plan.id}
-                      plan={plan}
-                      reports={panels.student.reports ?? []}
-                      acks={panels.student.acks ?? []}
-                      variant="student"
-                      focusMinutes={planFocusMinutes(plan, state.focusLog, state.tasks)}
-                      onToggleItem={(planId, itemId) => updatePanels((latest) => withPlanItemToggled(latest, planId, itemId))}
-                      onRollLesson={rollLessonOn}
-                      reportingDate={reporting?.planId === plan.id ? reporting.date : null}
-                      onReportDay={(date) => setReporting(date ? { planId: plan.id, date } : null)}
-                      actions={
-                        <>
-                          <button
-                            type="button"
-                            className="icon-btn round"
-                            aria-label={`${t('Print')} · ${plan.title}`}
-                            onClick={() => printWeekPlan(plan)}
-                          >
-                            <PrinterIcon size={14} />
-                          </button>
-                          <button
-                            type="button"
-                            className="icon-btn round"
-                            aria-label={`${t('Print timetable')} · ${plan.title}`}
-                            onClick={() => printTimetable(plan)}
-                          >
-                            <CalendarIcon size={14} />
-                          </button>
-                        </>
-                      }
-                    />
-                  );
-                }
-                return (
-                  <li key={plan.id} className="gplan-card">
-                    <div className="gplan-head">
-                      <div>
-                        <p className="gplan-kicker">
-                          <span className={cx('gplan-cadence', `gplan-cadence-${plan.cadence}`)}>
-                            {plan.cadence === 'day' ? t("Day plan") : t("Month plan")}
-                          </span>
-                          {planPeriodLabel(plan)}
-                        </p>
-                        <p className="gplan-title">{plan.title}</p>
-                      </div>
-                      <div className="gplan-progress" aria-label={t("{0} of {1} done", { 0: progress.done, 1: progress.total })}>
-                        <strong>{faNum(progress.done)}</strong>
-                        <span>/{faNum(progress.total)}</span>
-                      </div>
-                    </div>
-                    {plan.note ? <p className="gplan-note">{plan.note}</p> : null}
-                    <div className="gplan-bar" aria-hidden="true">
-                      <i style={{ width: `${progress.total ? Math.round((progress.done / progress.total) * 100) : 0}%` }} />
-                    </div>
-                    {plan.items.length > 0 ? (
-                      <ul className="gplan-items">
-                        {plan.items.map((item) => (
-                          <li key={item.id} className={cx('gplan-item', item.done && 'done')}>
-                            <label>
-                              <input
-                                type="checkbox"
-                                checked={item.done}
-                                onChange={() => updatePanels((latest) => withPlanItemToggled(latest, plan.id, item.id))}
-                              />
-                              <span className="gplan-item-title">{item.title}</span>
-                            </label>
-                            <span className="gplan-item-meta">
-                              {item.subject ? <span>{item.subject}</span> : null}
-                              {item.minutes ? <span>{minutesLabel(item.minutes)}</span> : null}
-                              {item.date ? <span>{item.date.slice(5)}</span> : null}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-                    <p className="gplan-from">{t("From {0}", { 0: plan.author })}</p>
-                  </li>
-                );
-              })}
-            </ul>
-          ) : null}
-        </section>
-        </>
-      ) : null}
-
-      <section className="card" aria-label={t("Tracking")}>
-        <header className="card-head">
-          <div>
-            <p className="kicker">{t("Tracking")}</p>
-            <h2 className="card-title">{t("The last weeks")}</h2>
-          </div>
-        </header>
-        <div className="student-charts">
-          <section className="chart-block">
-            <p className="chart-title">{t("This week at a glance")}</p>
-            <div className="result-row">
-              <CompletionRing done={results.done} planned={results.planned} />
-              <div className="result-stack">
-                <div className="result">
-                  <p className="kicker">{t("Focused")}</p>
-                  <p className="result-num">{minutesLabel(results.focusMinutes)}</p>
+                  {advice.watchOut ? <p className="advice-watchout">{advice.watchOut}</p> : null}
                 </div>
-                <div className="result">
-                  <p className="kicker">{t("Peak week")}</p>
-                  <p className="result-num">{minutesLabel(Math.max(0, ...history.map((entry) => entry.focusMinutes)))}</p>
+              ) : (
+                <p className="empty-note">{t("Nothing yet. Ask, and it answers from this week alone.")}</p>
+              )}
+            </section>
+
+            <section className="card">
+              <header className="card-head">
+                <div>
+                  <p className="kicker">{t("This week")}</p>
+                  <h2 className="card-title">{t("Explain a significant change")}</h2>
+                </div>
+              </header>
+              <p className="view-sub">
+                {t("Write a headline about what changed. The latest headline is included with your weekly results; your reason stays private in this planner.")}
+              </p>
+
+              <div className="panel-form">
+                <Field label={t("What changed")}>
+                  <input
+                    className="input"
+                    value={noteDraft.summary}
+                    placeholder={t("Moved the history essay to Thursday")}
+                    onChange={(event) => setNoteDraft({ ...noteDraft, summary: event.target.value })}
+                  />
+                </Field>
+                <Field label={t("Why")} hint={t("Private to you; only the headline above is shared.")}>
+                  <textarea
+                    className="input"
+                    rows={2}
+                    value={noteDraft.reason}
+                    placeholder={t("Two deadlines landed on the same day.")}
+                    onChange={(event) => setNoteDraft({ ...noteDraft, reason: event.target.value })}
+                  />
+                </Field>
+                <div className="panel-form-actions">
+                  <button type="button" className="btn btn-primary btn-small" disabled={!noteDraft.summary.trim()} onClick={addNote}>
+                    {t("Note this change")}
+                  </button>
                 </div>
               </div>
-            </div>
-          </section>
-          {history.length > 1 ? (
-            <>
-              <section className="chart-block">
-                <p className="chart-title">{t("Planned against done")}</p>
-                <p className="chart-note">{t("The last {0} weeks.", { 0: history.length })}</p>
-                <WeekBars weeks={history} />
-                <div className="chart-keys">
-                  <span>
-                    <i className="swatch swatch-planned" aria-hidden="true" />
-                    {t("Planned")}
-                  </span>
-                  <span>
-                    <i className="swatch swatch-done" aria-hidden="true" />
-                    {t("Done")}
-                  </span>
-                </div>
-              </section>
-              <section className="chart-block">
-                <p className="chart-title">{t("Focused time")}</p>
-                <FocusTrend weeks={history} />
-              </section>
-            </>
-          ) : (
-            <p className="chart-empty">{t("Charts appear once there is more than one week to compare.")}</p>
-          )}
-          {results.subjects.length > 0 ? (
-            <section className="chart-block">
-              <p className="chart-title">{t("Where the time went")}</p>
-              <SubjectSplit subjects={results.subjects} />
+
+              {current.length > 0 ? (
+                <ul className="explain-list">
+                  {current.map((note) => (
+                    <li key={note.id}>
+                      <div>
+                        <p className="explain-summary">{note.summary}</p>
+                        {note.reason ? <p className="explain-reason">{note.reason}</p> : null}
+                      </div>
+                      <button
+                        type="button"
+                        className="icon-btn round"
+                        aria-label={t("Delete")}
+                        onClick={() => updatePanels((latest) => withoutExplanation(latest, note.id))}
+                      >
+                        <TrashIcon size={14} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="empty-note">{t("Nothing noted this week.")}</p>
+              )}
+
+              {past.length > 0 ? (
+                <details className="past-weeks">
+                  <summary>{t("Earlier weeks")}</summary>
+                  <ul>
+                    {past.slice(0, 8).map((entry) => (
+                      <li key={entry.week}>
+                        <span className="past-week">{formatWeekRange(entry.week)}</span>
+                        <span className="past-count">{t("{0} changes explained", { 0: entry.count })}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="hint">{t("Earlier explanations stay in your planner. Guardians only receive results and the latest headline.")}</p>
+                </details>
+              ) : null}
             </section>
-          ) : null}
-          {history.some((week) => week.subjects.length > 0) ? (
-            <section className="chart-block">
-              <p className="chart-title">{t("Subject by subject")}</p>
-              <p className="chart-note">{t("Which subjects are being looked after, and which have gone quiet.")}</p>
-              <SubjectTrend weeks={history} />
-            </section>
-          ) : null}
-        </div>
-      </section>
-
-      <section className="card">
-        <header className="card-head">
-          <div>
-            <p className="kicker">{t("Guardians")}</p>
-            <h2 className="card-title">{t("Who sees your week")}</h2>
-          </div>
-          {panels.student.guardians.length > 0 ? (
-            <button type="button" className="btn btn-ghost btn-tiny" disabled={sharing} onClick={() => void shareNow()}>
-              {sharing ? <span className="spinner" aria-hidden="true" /> : null}
-              {sharing ? t("Sharing…") : t("Share this week now")}
-            </button>
-          ) : null}
-        </header>
-        <p className="view-sub">
-          {t("They receive your weekly results — how much was planned, how much got done, how long you focused, and the headline you write. Nothing else leaves this planner.")}
-        </p>
-
-        <details className="panel-sharing-preview">
-          <summary>{t("Preview shared results")}</summary>
-          <div className="sharing-preview-body">
-            <p className="hint">{t("This is the weekly snapshot guardians receive. Task details, exam dates, targets, reasons, and personal notes are not sent automatically.")}</p>
-            <p className="student-week">{t("Week of {0}", { 0: results.weekOf })}</p>
-            <dl className="sharing-preview-values">
-              <div><dt>{t("Planned")}</dt><dd>{faNum(results.planned)}</dd></div>
-              <div><dt>{t("Done")}</dt><dd>{faNum(results.done)}</dd></div>
-              <div><dt>{t("Focused")}</dt><dd>{minutesLabel(results.focusMinutes)}</dd></div>
-            </dl>
-            {results.subjects.length > 0 ? <SubjectSplit subjects={results.subjects} /> : null}
-            <p className="student-headline">{results.headline || t("No headline shared this week.")}</p>
-          </div>
-        </details>
-
-        {panels.student.guardians.length === 0 ? (
-          <p className="empty-note">{t("Nobody yet. Add a code from a parent or advisor to start sharing results.")}</p>
-        ) : (
-          <ul className="guardian-list">
-            {panels.student.guardians.map((guardian) => (
-              <li key={guardian.linkId}>
-                <div>
-                  <p className="guardian-name">{guardian.guardianDisplayName}</p>
-                  <p className="guardian-state">
-                    {guardian.sharedWeek ? t("Shared for the week of {0}", { 0: guardian.sharedWeek }) : t("Not shared yet")}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-tiny"
-                  onClick={() => stopSharing(guardian)}
-                >
-                  {t("Stop sharing")}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        <div className="panel-form">
-          <Field label={t("Have a code from a parent or advisor?")}>
-            <input
-              className="input"
-              value={code}
-              autoComplete="off"
-              placeholder="plnr-XXXX-XXXX-XXXX"
-              onChange={(event) => {
-                setCode(event.target.value);
-                setScanned(false);
-              }}
-            />
-          </Field>
-          <div className="panel-form-actions">
-            <button type="button" className="btn btn-primary btn-small" disabled={busy || !code.trim()} onClick={() => void accept()}>
-              {busy ? <span className="spinner" aria-hidden="true" /> : null}
-              {busy ? t("Linking…") : t("Link")}
-            </button>
-          </div>
-          {scanned ? (
-            <p className="hint" role="status">
-              {t("That code came from a QR code. Press Link to accept it.")}
-            </p>
-          ) : null}
-        </div>
-      </section>
-
-      <section className="card">
-        <header className="card-head">
-          <div>
-            <p className="kicker">{t("AI")}</p>
-            <h2 className="card-title">{t("What should I do this week?")}</h2>
-          </div>
-          <button type="button" className="btn btn-outline btn-small" disabled={asking} onClick={() => void ask()}>
-            {asking ? <span className="spinner" aria-hidden="true" /> : <SparkIcon size={14} />}
-            {asking ? t("Thinking…") : advice ? t("Ask again") : t("Ask")}
-          </button>
-        </header>
-        <p className="view-sub">
-          {t("It reads this week's plan and what you have already finished — nothing else in your planner.")}
-        </p>
-
-        {advice ? (
-          <div className="advice">
-            {advice.summary ? <p className="advice-summary">{advice.summary}</p> : null}
-            {advice.focus.length > 0 ? (
-              <ol className="advice-list">
-                {advice.focus.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ol>
-            ) : null}
-            {advice.watchOut ? <p className="advice-watchout">{advice.watchOut}</p> : null}
-          </div>
-        ) : (
-          <p className="empty-note">{t("Nothing yet. Ask, and it answers from this week alone.")}</p>
-        )}
-      </section>
-
-      <section className="card">
-        <header className="card-head">
-          <div>
-            <p className="kicker">{t("This week")}</p>
-            <h2 className="card-title">{t("Explain a significant change")}</h2>
-          </div>
-        </header>
-        <p className="view-sub">
-          {t("Write a headline about what changed. The latest headline is included with your weekly results; your reason stays private in this planner.")}
-        </p>
-
-        <div className="panel-form">
-          <Field label={t("What changed")}>
-            <input
-              className="input"
-              value={noteDraft.summary}
-              placeholder={t("Moved the history essay to Thursday")}
-              onChange={(event) => setNoteDraft({ ...noteDraft, summary: event.target.value })}
-            />
-          </Field>
-          <Field label={t("Why")} hint={t("Private to you; only the headline above is shared.")}>
-            <textarea
-              className="input"
-              rows={2}
-              value={noteDraft.reason}
-              placeholder={t("Two deadlines landed on the same day.")}
-              onChange={(event) => setNoteDraft({ ...noteDraft, reason: event.target.value })}
-            />
-          </Field>
-          <div className="panel-form-actions">
-            <button type="button" className="btn btn-primary btn-small" disabled={!noteDraft.summary.trim()} onClick={addNote}>
-              {t("Note this change")}
-            </button>
-          </div>
-        </div>
-
-        {current.length > 0 ? (
-          <ul className="explain-list">
-            {current.map((note) => (
-              <li key={note.id}>
-                <div>
-                  <p className="explain-summary">{note.summary}</p>
-                  {note.reason ? <p className="explain-reason">{note.reason}</p> : null}
-                </div>
-                <button
-                  type="button"
-                  className="icon-btn round"
-                  aria-label={t("Delete")}
-                  onClick={() => updatePanels((latest) => withoutExplanation(latest, note.id))}
-                >
-                  <TrashIcon size={14} />
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="empty-note">{t("Nothing noted this week.")}</p>
-        )}
-
-        {past.length > 0 ? (
-          <details className="past-weeks">
-            <summary>{t("Earlier weeks")}</summary>
-            <ul>
-              {past.slice(0, 8).map((entry) => (
-                <li key={entry.week}>
-                  <span className="past-week">{formatWeekRange(entry.week)}</span>
-                  <span className="past-count">{t("{0} changes explained", { 0: entry.count })}</span>
-                </li>
-              ))}
-            </ul>
-            <p className="hint">{t("Earlier explanations stay in your planner. Guardians only receive results and the latest headline.")}</p>
-          </details>
+          </>
         ) : null}
-      </section>
+
+        {/* -------------------------------------------------------- Subjects */}
+        {tab === 'subjects' ? (
+          <SubjectTracker
+            onStudy={(subject) => {
+              setStudyPrefill(subject);
+              setTab('today');
+            }}
+          />
+        ) : null}
+
+        {/* --------------------------------------------------------- Sharing */}
+        {tab === 'sharing' ? (
+          <section className="card">
+            <header className="card-head">
+              <div>
+                <p className="kicker">{t("Guardians")}</p>
+                <h2 className="card-title">{t("Who sees your week")}</h2>
+              </div>
+              {panels.student.guardians.length > 0 ? (
+                <button type="button" className="btn btn-ghost btn-tiny" disabled={sharing} onClick={() => void shareNow()}>
+                  {sharing ? <span className="spinner" aria-hidden="true" /> : null}
+                  {sharing ? t("Sharing…") : t("Share this week now")}
+                </button>
+              ) : null}
+            </header>
+            <p className="view-sub">
+              {t("They receive your weekly results — how much was planned, how much got done, how long you focused, and the headline you write. Nothing else leaves this planner.")}
+            </p>
+
+            <details className="panel-sharing-preview">
+              <summary>{t("Preview shared results")}</summary>
+              <div className="sharing-preview-body">
+                <p className="hint">{t("This is the weekly snapshot guardians receive. Task details, exam dates, targets, reasons, and personal notes are not sent automatically.")}</p>
+                <p className="student-week">{t("Week of {0}", { 0: results.weekOf })}</p>
+                <dl className="sharing-preview-values">
+                  <div><dt>{t("Planned")}</dt><dd>{faNum(results.planned)}</dd></div>
+                  <div><dt>{t("Done")}</dt><dd>{faNum(results.done)}</dd></div>
+                  <div><dt>{t("Focused")}</dt><dd>{minutesLabel(results.focusMinutes)}</dd></div>
+                </dl>
+                {results.subjects.length > 0 ? <SubjectSplit subjects={results.subjects} /> : null}
+                <p className="student-headline">{results.headline || t("No headline shared this week.")}</p>
+              </div>
+            </details>
+
+            {panels.student.guardians.length === 0 ? (
+              <p className="empty-note">{t("Nobody yet. Add a code from a parent or advisor to start sharing results.")}</p>
+            ) : (
+              <ul className="guardian-list">
+                {panels.student.guardians.map((guardian) => (
+                  <li key={guardian.linkId}>
+                    <div>
+                      <p className="guardian-name">{guardian.guardianDisplayName}</p>
+                      <p className="guardian-state">
+                        {guardian.sharedWeek ? t("Shared for the week of {0}", { 0: guardian.sharedWeek }) : t("Not shared yet")}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-tiny"
+                      onClick={() => stopSharing(guardian)}
+                    >
+                      {t("Stop sharing")}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <div className="panel-form">
+              <Field label={t("Have a code from a parent or advisor?")}>
+                <input
+                  className="input"
+                  value={code}
+                  autoComplete="off"
+                  placeholder="plnr-XXXX-XXXX-XXXX"
+                  onChange={(event) => {
+                    setCode(event.target.value);
+                    setScanned(false);
+                  }}
+                />
+              </Field>
+              <div className="panel-form-actions">
+                <button type="button" className="btn btn-primary btn-small" disabled={busy || !code.trim()} onClick={() => void accept()}>
+                  {busy ? <span className="spinner" aria-hidden="true" /> : null}
+                  {busy ? t("Linking…") : t("Link")}
+                </button>
+              </div>
+              {scanned ? (
+                <p className="hint" role="status">
+                  {t("That code came from a QR code. Press Link to accept it.")}
+                </p>
+              ) : null}
+            </div>
+
+            <p className="panel-private-note">
+              <HeartIcon size={13} />
+              {t("You decide what is shared. Stopping at any time stops it for good — the results they already have are theirs.")}
+            </p>
+          </section>
+        ) : null}
+      </PanelTabPanel>
 
       <p className="panel-footnote">
         <button type="button" className="text-btn" onClick={() => navigate({ name: 'panels' })}>

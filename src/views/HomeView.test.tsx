@@ -95,8 +95,11 @@ describe('the panel picker', () => {
     expect(window.location.hash).toBe('#/home');
     expect(text()).toContain('Choose your panel');
     expect(text()).toContain('Open personal panel');
-    expect(text()).toContain('Add student panel');
-    expect(text()).toContain('Add guardian panel');
+    // A panel that has not been added is offered once, as Add a panel — the
+    // picker lists the panels somebody actually has.
+    expect(text()).toContain('Add a panel');
+    expect(text()).not.toContain('Add student panel');
+    expect(text()).not.toContain('Open student panel');
     // The picker stays one press away from everywhere.
     expect(buttons().some((item) => (item.textContent ?? '').trim() === 'Home')).toBe(true);
   });
@@ -124,7 +127,7 @@ describe('the panel picker', () => {
   it('sends a panel that is not added to where it is added', async () => {
     mountApp('#/home');
     await boot();
-    await clickText('Add student panel');
+    await clickText('Add a panel');
     await waitFor(() => text().includes('Panels are additions to your planner'), 10_000, 'the panels page to open');
     expect(window.location.hash).toBe('#/panels');
   });
