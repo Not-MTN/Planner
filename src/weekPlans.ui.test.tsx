@@ -400,14 +400,18 @@ describe('reading the week back', () => {
     await click('Review reports');
 
     const form = query('.day-report-form');
-    const box = form.querySelector('input[type="checkbox"]');
-    if (!(box instanceof HTMLInputElement)) throw new Error('Missing report checkbox');
-    await act(async () => box.click());
+    expect(form.querySelector('input[type="checkbox"]')).toBeNull();
+    expect(form.querySelector('.day-report-performance')).not.toBeNull();
+    expect(form.textContent).not.toContain('Maths');
+    expect(form.textContent).not.toContain('Physics');
     await click('Send report');
     expect(document.body.textContent).toContain('All caught up');
     expect(document.body.textContent).not.toContain('Daily reports to send');
     await click('Today', query('[role="tablist"]'));
-    expect(document.querySelector('.week-plan-card')).not.toBeNull();
+    const weekCard = query('.week-plan-card');
+    expect(weekCard.textContent).toContain('of 1 done');
+    expect(weekCard.textContent).not.toContain('Maths');
+    expect(weekCard.textContent).not.toContain('Physics');
     expect(saved().panels.student.reports?.some((report) => report.date === yesterday)).toBe(true);
   });
 });
@@ -441,7 +445,7 @@ describe('living with the week', () => {
     expect(query('.week-plan-card').textContent).toContain('Reported');
   });
 
-  it('leaves day plans to their ticks: no rows, no reports, no lock', async () => {
+  it('shows performance only after a day plan ends', async () => {
     const plans = [
       weekPlan({
         id: 'day-1',
@@ -454,7 +458,11 @@ describe('living with the week', () => {
     await mount(studentState(plans), 'student');
     expect(document.body.textContent).not.toContain('Daily reports to send');
     expect(document.querySelector('.week-plan-card')).toBeNull();
-    expect(document.querySelector('.gplan-card')?.textContent).toContain('A day of revision');
+    const card = document.querySelector('.gplan-card');
+    expect(card?.textContent).toContain('Period performance');
+    expect(card?.textContent).toContain('Performance summary only');
+    expect(card?.textContent).not.toContain('A day of revision');
+    expect(card?.textContent).not.toContain('Revise');
   });
 });
 
@@ -650,7 +658,7 @@ describe('rolling over and the grid', () => {
     const card = query('.week-plan-card');
     const grid = card.querySelector('.week-grid');
     if (!grid) throw new Error('Missing timetable grid');
-    expect(grid.textContent).toContain('Maths');
+    expect(grid.textContent).not.toContain('Maths');
     expect(grid.textContent).toContain('Physics');
     expect(grid.textContent).toContain('Chemistry');
     expect(grid.textContent).toContain('✓');

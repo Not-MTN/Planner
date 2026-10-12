@@ -39,6 +39,7 @@ import {
   markInboxRead,
   newId,
   openGoalSuggestions,
+  planEnd,
   planPeriodLabel,
   planProgress,
   previousWeekFocus,
@@ -64,13 +65,16 @@ import type { ChangeNote, DayReport, GoalSuggestion, GuardianPlan, StudentSubjec
 import { Field, Empty } from '../components/ui';
 import { PanelTabPanel, PanelTabs, type PanelTab } from '../components/PanelTabs';
 import { StudentWorkspace, SubjectTracker } from '../components/StudentWorkspace';
+import { StudentLearningHub } from '../components/StudentLearningHub';
 import { upcomingExams } from '../panelFeatures';
 import {
+  canSubmitDayReport,
   missingReportDays,
   openRequests,
   planFocusMinutes,
   repairUsed,
   rollTarget,
+  studentCanTogglePlanItem,
   withDayReport,
   withLessonRolled,
 } from '../weekPlans';
@@ -83,7 +87,7 @@ import { StreakRepairForm } from '../components/StreakRepairForm';
 import { WeekPlanCard } from '../components/WeekPlanCard';
 import '../panels.css';
 
-type StudentTab = 'today' | 'week' | 'subjects' | 'sharing';
+type StudentTab = 'today' | 'week' | 'subjects' | 'classes' | 'sharing';
 
 const TAB_ID = 'student-panel';
 
@@ -422,6 +426,7 @@ export function StudentPanelView() {
       count: unreadInbox + openGoals.length,
     },
     { id: 'subjects', label: t('Subjects'), icon: BookIcon },
+    { id: 'classes', label: t('Classes'), icon: StudyIcon, count: (panels.student.inbox.classes ?? []).length + (panels.student.inbox.homework ?? []).length },
     { id: 'sharing', label: t('Sharing'), icon: HeartIcon },
   ];
 
@@ -545,7 +550,7 @@ export function StudentPanelView() {
                       <h2 className="card-title">{formatFullDate(day.date)}</h2>
                     </div>
                   </header>
-                  <DayReportForm plan={day.plan} date={day.date} lessons={day.lessons} onDone={() => undefined} />
+                  <DayReportForm plan={day.plan} date={day.date} lessons={day.lessons} performanceOnly={day.date < todayISO()} onDone={() => undefined} />
                   {!repairUsed(panels.student.reports ?? [], day.plan.id) && repairingLock !== `${day.plan.id}-${day.date}` ? (
                     <button
                       type="button"
@@ -721,6 +726,11 @@ export function StudentPanelView() {
                 ) : null}
 
                 {weekPlans.length > 0 ? <p className="hint">{t('A suggested plan. You can move unfinished lessons or ask for changes.')}</p> : null}
+                {missingDays.length > 0 ? (
+                  <p className="week-missing-alert" role="status">
+                    {t('Daily report missed for {0}. Send the oldest report first; other days stay locked until you catch up.', { 0: formatFullDate(missingDays[0]!.date) })}
+                  </p>
+                ) : null}
                 {weekPlans.map((plan) => (
                   <WeekPlanCard
                     key={plan.id}
@@ -730,7 +740,9 @@ export function StudentPanelView() {
                     variant="student"
                     focusMinutes={planFocusMinutes(plan, state.focusLog, state.tasks)}
                     onToggleItem={(planId, itemId) => updatePanels((latest) => withPlanItemToggled(latest, planId, itemId))}
-                    onRollLesson={rollLessonOn}
+                    canToggleItem={(planId, itemId) => studentCanTogglePlanItem(panels, planId, itemId)}
+                    onRollLesson={missingDays.length === 0 ? rollLessonOn : undefined}
+                    canReportDay={(planId, date) => canSubmitDayReport(panels, planId, date)}
                     reportingDate={reporting?.planId === plan.id ? reporting.date : null}
                     onReportDay={(date) => setReporting(date ? { planId: plan.id, date } : null)}
                     actions={
@@ -770,6 +782,32 @@ export function StudentPanelView() {
                   <ul className="gplan-list">
                     {shortPlans.map((plan) => {
                       const progress = planProgress(plan);
+                      const periodClosed = !!plan.approvedAt || planEnd(plan) < todayISO();
+                      if (periodClosed) {
+                        return (
+                          <li key={plan.id} className={cx('gplan-card week-period-summary', plan.approvedAt || (progress.total > 0 && progress.done === progress.total) ? 'is-complete' : 'is-incomplete')}>
+                            <div className="gplan-head">
+                              <div>
+                                <p className="gplan-kicker">
+                                  <span className={cx('gplan-cadence', `gplan-cadence-${plan.cadence}`)}>
+                                    {plan.cadence === 'day' ? t('Day plan') : t('Month plan')}
+                                  </span>
+                                  {planPeriodLabel(plan)}
+                                </p>
+                                <p className="gplan-title">{t('Period performance')}</p>
+                              </div>
+                              <div className="gplan-progress" aria-label={t('{0} of {1} done', { 0: progress.done, 1: progress.total })}>
+                                <strong>{faNum(progress.done)}</strong>
+                                <span>/{faNum(progress.total)}</span>
+                              </div>
+                            </div>
+                            <p className="week-period-state">{plan.approvedAt ? t('Approved by your guardian. This period is closed.') : t('This period has ended. Performance summary only.')}</p>
+                            <div className="gplan-bar" aria-hidden="true">
+                              <i style={{ width: `${progress.total ? Math.round((progress.done / progress.total) * 100) : 0}%` }} />
+                            </div>
+                          </li>
+                        );
+                      }
                       return (
                         <li key={plan.id} className="gplan-card">
                           <div className="gplan-head">
@@ -799,6 +837,7 @@ export function StudentPanelView() {
                                     <input
                                       type="checkbox"
                                       checked={item.done}
+                                      disabled={!studentCanTogglePlanItem(panels, plan.id, item.id)}
                                       onChange={() => updatePanels((latest) => withPlanItemToggled(latest, plan.id, item.id))}
                                     />
                                     <span className="gplan-item-title">{item.title}</span>
@@ -1187,6 +1226,8 @@ export function StudentPanelView() {
             </p>
           </section>
         ) : null}
+
+        {tab === 'classes' ? <StudentLearningHub /> : null}
       </PanelTabPanel>
 
       <p className="panel-footnote">

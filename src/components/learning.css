@@ -1,0 +1,62 @@
+/* Classes and guardian-assigned homework */
+.learning-hub,
+.guardian-assignments { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.learning-section { min-width: 0; padding: 18px; }
+.learning-section > .card-head { margin-bottom: 12px; }
+.learning-list { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.learning-card {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line-strong);
+  border-inline-start: 4px solid var(--status-incomplete);
+  border-radius: 14px;
+  background: var(--surface-2);
+}
+.learning-card.is-complete { border-color: color-mix(in srgb, var(--status-complete) 45%, var(--line)); border-inline-start-color: var(--status-complete); }
+.learning-card.is-incomplete { border-inline-start-color: var(--status-incomplete); }
+.learning-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.learning-card-head > div { min-width: 0; }
+.learning-kicker { margin: 0 0 3px; color: var(--muted); font-size: 11px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.learning-card h3 { color: var(--ink); font-size: 15px; line-height: 1.35; overflow-wrap: anywhere; }
+.learning-card.is-complete h3 { color: var(--status-complete); }
+.learning-card.is-incomplete h3 { color: var(--status-incomplete); }
+.learning-state { flex: none; display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 9px; font-size: 11px; font-weight: 750; }
+.learning-state.is-complete { color: var(--status-complete); background: var(--status-complete-soft); }
+.learning-state.is-incomplete { color: var(--status-incomplete); background: var(--status-incomplete-soft); }
+.learning-description { margin: 9px 0; color: var(--ink-soft); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.learning-meta { display: flex; flex-wrap: wrap; gap: 5px 12px; margin: 9px 0; color: var(--muted); font-size: 12px; }
+.learning-card-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.learning-privacy { margin: 9px 0 0; color: var(--muted); font-size: 11.5px; line-height: 1.5; }
+.learning-count { flex: none; min-width: 28px; height: 28px; display: grid; place-items: center; border-radius: 999px; color: var(--accent-deep); background: var(--accent-soft); font-size: 12px; font-weight: 750; }
+.learning-upload-form,
+.learning-assignment-form { display: flex; flex-direction: column; align-items: flex-start; gap: 11px; margin-top: 12px; }
+.learning-upload-form .field,
+.learning-assignment-form .field { width: 100%; }
+.learning-upload-form .input,
+.learning-assignment-form .input { width: 100%; }
+.learning-assignment-form { padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: color-mix(in srgb, var(--surface) 72%, transparent); }
+.learning-assigned-list { margin-top: 18px; }
+.learning-assigned-list > .chart-title { margin-bottom: 9px; }
+.assignment-mode-switch { flex: none; }
+.assignment-student-picker { min-width: 0; margin: 12px 0 0; padding: 12px; border: 1px solid var(--line-strong); border-radius: 13px; }
+.assignment-student-picker legend { padding: 0 5px; color: var(--ink-soft); font-size: 12px; font-weight: 700; }
+.assignment-student-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.assignment-student-option { display: flex; align-items: center; gap: 7px; max-width: 100%; padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); cursor: pointer; }
+.assignment-student-option input { accent-color: var(--status-complete); }
+.assignment-student-option span { font-size: 12.5px; font-weight: 650; overflow-wrap: anywhere; }
+.assignment-student-option small { color: var(--muted); font-size: 11px; }
+.homework-submission-summary { margin-top: 10px; color: var(--ink-soft); font-size: 12px; }
+.homework-photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; margin-top: 12px; }
+.homework-photo-preview { display: block; width: 100%; max-height: 240px; object-fit: contain; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.homework-photo-loading,
+.homework-photo-failed { display: grid; min-height: 80px; place-items: center; padding: 10px; border-radius: 10px; background: var(--surface); color: var(--muted); font-size: 11px; text-align: center; }
+.homework-photo-failed { color: var(--status-incomplete); }
+@media (max-width: 600px) {
+  .learning-section { padding: 14px; }
+  .learning-card { padding: 12px; }
+  .learning-card-head { flex-wrap: wrap; }
+  .assignment-mode-switch { width: 100%; }
+  .assignment-mode-switch .segment { flex: 1; }
+  .learning-card-actions > .btn { flex: 1; }
+  .learning-card-actions .learning-meta { flex-basis: 100%; }
+}

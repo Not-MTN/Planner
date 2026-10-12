@@ -32,6 +32,8 @@ import {
   handleSession,
   handleSessions,
   handleAuthEvents,
+  handleHomeworkPhotoDelete,
+  handleHomeworkUploadSign,
   handleShare,
   handleSignup,
 } from './src/server/authApi';
@@ -215,7 +217,10 @@ function icsApi(): Plugin {
   };
 }
 
-function authHandler(databaseUrl: string | undefined): NextHandleFunction {
+function authHandler(
+  databaseUrl: string | undefined,
+  cloudinary: { CLOUDINARY_CLOUD_NAME?: string; CLOUDINARY_API_KEY?: string; CLOUDINARY_API_SECRET?: string },
+): NextHandleFunction {
   return (request, response, next) => {
     const pathname = (request.url ?? '').split('?')[0];
     const run: ((webRequest: Request) => Promise<Response>) | null =
@@ -271,7 +276,11 @@ function authHandler(databaseUrl: string | undefined): NextHandleFunction {
                           ? (webRequest) => authStore(databaseUrl).then((store) => handleShare(webRequest, store))
                           : pathname === '/note'
                             ? (webRequest) => authStore(databaseUrl).then((store) => handleNote(webRequest, store))
-                            : null;
+                            : pathname === '/homework-photos/sign'
+                              ? (webRequest) => authStore(databaseUrl).then((store) => handleHomeworkUploadSign(webRequest, store, cloudinary))
+                              : pathname === '/homework-photos/delete'
+                                ? (webRequest) => authStore(databaseUrl).then((store) => handleHomeworkPhotoDelete(webRequest, store, cloudinary))
+                                : null;
     if (!run) {
       next();
       return;
@@ -307,8 +316,11 @@ function apiFallback(): Plugin {
   };
 }
 
-function authApi(databaseUrl: string | undefined): Plugin {
-  const middleware = authHandler(databaseUrl);
+function authApi(
+  databaseUrl: string | undefined,
+  cloudinary: { CLOUDINARY_CLOUD_NAME?: string; CLOUDINARY_API_KEY?: string; CLOUDINARY_API_SECRET?: string },
+): Plugin {
+  const middleware = authHandler(databaseUrl, cloudinary);
   return {
     name: 'planner-auth-api',
     configureServer(server) {
@@ -369,6 +381,11 @@ export default defineConfig(({ mode }) => {
   const model = env.GROQ_MODEL || fileEnv.GROQ_MODEL;
   const visionModel = env.GROQ_VISION_MODEL ?? fileEnv.GROQ_VISION_MODEL;
   const databaseUrl = env.DATABASE_URL || fileEnv.DATABASE_URL;
+  const cloudinary = {
+    CLOUDINARY_CLOUD_NAME: env.CLOUDINARY_CLOUD_NAME || fileEnv.CLOUDINARY_CLOUD_NAME,
+    CLOUDINARY_API_KEY: env.CLOUDINARY_API_KEY || fileEnv.CLOUDINARY_API_KEY,
+    CLOUDINARY_API_SECRET: env.CLOUDINARY_API_SECRET || fileEnv.CLOUDINARY_API_SECRET,
+  };
   // Packaged apps (Android, iOS, desktop) are a different origin from the API,
   // so their build carries the address. Empty for the website and for local
   // development, where `/api/...` stays relative.
@@ -409,7 +426,7 @@ export default defineConfig(({ mode }) => {
       __PLANNER_LINK_ORIGIN__: JSON.stringify(linkOrigin),
       __APP_VERSION__: JSON.stringify(appVersion),
     },
-    plugins: [appOrigins(), react(), groqProxyPlugin(apiKey, model, visionModel), syncApi(databaseUrl), authApi(databaseUrl), icsApi(), pushApi(pushEnv), apiFallback()],
+    plugins: [appOrigins(), react(), groqProxyPlugin(apiKey, model, visionModel), syncApi(databaseUrl), authApi(databaseUrl, cloudinary), icsApi(), pushApi(pushEnv), apiFallback()],
     build: {
       // `scripts/bundle-budget.mjs` keys its baseline by module, not by the
       // content hash in each filename, and this is where it learns that

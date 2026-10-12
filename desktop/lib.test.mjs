@@ -96,6 +96,8 @@ describe('contentSecurityPolicy', () => {
     expect(policy).toContain("object-src 'none'");
     expect(policy).toContain('connect-src');
     expect(policy).toContain('https://api.open-meteo.com');
+    expect(policy).toContain('https://api.cloudinary.com');
+    expect(policy).toContain('https://res.cloudinary.com');
     expect(policy).not.toContain('api.github.com');
     expect(policy).not.toContain('https://planner.example.com');
   });

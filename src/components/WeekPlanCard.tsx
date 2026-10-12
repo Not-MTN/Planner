@@ -13,13 +13,15 @@ import { cx } from '../cx';
 import { displayTime, formatFullDate, formatWeekdayShort, todayISO } from '../dates';
 import { faNum, t, tn } from '../i18n';
 import { BellIcon, CheckIcon, GlobeIcon } from '../icons';
-import { planPeriodLabel, planProgress } from '../panels';
+import { planEnd, planPeriodLabel, planProgress } from '../panels';
 import { ACK_REACTIONS } from '../types';
 import type { DayReport, GuardianPlan, PlanItem, ReportAck } from '../types';
 import {
   ackFor,
+  canApprovePlanPeriod,
   datelessItems,
   isRestDay,
+  missingReportDays,
   itemsForDay,
   planWeekDays,
   reportFor,
@@ -47,6 +49,7 @@ function AckLine({ ack }: { ack: ReportAck }) {
       ✓ {t('Seen')}
       {ack.text ? ` — ${ack.text}` : ''}
       {ack.reactions.length > 0 ? ` ${ack.reactions.join('')}` : ''}
+      {ack.approvedAt ? ` · ${t('Day approved')}` : ''}
     </p>
   );
 }
@@ -62,7 +65,7 @@ function ReactionRow({ ack, onReact }: { ack?: ReportAck; onReact: (emoji: strin
           key={emoji}
           type="button"
           className={cx('react-btn', active.has(emoji) && 'is-on')}
-          disabled={sending}
+          disabled={sending || !!ack?.approvedAt}
           aria-pressed={active.has(emoji)}
           aria-label={t('React with {0}', { 0: emoji })}
           title={t('React with {0}', { 0: emoji })}
@@ -80,7 +83,17 @@ function ReactionRow({ ack, onReact }: { ack?: ReportAck; onReact: (emoji: strin
 }
 
 /** Answering one report: seen at a tap, or seen with a line back. */
-function AckRow({ report, onAck }: { report: DayReport; onAck: (report: DayReport, text: string) => Promise<void> }) {
+function AckRow({
+  report,
+  onAck,
+  onApprove,
+  approved = false,
+}: {
+  report: DayReport;
+  onAck: (report: DayReport, text: string) => Promise<void>;
+  onApprove?: (report: DayReport) => Promise<void>;
+  approved?: boolean;
+}) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const send = async (value: string) => {
@@ -97,7 +110,7 @@ function AckRow({ report, onAck }: { report: DayReport; onAck: (report: DayRepor
       <button
         type="button"
         className="btn btn-ghost btn-tiny"
-        disabled={sending}
+        disabled={sending || approved}
         onClick={() => void send('')}
       >
         {t('Seen')}
@@ -106,7 +119,7 @@ function AckRow({ report, onAck }: { report: DayReport; onAck: (report: DayRepor
         className="input"
         value={text}
         maxLength={140}
-        disabled={sending}
+        disabled={sending || approved}
         placeholder={t('Write back…')}
         aria-label={t('Write back…')}
         onChange={(event) => setText(event.target.value)}
@@ -120,12 +133,45 @@ function AckRow({ report, onAck }: { report: DayReport; onAck: (report: DayRepor
       <button
         type="button"
         className="btn btn-ghost btn-tiny"
-        disabled={sending || !text.trim()}
+        disabled={sending || approved || !text.trim()}
         onClick={() => void send(text)}
       >
         {t('Reply')}
       </button>
+      {onApprove ? (
+        <button
+          type="button"
+          className="btn btn-primary btn-tiny"
+          disabled={sending || approved}
+          onClick={() => {
+            if (sending || approved) return;
+            setSending(true);
+            void onApprove(report).finally(() => setSending(false));
+          }}
+        >
+          {approved ? t('Approved') : t('Approve day')}
+        </button>
+      ) : null}
     </div>
+  );
+}
+
+function ApproveDayButton({ report, onApprove }: { report: DayReport; onApprove: (report: DayReport) => Promise<void> }) {
+  const [sending, setSending] = useState(false);
+  return (
+    <button
+      type="button"
+      className="btn btn-primary btn-tiny"
+      disabled={sending}
+      onClick={() => {
+        if (sending) return;
+        setSending(true);
+        void onApprove(report).catch(() => undefined).finally(() => setSending(false));
+      }}
+    >
+      {sending ? <span className="spinner" aria-hidden="true" /> : null}
+      {sending ? t('Approving…') : t('Approve day')}
+    </button>
   );
 }
 
@@ -136,10 +182,14 @@ export function WeekPlanCard({
   variant,
   actions,
   onToggleItem,
+  canToggleItem,
   reportingDate,
   onReportDay,
+  canReportDay,
   onRollLesson,
   onAck,
+  onApproveReport,
+  onApprovePlanPeriod,
   onReact,
   focusMinutes,
   onNudge,
@@ -154,13 +204,21 @@ export function WeekPlanCard({
   actions?: ReactNode;
   /** Student: ticking a lesson. Without it, ticks render read-only. */
   onToggleItem?: (planId: string, itemId: string) => void;
+  /** Whether this particular item may be marked today. */
+  canToggleItem?: (planId: string, itemId: string) => boolean;
   reportingDate?: string | null;
   /** Student: opening the report form for a day, or closing it with null. */
   onReportDay?: (date: string | null) => void;
+  /** Whether this is the oldest reportable day and may be filed now. */
+  canReportDay?: (planId: string, date: string) => boolean;
   /** Student: pushing an unfinished lesson to the next day. */
   onRollLesson?: (planId: string, itemId: string) => void;
   /** Guardian: answering a report. Without it, answers render read-only. */
   onAck?: (report: DayReport, text: string) => Promise<void>;
+  /** Guardian: sealing a submitted daily report. */
+  onApproveReport?: (report: DayReport) => Promise<void>;
+  /** Guardian: closing a finished day, week, or month. */
+  onApprovePlanPeriod?: (plan: GuardianPlan) => Promise<void>;
   /** Guardian: tapping a reaction on a report. Without it, no reactions are offered. */
   onReact?: (report: DayReport, ack: ReportAck | undefined, emoji: string) => Promise<void>;
   /** Student: focused minutes that belonged to this plan's lessons. Without it, the review stays quiet about focus. */
@@ -180,6 +238,10 @@ export function WeekPlanCard({
   const planReports = reports
     .filter((report) => report.planId === plan.id)
     .sort((a, b) => a.date.localeCompare(b.date));
+  const periodEnded = planEnd(plan) < today;
+  const periodClosed = !!plan.approvedAt || periodEnded;
+  const periodApprovable = canApprovePlanPeriod(plan, reports, acks, today);
+  const isWeeklyPlan = plan.cadence === 'week';
 
   const dayRow = (date: string | null, lessons: PlanItem[]) => {
     const report = date ? reportFor(reports, plan.id, date) : undefined;
@@ -193,7 +255,8 @@ export function WeekPlanCard({
       !rest &&
       lessons.length > 0 &&
       !report &&
-      onReportDay;
+      !!onReportDay &&
+      (canReportDay ? canReportDay(plan.id, date) : true);
     return (
       <li
         key={date ?? 'any-day'}
@@ -221,7 +284,11 @@ export function WeekPlanCard({
             <span className="week-pill missing">{t('Missing')}</span>
           ) : null}
         </div>
-        {lessons.length > 0 ? (
+        {lessons.length > 0 ? !!date && date < today ? (
+          <p className="week-day-performance" aria-label={t('{0} of {1} done', { 0: report?.doneIds.length ?? lessons.filter((item) => item.done).length, 1: lessons.length })}>
+            {t('{0} of {1} done', { 0: faNum(report?.doneIds.length ?? lessons.filter((item) => item.done).length), 1: faNum(lessons.length) })}
+          </p>
+        ) : (
           <ul className="week-lessons">
             {lessons.map((item) => {
               const target =
@@ -233,6 +300,7 @@ export function WeekPlanCard({
                     <input
                       type="checkbox"
                       checked={item.done}
+                      disabled={canToggleItem ? !canToggleItem(plan.id, item.id) : item.date !== today}
                       onChange={() => onToggleItem(plan.id, item.id)}
                     />
                     <span className="week-lesson-title">{item.title}</span>
@@ -280,11 +348,116 @@ export function WeekPlanCard({
           </button>
         ) : null}
         {date && reportingDate === date && onReportDay ? (
-          <DayReportForm plan={plan} date={date} lessons={lessons} onDone={() => onReportDay(null)} onCancel={() => onReportDay(null)} />
+          <DayReportForm plan={plan} date={date} lessons={lessons} performanceOnly={date < today} onDone={() => onReportDay(null)} onCancel={() => onReportDay(null)} />
         ) : null}
       </li>
     );
   };
+
+  if (periodClosed) {
+    const missingDay = missingReportDays([plan], reports, today)[0];
+    const awaitingDailyApprovals = planReports.filter((report) => !ackFor(acks, report.id)?.approvedAt).length;
+    return (
+      <li className={cx('gplan-card week-plan-card week-period-summary', plan.approvedAt ? 'is-complete' : 'is-incomplete')}>
+        <div className="gplan-head">
+          <div>
+            <p className="gplan-kicker">
+              <span className="gplan-cadence gplan-cadence-week">{t('Week plan')}</span>
+              {planPeriodLabel(plan, today)}
+            </p>
+            <p className="gplan-title">{t('Period performance')}</p>
+          </div>
+        </div>
+        <p className="week-period-state">
+          {plan.approvedAt
+            ? t('Approved by your guardian. This period is closed.')
+            : variant === 'student'
+              ? isWeeklyPlan
+                ? t('This week has ended. It is not finished until your guardian approves it.')
+                : t('This period has ended. It is not finished until your guardian approves it.')
+              : isWeeklyPlan
+                ? t('This week has ended. Review performance and approve it to finish the period.')
+                : t('This period has ended. Review performance and approve it to finish.')}
+        </p>
+        <p className="week-review week-period-metrics">
+          <span>{t('{0} of {1} tasks done', { 0: faNum(progress.done), 1: faNum(progress.total) })}</span>
+          {review.lessonDays > 0 ? <span>{t('{0} of {1} days reported', { 0: faNum(review.reported), 1: faNum(review.lessonDays) })}</span> : null}
+          {review.streak > 0 ? <span>{t('{0}-day streak', { 0: faNum(review.streak) })}</span> : null}
+          {typeof focusMinutes === 'number' && focusMinutes > 0 ? <span>{t('{0} focused', { 0: minutesLabel(focusMinutes) })}</span> : null}
+        </p>
+        <div className="gplan-bar" aria-hidden="true">
+          <i style={{ width: `${progress.total ? Math.round((progress.done / progress.total) * 100) : 0}%` }} />
+        </div>
+        {variant === 'student' && !plan.approvedAt && missingDay && onReportDay ? (
+          <div className="week-late-report">
+            <p>{t('A daily report is still missing. Send the oldest one before marking any other day.')}</p>
+            <p>{formatFullDate(missingDay.date)}</p>
+            {canReportDay && canReportDay(plan.id, missingDay.date) ? (
+              <button type="button" className="btn btn-primary btn-small" onClick={() => onReportDay(missingDay.date)}>
+                {t('Report this day')}
+              </button>
+            ) : null}
+            {reportingDate === missingDay.date ? (
+              <DayReportForm
+                plan={plan}
+                date={missingDay.date}
+                lessons={itemsForDay(plan, missingDay.date)}
+                performanceOnly={missingDay.date < today}
+                onDone={() => onReportDay(null)}
+                onCancel={() => onReportDay(null)}
+              />
+            ) : null}
+          </div>
+        ) : null}
+        {variant === 'guardian' && !plan.approvedAt && planReports.length > 0 ? (
+          <div className="week-digest week-period-reports">
+            <p className="chart-title">{t('Daily report performance')}</p>
+            <ul>
+              {planReports.map((report) => {
+                const total = itemsForDay(plan, report.date).length;
+                const ack = ackFor(acks, report.id);
+                const approved = !!ack?.approvedAt;
+                return (
+                  <li key={report.id}>
+                    <p className="week-digest-head">
+                      <span>{formatFullDate(report.date)}</span>
+                      <span>{t('{0} of {1} tasks done', { 0: faNum(report.doneIds.length), 1: faNum(total) })}</span>
+                    </p>
+                    <p className={cx('week-report-status', approved ? 'is-complete' : 'is-incomplete')}>
+                      {approved ? t('Day approved') : t('Awaiting guardian approval')}
+                    </p>
+                    {!approved && onApproveReport ? <ApproveDayButton report={report} onApprove={onApproveReport} /> : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ) : null}
+        {variant === 'guardian' && !plan.approvedAt && onApprovePlanPeriod ? (
+          <div className="week-period-approval">
+            {!periodApprovable ? (
+              <p>{missing > 0
+                ? t('Approve each daily report first. {0} daily reports are still missing.', { 0: faNum(missing) })
+                : awaitingDailyApprovals > 0
+                  ? t('Approve each submitted daily report before finishing this week.')
+                  : t('This week is waiting for approval.')}</p>
+            ) : null}
+            <button
+              type="button"
+              className="btn btn-primary btn-small"
+              disabled={!periodApprovable}
+              onClick={() => void onApprovePlanPeriod(plan)}
+            >
+              {t(isWeeklyPlan ? 'Approve and finish week' : 'Approve and close period')}
+            </button>
+          </div>
+        ) : null}
+        <p className="gplan-from">
+          {plan.approvedAt ? t('Guardian approved') : t('Performance summary only')}
+        </p>
+      </li>
+    );
+  }
 
   return (
     <li className="gplan-card week-plan-card">
@@ -350,7 +523,7 @@ export function WeekPlanCard({
         {days.map((date) => dayRow(date, itemsForDay(plan, date)))}
         {floating.length > 0 ? dayRow(null, floating) : null}
       </ol>
-      <WeekTimetable plan={plan} reports={reports} />
+      <WeekTimetable plan={plan} reports={reports} hidePast today={today} />
       {variant === 'guardian' && planReports.length > 0 ? (
         <div className="week-digest">
           <p className="chart-title">{t('Daily reports')}</p>
@@ -358,6 +531,7 @@ export function WeekPlanCard({
             {planReports.map((report) => {
               const total = itemsForDay(plan, report.date).length;
               const ack = ackFor(acks, report.id);
+              const approved = !!ack?.approvedAt;
               return (
                 <li key={report.id}>
                   <p className="week-digest-head">
@@ -366,7 +540,14 @@ export function WeekPlanCard({
                   </p>
                   {report.note ? <p className="week-report-note">{report.note}</p> : null}
                   {ack ? <AckLine ack={ack} /> : null}
-                  {!ack?.text && onAck ? <AckRow report={report} onAck={onAck} /> : null}
+                  {!approved && (onAck || onApproveReport) ? (
+                    <AckRow
+                      report={report}
+                      onAck={onAck ?? (async () => undefined)}
+                      onApprove={onApproveReport}
+                      approved={approved}
+                    />
+                  ) : null}
                   {onReact ? <ReactionRow ack={ack} onReact={(emoji) => onReact(report, ack, emoji)} /> : null}
                 </li>
               );

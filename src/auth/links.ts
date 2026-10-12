@@ -31,9 +31,22 @@ import {
 import { AuthError, getActiveSession, request } from './session';
 import { newId, weekOf, weekResults, withGoalAnswer, withLinkAck, withLinkGoal, withLinkPlan, withoutLinkGoal, withoutLinkPlan, withoutQueuedPlan } from '../panels';
 import { t } from '../i18n';
-import { mergeAcks, mergeLinkReports, normalizeLessonUrl, openRequests, requestNotice } from '../weekPlans';
-import { ACK_REACTIONS, ACK_TEXT_MAX, DAY_REPORT_NOTE_MAX, DAY_REPORTS_WIRE, GOAL_ANSWERS_KEPT, GOAL_STEPS_MAX, PANEL_GOALS_KEPT, PLAN_REQUESTS_WIRE, PRAISE_KEPT } from '../types';
-import type { DayReport, Goal, GoalAnswer, GoalSuggestion, GuardianLink, GuardianNotice, GuardianPlan, Panels, PlanDraft, PlanItem, PlanRequest, PlannerState, ReportAck, StudentGuardian, WeekResults, WeekSubjectMinutes } from '../types';
+import { deleteHomeworkPhotoAssets } from '../homeworkMedia';
+import {
+  normalizeClassVideoUrl,
+  sanitizeClassAssignment,
+  sanitizeClassProgress,
+  sanitizeHomeworkAssignment,
+  sanitizeHomeworkReview,
+  sanitizeHomeworkSubmission,
+  withGuardianHomeworkReview,
+  withLinkClass,
+  withLinkHomework,
+  withStudentHomeworkSubmission,
+} from '../learning';
+import { canApprovePlanPeriod, mergeAcks, mergeLinkReports, normalizeLessonUrl, openRequests, requestNotice } from '../weekPlans';
+import { ACK_REACTIONS, ACK_TEXT_MAX, DAY_REPORT_NOTE_MAX, DAY_REPORTS_WIRE, GOAL_ANSWERS_KEPT, GOAL_STEPS_MAX, HOMEWORK_ITEMS_KEPT, HOMEWORK_NOTE_MAX, PANEL_GOALS_KEPT, PLAN_REQUESTS_WIRE, PRAISE_KEPT } from '../types';
+import type { ClassAssignment, ClassProgress, DayReport, Goal, GoalAnswer, GoalSuggestion, GuardianLink, GuardianNotice, GuardianPlan, HomeworkAssignment, HomeworkPhoto, HomeworkReview, HomeworkSubmission, Panels, PlanDraft, PlanItem, PlanRequest, PlannerState, ReportAck, StudentGuardian, WeekResults, WeekSubjectMinutes } from '../types';
 /** Matches the cap in storage.ts, so the vault and the view agree. */
 const WEEKS_KEPT = 12;
 import type { AcceptLinkResponse, LinksResponse, OutgoingLink, ShareResponse } from '../shared/authContract';
@@ -199,8 +212,14 @@ interface GuardianOutbox {
   plans: GuardianPlan[];
   /** Goals suggested to this student. Words only, until they say yes. */
   goals: GoalSuggestion[];
-  /** Answers to the student's daily reports, newest first. */
+  /** Answers and approvals for the student's daily reports, newest first. */
   acks: ReportAck[];
+  /** Classes assigned specifically to this student. */
+  classes: ClassAssignment[];
+  /** Homework assigned specifically to this student. */
+  homework: HomeworkAssignment[];
+  /** Guardian approval decisions retained for synchronization. */
+  homeworkReviews: HomeworkReview[];
 }
 
 interface StudentOutbox {
@@ -211,6 +230,10 @@ interface StudentOutbox {
   answers: GoalAnswer[];
   /** Daily reports for this guardian's week plans, newest first. */
   reports: DayReport[];
+  /** Student's progress on this guardian's classes. */
+  classProgress: ClassProgress[];
+  /** Homework photo pointers and submission status for this guardian. */
+  homeworkSubmissions: HomeworkSubmission[];
   /** Open asks for a week plan. */
   requests: PlanRequest[];
 }
@@ -222,6 +245,13 @@ const PLAN_ITEMS_MAX = 60;
 /** Lesson times ride the wire as 24-hour HH:MM. */
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const OUTBOX_GOALS = 5;
+const OUTBOX_CLASSES = 20;
+const OUTBOX_HOMEWORK = HOMEWORK_ITEMS_KEPT;
+
+function wireTimestamp(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length > 40 || !Number.isFinite(Date.parse(value))) return null;
+  return value;
+}
 
 function wireNotice(value: unknown): Omit<GuardianNotice, 'read'> | null {
   if (!value || typeof value !== 'object') return null;
@@ -274,6 +304,7 @@ function wirePlan(value: unknown): GuardianPlan | null {
     grade: typeof raw.grade === 'string' && raw.grade.trim() ? raw.grade.trim().slice(0, 60) : null,
     restDays: [...new Set((Array.isArray(raw.restDays) ? raw.restDays : []).filter((day): day is number => Number.isInteger(day) && (day as number) >= 0 && (day as number) <= 6))].slice(0, 7),
     items,
+    approvedAt: wireTimestamp(raw.approvedAt),
     createdAt: String(raw.createdAt ?? new Date().toISOString()).slice(0, 40),
     updatedAt: String(raw.updatedAt ?? new Date().toISOString()).slice(0, 40),
   };
@@ -336,6 +367,7 @@ function wireReportAck(value: unknown): ReportAck | null {
     date,
     text: typeof raw.text === 'string' ? raw.text.trim().slice(0, ACK_TEXT_MAX) : '',
     reactions: sanitizeReactions(raw.reactions),
+    approvedAt: wireTimestamp(raw.approvedAt),
     createdAt: String(raw.createdAt ?? new Date().toISOString()).slice(0, 40),
   };
 }
@@ -414,7 +446,7 @@ async function writeSlot(linkId: string, wrappedShareKey: string, dek: CryptoKey
 }
 
 /** The guardian's outbox for one link; a legacy single note folds in as one notice. */
-function asGuardianOutbox(payload: unknown): { notices: Array<Omit<GuardianNotice, 'read'>>; plans: GuardianPlan[]; goals: GoalSuggestion[]; acks: ReportAck[] } {
+function asGuardianOutbox(payload: unknown): Omit<GuardianOutbox, 'v'> {
   const raw = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
   const legacy = wireNotice(payload);
   const notices = [
@@ -430,11 +462,29 @@ function asGuardianOutbox(payload: unknown): { notices: Array<Omit<GuardianNotic
   const acks = (Array.isArray(raw.acks) ? raw.acks : [])
     .flatMap((item) => (wireReportAck(item) ? [wireReportAck(item)!] : []))
     .slice(0, DAY_REPORTS_WIRE);
-  return { notices, plans, goals, acks };
+  const classes = (Array.isArray(raw.classes) ? raw.classes : [])
+    .flatMap((item) => {
+      const clean = sanitizeClassAssignment(item);
+      return clean ? [clean] : [];
+    })
+    .slice(0, OUTBOX_CLASSES);
+  const homework = (Array.isArray(raw.homework) ? raw.homework : [])
+    .flatMap((item) => {
+      const clean = sanitizeHomeworkAssignment(item);
+      return clean ? [clean] : [];
+    })
+    .slice(0, OUTBOX_HOMEWORK);
+  const homeworkReviews = (Array.isArray(raw.homeworkReviews) ? raw.homeworkReviews : [])
+    .flatMap((item) => {
+      const clean = sanitizeHomeworkReview(item);
+      return clean ? [clean] : [];
+    })
+    .slice(-HOMEWORK_ITEMS_KEPT);
+  return { notices, plans, goals, acks, classes, homework, homeworkReviews };
 }
 
 /** The student's outbox for one link; a legacy relayed note folds in too. */
-function asStudentOutbox(payload: unknown): { relayed: Array<Omit<GuardianNotice, 'read'>>; progress: PlanTick[]; answers: GoalAnswer[]; reports: DayReport[]; requests: PlanRequest[] } {
+function asStudentOutbox(payload: unknown): Omit<StudentOutbox, 'v'> {
   const raw = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
   const legacy = wireNotice(payload);
   const relayed = [
@@ -459,10 +509,22 @@ function asStudentOutbox(payload: unknown): { relayed: Array<Omit<GuardianNotice
   const reports = (Array.isArray(raw.reports) ? raw.reports : [])
     .flatMap((item) => (wireDayReport(item) ? [wireDayReport(item)!] : []))
     .slice(0, DAY_REPORTS_WIRE);
+  const classProgress = (Array.isArray(raw.classProgress) ? raw.classProgress : [])
+    .flatMap((item) => {
+      const clean = sanitizeClassProgress(item);
+      return clean ? [clean] : [];
+    })
+    .slice(0, OUTBOX_CLASSES);
+  const homeworkSubmissions = (Array.isArray(raw.homeworkSubmissions) ? raw.homeworkSubmissions : [])
+    .flatMap((item) => {
+      const clean = sanitizeHomeworkSubmission(item);
+      return clean ? [clean] : [];
+    })
+    .slice(0, HOMEWORK_ITEMS_KEPT);
   const requests = (Array.isArray(raw.requests) ? raw.requests : [])
     .flatMap((item) => (wirePlanRequest(item) ? [wirePlanRequest(item)!] : []))
     .slice(0, PLAN_REQUESTS_WIRE);
-  return { relayed, progress, answers, reports, requests };
+  return { relayed, progress, answers, reports, classProgress, homeworkSubmissions, requests };
 }
 
 /**
@@ -521,7 +583,7 @@ async function postToStudent(
     kind,
   };
   // Full-state write: whatever plans and goals are already out there must survive.
-  let outbox: GuardianOutbox = { v: 3, notices: [note], plans: [], goals: [], acks: [] };
+  let outbox: GuardianOutbox = { v: 3, notices: [note], plans: [], goals: [], acks: [], classes: [], homework: [], homeworkReviews: [] };
   try {
     const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
     outbox = {
@@ -530,6 +592,9 @@ async function postToStudent(
       acks: current.acks,
       plans: current.plans,
       goals: current.goals,
+      classes: current.classes,
+      homework: current.homework,
+      homeworkReviews: current.homeworkReviews,
     };
   } catch {
     /* first write, or the slot is empty */
@@ -575,7 +640,7 @@ export async function sendPlan(panels: Panels, linkId: string, draft: PlanDraft)
     updatedAt: now,
   };
 
-  let outbox: GuardianOutbox = { v: 3, notices: [], plans: [plan], goals: [], acks: [] };
+  let outbox: GuardianOutbox = { v: 3, notices: [], plans: [plan], goals: [], acks: [], classes: [], homework: [], homeworkReviews: [] };
   try {
     const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
     outbox = {
@@ -584,12 +649,165 @@ export async function sendPlan(panels: Panels, linkId: string, draft: PlanDraft)
       plans: [plan, ...current.plans.filter((item) => item.id !== plan.id)].slice(0, OUTBOX_PLANS),
       acks: current.acks,
       goals: current.goals,
+      classes: current.classes,
+      homework: current.homework,
+      homeworkReviews: current.homeworkReviews,
     };
   } catch {
     /* first write */
   }
   await writeSlot(linkId, link.wrappedShareKey, session.dek, outbox);
   return withLinkPlan(panels, linkId, plan);
+}
+
+/** Guardian: finish an ended period. A week waits for each daily report to be approved. */
+export async function approvePlanPeriod(panels: Panels, linkId: string, planId: string): Promise<Panels> {
+  const session = await requireSession();
+  const link = panels.guardian.links.find((item) => item.linkId === linkId);
+  const plan = link?.plans.find((item) => item.id === planId);
+  if (!link?.wrappedShareKey || !plan) throw new LinkError('That plan is no longer available.');
+  if (plan.approvedAt) return panels;
+  if (!canApprovePlanPeriod(plan, link.reports ?? [], link.acks ?? [])) {
+    throw new LinkError('Wait for this period to end and approve every submitted daily report first.');
+  }
+  const now = new Date().toISOString();
+  const approved: GuardianPlan = { ...plan, approvedAt: now, updatedAt: now };
+  const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
+  const outbox: GuardianOutbox = {
+    v: 3,
+    ...current,
+    plans: [approved, ...current.plans.filter((item) => item.id !== planId)].slice(0, OUTBOX_PLANS),
+  };
+  await writeSlot(linkId, link.wrappedShareKey, session.dek, outbox);
+  return withLinkPlan(panels, linkId, approved);
+}
+
+export interface ClassDraft {
+  title: string;
+  subject: string;
+  description: string;
+  videoUrl: string;
+}
+
+/** Guardian: assign one externally-hosted class to exactly one linked student. */
+export async function sendClass(panels: Panels, linkId: string, draft: ClassDraft): Promise<Panels> {
+  const session = await requireSession();
+  const link = panels.guardian.links.find((item) => item.linkId === linkId);
+  if (!link?.wrappedShareKey || link.status !== 'linked') throw new LinkError('That student link is not ready yet.');
+  const videoUrl = normalizeClassVideoUrl(draft.videoUrl);
+  if (!draft.title.trim() || !videoUrl) throw new LinkError('Add a class name and a secure video link.');
+  const assignment = sanitizeClassAssignment({
+    id: newId('class'),
+    linkId,
+    author: session.user.displayName || session.user.username,
+    title: draft.title,
+    subject: draft.subject,
+    description: draft.description,
+    videoUrl,
+    createdAt: new Date().toISOString(),
+  });
+  if (!assignment) throw new LinkError('That class could not be saved. Check its details and video link.');
+  const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
+  const outbox: GuardianOutbox = {
+    v: 3,
+    ...current,
+    classes: [assignment, ...current.classes.filter((item) => item.id !== assignment.id)].slice(0, OUTBOX_CLASSES),
+  };
+  await writeSlot(linkId, link.wrappedShareKey, session.dek, outbox);
+  return withLinkClass(panels, linkId, assignment);
+}
+
+export interface HomeworkDraft {
+  title: string;
+  instructions: string;
+  subject: string;
+  dueAt: string | null;
+}
+
+/** Student: file one submission for an assigned task; approval later clears photos. */
+export function submitHomework(
+  panels: Panels,
+  assignmentId: string,
+  photos: HomeworkPhoto[],
+): Panels {
+  const assignment = (panels.student.inbox.homework ?? []).find((item) => item.id === assignmentId);
+  if (!assignment || panels.student.homeworkSubmissions?.some((item) => item.assignmentId === assignmentId)) return panels;
+  if (photos.length < 1 || photos.length > 3) throw new LinkError('Add one to three homework photos.');
+  const now = new Date().toISOString();
+  const submission = sanitizeHomeworkSubmission({
+    id: newId('homework-submission'),
+    assignmentId,
+    linkId: assignment.linkId,
+    photos,
+    submittedAt: now,
+    status: 'submitted',
+    guardianNote: '',
+    reviewedAt: null,
+  });
+  if (!submission || submission.photos.length !== photos.length) throw new LinkError('One of those photos is not valid.');
+  return withStudentHomeworkSubmission(panels, submission);
+}
+
+/** Guardian: assign optional-deadline homework to exactly one linked student. */
+export async function sendHomeworkAssignment(panels: Panels, linkId: string, draft: HomeworkDraft): Promise<Panels> {
+  const session = await requireSession();
+  const link = panels.guardian.links.find((item) => item.linkId === linkId);
+  if (!link?.wrappedShareKey || link.status !== 'linked') throw new LinkError('That student link is not ready yet.');
+  const assignment = sanitizeHomeworkAssignment({
+    id: newId('homework'),
+    linkId,
+    author: session.user.displayName || session.user.username,
+    title: draft.title,
+    instructions: draft.instructions,
+    subject: draft.subject,
+    dueAt: draft.dueAt,
+    createdAt: new Date().toISOString(),
+  });
+  if (!assignment) throw new LinkError('Add a homework title and check its due time.');
+  const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
+  const outbox: GuardianOutbox = {
+    v: 3,
+    ...current,
+    homework: [assignment, ...current.homework.filter((item) => item.id !== assignment.id)].slice(0, OUTBOX_HOMEWORK),
+  };
+  await writeSlot(linkId, link.wrappedShareKey, session.dek, outbox);
+  return withLinkHomework(panels, linkId, assignment);
+}
+
+/** Guardian: approve a homework submission only after its encrypted photos are deleted. */
+export async function approveHomeworkSubmission(
+  panels: Panels,
+  linkId: string,
+  submissionId: string,
+  note: string,
+): Promise<Panels> {
+  const session = await requireSession();
+  const link = panels.guardian.links.find((item) => item.linkId === linkId);
+  if (!link?.wrappedShareKey || link.status !== 'linked') throw new LinkError('That student link is not ready yet.');
+  const submission = (link.homeworkSubmissions ?? []).find((item) => item.id === submissionId);
+  if (!submission) throw new LinkError('That homework submission is no longer available.');
+  if (submission.status === 'approved') return panels;
+  const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
+  const existingReview = current.homeworkReviews.find((item) => item.submissionId === submissionId);
+  if (existingReview) return withGuardianHomeworkReview(panels, existingReview);
+  await deleteHomeworkPhotoAssets(linkId, submission.photos);
+  const review: HomeworkReview = {
+    id: newId('homework-review'),
+    assignmentId: submission.assignmentId,
+    submissionId: submission.id,
+    linkId,
+    note: note.trim().slice(0, HOMEWORK_NOTE_MAX),
+    approvedAt: new Date().toISOString(),
+  };
+  const cleanReview = sanitizeHomeworkReview(review);
+  if (!cleanReview) throw new LinkError('The homework approval could not be saved.');
+  const outbox: GuardianOutbox = {
+    v: 3,
+    ...current,
+    homeworkReviews: [cleanReview, ...current.homeworkReviews.filter((item) => item.submissionId !== submissionId)].slice(0, HOMEWORK_ITEMS_KEPT),
+  };
+  await writeSlot(linkId, link.wrappedShareKey, session.dek, outbox);
+  return withGuardianHomeworkReview(panels, cleanReview);
 }
 
 let planQueueFlushing = false;
@@ -654,7 +872,7 @@ export async function sendGoal(panels: Panels, linkId: string, draft: GoalDraft)
     createdAt: new Date().toISOString(),
   };
 
-  let outbox: GuardianOutbox = { v: 3, notices: [], plans: [], goals: [goal], acks: [] };
+  let outbox: GuardianOutbox = { v: 3, notices: [], plans: [], goals: [goal], acks: [], classes: [], homework: [], homeworkReviews: [] };
   try {
     const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
     outbox = {
@@ -663,6 +881,9 @@ export async function sendGoal(panels: Panels, linkId: string, draft: GoalDraft)
       plans: current.plans,
       goals: [goal, ...current.goals.filter((item) => item.id !== goal.id)].slice(0, OUTBOX_GOALS),
       acks: current.acks,
+      classes: current.classes,
+      homework: current.homework,
+      homeworkReviews: current.homeworkReviews,
     };
   } catch {
     /* first write */
@@ -688,6 +909,9 @@ export async function dropGoal(panels: Panels, linkId: string, goalId: string): 
       plans: current.plans,
       goals: current.goals.filter((item) => item.id !== goalId),
       acks: current.acks,
+      classes: current.classes,
+      homework: current.homework,
+      homeworkReviews: current.homeworkReviews,
     } satisfies GuardianOutbox);
   } catch {
     /* dropping locally is still the right outcome */
@@ -708,6 +932,9 @@ export async function dropPlan(panels: Panels, linkId: string, planId: string): 
       plans: current.plans.filter((item) => item.id !== planId),
       acks: current.acks,
       goals: current.goals,
+      classes: current.classes,
+      homework: current.homework,
+      homeworkReviews: current.homeworkReviews,
     } satisfies GuardianOutbox);
   } catch {
     /* dropping locally is still the right outcome */
@@ -723,36 +950,41 @@ export async function dropPlan(panels: Panels, linkId: string, planId: string): 
 export async function sendAck(
   panels: Panels,
   linkId: string,
-  draft: { reportId: string; planId: string; date: string; text: string; reactions?: string[]; id?: string },
+  draft: { reportId: string; planId: string; date: string; text: string; reactions?: string[]; id?: string; approve?: boolean },
 ): Promise<Panels> {
   const session = await requireSession();
   const link = panels.guardian.links.find((item) => item.linkId === linkId);
   if (!link?.wrappedShareKey) throw new LinkError('That link is not ready yet.');
+  const localPrevious = (link.acks ?? []).find((item) => item.reportId === draft.reportId);
+  const report = (link.reports ?? []).find((item) => item.id === draft.reportId);
+  if (!report || report.planId !== draft.planId || report.date !== draft.date || report.linkId !== linkId) {
+    throw new LinkError('That daily report could not be found. Sync and try again.');
+  }
+  // Read the canonical encrypted outbox before every write. A stale second
+  // guardian device must not be able to change a day that has been approved.
+  const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
+  const remotePrevious = current.acks.find((item) => item.reportId === draft.reportId);
+  if (localPrevious?.approvedAt || remotePrevious?.approvedAt) throw new LinkError('This approved daily report is locked.');
+  const previous = remotePrevious ?? localPrevious;
+  const now = new Date().toISOString();
   const ack: ReportAck = {
-    // An id reuses the answer being changed, so a reaction lands on the reply
-    // instead of beside it; without one this is a new answer.
-    id: draft.id?.slice(0, 80) || newId('ack'),
+    // One answer per submitted report: replies, reactions and approval update
+    // the same record instead of creating conflicting decisions.
+    id: draft.id?.slice(0, 80) || previous?.id || newId('ack'),
     reportId: draft.reportId.slice(0, 80),
     planId: draft.planId.slice(0, 80),
     linkId,
     date: draft.date,
-    text: draft.text.trim().slice(0, ACK_TEXT_MAX),
-    reactions: sanitizeReactions(draft.reactions),
-    createdAt: new Date().toISOString(),
+    text: draft.text.trim().slice(0, ACK_TEXT_MAX) || previous?.text || '',
+    reactions: draft.reactions ? sanitizeReactions(draft.reactions) : previous?.reactions ?? [],
+    approvedAt: draft.approve ? now : previous?.approvedAt ?? null,
+    createdAt: previous?.createdAt ?? now,
   };
-  let outbox: GuardianOutbox = { v: 3, notices: [], plans: [], goals: [], acks: [ack] };
-  try {
-    const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
-    outbox = {
-      v: 3,
-      notices: current.notices,
-      plans: current.plans,
-      goals: current.goals,
-      acks: [ack, ...current.acks.filter((item) => item.id !== ack.id)].slice(0, DAY_REPORTS_WIRE),
-    };
-  } catch {
-    /* first write */
-  }
+  const outbox: GuardianOutbox = {
+    v: 3,
+    ...current,
+    acks: [ack, ...current.acks.filter((item) => item.reportId !== ack.reportId)].slice(0, DAY_REPORTS_WIRE),
+  };
   await writeSlot(linkId, link.wrappedShareKey, session.dek, outbox);
   return withLinkAck(panels, linkId, ack);
 }
@@ -780,12 +1012,16 @@ export async function syncStudentInbox(
   let plans = panels.student.inbox.plans;
   let acks = panels.student.acks ?? [];
   let suggestions = panels.student.inbox.goals ?? [];
+  let classes = panels.student.inbox.classes ?? [];
+  let homework = panels.student.inbox.homework ?? [];
+  let classProgress = panels.student.classProgress ?? [];
+  let homeworkSubmissions = panels.student.homeworkSubmissions ?? [];
   let praise = panels.student.praise ?? [];
   let changed = false;
   const added: { notices: GuardianNotice[]; plans: GuardianPlan[]; goals: GoalSuggestion[] } = { notices: [], plans: [], goals: [] };
 
   for (const source of guardians) {
-    let outbox: { notices: Array<Omit<GuardianNotice, 'read'>>; plans: GuardianPlan[]; goals: GoalSuggestion[]; acks: ReportAck[] };
+    let outbox: Omit<GuardianOutbox, 'v'>;
     try {
       outbox = asGuardianOutbox(await readSlot(source.linkId, source.wrappedShareKey, session.dek));
     } catch {
@@ -823,6 +1059,52 @@ export async function syncStudentInbox(
       };
       plans = plans.map((item) => (item.id === plan.id ? merged : item));
       changed = true;
+    }
+    const assignedClasses = outbox.classes
+      .filter((item) => item.linkId === source.linkId)
+      .map((item) => ({ ...item, linkId: source.linkId }));
+    for (const assignment of assignedClasses) {
+      const existing = classes.find((item) => item.id === assignment.id);
+      if (existing && JSON.stringify(existing) === JSON.stringify(assignment)) continue;
+      classes = [assignment, ...classes.filter((item) => item.id !== assignment.id)];
+      changed = true;
+    }
+    const offeredClassIds = new Set(assignedClasses.map((item) => item.id));
+    const keptClasses = classes.filter((item) => item.linkId !== source.linkId || offeredClassIds.has(item.id));
+    if (keptClasses.length !== classes.length) {
+      classes = keptClasses;
+      classProgress = classProgress.filter((item) => item.linkId !== source.linkId || offeredClassIds.has(item.classId));
+      changed = true;
+    }
+    const assignedHomework = outbox.homework
+      .filter((item) => item.linkId === source.linkId)
+      .map((item) => ({ ...item, linkId: source.linkId }));
+    for (const assignment of assignedHomework) {
+      const existing = homework.find((item) => item.id === assignment.id);
+      if (existing && JSON.stringify(existing) === JSON.stringify(assignment)) continue;
+      homework = [assignment, ...homework.filter((item) => item.id !== assignment.id)];
+      changed = true;
+    }
+    const offeredHomeworkIds = new Set(assignedHomework.map((item) => item.id));
+    const keptHomework = homework.filter((item) => item.linkId !== source.linkId || offeredHomeworkIds.has(item.id));
+    if (keptHomework.length !== homework.length) {
+      homework = keptHomework;
+      changed = true;
+    }
+    for (const review of outbox.homeworkReviews.filter((item) => item.linkId === source.linkId)) {
+      const previous = homeworkSubmissions.find((item) => item.id === review.submissionId);
+      if (!previous) continue;
+      const approved: HomeworkSubmission = {
+        ...previous,
+        status: 'approved',
+        photos: [],
+        guardianNote: review.note,
+        reviewedAt: review.approvedAt,
+      };
+      if (JSON.stringify(previous) !== JSON.stringify(approved)) {
+        homeworkSubmissions = homeworkSubmissions.map((item) => item.id === approved.id ? approved : item);
+        changed = true;
+      }
     }
     for (const goal of outbox.goals) {
       // Answered suggestions are kept, not dropped: the answer has to keep
@@ -902,11 +1184,26 @@ export async function syncStudentInbox(
     const reports = (panels.student.reports ?? [])
       .filter((entry) => entry.linkId === target.linkId)
       .slice(0, DAY_REPORTS_WIRE);
+    const classProgressForLink = classProgress
+      .filter((entry) => entry.linkId === target.linkId)
+      .slice(0, OUTBOX_CLASSES);
+    const homeworkSubmissionsForLink = homeworkSubmissions
+      .filter((entry) => entry.linkId === target.linkId)
+      .slice(0, HOMEWORK_ITEMS_KEPT);
     // Open asks for a week plan keep travelling until they go stale.
     const requests = openRequests(panels.student.requests ?? [])
       .filter((entry) => entry.linkId === target.linkId)
       .slice(-PLAN_REQUESTS_WIRE);
-    const outbox: StudentOutbox = { v: 3, relayed: passed, progress, answers, reports, requests };
+    const outbox: StudentOutbox = {
+      v: 3,
+      relayed: passed,
+      progress,
+      answers,
+      reports,
+      classProgress: classProgressForLink,
+      homeworkSubmissions: homeworkSubmissionsForLink,
+      requests,
+    };
     try {
       await writeSlot(target.linkId, target.wrappedShareKey, session.dek, outbox);
       relayed += passed.length;
@@ -916,7 +1213,17 @@ export async function syncStudentInbox(
   }
 
   return {
-    panels: { ...panels, student: { ...panels.student, inbox: { notices, plans, goals: suggestions }, praise, acks } },
+    panels: {
+      ...panels,
+      student: {
+        ...panels.student,
+        inbox: { notices, plans, goals: suggestions, classes, homework },
+        praise,
+        acks,
+        classProgress,
+        homeworkSubmissions,
+      },
+    },
     added,
     relayed,
     changed,
@@ -936,7 +1243,7 @@ export async function readNotices(panels: Panels): Promise<{ panels: Panels; cha
     // Re-read each time: the loop updates the entry as answers land on it.
     let link = links[index]!;
     if (link.status !== 'linked' || !link.linkId || !link.wrappedShareKey) continue;
-    let outbox: { relayed: Array<Omit<GuardianNotice, 'read'>>; progress: PlanTick[]; answers: GoalAnswer[]; reports: DayReport[]; requests: PlanRequest[] };
+    let outbox: Omit<StudentOutbox, 'v'>;
     try {
       outbox = asStudentOutbox(await readSlot(link.linkId, link.wrappedShareKey, session.dek));
     } catch {
@@ -954,14 +1261,25 @@ export async function readNotices(panels: Panels): Promise<{ panels: Panels; cha
       found.push(notice);
     }
     // Ticks land back on the plans they belong to.
-    if (outbox.progress.length > 0 && link.plans.length > 0) {
+    if ((outbox.progress.length > 0 || outbox.reports.length > 0) && link.plans.length > 0) {
+      const incomingReports = outbox.reports.filter((report) => report.linkId === link.linkId);
+      const syncedReports = mergeLinkReports(link.reports ?? [], incomingReports);
       const plans = link.plans.map((plan) => {
+        if (plan.approvedAt) return plan;
         const tick = outbox.progress.find((item) => item.planId === plan.id);
-        if (!tick) return plan;
-        const done = new Set(tick.doneIds);
+        const reportsByDate = new Map(
+          syncedReports.filter((report) => report.planId === plan.id).map((report) => [report.date, new Set(report.doneIds)]),
+        );
+        if (!tick && reportsByDate.size === 0) return plan;
+        const done = tick ? new Set(tick.doneIds) : null;
         const next: GuardianPlan = {
           ...plan,
-          items: plan.items.map((item) => ({ ...item, done: done.has(item.id) })),
+          items: plan.items.map((item) => {
+            if (!item.date) return item;
+            const filed = reportsByDate.get(item.date);
+            if (filed) return { ...item, done: filed.has(item.id) };
+            return done ? { ...item, done: done.has(item.id) } : item;
+          }),
         };
         return next;
       });
@@ -991,6 +1309,48 @@ export async function readNotices(panels: Panels): Promise<{ panels: Panels; cha
       if (JSON.stringify(merged) !== JSON.stringify(link.reports ?? [])) {
         changed = true;
         links[index] = { ...link, reports: merged };
+        link = links[index]!;
+      }
+    }
+    if (outbox.classProgress.length > 0) {
+      const progressByClass = new Map((link.classProgress ?? []).map((item) => [item.classId, item]));
+      const assignedIds = new Set((link.classes ?? []).map((item) => item.id));
+      for (const progress of outbox.classProgress) {
+        if (progress.linkId !== link.linkId || !assignedIds.has(progress.classId)) continue;
+        const previous = progressByClass.get(progress.classId);
+        if (!previous || progress.updatedAt >= previous.updatedAt) progressByClass.set(progress.classId, progress);
+      }
+      const classProgress = [...progressByClass.values()].slice(-OUTBOX_CLASSES);
+      if (JSON.stringify(classProgress) !== JSON.stringify(link.classProgress ?? [])) {
+        changed = true;
+        links[index] = { ...link, classProgress };
+        link = links[index]!;
+      }
+    }
+    if (outbox.homeworkSubmissions.length > 0) {
+      const assignmentIds = new Set((link.homework ?? []).map((item) => item.id));
+      const submissionsById = new Map((link.homeworkSubmissions ?? []).map((item) => [item.id, item]));
+      for (const incoming of outbox.homeworkSubmissions) {
+        if (incoming.linkId !== link.linkId || !assignmentIds.has(incoming.assignmentId)) continue;
+        const prior = submissionsById.get(incoming.id);
+        const review = (link.homeworkReviews ?? []).find((item) => item.submissionId === incoming.id);
+        const clean: HomeworkSubmission = review || prior?.status === 'approved'
+          ? {
+              ...incoming,
+              status: 'approved',
+              photos: [],
+              guardianNote: review?.note ?? prior?.guardianNote ?? '',
+              reviewedAt: review?.approvedAt ?? prior?.reviewedAt ?? null,
+            }
+          : incoming;
+        submissionsById.set(clean.id, clean);
+      }
+      const homeworkSubmissions = [...submissionsById.values()]
+        .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))
+        .slice(0, HOMEWORK_ITEMS_KEPT);
+      if (JSON.stringify(homeworkSubmissions) !== JSON.stringify(link.homeworkSubmissions ?? [])) {
+        changed = true;
+        links[index] = { ...link, homeworkSubmissions };
         link = links[index]!;
       }
     }

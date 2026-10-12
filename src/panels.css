@@ -820,3 +820,32 @@
   .guardian-student-brief .student-summary-values { flex-wrap: wrap; }
   .week-report-reminder-head > .btn { width: 100%; }
 }
+
+/* Day-level plans use the same success/failure colors as planner checkboxes. */
+.week-pill.reported { color: var(--status-complete); background: var(--status-complete-soft); }
+.week-pill.missing { color: var(--status-incomplete); background: var(--status-incomplete-soft); }
+.week-lesson { border-inline-start: 2px solid var(--status-incomplete); padding-inline-start: 7px; }
+.week-lesson.done { border-inline-start-color: var(--status-complete); }
+.week-lesson input[type='checkbox'] { accent-color: var(--status-complete); outline: 1px solid var(--status-incomplete); outline-offset: 1px; }
+.week-lesson input[type='checkbox']:checked { outline-color: var(--status-complete); }
+.week-lesson-title { color: var(--status-incomplete); }
+.week-lesson.done .week-lesson-title { color: var(--status-complete); }
+.week-tick-open { border-color: var(--status-incomplete); background: var(--status-incomplete-soft); }
+.week-lesson-read svg { color: var(--status-complete); }
+.week-grid-lesson { padding-inline-start: 7px; border-inline-start: 2px solid var(--status-incomplete); color: var(--status-incomplete); }
+.week-grid-lesson.done { border-inline-start-color: var(--status-complete); color: var(--status-complete); }
+.gplan-item { border-inline-start: 2px solid var(--status-incomplete); padding-inline-start: 7px; }
+.gplan-item.done { border-inline-start-color: var(--status-complete); }
+.gplan-item input[type='checkbox'] { accent-color: var(--status-complete); outline: 1px solid var(--status-incomplete); outline-offset: 1px; }
+.gplan-item input[type='checkbox']:checked { outline-color: var(--status-complete); }
+.week-report-status { margin: 5px 0 8px; font-size: 11.5px; font-weight: 700; }
+.week-report-status.is-complete { color: var(--status-complete); }
+.week-report-status.is-incomplete { color: var(--status-incomplete); }
+.day-report-performance { padding: 9px 11px; border-inline-start: 3px solid var(--status-complete); border-radius: 8px; background: var(--status-complete-soft); color: var(--status-complete); font-weight: 700; font-size: 13px; }
+.week-late-report,
+.week-missing-alert { padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--status-incomplete) 42%, var(--line)); border-inline-start: 4px solid var(--status-incomplete); border-radius: 12px; background: var(--status-incomplete-soft); color: var(--status-incomplete); }
+.week-late-report { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 10px; font-size: 12.5px; }
+.week-missing-alert { margin: 10px 0; font-size: 13px; font-weight: 650; }
+.week-period-summary { border-inline-start: 4px solid var(--status-incomplete); }
+.week-period-summary.is-complete { border-inline-start-color: var(--status-complete); }
+.week-period-summary.is-incomplete { border-inline-start-color: var(--status-incomplete); }

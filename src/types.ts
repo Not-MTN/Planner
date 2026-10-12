@@ -340,6 +340,10 @@ export interface StudentPanel {
   reports?: DayReport[];
   /** Guardians' answers to daily reports, newest first. */
   acks?: ReportAck[];
+  /** Student progress for classes assigned over a guardian link. */
+  classProgress?: ClassProgress[];
+  /** Homework submissions, newest first; approved submissions keep no images. */
+  homeworkSubmissions?: HomeworkSubmission[];
   /** Open asks for a week plan, newest first. */
   requests?: PlanRequest[];
   /**
@@ -512,6 +516,8 @@ export interface GuardianPlan {
   /** Weekdays (0 = Sunday) that need no daily report. Guardian-chosen rest days. */
   restDays?: number[];
   items: PlanItem[];
+  /** A guardian's sign-off closes this period and hides item-level detail. */
+  approvedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -544,8 +550,9 @@ export interface DayReport {
 }
 
 /** Daily reports kept on each side, and how many ride along in one outbox write. */
-export const DAY_REPORTS_KEPT = 30;
-export const DAY_REPORTS_WIRE = 14;
+/** Ten week plans can hold seventy reportable days; retain them while a student catches up. */
+export const DAY_REPORTS_KEPT = 70;
+export const DAY_REPORTS_WIRE = 70;
 /** A report note is a few sentences, not an essay. */
 export const DAY_REPORT_NOTE_MAX = 280;
 
@@ -565,11 +572,81 @@ export interface ReportAck {
   text: string;
   /** Quick emoji taps on the report — only ACK_REACTIONS can ever appear here. */
   reactions: string[];
+  /** Set once by the guardian; approval cannot be taken back. */
+  approvedAt?: string | null;
   createdAt: string;
 }
 
 /** The whole reaction vocabulary: offered as buttons, enforced on the wire. */
 export const ACK_REACTIONS = ['🎉', '💪', '❤️'] as const;
+
+/** One externally hosted lesson assigned to one student over one guardian link. */
+export interface ClassAssignment {
+  id: string;
+  linkId: string;
+  author: string;
+  title: string;
+  subject: string;
+  description: string;
+  /** A link to an existing video host; Planner never stores the video bytes. */
+  videoUrl: string;
+  createdAt: string;
+}
+
+/** A student's completion mark for one assigned class. */
+export interface ClassProgress {
+  classId: string;
+  linkId: string;
+  completedAt: string | null;
+  updatedAt: string;
+}
+
+/** Guardian-authored homework. A deadline is optional. */
+export interface HomeworkAssignment {
+  id: string;
+  linkId: string;
+  author: string;
+  title: string;
+  instructions: string;
+  subject: string;
+  dueAt: string | null;
+  createdAt: string;
+}
+
+/** Encrypted image bytes are hosted outside the planner database. */
+export interface HomeworkPhoto {
+  url: string;
+  publicId: string;
+  name: string;
+  mime: string;
+  bytes: number;
+}
+
+/** One immutable student submission; guardian approval removes every photo. */
+export interface HomeworkSubmission {
+  id: string;
+  assignmentId: string;
+  linkId: string;
+  photos: HomeworkPhoto[];
+  submittedAt: string;
+  status: 'submitted' | 'approved';
+  guardianNote: string;
+  reviewedAt: string | null;
+}
+
+/** Guardian's signed decision sent back to the student. */
+export interface HomeworkReview {
+  id: string;
+  assignmentId: string;
+  submissionId: string;
+  linkId: string;
+  note: string;
+  approvedAt: string;
+}
+
+export const HOMEWORK_PHOTOS_MAX = 3;
+export const HOMEWORK_NOTE_MAX = 280;
+export const HOMEWORK_ITEMS_KEPT = 30;
 
 /**
  * A student asking for a week plan. Broadcast to every linked guardian; each
@@ -598,6 +675,10 @@ export interface StudentInbox {
   notices: GuardianNotice[];
   /** Active plans, newest first. */
   plans: GuardianPlan[];
+  /** Classes sent specifically to this student. */
+  classes?: ClassAssignment[];
+  /** Homework set by this student's guardians. */
+  homework?: HomeworkAssignment[];
   /** Goals a guardian would like them to take on, newest first. */
   goals?: GoalSuggestion[];
 }
@@ -644,6 +725,15 @@ export interface GuardianLink {
   acks?: ReportAck[];
   /** Goals suggested to this student, newest first. */
   goals?: GoalSuggestion[];
+  /** Classes assigned to this student over this link. */
+  classes?: ClassAssignment[];
+  /** Homework assigned to this student over this link. */
+  homework?: HomeworkAssignment[];
+  /** Progress marks returned for assigned classes. */
+  classProgress?: ClassProgress[];
+  /** Homework images/approvals returned over the encrypted link. */
+  homeworkSubmissions?: HomeworkSubmission[];
+  homeworkReviews?: HomeworkReview[];
   /** How this student answered them, newest last write wins. */
   goalAnswers?: GoalAnswer[];
   /** When a pending code stops working. Null once accepted, or if unknown. */

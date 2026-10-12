@@ -10,7 +10,7 @@ import { useState } from 'react';
 import { syncStudentInbox } from '../auth/links';
 import { usePlanner } from '../context';
 import { displayTime, formatFullDate, todayISO } from '../dates';
-import { t } from '../i18n';
+import { faNum, t } from '../i18n';
 import { newId } from '../panels';
 import { DAY_REPORT_NOTE_MAX } from '../types';
 import type { DayReport, GuardianPlan, PlanItem } from '../types';
@@ -23,6 +23,7 @@ export function DayReportForm({
   lessons,
   onDone,
   onCancel,
+  performanceOnly = false,
 }: {
   plan: GuardianPlan;
   date: string;
@@ -30,6 +31,8 @@ export function DayReportForm({
   onDone: () => void;
   /** Without it there is nothing to go back to — the lock screen's forms have none. */
   onCancel?: () => void;
+  /** Late reports retain counts, not the old task-by-task plan. */
+  performanceOnly?: boolean;
 }) {
   const { state, panels, updatePanels, flash } = usePlanner();
   const [doneIds, setDoneIds] = useState<string[]>(() =>
@@ -95,17 +98,23 @@ export function DayReportForm({
       <fieldset disabled={sending}>
         <legend className="chart-title">{t('Report this day')}</legend>
         <p className="hint">{formatFullDate(date)}</p>
-        <ul className="day-report-lessons">
-          {lessons.map((lesson) => (
-            <li key={lesson.id}>
-              <label>
-                <input type="checkbox" checked={doneIds.includes(lesson.id)} onChange={() => toggle(lesson.id)} />
-                <span>{lesson.title}</span>
-              </label>
-              {lesson.time ? <span className="week-time">{displayTime(lesson.time)}</span> : null}
-            </li>
-          ))}
-        </ul>
+        {performanceOnly ? (
+          <p className="day-report-performance">
+            {t('{0} of {1} tasks done', { 0: faNum(doneIds.length), 1: faNum(lessons.length) })}
+          </p>
+        ) : (
+          <ul className="day-report-lessons">
+            {lessons.map((lesson) => (
+              <li key={lesson.id}>
+                <label>
+                  <input type="checkbox" checked={doneIds.includes(lesson.id)} onChange={() => toggle(lesson.id)} />
+                  <span>{lesson.title}</span>
+                </label>
+                {lesson.time ? <span className="week-time">{displayTime(lesson.time)}</span> : null}
+              </li>
+            ))}
+          </ul>
+        )}
         <div className="week-chip-row" role="group" aria-label={t('A note to go with it')}>
           {templates.map((text) => (
             <button key={text} type="button" className="btn btn-ghost btn-tiny" onClick={() => applyTemplate(text)}>

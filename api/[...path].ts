@@ -29,6 +29,9 @@ function currentEnv(): ApiEnv {
       process.env.DATABASE_URL ||
       process.env.POSTGRES_URL ||
       process.env.NEON_DATABASE_URL,
+    CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME,
+    CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY,
+    CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET,
     GROQ_API_KEY: process.env.GROQ_API_KEY,
     GROQ_MODEL: process.env.GROQ_MODEL,
     GROQ_VISION_MODEL: process.env.GROQ_VISION_MODEL,

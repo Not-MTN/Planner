@@ -8,8 +8,8 @@
  * The server stores { id, version, ciphertext } and can't read anything.
  */
 import { sanitizeState, serialize } from './storage';
-import { AI_DECLINED_LIMIT, AI_PLAN_LIMIT, GOAL_ANSWERS_KEPT, PRAISE_KEPT } from './types';
-import type { FixedCommitment, Goal, GoalAnswer, GuardianPlan, Habit, Note, Panels, PlannerEvent, PlannerState, Task } from './types';
+import { AI_DECLINED_LIMIT, AI_PLAN_LIMIT, DAY_REPORTS_KEPT, GOAL_ANSWERS_KEPT, HOMEWORK_ITEMS_KEPT, PRAISE_KEPT } from './types';
+import type { ClassAssignment, ClassProgress, DayReport, FixedCommitment, Goal, GoalAnswer, GuardianLink, GuardianPlan, Habit, HomeworkAssignment, HomeworkReview, HomeworkSubmission, Note, Panels, PlannerEvent, PlannerState, PlanRequest, ReportAck, Task } from './types';
 
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O/1/I/L
 const SETTINGS_KEY = 'planner-sync';
@@ -149,13 +149,21 @@ export function mergePanels(local: Panels, remote: Panels): Panels {
     return [...map.values()];
   };
   // Plans merge by id: the newer shape wins, but a tick on either device stays
-  // ticked — progress should never be lost to a sync.
+  // ticked. Guardian approval is terminal, so a stale device cannot reopen or
+  // rewrite a period after sign-off.
   const mergePlans = (a: GuardianPlan[], b: GuardianPlan[]): GuardianPlan[] => {
     const map = new Map<string, GuardianPlan>();
     for (const plan of [...b, ...a]) {
       const other = map.get(plan.id);
       if (!other) {
         map.set(plan.id, plan);
+        continue;
+      }
+      if (plan.approvedAt || other.approvedAt) {
+        const approved = plan.approvedAt && other.approvedAt
+          ? plan.approvedAt <= other.approvedAt ? plan : other
+          : plan.approvedAt ? plan : other;
+        map.set(plan.id, approved);
         continue;
       }
       const newer = (plan.updatedAt ?? '') >= (other.updatedAt ?? '') ? plan : other;
@@ -168,6 +176,149 @@ export function mergePanels(local: Panels, remote: Panels): Panels {
     }
     return [...map.values()];
   };
+  const mergeReports = (a: DayReport[], b: DayReport[]): DayReport[] => {
+    const keyOf = (item: DayReport) => `${item.linkId}:${item.planId}:${item.date}`;
+    const map = new Map<string, DayReport>();
+    for (const report of [...b, ...a]) {
+      const key = keyOf(report);
+      const previous = map.get(key);
+      // Daily reports are write-once. If two offline devices filed the same
+      // date, keep the earliest filing instead of making a second report.
+      if (!previous || report.createdAt < previous.createdAt) map.set(key, report);
+    }
+    return [...map.values()]
+      .sort((left, right) => right.date.localeCompare(left.date) || right.updatedAt.localeCompare(left.updatedAt))
+      .slice(0, DAY_REPORTS_KEPT);
+  };
+  const mergeAcks = (a: ReportAck[], b: ReportAck[]): ReportAck[] => {
+    const map = new Map<string, ReportAck>();
+    for (const ack of [...b, ...a]) {
+      const previous = map.get(ack.reportId);
+      if (!previous) {
+        map.set(ack.reportId, ack);
+        continue;
+      }
+      // Approval is irreversible and wins over a stale reply/reaction from
+      // another device. If two devices approved concurrently, keep the first.
+      if (previous.approvedAt && ack.approvedAt) {
+        if (ack.approvedAt < previous.approvedAt) map.set(ack.reportId, ack);
+      } else if (ack.approvedAt || !previous.approvedAt) {
+        // With no approval, local state (iterated last) is the last write.
+        map.set(ack.reportId, ack);
+      }
+    }
+    return [...map.values()].sort((left, right) => right.createdAt.localeCompare(left.createdAt)).slice(0, DAY_REPORTS_KEPT);
+  };
+  const sealReportedDays = (plans: GuardianPlan[], reports: DayReport[]): GuardianPlan[] => {
+    const byDay = new Map(reports.map((report) => [`${report.linkId}:${report.planId}:${report.date}`, new Set(report.doneIds)]));
+    return plans.map((plan) => ({
+      ...plan,
+      items: plan.items.map((item) => {
+        if (!item.date) return item;
+        const doneIds = byDay.get(`${plan.linkId}:${plan.id}:${item.date}`);
+        return doneIds ? { ...item, done: doneIds.has(item.id) } : item;
+      }),
+    }));
+  };
+  const mergeClasses = (a: ClassAssignment[], b: ClassAssignment[]): ClassAssignment[] =>
+    byId(a, b).sort((left, right) => right.createdAt.localeCompare(left.createdAt)).slice(0, HOMEWORK_ITEMS_KEPT);
+  const mergeHomework = (a: HomeworkAssignment[], b: HomeworkAssignment[]): HomeworkAssignment[] =>
+    byId(a, b).sort((left, right) => right.createdAt.localeCompare(left.createdAt)).slice(0, HOMEWORK_ITEMS_KEPT);
+  const mergeClassProgress = (a: ClassProgress[], b: ClassProgress[]): ClassProgress[] => {
+    const map = new Map<string, ClassProgress>();
+    for (const progress of [...b, ...a]) {
+      const key = `${progress.linkId}:${progress.classId}`;
+      const previous = map.get(key);
+      if (!previous || progress.updatedAt >= previous.updatedAt) map.set(key, progress);
+    }
+    return [...map.values()].slice(-HOMEWORK_ITEMS_KEPT);
+  };
+  const mergeHomeworkSubmissions = (a: HomeworkSubmission[], b: HomeworkSubmission[]): HomeworkSubmission[] => {
+    const map = new Map<string, HomeworkSubmission>();
+    for (const submission of [...b, ...a]) {
+      const key = `${submission.linkId}:${submission.assignmentId}`;
+      const previous = map.get(key);
+      if (!previous) {
+        map.set(key, submission);
+        continue;
+      }
+      if (previous.status === 'approved') continue;
+      if (submission.status === 'approved' || submission.submittedAt < previous.submittedAt) map.set(key, submission);
+    }
+    return [...map.values()]
+      .map((submission) => submission.status === 'approved' ? { ...submission, photos: [] } : submission)
+      .sort((left, right) => right.submittedAt.localeCompare(left.submittedAt))
+      .slice(0, HOMEWORK_ITEMS_KEPT);
+  };
+  const mergeHomeworkReviews = (a: HomeworkReview[], b: HomeworkReview[]): HomeworkReview[] => {
+    const map = new Map<string, HomeworkReview>();
+    for (const review of [...b, ...a]) {
+      const previous = map.get(review.submissionId);
+      if (!previous || review.approvedAt < previous.approvedAt) map.set(review.submissionId, review);
+    }
+    return [...map.values()].sort((left, right) => right.approvedAt.localeCompare(left.approvedAt)).slice(0, HOMEWORK_ITEMS_KEPT);
+  };
+  const applyHomeworkReviews = (submissions: HomeworkSubmission[], reviews: HomeworkReview[]): HomeworkSubmission[] => {
+    const bySubmission = new Map(reviews.map((review) => [review.submissionId, review]));
+    return submissions.map((submission) => {
+      const review = bySubmission.get(submission.id);
+      return review
+        ? { ...submission, status: 'approved' as const, photos: [], guardianNote: review.note, reviewedAt: review.approvedAt }
+        : submission;
+    });
+  };
+  const mergeGuardianLinks = (localLinks: GuardianLink[], remoteLinks: GuardianLink[]): GuardianLink[] => {
+    const map = new Map<string, GuardianLink>();
+    const keyOf = (link: GuardianLink) => link.linkId ?? link.id;
+    for (const remoteLink of remoteLinks) map.set(keyOf(remoteLink), remoteLink);
+    for (const localLink of localLinks) {
+      const previous = map.get(keyOf(localLink));
+      if (!previous) {
+        map.set(keyOf(localLink), localLink);
+        continue;
+      }
+      const reports = mergeReports(localLink.reports ?? [], previous.reports ?? []);
+      const acks = mergeAcks(localLink.acks ?? [], previous.acks ?? []);
+      const plans = sealReportedDays(mergePlans(localLink.plans ?? [], previous.plans ?? []), reports);
+      const reviews = mergeHomeworkReviews(localLink.homeworkReviews ?? [], previous.homeworkReviews ?? []);
+      const submissions = applyHomeworkReviews(
+        mergeHomeworkSubmissions(localLink.homeworkSubmissions ?? [], previous.homeworkSubmissions ?? []),
+        reviews,
+      );
+      const linked = localLink.status === 'linked' || previous.status === 'linked';
+      map.set(keyOf(localLink), {
+        ...previous,
+        ...localLink,
+        status: linked ? 'linked' : 'pending',
+        linkId: localLink.linkId ?? previous.linkId,
+        code: linked ? null : localLink.code ?? previous.code,
+        wrappedShareKey: localLink.wrappedShareKey ?? previous.wrappedShareKey,
+        history: byIdKey(localLink.history ?? [], previous.history ?? [], (item) => item.weekOf)
+          .sort((left, right) => right.weekOf.localeCompare(left.weekOf)).slice(0, 12),
+        results: !localLink.results ? previous.results : !previous.results ? localLink.results
+          : localLink.results.weekOf >= previous.results.weekOf ? localLink.results : previous.results,
+        plans: plans.sort((left, right) => right.createdAt.localeCompare(left.createdAt)).slice(0, 10),
+        reports,
+        acks,
+        goals: byId(localLink.goals ?? [], previous.goals ?? []).sort((left, right) => right.createdAt.localeCompare(left.createdAt)).slice(0, 10),
+        classes: mergeClasses(localLink.classes ?? [], previous.classes ?? []),
+        homework: mergeHomework(localLink.homework ?? [], previous.homework ?? []),
+        classProgress: mergeClassProgress(localLink.classProgress ?? [], previous.classProgress ?? []),
+        homeworkSubmissions: submissions,
+        homeworkReviews: reviews,
+        goalAnswers: byIdKey(localLink.goalAnswers ?? [], previous.goalAnswers ?? [], (item) => item.suggestionId).slice(0, GOAL_ANSWERS_KEPT),
+      });
+    }
+    return [...map.values()];
+  };
+  const studentReports = mergeReports(local.student.reports ?? [], remote.student.reports ?? []);
+  const studentAcks = mergeAcks(local.student.acks ?? [], remote.student.acks ?? []);
+  const studentPlans = sealReportedDays(mergePlans(local.student.inbox?.plans ?? [], remote.student.inbox?.plans ?? []), studentReports);
+  const studentHomeworkSubmissions = mergeHomeworkSubmissions(
+    local.student.homeworkSubmissions ?? [], remote.student.homeworkSubmissions ?? [],
+  );
+  const studentRequests: PlanRequest[] = byId(local.student.requests ?? [], remote.student.requests ?? [])
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt)).slice(0, 60);
   return {
     student: {
       enabled: local.student.enabled || remote.student.enabled,
@@ -182,13 +333,18 @@ export function mergePanels(local: Panels, remote: Panels): Panels {
         notices: byId(local.student.inbox?.notices ?? [], remote.student.inbox?.notices ?? [])
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
           .slice(0, 20),
-        plans: mergePlans(local.student.inbox?.plans ?? [], remote.student.inbox?.plans ?? [])
-          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-          .slice(0, 10),
+        plans: studentPlans.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 10),
         goals: byId(local.student.inbox?.goals ?? [], remote.student.inbox?.goals ?? [])
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
           .slice(0, 10),
+        classes: mergeClasses(local.student.inbox?.classes ?? [], remote.student.inbox?.classes ?? []),
+        homework: mergeHomework(local.student.inbox?.homework ?? [], remote.student.inbox?.homework ?? []),
       },
+      reports: studentReports,
+      acks: studentAcks,
+      classProgress: mergeClassProgress(local.student.classProgress ?? [], remote.student.classProgress ?? []),
+      homeworkSubmissions: studentHomeworkSubmissions,
+      requests: studentRequests,
       // Two devices should not disagree about which kind words were kept.
       goalAnswers: byIdKey(
         local.student.goalAnswers ?? [],
@@ -203,7 +359,7 @@ export function mergePanels(local: Panels, remote: Panels): Panels {
       enabled: local.guardian.enabled || remote.guardian.enabled,
       kind: local.guardian.kind ?? remote.guardian.kind,
       field: local.guardian.field ?? remote.guardian.field,
-      links: byId(local.guardian.links, remote.guardian.links)
+      links: mergeGuardianLinks(local.guardian.links, remote.guardian.links)
         .sort((a, b) => a.displayName.localeCompare(b.displayName))
         .slice(0, 20),
       notices: byId(local.guardian.notices ?? [], remote.guardian.notices ?? [])
