@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { createEmptyState } from './types';
 import { sanitizePanels, sanitizeState } from './storage';
 import { mergePanels, mergeStates } from './sync';
-import { daysUntil, splitExplanations, subjectMinutes, weekOf, weekResults, withExplanation, withSubject, withoutSubject } from './panels';
-import type { ChangeNote, Panels, PlannerState, StudentSubject } from './types';
+import { daysUntil, splitExplanations, subjectMinutes, weekOf, weekResults, withExplanation, withFlushedPlans, withLinkPlan, withQueuedPlan, withSubject, withoutQueuedPlan, withoutSubject } from './panels';
+import type { ChangeNote, GuardianPlan, Panels, PlannerState, QueuedPlan, StudentSubject } from './types';
 
 function note(week: string, id: string): ChangeNote {
   return { id, createdAt: `2026-03-0${id}T10:00:00.000Z`, weekOf: week, summary: `change ${id}`, reason: 'because' };
@@ -183,5 +183,64 @@ describe('weekly results', () => {
     const next = withoutSubject(panels, 's1');
     expect(next.student.subjects).toHaveLength(0);
     expect(next.student.enabled).toBe(panels.student.enabled);
+  });
+});
+
+describe('the send queue', () => {
+  const draft = { cadence: 'week' as const, start: '2026-10-12', title: 'Chemistry week', note: '', items: [] };
+  const queued = (id: string): QueuedPlan => ({ id, linkId: 'link-1', draft, createdAt: `${id}T08:00:00.000Z` });
+
+  it('parks plans oldest first and refuses more than ten', () => {
+    let panels = createEmptyState().panels;
+    for (let index = 0; index < 12; index += 1) panels = withQueuedPlan(panels, queued(`q${index}`));
+    expect(panels.guardian.queuedPlans?.map((entry) => entry.id)).toEqual([
+      'q0', 'q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9',
+    ]);
+  });
+
+  it('drops one waiting plan by its queue id', () => {
+    let panels = createEmptyState().panels;
+    panels = withQueuedPlan(withQueuedPlan(panels, queued('q0')), queued('q1'));
+    expect(withoutQueuedPlan(panels, 'q0').guardian.queuedPlans?.map((entry) => entry.id)).toEqual(['q1']);
+    expect(withoutQueuedPlan(panels, 'missing')).toBe(panels);
+  });
+
+  it('files flushed plans and lifts them from the queue', () => {
+    const plan = (id: string): GuardianPlan => ({
+      id, author: 'Dr Noor', linkId: 'link-1', cadence: 'week', start: '2026-10-12', title: 'Chemistry week',
+      note: '', field: null, grade: null, restDays: [], items: [],
+      createdAt: '2026-10-12T08:00:00.000Z', updatedAt: '2026-10-12T08:00:00.000Z',
+    });
+    const empty = createEmptyState().panels;
+    const link = {
+      id: 'nina', username: 'nina', displayName: 'Nina', status: 'linked' as const, history: [],
+      linkId: 'link-1', code: null, wrappedShareKey: null, results: null, plans: [] as GuardianPlan[],
+    };
+    const base = { ...empty, guardian: { ...empty.guardian, links: [link] } };
+    const before = withQueuedPlan(withQueuedPlan(base, queued('q0')), queued('q1'));
+    const after = withLinkPlan(withoutQueuedPlan(withoutQueuedPlan(before, 'q0'), 'q1'), 'link-1', plan('plan-9'));
+    const filed = withFlushedPlans(before, before, after);
+    expect(filed.guardian.queuedPlans ?? []).toEqual([]);
+    expect(filed.guardian.links[0]?.plans.map((entry) => entry.id)).toEqual(['plan-9']);
+    expect(withFlushedPlans(before, before, before)).toBe(before);
+  });
+
+  it('keeps waiting plans through a save and load round trip', () => {
+    const panels = withQueuedPlan(createEmptyState().panels, {
+      id: 'q0',
+      linkId: 'link-1',
+      draft: { ...draft, items: [{ title: 'Acids', date: '2026-10-13', time: '08:00', minutes: null, subject: null, url: null }] },
+      createdAt: '2026-10-12T08:00:00.000Z',
+    });
+    const round = sanitizeState(JSON.parse(JSON.stringify(stateWith(panels))));
+    expect(round?.panels.guardian.queuedPlans?.[0]?.draft.title).toBe('Chemistry week');
+    expect(round?.panels.guardian.queuedPlans?.[0]?.draft.items[0]?.title).toBe('Acids');
+  });
+
+  it('drops waiting plans that lost their shape', () => {
+    const panels = sanitizePanels({
+      guardian: { enabled: false, kind: null, field: null, links: [], notices: [], queuedPlans: [{ id: 'q0' }, null, 'junk'] },
+    });
+    expect(panels.guardian.queuedPlans ?? []).toEqual([]);
   });
 });

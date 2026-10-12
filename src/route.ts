@@ -3,6 +3,8 @@ import { formatFullDate, isValidISODate, todayISO } from './dates';
 export type CalendarTab = 'week' | 'month' | 'agenda';
 
 export type Route =
+  /** The front door: the panel picker, shown first on every open and login. */
+  | { name: 'home' }
   | { name: 'today' }
   | { name: 'day'; date: string }
   | { name: 'calendar'; tab: CalendarTab; date: string }
@@ -22,7 +24,7 @@ export type Route =
   | { name: 'quickadd' }
   | { name: 'ai'; tab?: 'plan' | 'review' };
 
-const PLAIN_NAMES = new Set(['today', 'tasks', 'habits', 'goals', 'notes', 'insights', 'plans', 'matrix', 'review', 'student', 'guardian']);
+const PLAIN_NAMES = new Set(['home', 'today', 'tasks', 'habits', 'goals', 'notes', 'insights', 'plans', 'matrix', 'review', 'student', 'guardian']);
 /**
  * Every head `parseHash` knows, including the legacy aliases. This is what
  * tells an address that belongs to the app from one that does not: a link
@@ -66,7 +68,11 @@ export function parseHash(hash: string, now = new Date()): Route {
   const [head, a, b] = parts;
   const today = todayISO(now);
   if (head === 'today' && /(^|&)qa=1(&|$)/.test(queryPart ?? '')) return { name: 'quickadd' };
-  if (!head || head === 'today') return { name: 'today' };
+  // No address, or an address from nowhere: the panel picker is the front
+  // door. Explicit destinations (a PWA shortcut, a bookmark, a shared link)
+  // still open exactly where they point.
+  if (!head) return { name: 'home' };
+  if (head === 'today') return { name: 'today' };
   if (head === 'ai') return { name: 'ai', tab: a === 'review' ? 'review' : 'plan' };
   if (head === 'day' && a && isValidISODate(a)) return { name: 'day', date: a };
   if (head === 'calendar' && !a) return { name: 'calendar', tab: 'week', date: today };
@@ -95,14 +101,16 @@ export function parseHash(hash: string, now = new Date()): Route {
     return code ? { name: 'panels', invite: code } : { name: 'panels' };
   }
   if (PLAIN_NAMES.has(head)) return { name: head as 'today' };
-  return { name: 'today' };
+  // An unknown address is answered with the picker, not a guess: from there
+  // every panel is one press away.
+  return { name: 'home' };
 }
 
 /**
  * The route a hash names, or null when the hash is not ours.
  *
  * `parseHash` answers every address with something — an unknown hash is simply
- * `today`, which is right for a planner someone already has open and wrong for
+ * `home`, which is right for a planner someone already has open and wrong for
  * a link arriving from outside. Anything deciding "should this address open
  * the app?" has to be able to hear "no", and this is that answer.
  */
@@ -149,6 +157,8 @@ export function routeKey(route: Route): string {
 
 export function routeTitle(route: Route): string {
   switch (route.name) {
+    case 'home':
+      return 'Home';
     case 'today':
       return 'Today';
     case 'day':

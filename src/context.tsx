@@ -4,8 +4,9 @@ import { addBreadcrumb, reportCaught } from './reporting';
 import { parseHash, toHash, type Route } from './route';
 import { downloadState, loadFrom, parseBackup, sanitizeState, saveTo, serialize, storageFullMessage, STORAGE_KEY } from './storage';
 import { flushVaultPush, scheduleVaultPush } from './auth/vault';
-import { readNotices, refreshResults, shareWeeklyResults, syncLinks, syncStudentInbox } from './auth/links';
+import { flushPlanQueue, readNotices, refreshResults, shareWeeklyResults, syncLinks, syncStudentInbox } from './auth/links';
 import { idbRead, idbWrite, savedAt } from './idb';
+import { withFlushedPlans } from './panels';
 import {
   addAIMemory as addAIMemoryTo,
   clearAIMemory as clearAIMemoryIn,
@@ -80,6 +81,7 @@ import {
   type ReminderSettings,
 } from './reminders';
 import { appendNotifications } from './notificationCenter';
+import { missingReportReminders } from './weekPlans';
 import type { SettingsTab } from './components/SettingsSheet';
 import { backgroundPushEnabled, refreshBackgroundPushSchedule } from './push';
 import { buildSampleState } from './sample';
@@ -466,7 +468,9 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     };
     const onHash = () => sync(true);
     window.addEventListener('hashchange', onHash);
-    if (!window.location.hash) window.history.replaceState(null, '', '#/today');
+    // No address: the panel picker is the front door. An explicit hash — a
+    // bookmark, a PWA shortcut, a shared link — is left exactly as it is.
+    if (!window.location.hash) window.history.replaceState(null, '', '#/home');
     sync(false);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
@@ -673,6 +677,42 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     },
     [commit, flash],
   );
+
+  /**
+   * Whatever the guardian parked without a signal goes out on its own — on
+   * opening, on reconnecting, and whenever the queue itself changes.
+   */
+  const flushQueuedPlans = useCallback(
+    async (current: PlannerState) => {
+      if (!current.panels.guardian.enabled || (current.panels.guardian.queuedPlans ?? []).length === 0) return;
+      try {
+        const before = current.panels;
+        const after = await flushPlanQueue(before);
+        const sent = (before.guardian.queuedPlans?.length ?? 0) - (after.guardian.queuedPlans?.length ?? 0);
+        if (sent <= 0) return;
+        commit((latest) => ({ ...latest, panels: withFlushedPlans(latest.panels, before, after) }));
+        flash(tn(sent, 'Sent {count} queued plan.', 'Sent {count} queued plans.'));
+      } catch {
+        /* best effort; the queue keeps waiting */
+      }
+    },
+    [commit, flash],
+  );
+
+  useEffect(() => {
+    if (!state.panels.guardian.enabled || (state.panels.guardian.queuedPlans ?? []).length === 0) return;
+    void flushQueuedPlans(stateRef.current);
+    const onOnline = () => void flushQueuedPlans(stateRef.current);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void flushQueuedPlans(stateRef.current);
+    };
+    window.addEventListener('online', onOnline);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [state.panels.guardian.enabled, state.panels.guardian.queuedPlans, flushQueuedPlans]);
 
   // Runs shortly after the planner changes, and once when it opens.
   const panelTimer = useRef<number | null>(null);
@@ -1350,6 +1390,28 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     const id = window.setInterval(check, 20000);
     return () => window.clearInterval(id);
   }, [reminders, flash]);
+
+  // Daily reports are a promise to another person, not a preference: a student
+  // with a finished planned day and no report hears about it once a day until
+  // the day is reported — even with reminders switched off.
+  useEffect(() => {
+    const check = () => {
+      const today = todayISO();
+      const fired = loadFired(today);
+      const due = missingReportReminders(stateRef.current.panels, today).filter((reminder) => !fired.has(reminder.key));
+      if (due.length === 0) return;
+      appendNotifications(due, new Date());
+      for (const reminder of due) {
+        fired.add(reminder.key);
+        void showNotification(reminder);
+        flash(`🔔 ${reminder.title} — ${reminder.body}`);
+      }
+      saveFired(fired);
+    };
+    check();
+    const id = window.setInterval(check, 20000);
+    return () => window.clearInterval(id);
+  }, [flash]);
 
   const nativeReminderTimer = useRef<number | null>(null);
   useEffect(() => {

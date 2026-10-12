@@ -6,8 +6,10 @@ import { formatEdited } from '../dates';
 import {
   BellIcon,
   BookIcon,
+  CalendarIcon,
   CheckIcon,
   HeartIcon,
+  HomeIcon,
   PlusIcon,
   PrinterIcon,
   SearchIcon,
@@ -18,6 +20,7 @@ import {
 } from '../icons';
 import { friendlyGroqError, generateGuardianGuidance, type GuardianGuidance } from '../ai';
 import { advisingHtml, buildAdvisingAgenda } from '../advising';
+import { timetableHtml, weekPlanHtml } from '../weekPlanPrint';
 import { downloadBlob } from '../download';
 import { printDocument } from '../printDocument';
 import { todayISO } from '../dates';
@@ -28,6 +31,8 @@ import { GuardianGoalForm } from '../components/GuardianGoalForm';
 import { InviteQr } from '../components/InviteQr';
 import { PraiseComposer } from '../components/PraiseComposer';
 import { GuardianPlanComposer } from '../components/GuardianPlanComposer';
+import { WeekPlanCard } from '../components/WeekPlanCard';
+import { WeekPlanComposer } from '../components/WeekPlanComposer';
 import {
   dropGoal,
   dropPlan,
@@ -35,13 +40,25 @@ import {
   isInviteExpired,
   markNoticesRead,
   postNotice,
+  postNudge,
   readNotices,
   refreshResults,
   removeLink,
+  sendAck,
+  sendPlan,
   syncLinks,
   type Invitation,
 } from '../auth/links';
-import { goalAnswerOnLink, planPeriodLabel, planProgress, withoutLinkPlan } from '../panels';
+import {
+  goalAnswerOnLink,
+  planPeriodLabel,
+  planProgress,
+  withLinkAck,
+  withLinkPlan,
+  withoutLinkPlan,
+  withoutQueuedPlan,
+} from '../panels';
+import { ackFor, nudgedToday, toggleReaction } from '../weekPlans';
 import {
   filterGuardianLinks,
   guardianResultStatus,
@@ -49,7 +66,7 @@ import {
   type RosterFilter,
   type RosterSort,
 } from '../panelFeatures';
-import type { GuardianLink, PlanCadence } from '../types';
+import type { DayReport, GuardianLink, GuardianNotice, GuardianPlan, PlanCadence, QueuedPlan, ReportAck } from '../types';
 import '../panels.css';
 
 /**
@@ -80,9 +97,10 @@ export function GuardianPanelView() {
   const [sending, setSending] = useState<string | null>(null);
   const [guidance, setGuidance] = useState<Record<string, GuardianGuidance>>({});
   const [guiding, setGuiding] = useState<string | null>(null);
-  const [planning, setPlanning] = useState<{ id: string; cadence: PlanCadence } | null>(null);
+  const [planning, setPlanning] = useState<{ id: string; cadence: PlanCadence; mode: 'steps' | 'lessons' } | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [goalForm, setGoalForm] = useState<string | null>(null);
+  const [sendingQueue, setSendingQueue] = useState(false);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<RosterFilter>('all');
   const [sort, setSort] = useState<RosterSort>('name');
@@ -234,6 +252,117 @@ export function GuardianPanelView() {
     downloadBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), `advising-${link.username || link.id}.html`);
   };
 
+  const printWeekPlan = (link: GuardianLink, plan: GuardianPlan) => {
+    const html = weekPlanHtml(plan, link.reports ?? [], link.acks ?? [], {
+      student: link.displayName,
+      madeOn: todayISO(),
+      dir: document.documentElement.dir || 'ltr',
+      lang: document.documentElement.lang || 'en',
+    });
+    if (printDocument(html)) return;
+    downloadBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), `week-plan-${plan.id}.html`);
+  };
+
+  const printTimetable = (link: GuardianLink, plan: GuardianPlan) => {
+    const html = timetableHtml(plan, link.reports ?? [], {
+      student: link.displayName,
+      madeOn: todayISO(),
+      dir: document.documentElement.dir || 'ltr',
+      lang: document.documentElement.lang || 'en',
+    });
+    if (printDocument(html)) return;
+    downloadBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), `timetable-${plan.id}.html`);
+  };
+
+  const ackReport = async (link: GuardianLink, report: DayReport, text: string) => {
+    if (!link.linkId) return;
+    const existing = ackFor(link.acks ?? [], report.id);
+    try {
+      const next = await sendAck(panels, link.linkId, {
+        reportId: report.id,
+        planId: report.planId,
+        date: report.date,
+        text,
+        // A reply lands on the reacted answer instead of orphaning its emoji.
+        reactions: existing?.reactions ?? [],
+        id: existing?.id,
+      });
+      const ack = next.guardian.links.find((item) => item.linkId === link.linkId)?.acks?.[0];
+      // Apply only the new answer: slow requests must not replace an edited roster.
+      if (ack) updatePanels((current) => withLinkAck(current, link.linkId!, ack));
+    } catch (caught) {
+      flash(caught instanceof Error ? caught.message : t('That reply could not be sent.'));
+    }
+  };
+
+  const reactReport = async (link: GuardianLink, report: DayReport, ack: ReportAck | undefined, emoji: string) => {
+    if (!link.linkId) return;
+    try {
+      const next = await sendAck(panels, link.linkId, {
+        reportId: report.id,
+        planId: report.planId,
+        date: report.date,
+        text: ack?.text ?? '',
+        reactions: toggleReaction(ack?.reactions ?? [], emoji),
+        id: ack?.id,
+      });
+      const updated = next.guardian.links.find((item) => item.linkId === link.linkId)?.acks?.[0];
+      // Apply only the touched answer: slow requests must not replace an edited roster.
+      if (updated) updatePanels((current) => withLinkAck(current, link.linkId!, updated));
+    } catch (caught) {
+      flash(caught instanceof Error ? caught.message : t('That reply could not be sent.'));
+    }
+  };
+
+  const sendQueuedPlan = async (link: GuardianLink, queued: QueuedPlan) => {
+    if (!link.linkId || sendingQueue) return;
+    setSendingQueue(true);
+    try {
+      const next = await sendPlan(panels, link.linkId, queued.draft);
+      const previousIds = new Set(link.plans.map((plan) => plan.id));
+      const sent = next.guardian.links
+        .find((item) => item.linkId === link.linkId)
+        ?.plans.find((plan) => !previousIds.has(plan.id));
+      // Apply only the new plan onto the latest roster, and lift it from the queue.
+      updatePanels((current) => {
+        const lifted = withoutQueuedPlan(current, queued.id);
+        return sent ? withLinkPlan(lifted, link.linkId!, sent) : lifted;
+      });
+      flash(t('The plan is on its way to {0}.', { 0: link.displayName }));
+    } catch (caught) {
+      flash(caught instanceof Error ? caught.message : t('That plan could not be sent.'));
+    } finally {
+      setSendingQueue(false);
+    }
+  };
+
+  const dropQueuedPlan = (queueId: string) => {
+    updatePanels((current) => withoutQueuedPlan(current, queueId));
+  };
+
+  const nudgeStudent = async (link: GuardianLink) => {
+    if (!link.linkId || nudgedToday(guardian.notices, link.username)) return;
+    try {
+      const next = await postNudge(panels, link.linkId);
+      // Adopt only the new notice: slow requests must not replace an edited roster.
+      const previousIds = new Set(guardian.notices.map((notice) => notice.id));
+      const added = next.guardian.notices.filter((notice) => !previousIds.has(notice.id));
+      updatePanels((latest) => ({
+        ...latest,
+        guardian: {
+          ...latest.guardian,
+          notices: [
+            ...added,
+            ...latest.guardian.notices.filter((notice) => !added.some((item) => item.id === notice.id)),
+          ].slice(0, 20),
+        },
+      }));
+      flash(t('Nudge sent'));
+    } catch (caught) {
+      flash(caught instanceof Error ? caught.message : t('That nudge could not be sent.'));
+    }
+  };
+
   const send = async (link: GuardianLink, event: React.FormEvent) => {
     event.preventDefault();
     const text = (notes[link.id] ?? '').trim();
@@ -285,7 +414,21 @@ export function GuardianPanelView() {
 
   const openPlanner = (link: GuardianLink, cadence: PlanCadence) => {
     setExpanded(link.id);
-    setPlanning({ id: link.id, cadence });
+    setPlanning({ id: link.id, cadence, mode: 'steps' });
+  };
+  const openLessonPlanner = (link: GuardianLink) => {
+    setExpanded(link.id);
+    setPlanning({ id: link.id, cadence: 'week', mode: 'lessons' });
+  };
+  // A request notice names its student; the roster knows which link that is.
+  const planAskButton = (notice: GuardianNotice) => {
+    const target = guardian.links.find((item) => item.username === notice.student);
+    if (!target) return null;
+    return (
+      <button type="button" className="btn btn-ghost btn-small" onClick={() => openLessonPlanner(target)}>
+        {t('Plan lessons')}
+      </button>
+    );
   };
   // Taking a suggestion back is not undoing a goal: if they already said yes,
   // the goal they made is theirs and stays. This only stops the asking.
@@ -354,6 +497,10 @@ export function GuardianPanelView() {
           >
             {refreshing ? <span className="spinner" aria-hidden="true" /> : null}
             {refreshing ? t('Refreshing…') : t('Refresh results')}
+          </button>
+          <button type="button" className="btn btn-ghost btn-small" onClick={() => navigate({ name: 'home' })}>
+            <HomeIcon size={14} />
+            {t('Switch panel')}
           </button>
           <button type="button" className="btn btn-ghost btn-small" onClick={() => navigate({ name: 'panels' })}>
             <SlidersIcon size={14} />
@@ -561,6 +708,7 @@ export function GuardianPanelView() {
               const status = guardianResultStatus(link);
               const isExpanded = expanded === link.id;
               const ready = link.status === 'linked' && !!link.linkId && !!link.wrappedShareKey;
+              const waiting = (guardian.queuedPlans ?? []).filter((entry) => entry.linkId === link.linkId);
               const ticks = link.plans.reduce(
                 (sum, plan) => ({
                   done: sum.done + planProgress(plan).done,
@@ -850,18 +998,30 @@ export function GuardianPanelView() {
                           >
                             {t('A month')}
                           </button>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-small"
+                            disabled={!ready}
+                            onClick={() => openLessonPlanner(link)}
+                          >
+                            {t('Plan lessons')}
+                          </button>
                         </div>
                         {!ready ? (
                           <p className="hint">{t('This link needs to sync before you can send notes or plans.')}</p>
                         ) : null}
                       </section>
                       {planning?.id === link.id ? (
-                        <GuardianPlanComposer
-                          key={`${link.id}-${planning.cadence}`}
-                          link={link}
-                          cadence={planning.cadence}
-                          onClose={() => setPlanning(null)}
-                        />
+                        planning.mode === 'lessons' ? (
+                          <WeekPlanComposer key={`${link.id}-lessons`} link={link} onClose={() => setPlanning(null)} />
+                        ) : (
+                          <GuardianPlanComposer
+                            key={`${link.id}-${planning.cadence}`}
+                            link={link}
+                            cadence={planning.cadence}
+                            onClose={() => setPlanning(null)}
+                          />
+                        )
                       ) : null}
                       <section className="gplan-actions">
                         <p className="chart-title">{t('Goals')}</p>
@@ -943,6 +1103,42 @@ export function GuardianPanelView() {
                           </ul>
                         ) : null}
                       </section>
+                      {waiting.length > 0 ? (
+                        <section className="gplan-sent">
+                          <p className="chart-title">
+                            {t('Waiting to send')} ({faNum(waiting.length)})
+                          </p>
+                          <ul className="gplan-list">
+                            {waiting.map((queued) => (
+                                <li key={queued.id} className="gplan-card">
+                                  <div className="gplan-head">
+                                    <div>
+                                      <p className="gplan-kicker">{t('{0} lessons', { 0: queued.draft.items.length })}</p>
+                                      <p className="gplan-title">{queued.draft.title || t('Plan')}</p>
+                                    </div>
+                                  </div>
+                                  <div className="gplan-picks">
+                                    <button
+                                      type="button"
+                                      className="btn btn-ghost btn-small"
+                                      disabled={sendingQueue}
+                                      onClick={() => void sendQueuedPlan(link, queued)}
+                                    >
+                                      {t('Send now')}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn btn-ghost btn-small"
+                                      onClick={() => dropQueuedPlan(queued.id)}
+                                    >
+                                      {t('Cancel')}
+                                    </button>
+                                  </div>
+                                </li>
+                              ))}
+                          </ul>
+                        </section>
+                      ) : null}
                       {link.plans.length > 0 ? (
                         <section className="gplan-sent">
                           <p className="chart-title">{t('Plans you sent')}</p>
@@ -950,6 +1146,49 @@ export function GuardianPanelView() {
                             {link.plans.map((plan) => {
                               const progress = planProgress(plan);
                               const percent = progress.total ? Math.round((progress.done / progress.total) * 100) : 0;
+                              if (plan.cadence === 'week') {
+                                return (
+                                  <WeekPlanCard
+                                    key={plan.id}
+                                    plan={plan}
+                                    reports={link.reports ?? []}
+                                    variant="guardian"
+                                    acks={link.acks ?? []}
+                                    onAck={(report, text) => ackReport(link, report, text)}
+                                    onReact={(report, ack, emoji) => reactReport(link, report, ack, emoji)}
+                                    onNudge={() => nudgeStudent(link)}
+                                    nudgeSent={nudgedToday(guardian.notices, link.username)}
+                                    actions={
+                                      <>
+                                        <button
+                                          type="button"
+                                          className="icon-btn round"
+                                          aria-label={`${t('Print')} · ${plan.title}`}
+                                          onClick={() => printWeekPlan(link, plan)}
+                                        >
+                                          <PrinterIcon size={14} />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="icon-btn round"
+                                          aria-label={`${t('Print timetable')} · ${plan.title}`}
+                                          onClick={() => printTimetable(link, plan)}
+                                        >
+                                          <CalendarIcon size={14} />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="icon-btn round"
+                                          aria-label={t('Take back {0}', { 0: plan.title })}
+                                          onClick={() => dropSentPlan(link, plan.id)}
+                                        >
+                                          <TrashIcon size={14} />
+                                        </button>
+                                      </>
+                                    }
+                                  />
+                                );
+                              }
                               return (
                                 <li key={plan.id} className="gplan-card">
                                   <div className="gplan-head">
@@ -1025,6 +1264,7 @@ export function GuardianPanelView() {
                     {notice.weekOf ? ` · ${notice.weekOf}` : ''}
                   </p>
                 </div>
+                {notice.kind === 'request' ? planAskButton(notice) : null}
               </li>
             ))}
           </ul>

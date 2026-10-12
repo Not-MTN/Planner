@@ -7,8 +7,8 @@
  */
 import { addDays, parseISODate, startOfWeek, toISODate, todayISO } from './dates';
 import { t } from './i18n';
-import { GOAL_ANSWERS_KEPT, PANEL_GOALS_KEPT } from './types';
-import type { ChangeNote, GoalAnswer, GoalSuggestion, GuardianLink, GuardianPlan, Panels, PlanCadence, PlannerState, StudentSubject, WeekResults } from './types';
+import { DAY_REPORTS_KEPT, GOAL_ANSWERS_KEPT, PANEL_GOALS_KEPT, QUEUED_PLANS_KEPT } from './types';
+import type { ChangeNote, GoalAnswer, GoalSuggestion, GuardianLink, GuardianPlan, Panels, PlanCadence, PlannerState, QueuedPlan, ReportAck, StudentSubject, WeekResults } from './types';
 
 export function weekOf(date = todayISO()): string {
   return startOfWeek(date);
@@ -209,6 +209,54 @@ export function withLinkPlan(panels: Panels, linkId: string, plan: GuardianPlan)
     link.linkId !== linkId
       ? link
       : { ...link, plans: [plan, ...link.plans.filter((item) => item.id !== plan.id)].slice(0, 10) },
+  );
+  return { ...panels, guardian: { ...panels.guardian, links } };
+}
+
+/**
+ * Guardian: park a plan that could not be sent, oldest first. A full queue
+ * keeps what is waiting — the caller tells the guardian to reconnect.
+ */
+export function withQueuedPlan(panels: Panels, queued: QueuedPlan): Panels {
+  const waiting = panels.guardian.queuedPlans ?? [];
+  if (waiting.length >= QUEUED_PLANS_KEPT) return panels;
+  return { ...panels, guardian: { ...panels.guardian, queuedPlans: [...waiting, queued] } };
+}
+
+/** Guardian: drop one waiting plan, by its queue id. */
+export function withoutQueuedPlan(panels: Panels, queueId: string): Panels {
+  const waiting = panels.guardian.queuedPlans ?? [];
+  if (!waiting.some((entry) => entry.id === queueId)) return panels;
+  return { ...panels, guardian: { ...panels.guardian, queuedPlans: waiting.filter((entry) => entry.id !== queueId) } };
+}
+
+/**
+ * After the queue flushed: lift what went out and file the plans beside the
+ * rest — onto the latest panels, so work done mid-flight is never lost.
+ */
+export function withFlushedPlans(latest: Panels, before: Panels, after: Panels): Panels {
+  const stillWaiting = new Set((after.guardian.queuedPlans ?? []).map((entry) => entry.id));
+  const sentIds = (before.guardian.queuedPlans ?? []).map((entry) => entry.id).filter((id) => !stillWaiting.has(id));
+  if (sentIds.length === 0) return latest;
+  let panels = latest;
+  for (const id of sentIds) panels = withoutQueuedPlan(panels, id);
+  for (const link of after.guardian.links) {
+    const previous = new Set(
+      (before.guardian.links.find((item) => item.linkId === link.linkId)?.plans ?? []).map((plan) => plan.id),
+    );
+    for (const plan of link.plans) {
+      if (!previous.has(plan.id) && link.linkId) panels = withLinkPlan(panels, link.linkId, plan);
+    }
+  }
+  return panels;
+}
+
+/** Guardian: remember an answer sent to a daily report, newest first. */
+export function withLinkAck(panels: Panels, linkId: string, ack: ReportAck): Panels {
+  const links = panels.guardian.links.map((link) =>
+    link.linkId !== linkId
+      ? link
+      : { ...link, acks: [ack, ...(link.acks ?? []).filter((item) => item.id !== ack.id)].slice(0, DAY_REPORTS_KEPT) },
   );
   return { ...panels, guardian: { ...panels.guardian, links } };
 }

@@ -62,8 +62,8 @@ describe('routing', () => {
     expect(parseHash(toHash({ name: 'insights' }))).toEqual({ name: 'insights' });
     expect(parseHash(toHash({ name: 'ai', tab: 'review' }))).toEqual({ name: 'ai', tab: 'review' });
     expect(parseHash('#/ai', now)).toEqual({ name: 'ai', tab: 'plan' });
-    expect(parseHash('#/nope', now)).toEqual({ name: 'today' });
-    expect(parseHash('#/day/2026-02-31', now)).toEqual({ name: 'today' });
+    expect(parseHash('#/nope', now)).toEqual({ name: 'home' });
+    expect(parseHash('#/day/2026-02-31', now)).toEqual({ name: 'home' });
   });
 
   it('keeps legacy routes working', () => {

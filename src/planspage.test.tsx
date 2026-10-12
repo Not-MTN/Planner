@@ -86,21 +86,25 @@ function seedPlans(plans: unknown[]): void {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(blob));
 }
 
+// Relative to today: the boot rollup prunes the bodies of plans whose week
+// has aged out, so fixed dates would rot this test within weeks.
+const PLAN_DAY = new Date().toISOString().slice(0, 10);
+const PLAN_DUE = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
 const PLAN = {
   id: 'plan-1',
   title: 'A calm week',
   prompt: 'Plan a calm week',
   summary: 'A gentle week with room to breathe.',
-  startDate: '2026-09-28',
+  startDate: PLAN_DAY,
   days: 7,
   status: 'draft',
   source: 'typed',
-  tasks: [{ title: 'Water the plants', priority: 'low', dueDate: '2026-09-29', dueTime: null, category: 'home', note: '', goalId: null }],
+  tasks: [{ title: 'Water the plants', priority: 'low', dueDate: PLAN_DUE, dueTime: null, category: 'home', note: '', goalId: null }],
   events: [],
   habits: [],
   suggestions: [],
-  createdAt: '2026-09-28T08:00:00.000Z',
-  updatedAt: '2026-09-28T08:00:00.000Z',
+  createdAt: `${PLAN_DAY}T08:00:00.000Z`,
+  updatedAt: `${PLAN_DAY}T08:00:00.000Z`,
 };
 
 describe('Plans page', () => {
@@ -132,7 +136,7 @@ describe('Plans page', () => {
     expect(text()).not.toContain('Add to planner');
     // And the task itself now lives on its due date.
     await act(async () => {
-      window.location.hash = '#/day/2026-09-29';
+      window.location.hash = `#/day/${PLAN_DUE}`;
       await new Promise((resolve) => setTimeout(resolve, 80));
     });
     expect(text()).toContain('Water the plants');

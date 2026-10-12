@@ -134,6 +134,9 @@ export function DayView({ date }: { date: string }) {
               <button type="button" className="text-btn" onClick={() => navigate({ name: 'calendar', tab: 'agenda', date: today })}>
                 {dayRelation(addDays(today, 1), today)} {t("and beyond")}
               </button>
+              <button type="button" className="text-btn" onClick={() => navigate({ name: 'home' })}>
+                {t("Switch panel")}
+              </button>
             </div>
           ) : null}
           {!isToday ? (
