@@ -201,7 +201,7 @@ export function WeekPlanComposer({ link, onClose }: { link: GuardianLink; onClos
       if (sent) updatePanels((current) => withLinkPlan(current, link.linkId!, sent));
       flash(t('The plan is on its way to {0}.', { 0: link.displayName }));
       onClose();
-    } catch (caught) {
+    } catch {
       // No signal, no loss: the week waits in the queue and sends itself later.
       if ((panels.guardian.queuedPlans ?? []).length >= QUEUED_PLANS_KEPT) {
         setError(t('The send queue is full — reconnect to send what is waiting.'));
