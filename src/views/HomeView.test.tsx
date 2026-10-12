@@ -100,8 +100,11 @@ describe('the panel picker', () => {
     expect(text()).toContain('Add a panel');
     expect(text()).not.toContain('Add student panel');
     expect(text()).not.toContain('Open student panel');
-    // The picker stays one press away from everywhere.
-    expect(buttons().some((item) => (item.textContent ?? '').trim() === 'Home')).toBe(true);
+    // Choosing is the whole page; no personal workspace chrome before a choice.
+    expect(document.querySelector('.sidebar')).toBeNull();
+    expect(document.querySelector('.tabbar')).toBeNull();
+    expect(document.querySelector('.mobile-bar')).toBeNull();
+    expect(buttons().some((item) => (item.textContent ?? '').trim() === 'Home')).toBe(false);
   });
 
   it('opens the personal panel and offers the way back', async () => {

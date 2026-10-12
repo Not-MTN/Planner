@@ -4,9 +4,9 @@
  * Guardians receive results, not a live view of a student's private planner.
  * The panel is therefore two pages and three tabs:
  *
- *   Students — the roster you follow: search, filter, invite, and the shared
- *              updates from the whole circle.
- *   one student — This week (results, charts, what you sent, what is waiting),
+ *   Students — the attention-first roster: search, filter, invite, and the
+ *              shared updates from the whole circle.
+ *   one student — a shared summary first, then This week (charts, sent plans),
  *              Plan (build a suggestion and send it), Support (a note, kind
  *              words, questions worth asking, and a goal to aim at).
  *
@@ -25,7 +25,7 @@ import {
   CalendarIcon,
   CheckIcon,
   HeartIcon,
-  HomeIcon,
+  HorizonIcon,
   PlusIcon,
   PrinterIcon,
   SearchIcon,
@@ -79,6 +79,7 @@ import {
 import { ackFor, nudgedToday, toggleReaction } from '../weekPlans';
 import {
   filterGuardianLinks,
+  guardianNextAction,
   guardianResultStatus,
   guardianStatusLabel,
   type RosterFilter,
@@ -127,13 +128,14 @@ export function GuardianPanelView() {
   const [sendingQueue, setSendingQueue] = useState(false);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<RosterFilter>('all');
-  const [sort, setSort] = useState<RosterSort>('name');
+  const [sort, setSort] = useState<RosterSort>('attention');
   const guardian = panels.guardian;
   const unread = guardian.notices.filter((notice) => !notice.read).length;
-  const rows = filterGuardianLinks(guardian.links, search, filter, sort);
+  const rows = filterGuardianLinks(guardian.links, search, filter, sort, todayISO(), guardian.notices);
   const linked = guardian.links.filter((link) => link.status === 'linked').length;
   const current = guardian.links.filter((link) => guardianResultStatus(link) === 'current').length;
   const waiting = guardian.links.filter((link) => ['pending', 'awaiting'].includes(guardianResultStatus(link))).length;
+  const attention = guardian.links.filter((link) => ['request', 'unread', 'expired', 'expiring'].includes(guardianNextAction(link, guardian.notices))).length;
   const open = guardian.links.find((link) => link.id === openId) ?? null;
 
   // Opening a student is the move this panel is built around: the roster is the
@@ -522,9 +524,9 @@ export function GuardianPanelView() {
             <HeartIcon size={16} />
             {guardian.kind === 'parent' ? t('Parent panel') : t('Advisor panel')}
           </p>
-          <h1 className="view-title">{open ? open.displayName : t('The week, as results')}</h1>
+          <h1 className="view-title">{open ? open.displayName : t('Who needs your attention?')}</h1>
           <p className="view-sub">
-            {t('You see how the week went, not what was in it. Anything personal to the student stays with them.')}
+            {t('Shared weekly results only. The student chooses what to share.')}
           </p>
         </div>
         <div className="panel-page-actions">
@@ -534,23 +536,20 @@ export function GuardianPanelView() {
               {t('All students')}
             </button>
           ) : null}
-          <button
-            type="button"
-            className="btn btn-outline btn-small"
-            disabled={refreshing}
-            onClick={() => void refreshPanel()}
-          >
-            {refreshing ? <span className="spinner" aria-hidden="true" /> : null}
-            {refreshing ? t('Refreshing…') : t('Refresh results')}
-          </button>
           <button type="button" className="btn btn-ghost btn-small" onClick={() => navigate({ name: 'home' })}>
-            <HomeIcon size={14} />
-            {t('Switch panel')}
+            <HorizonIcon size={14} /> {t('Switch panel')}
           </button>
-          <button type="button" className="btn btn-ghost btn-small" onClick={() => navigate({ name: 'panels' })}>
-            <SlidersIcon size={14} />
-            {t('Manage panels')}
-          </button>
+          <details className="guardian-tools">
+            <summary className="btn btn-ghost btn-small">{t('More options')}</summary>
+            <div className="guardian-tools-menu">
+              <button type="button" className="btn btn-outline btn-small" disabled={refreshing} onClick={() => void refreshPanel()}>
+                {refreshing ? t('Refreshing…') : t('Refresh results')}
+              </button>
+              <button type="button" className="btn btn-ghost btn-small" onClick={() => navigate({ name: 'panels' })}>
+                <SlidersIcon size={14} /> {t('Manage panels')}
+              </button>
+            </div>
+          </details>
         </div>
       </header>
       <p className="panel-identity">
@@ -562,46 +561,12 @@ export function GuardianPanelView() {
 
       {!open ? (
         <>
-          <section className="panel-overview" aria-label={t('Your student circle')}>
-            <div className="panel-stat">
-              <span className="panel-stat-icon">
-                <UserIcon size={18} />
-              </span>
-              <p>{t('Linked students')}</p>
-              <strong>{faNum(linked)}</strong>
-              <span>{t('Connected with their consent')}</span>
-            </div>
-            <div className="panel-stat">
-              <span className="panel-stat-icon">
-                <CheckIcon size={18} />
-              </span>
-              <p>{t('Updated this week')}</p>
-              <strong>{faNum(current)}</strong>
-              <span>{t('Weekly results available')}</span>
-            </div>
-            <div className="panel-stat">
-              <span className="panel-stat-icon">
-                <BookIcon size={18} />
-              </span>
-              <p>{t('Waiting for results')}</p>
-              <strong>{faNum(waiting)}</strong>
-              <span>{t('Invitations or first shares')}</span>
-            </div>
-            <div className="panel-stat">
-              <span className="panel-stat-icon">
-                <BellIcon size={18} />
-              </span>
-              <p>{t('Unread notes')}</p>
-              <strong>{faNum(unread)}</strong>
-              <span>{t('From your shared circle')}</span>
-            </div>
-          </section>
-
           <section className="card guardian-roster" aria-label={t('Who you follow')}>
             <header className="card-head">
               <div>
                 <p className="kicker">{t('Students')}</p>
                 <h2 className="card-title">{t('Who you follow')}</h2>
+                {attention > 0 ? <p className="guardian-attention-count">{t('{0} need your attention', { 0: faNum(attention) })}</p> : null}
               </div>
               <button
                 type="button"
@@ -722,6 +687,7 @@ export function GuardianPanelView() {
                       value={sort}
                       onChange={(event) => setSort(event.target.value as RosterSort)}
                     >
+                      <option value="attention">{t('Needs attention')}</option>
                       <option value="name">{t('Name')}</option>
                       <option value="updated">{t('Latest update')}</option>
                     </select>
@@ -756,6 +722,12 @@ export function GuardianPanelView() {
               <ul className="student-cards guardian-student-grid">
                 {rows.map((link) => {
                   const rowStatus = guardianResultStatus(link);
+                  const nextAction = guardianNextAction(link, guardian.notices);
+                  const actionLabel = nextAction === 'request' ? t('Plan requested')
+                    : nextAction === 'unread' ? t('New shared update')
+                    : nextAction === 'expired' ? t('Invitation expired')
+                    : nextAction === 'expiring' ? t('Invitation expiring soon')
+                    : null;
                   const ticks = link.plans.reduce(
                     (sum, plan) => ({
                       done: sum.done + planProgress(plan).done,
@@ -786,6 +758,7 @@ export function GuardianPanelView() {
                       </div>
                       <div className="student-status-line">
                         <span className={cx('panel-status', `panel-status-${rowStatus}`)}>{guardianStatusLabel(rowStatus)}</span>
+                        {actionLabel ? <span className="guardian-action-label">{actionLabel}</span> : null}
                         {link.results ? <span>{t('Week of {0}', { 0: link.results.weekOf })}</span> : null}
                       </div>
                       {link.results && link.status === 'linked' ? (
@@ -828,43 +801,72 @@ export function GuardianPanelView() {
                         </p>
                       ) : null}
                       <div className="student-card-actions">
-                        {link.status === 'pending' && link.code && !isInviteExpired(link.expiresAt) ? (
-                          <button
-                            type="button"
-                            className="btn btn-outline btn-small"
-                            onClick={() => {
-                              setInvitation({ link, code: link.code!, expiresAt: link.expiresAt ?? null });
-                              setCopied(false);
-                            }}
-                          >
-                            {t('Show the code again')}
-                          </button>
-                        ) : null}
-                        {link.status === 'pending' && link.username ? (
-                          <button
-                            type="button"
-                            className="btn btn-outline btn-small"
-                            disabled={busy}
-                            onClick={() => void resendInvitation(link.id)}
-                          >
-                            {t('Send a new code')}
-                          </button>
-                        ) : null}
-                        {link.status === 'linked' ? (
+                        {link.status === 'pending' ? (
                           <button
                             type="button"
                             className="btn btn-primary btn-small"
-                            onClick={() => openStudent(link)}
+                            disabled={busy && (!link.code || nextAction === 'expired')}
+                            onClick={() => {
+                              if (nextAction === 'expired' || !link.code) void resendInvitation(link.id);
+                              else {
+                                setInvitation({ link, code: link.code, expiresAt: link.expiresAt ?? null });
+                                setCopied(false);
+                                setShowQr(false);
+                              }
+                            }}
                           >
-                            {t('View student')}
+                            {nextAction === 'expired' || !link.code ? t('Send a new code') : t('Show invitation')}
                           </button>
-                        ) : null}
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-small"
+                            onClick={() => nextAction === 'request' ? openStudent(link, 'plan', 'lessons') : openStudent(link)}
+                          >
+                            {nextAction === 'request' ? t('Plan lessons') : t('View student')}
+                          </button>
+                        )}
                       </div>
                     </li>
                   );
                 })}
               </ul>
             )}
+          </section>
+
+          <section className="panel-overview" aria-label={t('Your student circle')}>
+            <div className="panel-stat">
+              <span className="panel-stat-icon">
+                <UserIcon size={18} />
+              </span>
+              <p>{t('Linked students')}</p>
+              <strong>{faNum(linked)}</strong>
+              <span>{t('Connected with their consent')}</span>
+            </div>
+            <div className="panel-stat">
+              <span className="panel-stat-icon">
+                <CheckIcon size={18} />
+              </span>
+              <p>{t('Updated this week')}</p>
+              <strong>{faNum(current)}</strong>
+              <span>{t('Weekly results available')}</span>
+            </div>
+            <div className="panel-stat">
+              <span className="panel-stat-icon">
+                <BookIcon size={18} />
+              </span>
+              <p>{t('Waiting for results')}</p>
+              <strong>{faNum(waiting)}</strong>
+              <span>{t('Invitations or first shares')}</span>
+            </div>
+            <div className="panel-stat">
+              <span className="panel-stat-icon">
+                <BellIcon size={18} />
+              </span>
+              <p>{t('Unread notes')}</p>
+              <strong>{faNum(unread)}</strong>
+              <span>{t('From your shared circle')}</span>
+            </div>
           </section>
 
           {guardian.notices.length > 0 ? (
@@ -906,6 +908,39 @@ export function GuardianPanelView() {
         </>
       ) : (
         <>
+          <section className="card guardian-student-brief" aria-label={t('Shared weekly summary')}>
+            <div className="guardian-brief-top">
+              <div>
+                <p className="kicker">{t('Shared weekly summary')}</p>
+                <h2 className="card-title">{open.displayName}</h2>
+                <span className={cx('panel-status', `panel-status-${status}`)}>{guardianStatusLabel(status ?? 'awaiting')}</span>
+                {open.results ? (
+                  <p className="hint">
+                    {t('Week of {0}', { 0: open.results.weekOf })}
+                    {formatEdited(open.results.updatedAt) ? ` · ${t('Updated {0}', { 0: formatEdited(open.results.updatedAt) })}` : null}
+                  </p>
+                ) : <p className="hint">{status === 'pending' ? t('Waiting for them to accept — no results yet.') : t('Linked. Their first results will appear after they share.')}</p>}
+              </div>
+              <div className="guardian-brief-actions">
+                <button type="button" className="btn btn-primary btn-small" onClick={() => setTab('plan')}>{t('Suggest a plan')}</button>
+                <button type="button" className="btn btn-outline btn-small" onClick={() => setTab('support')}>{t('Offer support')}</button>
+              </div>
+            </div>
+            {guardian.notices.filter((notice) => notice.student === open.username && !notice.read && notice.kind === 'request').slice(0, 1).map((notice) => (
+              <p className="guardian-brief-headline" key={notice.id}>{t('Plan requested')}: {notice.summary}</p>
+            ))}
+            {open.results && open.status === 'linked' ? (
+              <>
+                <p className="guardian-brief-headline">{open.results.headline ? `“${open.results.headline}”` : t('No headline shared this week.')}</p>
+                <div className="student-summary-values">
+                  <CompletionRing done={open.results.done} planned={open.results.planned} />
+                  <div><p>{t('Done')}</p><strong>{faNum(open.results.done)}<small> / {faNum(open.results.planned)}</small></strong></div>
+                  <div><p>{t('Focused')}</p><strong>{minutesLabel(open.results.focusMinutes)}</strong></div>
+                </div>
+              </>
+            ) : null}
+            <p className="hint">{t('Only the results they shared are shown here. Their personal details stay private.')}</p>
+          </section>
           <PanelTabs id={TAB_ID} label={open.displayName} tabs={studentTabs} active={tab} onChange={setTab} />
 
           <PanelTabPanel id={TAB_ID} tab={tab}>
@@ -933,25 +968,6 @@ export function GuardianPanelView() {
                   </header>
                   {open.results && open.status === 'linked' ? (
                     <>
-                      <div className="student-summary-values">
-                        <CompletionRing done={open.results.done} planned={open.results.planned} />
-                        <div>
-                          <p>{t('Done')}</p>
-                          <strong>
-                            {faNum(open.results.done)}
-                            <small> / {faNum(open.results.planned)}</small>
-                          </strong>
-                        </div>
-                        <div>
-                          <p>{t('Focused')}</p>
-                          <strong>{minutesLabel(open.results.focusMinutes)}</strong>
-                        </div>
-                      </div>
-                      {open.results.headline ? (
-                        <p className="student-headline">“{open.results.headline}”</p>
-                      ) : (
-                        <p className="student-headline muted">{t('No headline shared this week.')}</p>
-                      )}
                       <div className="student-charts">
                         {open.history.length > 1 ? (
                           <>
@@ -1166,7 +1182,7 @@ export function GuardianPanelView() {
                 </header>
                 <p className="view-sub">
                   {planMode === 'lessons'
-                    ? t('They report each planned day back. A missing report pauses their panel until it arrives.')
+                    ? t('They can share daily reports when ready. A missing report never blocks their panel.')
                     : t('Sent as a suggestion in their panel. It does not change their personal tasks or calendar.')}
                 </p>
                 {!ready ? (

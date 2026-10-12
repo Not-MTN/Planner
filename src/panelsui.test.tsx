@@ -99,6 +99,23 @@ afterEach(() => {
 });
 
 describe('optional panels', () => {
+  it('starts at a panel-only chooser and enters the personal workspace only after a choice', async () => {
+    window.history.replaceState(null, '', '#/home');
+    mountApp();
+    await boot();
+    expect(text()).toContain('Choose your panel');
+    expect(document.querySelector('.sidebar')).toBeNull();
+    expect(document.querySelector('.tabbar')).toBeNull();
+    expect(document.querySelector('.mobile-bar')).toBeNull();
+    await clickText('Open personal panel');
+    expect(document.querySelector('.sidebar')).toBeTruthy();
+    expect(document.querySelector('.side-nav-desktop .nav-link')?.textContent?.trim()).toBe('Panels');
+    expect(document.querySelector('.side-panels-card')).toBeNull();
+    await clickText('Panels');
+    expect(text()).toContain('Choose your panel');
+    expect(document.querySelector('.sidebar')).toBeNull();
+  });
+
   it('boots with no panel and offers one without forcing it', async () => {
     mountApp();
     await boot();
@@ -156,15 +173,20 @@ describe('optional panels', () => {
     await clickText('Add subject');
     expect(text()).toContain('Physics');
 
-    // Back to the dashboard: the panel is listed there, the planner is intact.
-    const today = buttons().find((item) => (item.textContent ?? '').trim() === 'Today');
-    await act(async () => {
-      today?.click();
-    });
-    await settle();
-    expect(text()).toContain('Personal Planner');
-    expect(text()).toContain('Your panels');
+    // Student has only its own tabs, not the personal planner's navigation.
+    expect(document.querySelector('.sidebar')).toBeNull();
+    expect(document.querySelector('.tabbar')).toBeNull();
+    expect(document.querySelector('.mobile-bar')).toBeNull();
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 't', bubbles: true })); });
+    expect(window.location.hash).toBe('#/student');
+    await clickText('Switch panel');
+    expect(text()).toContain('Choose your panel');
     expect(text()).toContain('Student panel');
+    expect(document.querySelector('.sidebar')).toBeNull();
+    await clickText('Open personal panel');
+    expect(text()).toContain('Personal Planner');
+    expect(document.querySelector('.sidebar')).toBeTruthy();
+    expect([...document.querySelectorAll('.side-nav-desktop .nav-link')].map((node) => node.textContent?.trim())).not.toContain('Home');
   });
 
   it('asks the AI from the student panel, and sends only this week', async () => {
@@ -227,7 +249,10 @@ describe('optional panels', () => {
     await clickText('Add guardian panel');
     expect(text()).toContain('Parent panel added');
     await clickText('Open guardian panel');
-    await waitFor(() => text().includes('The week, as results'), 10_000, 'the guardian panel to open');
+    await waitFor(() => text().includes('Who needs your attention?'), 10_000, 'the guardian panel to open');
+    expect(document.querySelector('.sidebar')).toBeNull();
+    expect(document.querySelector('.tabbar')).toBeNull();
+    expect(document.querySelector('.mobile-bar')).toBeNull();
   });
 
   it('removes a panel without touching the planner', async () => {
@@ -244,12 +269,10 @@ describe('optional panels', () => {
     expect(text()).toContain('Not added');
     expect(buttons().some((item) => (item.textContent ?? '').trim() === 'Student')).toBe(false);
 
-    // Back on the dashboard the invitation returns, with the planner untouched.
-    const today = buttons().find((item) => (item.textContent ?? '').trim() === 'Today');
-    await act(async () => {
-      today?.click();
-    });
-    await settle();
+    // Return to the chooser, then open the personal panel: nothing was deleted.
+    await clickText('Choose your panel');
+    expect(text()).toContain('Add a panel');
+    await clickText('Open personal panel');
     expect(text()).toContain('Personal Planner');
     expect(document.querySelector('.panel-hub')).toBeNull();
     expect(text()).toContain('Add a panel when you want one');

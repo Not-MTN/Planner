@@ -19,12 +19,10 @@ import {
   SearchIcon,
   HelpIcon,
   HeartIcon,
-  HomeIcon,
   HorizonIcon,
   SlidersIcon,
   SparklesIcon,
   StopwatchIcon,
-  StudyIcon,
   SunIcon,
   UndoIcon,
   RedoIcon,
@@ -153,11 +151,9 @@ export function Shell() {
   // sign out, so the button would be a dead end.
   const account = accountUser();
   const requestSignOut = useSignOut();
-  // Panels only show up once they are added — they are extras, never a mode.
-  const panelNav = [
-    ...(planner.panels.student.enabled ? [{ name: 'student' as const, label: t("Student"), icon: StudyIcon }] : []),
-    ...(planner.panels.guardian.enabled ? [{ name: 'guardian' as const, label: t("Guardian"), icon: HeartIcon }] : []),
-  ];
+  // The chooser is a separate front door. Only the personal workspace has
+  // planner navigation; panel pages provide their own tabs and actions.
+  const personalWorkspace = !['home', 'panels', 'student', 'guardian'].includes(route.name);
   const planNav = NAV.slice(0, 4).filter((item) => visiblePages.includes(item.name));
   const growthNav = NAV.slice(4, 6).filter((item) => visiblePages.includes(item.name));
   const trackNav = NAV.slice(6).filter((item) => visiblePages.includes(item.name));
@@ -172,7 +168,7 @@ export function Shell() {
   const importFile = useImportFile(importText);
   const key = routeKey(route);
   const today = todayISO();
-  const [tabletFlyout, setTabletFlyout] = useState<null | 'plan' | 'focus' | 'growth' | 'track' | 'panels'>(null);
+  const [tabletFlyout, setTabletFlyout] = useState<null | 'plan' | 'focus' | 'growth' | 'track'>(null);
   const tabletFlyoutRef = useRef<HTMLDivElement>(null);
   const tabletTriggerRef = useRef<HTMLButtonElement>(null);
   const tabletFlyoutTitleId = useId();
@@ -281,10 +277,10 @@ export function Shell() {
   // a language-switch reload); replayable from the (?) side tool or Settings.
   const [tourStep, setTourStep] = useState<number | null>(null);
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !personalWorkspace) return;
     const start = tourStartIndex();
     if (start !== null) setTourStep(start);
-  }, [ready]);
+  }, [ready, personalWorkspace]);
   useEffect(() => onTourRequest(() => setTourStep(0)), []);
   // The tour walks the real pages: each stop navigates to the tab it teaches.
   useEffect(() => {
@@ -393,6 +389,9 @@ export function Shell() {
   }, [quickAddPending, route.name]);
 
   useEffect(() => {
+    // The chooser and optional panels do not inherit personal planner shortcuts.
+    // In particular, T and N must not jump into Today or open its composer.
+    if (!personalWorkspace) return;
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const typing =
@@ -434,7 +433,7 @@ export function Shell() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [paletteOpen, composer, confirm, settingsOpen, moreOpen, tourStep, aboutOpen, shortcutsOpen, reviewOpen, openPalette, closePalette, openComposer, openSettings, navigate, undo, redo, today]);
+  }, [personalWorkspace, paletteOpen, composer, confirm, settingsOpen, moreOpen, tourStep, aboutOpen, shortcutsOpen, reviewOpen, openPalette, closePalette, openComposer, openSettings, navigate, undo, redo, today]);
 
   const go = (name: string) => {
     if (name === 'calendar') navigate({ name: 'calendar', tab: 'week', date: today });
@@ -471,10 +470,10 @@ export function Shell() {
     );
   };
 
-  const moreActive = ['goals', 'notes', 'insights', 'ai', 'plans', 'matrix', 'review', 'panels', 'student', 'guardian', 'home'].includes(route.name);
+  const moreActive = ['goals', 'notes', 'insights', 'ai', 'plans', 'matrix', 'review'].includes(route.name);
 
   return (
-    <div className="app-shell">
+    <div className={cx('app-shell', !personalWorkspace && 'app-shell--standalone')}>
       {/*
         `href="#content"` is the honest markup, but this app routes on the hash:
         letting the fragment through would rewrite the address to `#content` and
@@ -495,7 +494,7 @@ export function Shell() {
       >
         {t("Skip to content")}
       </a>
-      <aside className="sidebar">
+      {personalWorkspace ? <aside className="sidebar">
         <button type="button" className="brand" onClick={() => navigate({ name: 'home' })}>
           <span className="brand-mark"><LeafIcon size={18} /></span>
           <span className="brand-text">
@@ -510,10 +509,9 @@ export function Shell() {
         </button>
         {/* Desktop: full labelled sidebar, all destinations visible without scrolling */}
         <nav className="side-nav side-nav-desktop" aria-label={t("Planner")}>
-          {/* The front door, always one press away. */}
           <NavButton
-            item={{ name: 'home', label: t("Home"), icon: HomeIcon }}
-            active={route.name === 'home'}
+            item={{ name: 'home', label: t("Panels"), icon: HorizonIcon }}
+            active={false}
             onClick={() => go('home')}
           />
           {planNav.length > 0 ? (
@@ -560,27 +558,13 @@ export function Shell() {
               ))}
             </>
           ) : null}
-          <div className="side-panels-card">
-            <p className="side-panels-cap">
-              <HorizonIcon size={14} />
-              <span>{t("Panels · separate workspace")}</span>
-            </p>
-            {panelNav.map((item) => (
-              <NavButton key={item.name} item={item} active={route.name === item.name} onClick={() => go(item.name)} />
-            ))}
-            <NavButton
-              item={{ name: 'panels', label: t("All panels"), icon: HorizonIcon }}
-              active={route.name === 'panels'}
-              onClick={() => go('panels')}
-            />
-          </div>
         </nav>
         {/* Tablet: 66px icon rail + contextual flyout (design board) */}
         <nav className="side-nav side-nav-rail" aria-label={t("Planner")}>
           <div className="rail-group">
-            <button type="button" className={cx('rail-btn', route.name === 'home' && 'active')} aria-label={t("Home")} title={t("Home")} onClick={() => { go('home'); setTabletFlyout(null); }}>
-              <HomeIcon size={19} />
-              <i className="rail-cat">{t("Home")}</i>
+            <button type="button" className="rail-btn" aria-label={t("Panels")} title={t("Panels")} onClick={() => { go('home'); setTabletFlyout(null); }}>
+              <HorizonIcon size={19} />
+              <i className="rail-cat">{t("Panels")}</i>
             </button>
             <button type="button" className="rail-btn rail-search" aria-label={t("Search")} title={t("Search")} onClick={openPalette}>
               <SearchIcon size={18} />
@@ -600,10 +584,6 @@ export function Shell() {
             <button type="button" className={cx('rail-btn', tabletFlyout === 'track' && 'on', trackNav.some((n) => route.name === n.name) && 'active')} aria-label={t("Track")} title={t("Track")} aria-haspopup="dialog" aria-expanded={tabletFlyout === 'track'} aria-controls="tablet-flyout" onClick={(event) => toggleTabletFlyout('track', event.currentTarget)}>
               <ArcIcon size={19} />
               <i className="rail-cat">{t("Track")}</i>
-            </button>
-            <button type="button" className={cx('rail-btn rail-btn-ws', tabletFlyout === 'panels' && 'on', (panelNav.some((n) => route.name === n.name) || route.name === 'panels') && 'active')} aria-label={t("Panels")} title={t("Panels")} aria-haspopup="dialog" aria-expanded={tabletFlyout === 'panels'} aria-controls="tablet-flyout" onClick={(event) => toggleTabletFlyout('panels', event.currentTarget)}>
-              <HorizonIcon size={19} />
-              <i className="rail-cat">{t("Panels")}</i>
             </button>
           </div>
           <div className="rail-foot">
@@ -729,10 +709,10 @@ export function Shell() {
             </div>
           ) : null}
         </div>
-      </aside>
+      </aside> : null}
 
       {/* Tablet flyout: contextual panel beside 66px rail, content stays visible behind scrim */}
-      {tabletFlyout ? (
+      {personalWorkspace && tabletFlyout ? (
         <>
           <div className="tablet-scrim" onClick={() => setTabletFlyout(null)} aria-hidden="true" />
           <div id="tablet-flyout" className="tablet-flyout" role="dialog" aria-modal="true" aria-labelledby={tabletFlyoutTitleId} ref={tabletFlyoutRef}>
@@ -781,24 +761,16 @@ export function Shell() {
                   onClick={() => { go(item.name); setTabletFlyout(null); }}
                 />
               ))}
-              {tabletFlyout === 'panels' && (
-                <div className="side-panels-card">
-                  {panelNav.map((item) => (
-                    <NavButton key={item.name} item={item} active={route.name === item.name} onClick={() => { go(item.name); setTabletFlyout(null); }} />
-                  ))}
-                  <NavButton item={{ name: 'panels', label: t("All panels"), icon: HorizonIcon }} active={route.name === 'panels'} onClick={() => { go('panels'); setTabletFlyout(null); }} />
-                </div>
-              )}
             </div>
           </div>
         </>
       ) : null}
 
       <div className="workspace">
-        <header className="mobile-bar">
-          <button type="button" className="brand" onClick={() => navigate({ name: 'home' })}>
-            <span className="brand-mark"><LeafIcon size={16} /></span>
-            <span className="brand-text"><strong>{t("Planner")}</strong></span>
+        {personalWorkspace ? <header className="mobile-bar">
+          <button type="button" className="brand" onClick={() => go('home')}>
+            <span className="brand-mark"><HorizonIcon size={16} /></span>
+            <span className="brand-text"><strong>{t("Panels")}</strong></span>
           </button>
           <div className="mobile-bar-actions">
             <button
@@ -839,8 +811,8 @@ export function Shell() {
               {isDark ? <SunIcon size={18} /> : <MoonIcon size={18} />}
             </button>
           </div>
-        </header>
-        <span className="mobile-date">{formatWeekdayShort(today)} {today.slice(8)}</span>
+        </header> : null}
+        {personalWorkspace ? <span className="mobile-date">{formatWeekdayShort(today)} {today.slice(8)}</span> : null}
         <main id="content" className="content" tabIndex={-1}>
           {!ready ? <LoadingScreen /> : (
             <>
@@ -900,7 +872,7 @@ export function Shell() {
         </main>
       </div>
 
-      <nav className="tabbar" aria-label={t("Primary")}>
+      {personalWorkspace ? <nav className="tabbar" aria-label={t("Primary")}>
         <Tab icon={SunIcon} name="today" label={t("Today")} active={route.name === 'today'} onClick={() => go('today')} />
         <Tab icon={CalendarIcon} name="calendar" label={t("Calendar")} active={route.name === 'calendar'} onClick={() => go('calendar')} />
         {/* The add action lives in the bar itself, centred for the thumb,
@@ -911,7 +883,7 @@ export function Shell() {
         <Tab icon={CheckIcon} name="tasks" label={t("Tasks")} active={route.name === 'tasks'} onClick={() => go('tasks')} />
         <Tab icon={DotsIcon} name="habits" label={t("Habits")} active={route.name === 'habits'} onClick={() => go('habits')} />
         <Tab icon={SlidersIcon} label={t("More")} active={moreActive || moreOpen} onClick={() => setMoreOpen(true)} />
-      </nav>
+      </nav> : null}
 
       {moreOpen ? (
         <Modal title={t("More")} onClose={() => setMoreOpen(false)}>
@@ -970,20 +942,9 @@ export function Shell() {
             ) : null}
 
             <div className="more-section more-section-ws">
-              <p className="more-group-label">{t("Panels · separate workspace")}</p>
-              <div className="more-grid more-grid-ws">
-                <button type="button" className={cx('more-tile more-tile-ws more-tile-wide', route.name === 'home' && 'on')} onClick={() => go('home')}>
-                  <HomeIcon size={18} /> <span>{t("Home")}</span>
-                </button>
-                {panelNav.map((item) => (
-                  <button key={item.name} type="button" className={cx('more-tile more-tile-ws', route.name === item.name && 'on')} onClick={() => go(item.name)}>
-                    <item.icon size={18} /> <span>{item.label}</span>
-                  </button>
-                ))}
-                <button type="button" className={cx('more-tile more-tile-ws more-tile-wide', route.name === 'panels' && 'on')} onClick={() => go('panels')}>
-                  <HorizonIcon size={18} /> <span>{t("All panels")}</span>
-                </button>
-              </div>
+              <button type="button" className="more-tile more-tile-ws" onClick={() => go('home')}>
+                <HorizonIcon size={18} /> <span>{t("Panels")}</span>
+              </button>
             </div>
 
             <div className="more-section more-section-sys">

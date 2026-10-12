@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import { act } from 'react';
+import { waitFor } from './testing/wait';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -10,6 +11,7 @@ describe('Persian UI', () => {
     Element.prototype.scrollIntoView = () => undefined;
     window.scrollTo = () => undefined;
     localStorage.setItem('planner-lang', 'fa');
+    window.history.replaceState(null, '', '#/home');
     const { applyDocumentLang, loadDictionary } = await import('./i18n');
     // Dictionaries arrive on demand (src/i18n.ts): the test reads Persian
     // labels, so it waits for Persian the way the app does before its first paint.
@@ -23,9 +25,11 @@ describe('Persian UI', () => {
     await act(async () => root.render(<App />));
     expect(document.documentElement.dir).toBe('rtl');
     expect(document.documentElement.lang).toBe('fa');
+    await waitFor(() => (document.body.textContent ?? '').includes('پنل خود را انتخاب کنید'));
     const text = document.body.textContent ?? '';
-    expect(text).toContain('امروز');
-    expect(text).toContain('تنظیمات');
+    expect(text).toContain('پنل خود را انتخاب کنید');
+    expect(text).toContain('پنل شخصی');
+    expect(document.querySelector('.sidebar')).toBeNull();
     act(() => root.unmount());
   });
 });

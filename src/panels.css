@@ -546,22 +546,6 @@
 .day-report-lessons input[type='checkbox'] { width: 17px; height: 17px; accent-color: var(--accent); flex: none; cursor: pointer; }
 .day-report-lessons label span { font-size: 13.5px; color: var(--ink); overflow-wrap: anywhere; }
 
-/* ------------------------------------------------ paused student panel */
-
-.week-lock-card { align-items: center; text-align: center; }
-.week-lock-icon {
-  display: grid;
-  place-items: center;
-  width: 46px;
-  height: 46px;
-  margin: 2px auto 0;
-  border-radius: 50%;
-  color: var(--cat-peach-text);
-  background: color-mix(in srgb, var(--cat-peach) 18%, transparent);
-}
-.week-lock-card .card-title { margin-top: 10px; }
-.week-lock-card .view-sub { margin-bottom: 0; }
-
 /* The week's second act: rest chips, exam warning, review line, answers, the grid. */
 .week-rest-block { display: flex; flex-direction: column; gap: 6px; }
 .week-rest-label { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--ink-soft); }
@@ -803,4 +787,36 @@
 @media (prefers-reduced-motion: reduce) {
   .momentum-bar > span { transition: none; }
   .panel-choice-add:hover { transform: none; }
+}
+
+/* Guardian: the next useful step comes before the dashboard numbers. */
+.guardian-attention-count { margin: 7px 0 0; color: var(--cat-peach-text); font-size: 12px; font-weight: 650; }
+.guardian-action-label { padding: 3px 8px; border-radius: 8px; background: color-mix(in srgb, var(--cat-peach) 18%, var(--surface)); color: var(--cat-peach-text); font-size: 11px; font-weight: 650; }
+.guardian-panel-view .student-card-actions .btn { min-height: 42px; }
+.guardian-student-brief { display: flex; flex-direction: column; gap: 16px; }
+.guardian-brief-top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: start; gap: 16px; }
+.guardian-brief-top > div:first-child { min-width: 0; }
+.guardian-brief-top .card-title { margin: 5px 0 12px; }
+.guardian-brief-top .hint { margin: 9px 0 0; }
+.guardian-brief-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.guardian-brief-headline { margin: 0; padding: 14px 16px; border-radius: 12px; background: color-mix(in srgb, var(--cat-peach) 9%, var(--surface)); color: var(--ink); font-size: 15px; line-height: 1.6; overflow-wrap: anywhere; }
+.guardian-student-brief > .hint { margin: 0; }
+.guardian-tools { min-width: 0; }
+.guardian-tools > summary { cursor: pointer; list-style: none; }
+.guardian-tools > summary::-webkit-details-marker { display: none; }
+.guardian-tools-menu { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 0 0; }
+.guardian-tools[open] { flex-basis: 100%; }
+.week-report-reminder { border-color: color-mix(in srgb, var(--cat-peach) 45%, var(--line)); }
+.week-report-reminder-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
+.week-report-reminder-head .view-sub { margin: 6px 0 0; }
+.week-report-reminder-days { display: grid; gap: 12px; padding-block-start: 16px; }
+.week-report-reminder-days > .card { background: var(--surface-2); }
+@media (max-width: 640px) {
+  .guardian-panel-view .panel-page-actions > .guardian-tools { flex-basis: 100%; }
+  .guardian-tools > summary { width: 100%; justify-content: center; }
+  .guardian-tools-menu > .btn { flex: 1; }
+  .guardian-brief-actions { width: 100%; }
+  .guardian-brief-actions > .btn { flex: 1; }
+  .guardian-student-brief .student-summary-values { flex-wrap: wrap; }
+  .week-report-reminder-head > .btn { width: 100%; }
 }

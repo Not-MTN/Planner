@@ -419,6 +419,32 @@ describe('guardian roster and planning', () => {
     expect(summary).not.toMatch(/[0-9]/);
   });
 
+  it('leads with the next action and keeps the summary, plans, and support in the guardian workspace', async () => {
+    const state = guardianState();
+    state.panels.guardian.notices = [{
+      id: 'request-1', student: 'alice', author: 'Alice', kind: 'request', summary: 'A plan, please',
+      weekOf: weekOf(), createdAt: new Date().toISOString(), read: false,
+    }];
+    await mount(state, 'guardian');
+    expect(query('select[aria-label="Sort students"]')).toHaveProperty('value', 'attention');
+    expect(query('.student-card .student-name').textContent).toBe('Alice');
+    expect(query('.student-card .guardian-action-label').textContent).toBe('Plan requested');
+    expect(query('.student-card .student-card-actions button').textContent).toBe('Plan lessons');
+    expect(query('.guardian-roster').compareDocumentPosition(query('.panel-overview')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await click('Plan lessons', query('.student-card'));
+    expect(query('.guardian-student-brief').textContent).toContain('A steady week');
+    expect(query('.guardian-student-brief').textContent).toContain('Week of');
+    expect(query('.guardian-student-brief').textContent).toContain('Only the results they shared');
+    expect(query('[role="tab"][aria-selected="true"]').textContent).toContain('Plan');
+    await click('Offer support');
+    expect(query('[role="tab"][aria-selected="true"]').textContent).toContain('Support');
+    expect(document.querySelector('.sidebar')).toBeNull();
+    expect(query('.guardian-tools').hasAttribute('open')).toBe(false);
+    await act(async () => query<HTMLElement>('.guardian-tools summary').click());
+    expect(query('.guardian-tools').hasAttribute('open')).toBe(true);
+    expect(query('.guardian-tools-menu').textContent).toContain('Refresh results');
+  });
+
   it('searches and filters the roster and recovers from a no-match result', async () => {
     await mount(guardianState(), 'guardian');
     expect(document.querySelectorAll('.student-card')).toHaveLength(4);

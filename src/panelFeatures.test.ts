@@ -6,6 +6,7 @@ import {
   emptyPlanStep,
   filterGuardianLinks,
   guardianResultStatus,
+  guardianNextAction,
   planDraftError,
   saveStudentSubject,
   studyPlanTemplate,
@@ -14,7 +15,7 @@ import {
   upcomingExams,
   type PanelPlanDraft,
 } from './panelFeatures';
-import { createEmptyState, type GuardianLink, type PlannerState, type StudentSubject, type TaskInput } from './types';
+import { createEmptyState, type GuardianLink, type GuardianNotice, type PlannerState, type StudentSubject, type TaskInput } from './types';
 
 const today = '2026-09-30';
 const subject: StudentSubject = {
@@ -181,6 +182,28 @@ describe('subject editing', () => {
 });
 
 describe('guardian roster', () => {
+  it('prioritizes unread requests and expiring invitations without using performance as urgency', () => {
+    const now = Date.parse('2026-09-30T12:00:00Z');
+    const roster = [
+      link('current', { displayName: 'Ada', results: result('2026-09-28') }),
+      link('expired', { displayName: 'Bela', status: 'pending', expiresAt: '2026-09-29T12:00:00Z' }),
+      link('expiring', { displayName: 'Cleo', status: 'pending', expiresAt: '2026-10-01T12:00:00Z' }),
+      link('request', { displayName: 'Dee', results: result('2026-09-28') }),
+      link('unread', { displayName: 'Eli', results: result('2026-09-28') }),
+    ];
+    const notices: GuardianNotice[] = [
+      { id: 'r', student: 'request', kind: 'request', author: 'Dee', summary: 'Plan please', weekOf: today, createdAt: '', read: false },
+      { id: 'u', student: 'unread', kind: 'note', author: 'Eli', summary: 'An update', weekOf: today, createdAt: '', read: false },
+    ];
+    expect(guardianNextAction(roster[1], notices, today, now)).toBe('expired');
+    expect(guardianNextAction(roster[2], notices, today, now)).toBe('expiring');
+    expect(filterGuardianLinks(roster, '', 'all', 'attention', today, notices, now).map((item) => item.id)).toEqual([
+      'request', 'unread', 'expired', 'expiring', 'current',
+    ]);
+    expect(roster.map((item) => item.id)).toEqual(['current', 'expired', 'expiring', 'request', 'unread']);
+    expect(guardianNextAction(roster[3], notices.map((notice) => ({ ...notice, read: true })), today, now)).toBe('current');
+  });
+
   it('distinguishes a pending invitation from a linked student waiting for their first results', () => {
     expect(guardianResultStatus(link('pending', { status: 'pending' }), today)).toBe('pending');
     expect(guardianResultStatus(link('first-share'), today)).toBe('awaiting');

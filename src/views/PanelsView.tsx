@@ -10,7 +10,7 @@ import { useState } from 'react';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { Field } from '../components/ui';
-import { HeartIcon, StudyIcon } from '../icons';
+import { HeartIcon, HorizonIcon, StudyIcon } from '../icons';
 import { t } from '../i18n';
 import { GRADE_LABELS, gradeLabel } from '../panels';
 import type { GuardianKind, Panels } from '../types';
@@ -91,6 +91,9 @@ export function PanelsView() {
             {t("Panels are additions to your planner, not a choice between them. Add one, add both, or keep the personal panel on its own — you can change it whenever you like.")}
           </p>
         </div>
+        <button type="button" className="btn btn-ghost btn-small" onClick={() => navigate({ name: 'home' })}>
+          <HorizonIcon size={14} /> {t("Choose your panel")}
+        </button>
       </header>
 
       <div className="panel-choices">

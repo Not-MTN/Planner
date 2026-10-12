@@ -13,7 +13,7 @@ import { ACK_REACTIONS, DAY_REPORTS_KEPT, DAY_REPORT_NOTE_MAX, LESSON_URL_MAX, P
 
 /** A week plan holds seven days of lessons; sixty is eight a day with room to spare. */
 export const WEEK_LESSON_LIMIT = 60;
-/** Only recent weeks can ask for reports — an old plan must never lock a panel. */
+/** Only recent weeks can ask for reports — an old plan must not nag forever. */
 const REPORT_LOOKBACK_DAYS = 21;
 
 /** The seven days a week plan covers, oldest first. Empty when the start is not a date. */
@@ -213,7 +213,7 @@ export function missingReportReminders(panels: Panels, today = todayISO()): Remi
     {
       key: `${today}|report-missing`,
       title: t('Daily report missing'),
-      body: t('Send the missing daily reports to open your student panel again.'),
+      body: t('You can send the missing daily reports when you are ready.'),
     },
   ];
 }

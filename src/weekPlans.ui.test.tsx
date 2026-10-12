@@ -2,8 +2,8 @@
 /**
  * The weekly planning loop, as the two sides live it: the guardian plans
  * lessons from built-in chips and sends the week; the student ticks, reports,
- * and — when a day ends without a report — finds the panel paused until the
- * day is filed.
+ * and — when a day ends without a report — sees a nonblocking reminder
+ * and can keep using the panel until ready to share.
  */
 import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -390,11 +390,14 @@ describe('reading the week back', () => {
     expect(card.textContent).toContain('Daily reports');
   });
 
-  it('locks the student panel over the missing day and reopens on filing', async () => {
+  it('keeps the student panel usable while offering the missing report', async () => {
     const { plans, reports } = reportedWeek();
     await mount(studentState(plans, reports), 'student');
-    expect(document.body.textContent).toContain('Your student panel is paused');
-    expect(document.querySelector('.student-charts')).toBeNull();
+    expect(document.body.textContent).toContain('Daily reports to send');
+    expect(document.querySelector('.student-panel-view [role="tablist"]')).not.toBeNull();
+    await click('Subjects', query('[role="tablist"]'));
+    expect(query('[role="tab"][aria-selected="true"]').textContent).toContain('Subjects');
+    await click('Review reports');
 
     const form = query('.day-report-form');
     const box = form.querySelector('input[type="checkbox"]');
@@ -402,7 +405,8 @@ describe('reading the week back', () => {
     await act(async () => box.click());
     await click('Send report');
     expect(document.body.textContent).toContain('All caught up');
-    expect(document.body.textContent).not.toContain('Your student panel is paused');
+    expect(document.body.textContent).not.toContain('Daily reports to send');
+    await click('Today', query('[role="tablist"]'));
     expect(document.querySelector('.week-plan-card')).not.toBeNull();
     expect(saved().panels.student.reports?.some((report) => report.date === yesterday)).toBe(true);
   });
@@ -421,7 +425,7 @@ describe('living with the week', () => {
       }),
     ];
     await mount(studentState(plans), 'student');
-    expect(document.body.textContent).not.toContain('Your student panel is paused');
+    expect(document.body.textContent).not.toContain('Daily reports to send');
     const card = query('.week-plan-card');
     const times = [...card.querySelectorAll('.week-time')].map((item) => item.textContent);
     expect(times).toEqual(['08:00', '10:00']);
@@ -448,7 +452,7 @@ describe('living with the week', () => {
       }),
     ];
     await mount(studentState(plans), 'student');
-    expect(document.body.textContent).not.toContain('Your student panel is paused');
+    expect(document.body.textContent).not.toContain('Daily reports to send');
     expect(document.querySelector('.week-plan-card')).toBeNull();
     expect(document.querySelector('.gplan-card')?.textContent).toContain('A day of revision');
   });
@@ -531,6 +535,18 @@ describe('answering a report', () => {
 });
 
 describe('asking for a plan', () => {
+  it('lets the student request an adjustment to a suggested week without blocking their panel', async () => {
+    const state = studentState([weekPlan()]);
+    await mount(state, 'student');
+    expect(query('.student-plans-card').textContent).toContain('A suggested plan.');
+    await click('Request a change', query('.week-plan-card'));
+    const asks = saved().panels.student.requests ?? [];
+    expect(asks).toHaveLength(1);
+    expect(asks[0]?.linkId).toBe(ninaLinkId);
+    expect(asks[0]?.note).toContain('adjust the plan for');
+    expect(query('.student-panel-view [role="tablist"]')).toBeTruthy();
+  });
+
   it('sends a request with a note and takes it back on cancel', async () => {
     await mount(studentState(), 'student');
     setValue('.week-ask-row .input', 'Maths please');
@@ -728,8 +744,8 @@ describe('keeping the streak', () => {
       }),
     ];
     await mount(studentState(plans), 'student');
-    expect(document.body.textContent).toContain('Your student panel is paused');
-
+    expect(document.body.textContent).toContain('Daily reports to send');
+    await click('Review reports');
     await click('Keep my streak');
     setValue('.week-repair-form .input', 'Fever all day.');
     await click('Save');
@@ -765,7 +781,8 @@ describe('keeping the streak', () => {
       },
     ];
     await mount(studentState(plans, reports), 'student');
-    expect(document.body.textContent).toContain('Your student panel is paused');
+    expect(document.body.textContent).toContain('Daily reports to send');
+    await click('Review reports');
     // Yesterday still needs its report — but the mulligan is spent.
     expect(document.body.textContent).toContain('Send report');
     expect(document.body.textContent).not.toContain('Keep my streak');
