@@ -84,13 +84,15 @@ function contentType(file) {
  * configured with one.
  */
 function contentSecurityPolicy(apiOrigin = '') {
-  // Packaged update feeds are fetched by the main process, not the page, so
-  // the renderer's connect policy needs only its API and weather services.
+  // Packaged update feeds are fetched by the main process. The renderer uses
+  // weather services and Cloudinary only for encrypted homework image blobs.
   const connect = [
     "'self'",
     normalizeAddress(apiOrigin),
     'https://api.open-meteo.com',
     'https://geocoding-api.open-meteo.com',
+    'https://api.cloudinary.com',
+    'https://res.cloudinary.com',
   ]
     .filter(Boolean)
     .join(' ');

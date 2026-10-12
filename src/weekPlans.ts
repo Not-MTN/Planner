@@ -6,15 +6,19 @@
  * link is decided in `auth/links.ts`, and these are the shapes both sides
  * agree on before anything is sent.
  */
-import { addDays, isValidISODate, isValidTime, todayISO, weekdayIndex } from './dates';
+import { addDays, isValidISODate, isValidTime, parseISODate, todayISO, toISODate, weekdayIndex } from './dates';
 import { t } from './i18n';
 import type { Reminder } from './reminders';
 import { ACK_REACTIONS, DAY_REPORTS_KEPT, DAY_REPORT_NOTE_MAX, LESSON_URL_MAX, PLAN_REQUEST_DAYS, type DayReport, type FocusLog, type GuardianNotice, type GuardianPlan, type Panels, type PlanItem, type PlanRequest, type ReportAck, type Task } from './types';
 
 /** A week plan holds seven days of lessons; sixty is eight a day with room to spare. */
 export const WEEK_LESSON_LIMIT = 60;
-/** Only recent weeks can ask for reports — an old plan must not nag forever. */
-const REPORT_LOOKBACK_DAYS = 21;
+function planPeriodEnd(plan: Pick<GuardianPlan, 'cadence' | 'start'>): string {
+  if (plan.cadence === 'day') return plan.start;
+  if (plan.cadence === 'week') return addDays(plan.start, 6);
+  const date = parseISODate(plan.start);
+  return toISODate(new Date(date.getFullYear(), date.getMonth() + 1, 0));
+}
 
 /** The seven days a week plan covers, oldest first. Empty when the start is not a date. */
 export function planWeekDays(plan: Pick<GuardianPlan, 'start'>): string[] {
@@ -73,12 +77,11 @@ export function missingReportDays(
   reports: DayReport[],
   today = todayISO(),
 ): MissingDay[] {
-  const earliest = addDays(today, -REPORT_LOOKBACK_DAYS);
   const missing: MissingDay[] = [];
   for (const plan of plans) {
-    if (plan.cadence !== 'week') continue;
+    if (plan.cadence !== 'week' || plan.approvedAt) continue;
     for (const date of planWeekDays(plan)) {
-      if (date >= today || date < earliest) continue;
+      if (date >= today) continue;
       if (isRestDay(plan, date)) continue;
       const lessons = itemsForDay(plan, date);
       if (lessons.length === 0 || reportFor(reports, plan.id, date)) continue;
@@ -88,15 +91,62 @@ export function missingReportDays(
   return missing.sort((a, b) => a.date.localeCompare(b.date) || a.plan.start.localeCompare(b.plan.start));
 }
 
+/** An earlier unfiled day is the only day a student may report first. */
+export function reportBlockedByEarlierDay(
+  plans: GuardianPlan[],
+  reports: DayReport[],
+  date: string,
+  today = todayISO(),
+): boolean {
+  return missingReportDays(plans, reports, today).some((day) => day.date < date);
+}
+
+/** True only for an existing, unfiled day that has come around. */
+export function canSubmitDayReport(
+  panels: Panels,
+  planId: string,
+  date: string,
+  today = todayISO(),
+): boolean {
+  const plan = panels.student.inbox.plans.find((entry) => entry.id === planId);
+  const reports = panels.student.reports ?? [];
+  if (!plan || plan.cadence !== 'week' || plan.approvedAt || !isValidISODate(date) || date > today) return false;
+  if (!planWeekDays(plan).includes(date) || isRestDay(plan, date) || itemsForDay(plan, date).length === 0) return false;
+  if (reportFor(reports, plan.id, date)) return false;
+  return !reportBlockedByEarlierDay(panels.student.inbox.plans, reports, date, today);
+}
+
+/**
+ * A student may only tick today's work. A missed report from any earlier day
+ * locks the next day's ticks until the student files the oldest missing report.
+ */
+export function studentCanTogglePlanItem(
+  panels: Panels,
+  planId: string,
+  itemId: string,
+  today = todayISO(),
+): boolean {
+  const plan = panels.student.inbox.plans.find((entry) => entry.id === planId);
+  const item = plan?.items.find((entry) => entry.id === itemId);
+  if (!plan || !item || plan.approvedAt || today < plan.start || today > planPeriodEnd(plan)) return false;
+  if (reportBlockedByEarlierDay(panels.student.inbox.plans, panels.student.reports ?? [], today, today)) return false;
+  if (plan.cadence === 'week') {
+    if (!planWeekDays(plan).includes(today) || (item.date && item.date !== today)) return false;
+    if (reportFor(panels.student.reports ?? [], plan.id, today)) return false;
+    return true;
+  }
+  if (item.date && item.date !== today) return false;
+  return today >= plan.start && today <= planPeriodEnd(plan);
+}
+
 /** How many planned days were reported — for the guardian's "waiting on" flag. */
 export function reportStats(plans: GuardianPlan[], reports: DayReport[], today = todayISO()): { reported: number; missing: number } {
-  const earliest = addDays(today, -REPORT_LOOKBACK_DAYS);
   let reported = 0;
   let missing = 0;
   for (const plan of plans) {
-    if (plan.cadence !== 'week') continue;
+    if (plan.cadence !== 'week' || plan.approvedAt) continue;
     for (const date of planWeekDays(plan)) {
-      if (date >= today || date < earliest || itemsForDay(plan, date).length === 0) continue;
+      if (date >= today || itemsForDay(plan, date).length === 0) continue;
       if (isRestDay(plan, date)) continue;
       if (reportFor(reports, plan.id, date)) reported += 1;
       else missing += 1;
@@ -110,7 +160,13 @@ export function reportStats(plans: GuardianPlan[], reports: DayReport[], today =
  * ticks are set from it — other days are left alone — and then it travels on
  * the next sync like everything else the student sends.
  */
-export function withDayReport(panels: Panels, report: DayReport): Panels {
+export function withDayReport(panels: Panels, report: DayReport, today = todayISO()): Panels {
+  const existingReports = panels.student.reports ?? [];
+  // Reports are one-time filings: resubmitting a date must never rewrite it,
+  // including after a guardian has already approved it.
+  if (existingReports.some((entry) => entry.planId === report.planId && entry.date === report.date)) return panels;
+  if (panels.student.inbox.plans.some((entry) => entry.id === report.planId) &&
+      !canSubmitDayReport(panels, report.planId, report.date, today)) return panels;
   const clean: DayReport = {
     ...report,
     note: report.note.trim().slice(0, DAY_REPORT_NOTE_MAX),
@@ -137,9 +193,15 @@ export function withDayReport(panels: Panels, report: DayReport): Panels {
 
 /** Guardian: fold freshly pulled reports into what a link already holds. */
 export function mergeLinkReports(current: DayReport[], incoming: DayReport[]): DayReport[] {
-  const byId = new Map(current.map((report) => [report.id, report]));
-  for (const report of incoming) byId.set(report.id, report);
-  return [...byId.values()]
+  const byDay = new Map<string, DayReport>();
+  for (const report of [...incoming, ...current]) {
+    const key = `${report.linkId}:${report.planId}:${report.date}`;
+    const previous = byDay.get(key);
+    // A day is filed once. If two offline devices submitted it independently,
+    // retain the earliest filing rather than creating competing reports.
+    if (!previous || report.createdAt < previous.createdAt) byDay.set(key, report);
+  }
+  return [...byDay.values()]
     .sort((a, b) => b.date.localeCompare(a.date) || b.updatedAt.localeCompare(a.updatedAt))
     .slice(0, DAY_REPORTS_KEPT);
 }
@@ -205,15 +267,27 @@ export function weekPlanDraftError(draft: WeekPlanDraft): string | null {
  * the sweep fires it once a day while days stay missing — and never again once
  * the reports are in.
  */
-export function missingReportReminders(panels: Panels, today = todayISO()): Reminder[] {
+export function missingReportReminders(panels: Panels, today = todayISO(), now = new Date()): Reminder[] {
   if (!panels.student.enabled) return [];
-  const missing = missingReportDays(panels.student.inbox.plans, panels.student.reports ?? [], today);
-  if (missing.length === 0) return [];
+  const reports = panels.student.reports ?? [];
+  const missing = missingReportDays(panels.student.inbox.plans, reports, today);
+  // A gentle evening reminder before the local day rolls over. Once the date
+  // passes, the same reminder continues until the student files the oldest gap.
+  const eveningDue = now.getFullYear() === Number(today.slice(0, 4)) &&
+    now.getMonth() + 1 === Number(today.slice(5, 7)) &&
+    now.getDate() === Number(today.slice(8, 10)) &&
+    now.getHours() >= 21 &&
+    panels.student.inbox.plans.some((plan) =>
+      plan.cadence === 'week' && !isRestDay(plan, today) && itemsForDay(plan, today).length > 0 && !reportFor(reports, plan.id, today),
+    );
+  if (missing.length === 0 && !eveningDue) return [];
   return [
     {
       key: `${today}|report-missing`,
       title: t('Daily report missing'),
-      body: t('You can send the missing daily reports when you are ready.'),
+      body: missing.length > 0
+        ? t('Send the oldest missing daily report first. The next day stays locked until you catch up.')
+        : t('Tonight’s report is still open. File it before the day ends.'),
     },
   ];
 }
@@ -230,6 +304,29 @@ export function isRestDay(plan: Pick<GuardianPlan, 'restDays'>, date: string): b
 
 export function ackFor(acks: ReportAck[], reportId: string): ReportAck | undefined {
   return acks.find((ack) => ack.reportId === reportId);
+}
+
+/** Daily approval seals the filing; a weekly period also waits for those seals. */
+export function reportIsApproved(report: DayReport, acks: ReportAck[]): boolean {
+  return !!ackFor(acks, report.id)?.approvedAt;
+}
+
+/** A period may close only after its last calendar day has passed. */
+export function canApprovePlanPeriod(
+  plan: GuardianPlan,
+  reports: DayReport[],
+  acks: ReportAck[],
+  today = todayISO(),
+): boolean {
+  if (plan.approvedAt || planPeriodEnd(plan) >= today) return false;
+  if (plan.cadence !== 'week') return true;
+  const reportable = planWeekDays(plan).filter((date) =>
+    date <= planPeriodEnd(plan) && itemsForDay(plan, date).length > 0 && !isRestDay(plan, date),
+  );
+  return reportable.every((date) => {
+    const report = reportFor(reports, plan.id, date);
+    return !!report && reportIsApproved(report, acks);
+  });
 }
 
 /** Fold freshly pulled answers into the ones already held, newest first. */
@@ -325,7 +422,8 @@ export function rollTarget(
   reports: DayReport[] = [],
   today = todayISO(),
 ): string | null {
-  if (!item.date || !isValidISODate(item.date)) return null;
+  if (!item.date || !isValidISODate(item.date) || item.date !== today || item.done || plan.approvedAt) return null;
+  if (reportFor(reports, plan.id, today)) return null;
   const from = item.date;
   const candidates = planWeekDays(plan).filter(
     (date) => date > from && date >= today && !isRestDay(plan, date) && !reportFor(reports, plan.id, date),
@@ -342,7 +440,9 @@ export function rollTarget(
 export function withLessonRolled(panels: Panels, planId: string, itemId: string, today = todayISO()): Panels {
   const plan = panels.student.inbox.plans.find((entry) => entry.id === planId);
   const item = plan?.items.find((entry) => entry.id === itemId);
-  const target = plan && item ? rollTarget(plan, item, panels.student.reports ?? [], today) : null;
+  const reports = panels.student.reports ?? [];
+  if (reportBlockedByEarlierDay(panels.student.inbox.plans, reports, today, today)) return panels;
+  const target = plan && item ? rollTarget(plan, item, reports, today) : null;
   if (!plan || !item || item.done || !target) return panels;
   return {
     ...panels,

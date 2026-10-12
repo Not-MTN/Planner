@@ -6,13 +6,24 @@
  * read — the grid is for the glance, and for the wall once printed.
  */
 import { cx } from '../cx';
-import { displayTime, formatMonthShort, formatWeekdayShort } from '../dates';
+import { displayTime, formatMonthShort, formatWeekdayShort, todayISO } from '../dates';
 import { faNum, t } from '../i18n';
 import type { DayReport, GuardianPlan } from '../types';
 import { timetableModel } from '../weekPlans';
 
-export function WeekTimetable({ plan, reports }: { plan: GuardianPlan; reports: DayReport[] }) {
-  const grid = timetableModel(plan, reports);
+export function WeekTimetable({
+  plan,
+  reports,
+  hidePast = false,
+  today = todayISO(),
+}: {
+  plan: GuardianPlan;
+  reports: DayReport[];
+  hidePast?: boolean;
+  today?: string;
+}) {
+  const visiblePlan = hidePast ? { ...plan, items: plan.items.filter((item) => !item.date || item.date >= today) } : plan;
+  const grid = timetableModel(visiblePlan, reports);
   if (grid.days.length === 0) return null;
   const showUntimed = grid.days.some((date) => grid.lessonsFor(date, null).length > 0);
   return (

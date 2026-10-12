@@ -2,9 +2,10 @@ import { ACCENTS, categoryById, HABIT_ICONS, NOTE_KINDS, PRIORITIES } from './co
 import { isBase64 } from './shared/authContract';
 import { isValidISODate, isValidTime, localDateFromTimestamp, timeToMinutes } from './dates';
 import { normalizeLessonUrl } from './weekPlans';
+import { sanitizeClassAssignment, sanitizeClassProgress, sanitizeHomeworkAssignment, sanitizeHomeworkReview, sanitizeHomeworkSubmission } from './learning';
 import { REPEAT_SET } from './recurrence';
 import { MAX_PLAN_DAYS } from './duration';
-import { ACK_REACTIONS, ACK_TEXT_MAX, AI_PLAN_LIMIT, DAY_REPORT_NOTE_MAX, DAY_REPORTS_KEPT, GOAL_STEPS_MAX, PLAN_REQUESTS_KEPT, PRAISE_KEPT, QUEUED_PLANS_KEPT, createEmptyPanels, createEmptyState, isGradeLevel, type AIDeclined, type AIDeclinedKind, type AIMemory, type AttachmentRef, type AIMemoryCategory, type ChangeNote, type DayReport, type EventInput, type FixedCommitment, type FocusLog, type GoalAnswer, type GoalSuggestion, type GuardianKind, type GuardianLink, type GuardianNotice, type GuardianPlan, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Panels, type PlanCadence, type PlanDraft, type PlanItem, type PlanRequest, type QueuedPlan, type ReportAck, type StudentGuardian, type StudentInbox, type StudentSubject, type Subtask, type TaskInput, type TaskRepeat, type WeekResults, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task, type WeekArchive } from './types';
+import { ACK_REACTIONS, ACK_TEXT_MAX, AI_PLAN_LIMIT, DAY_REPORT_NOTE_MAX, DAY_REPORTS_KEPT, GOAL_STEPS_MAX, HOMEWORK_ITEMS_KEPT, PLAN_REQUESTS_KEPT, PRAISE_KEPT, QUEUED_PLANS_KEPT, createEmptyPanels, createEmptyState, isGradeLevel, type AIDeclined, type AIDeclinedKind, type AIMemory, type AttachmentRef, type AIMemoryCategory, type ChangeNote, type DayReport, type EventInput, type FixedCommitment, type FocusLog, type GoalAnswer, type GoalSuggestion, type GuardianKind, type GuardianLink, type GuardianNotice, type GuardianPlan, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Panels, type PlanCadence, type PlanDraft, type PlanItem, type PlanRequest, type QueuedPlan, type ReportAck, type StudentGuardian, type StudentInbox, type StudentSubject, type Subtask, type TaskInput, type TaskRepeat, type WeekResults, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task, type WeekArchive } from './types';
 import { t } from './i18n';
 import { downloadBlob } from './download';
 
@@ -785,6 +786,7 @@ function sanitizeReportAck(value: unknown): ReportAck | null {
     date,
     text: (asString(raw.text, ACK_TEXT_MAX) ?? '').trim(),
     reactions: sanitizeReactions(raw.reactions),
+    approvedAt: typeof raw.approvedAt === 'string' && Number.isFinite(Date.parse(raw.approvedAt)) ? raw.approvedAt.slice(0, 40) : null,
     createdAt: asString(raw.createdAt, 40) ?? new Date(0).toISOString(),
   };
 }
@@ -856,6 +858,7 @@ function sanitizeGuardianPlan(value: unknown): GuardianPlan | null {
       }),
       (item) => item.id,
     ).slice(0, 60),
+    approvedAt: typeof raw.approvedAt === 'string' && Number.isFinite(Date.parse(raw.approvedAt)) ? raw.approvedAt.slice(0, 40) : null,
     createdAt: asString(raw.createdAt, 40) ?? new Date(0).toISOString(),
     updatedAt: asString(raw.updatedAt, 40) ?? new Date(0).toISOString(),
   };
@@ -932,7 +935,21 @@ function sanitizeStudentInbox(value: unknown): StudentInbox {
   )
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .slice(0, PANEL_GOAL_LIMIT);
-  return { notices, plans, goals };
+  const classes = uniqueBy(
+    (Array.isArray(raw.classes) ? raw.classes : []).flatMap((item) => {
+      const assignment = sanitizeClassAssignment(item);
+      return assignment ? [assignment] : [];
+    }),
+    (item) => item.id,
+  ).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 20);
+  const homework = uniqueBy(
+    (Array.isArray(raw.homework) ? raw.homework : []).flatMap((item) => {
+      const assignment = sanitizeHomeworkAssignment(item);
+      return assignment ? [assignment] : [];
+    }),
+    (item) => item.id,
+  ).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 30);
+  return { notices, plans, goals, classes, homework };
 }
 
 function sanitizeGuardianLink(value: unknown): GuardianLink | null {
@@ -1001,6 +1018,41 @@ function sanitizeGuardianLink(value: unknown): GuardianLink | null {
     )
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .slice(0, DAY_REPORTS_KEPT),
+    classes: uniqueBy(
+      (Array.isArray(raw.classes) ? raw.classes : []).flatMap((item) => {
+        const assignment = sanitizeClassAssignment(item);
+        return assignment && !!linkId && assignment.linkId === linkId ? [assignment] : [];
+      }),
+      (item) => item.id,
+    ).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 20),
+    homework: uniqueBy(
+      (Array.isArray(raw.homework) ? raw.homework : []).flatMap((item) => {
+        const assignment = sanitizeHomeworkAssignment(item);
+        return assignment && !!linkId && assignment.linkId === linkId ? [assignment] : [];
+      }),
+      (item) => item.id,
+    ).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, HOMEWORK_ITEMS_KEPT),
+    classProgress: uniqueBy(
+      (Array.isArray(raw.classProgress) ? raw.classProgress : []).flatMap((item) => {
+        const progress = sanitizeClassProgress(item);
+        return progress && !!linkId && progress.linkId === linkId ? [progress] : [];
+      }),
+      (item) => item.classId,
+    ).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 60),
+    homeworkSubmissions: uniqueBy(
+      (Array.isArray(raw.homeworkSubmissions) ? raw.homeworkSubmissions : []).flatMap((item) => {
+        const submission = sanitizeHomeworkSubmission(item);
+        return submission && !!linkId && submission.linkId === linkId ? [submission] : [];
+      }),
+      (item) => item.id,
+    ).sort((a, b) => b.submittedAt.localeCompare(a.submittedAt)).slice(0, HOMEWORK_ITEMS_KEPT),
+    homeworkReviews: uniqueBy(
+      (Array.isArray(raw.homeworkReviews) ? raw.homeworkReviews : []).flatMap((item) => {
+        const review = sanitizeHomeworkReview(item);
+        return review && !!linkId && review.linkId === linkId ? [review] : [];
+      }),
+      (item) => item.submissionId,
+    ).sort((a, b) => b.approvedAt.localeCompare(a.approvedAt)).slice(0, HOMEWORK_ITEMS_KEPT),
   };
 }
 
@@ -1117,6 +1169,20 @@ export function sanitizePanels(value: unknown): Panels {
       )
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         .slice(0, DAY_REPORTS_KEPT),
+      classProgress: uniqueBy(
+        (Array.isArray(student.classProgress) ? student.classProgress : []).flatMap((item) => {
+          const progress = sanitizeClassProgress(item);
+          return progress && guardians.some((guardian) => guardian.linkId === progress.linkId) ? [progress] : [];
+        }),
+        (item) => `${item.linkId}:${item.classId}`,
+      ).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 60),
+      homeworkSubmissions: uniqueBy(
+        (Array.isArray(student.homeworkSubmissions) ? student.homeworkSubmissions : []).flatMap((item) => {
+          const submission = sanitizeHomeworkSubmission(item);
+          return submission && guardians.some((guardian) => guardian.linkId === submission.linkId) ? [submission] : [];
+        }),
+        (item) => item.id,
+      ).sort((a, b) => b.submittedAt.localeCompare(a.submittedAt)).slice(0, HOMEWORK_ITEMS_KEPT),
       requests: uniqueBy(
         (Array.isArray(student.requests) ? student.requests : []).flatMap((item) => {
           const request = sanitizePlanRequest(item);

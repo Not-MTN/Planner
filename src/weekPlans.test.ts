@@ -7,8 +7,10 @@
 import { describe, expect, it } from 'vitest';
 import { addDays } from './dates';
 import { createEmptyState, type GuardianNotice, type GuardianPlan, type PlanItem } from './types';
+import { withPlanItemToggled } from './panels';
 import {
   ackFor,
+  canApprovePlanPeriod,
   crossedTimeboxes,
   datelessItems,
   emptyWeekPlanDraft,
@@ -31,6 +33,7 @@ import {
   requestNotice,
   rollTarget,
   sortPlanItems,
+  studentCanTogglePlanItem,
   timetableModel,
   toggleReaction,
   weekPlanDraftError,
@@ -139,6 +142,25 @@ describe('asking for daily reports', () => {
     expect(missingReportDays([empty], [], TODAY)).toHaveLength(0);
   });
 
+  it('lets a student tick today only, then freezes that day when its report is filed', () => {
+    const yesterday = addDays(TODAY, -1);
+    const tomorrow = addDays(TODAY, 1);
+    const week = plan({
+      start: TODAY,
+      items: [item({ id: 'past', title: 'Past lesson', date: yesterday }), item({ id: 'today', title: 'Today lesson', date: TODAY }), item({ id: 'future', title: 'Future lesson', date: tomorrow })],
+    });
+    const empty = createEmptyState().panels;
+    const student = { ...empty, student: { ...empty.student, inbox: { ...empty.student.inbox, plans: [week] } } };
+    expect(studentCanTogglePlanItem(student, week.id, 'past', TODAY)).toBe(false);
+    expect(studentCanTogglePlanItem(student, week.id, 'today', TODAY)).toBe(true);
+    expect(studentCanTogglePlanItem(student, week.id, 'future', TODAY)).toBe(false);
+    const ticked = withPlanItemToggled(student, week.id, 'today', TODAY);
+    expect(ticked.student.inbox.plans[0]?.items.find((entry) => entry.id === 'today')?.done).toBe(true);
+    const filed = { ...ticked, student: { ...ticked.student, reports: [report(week.id, TODAY, ['today'])] } };
+    expect(studentCanTogglePlanItem(filed, week.id, 'today', TODAY)).toBe(false);
+    expect(withPlanItemToggled(filed, week.id, 'today', TODAY)).toBe(filed);
+  });
+
   it('stops asking once the report is in', () => {
     const date = addDays(TODAY, -1);
     const week = plan({ start: addDays(TODAY, -6), items: lessons(date) });
@@ -163,9 +185,10 @@ describe('asking for daily reports', () => {
     expect(missingReportDays([day, month], [], TODAY)).toHaveLength(0);
   });
 
-  it('never locks a panel over a plan older than three weeks', () => {
+  it('keeps an old missed report locked until the student submits it', () => {
     const old = plan({ start: addDays(TODAY, -30), items: lessons(addDays(TODAY, -25)) });
-    expect(missingReportDays([old], [], TODAY)).toHaveLength(0);
+    expect(missingReportDays([old], [], TODAY)).toHaveLength(1);
+    expect(missingReportDays([old], [report(old.id, addDays(TODAY, -25))], TODAY)).toHaveLength(0);
     const recent = plan({ start: addDays(TODAY, -20), items: lessons(addDays(TODAY, -15)) });
     expect(missingReportDays([recent], [], TODAY)).toHaveLength(1);
   });
@@ -177,6 +200,22 @@ describe('asking for daily reports', () => {
     });
     expect(reportStats([week], [], TODAY)).toEqual({ reported: 0, missing: 2 });
     expect(reportStats([week], [report(week.id, addDays(TODAY, -2))], TODAY)).toEqual({ reported: 1, missing: 1 });
+  });
+
+  it('requires each report to be submitted and guardian-approved before finishing a week', () => {
+    const start = '2026-10-01';
+    const week = plan({ start, items: [item({ id: 'a', title: 'Maths', date: start }), item({ id: 'b', title: 'Physics', date: '2026-10-02' })] });
+    const first = report(week.id, start, ['a']);
+    const second = report(week.id, '2026-10-02', ['b']);
+    const approvals = [first, second].map((entry) => ({
+      id: `ack-${entry.id}`, reportId: entry.id, planId: week.id, linkId: week.linkId, date: entry.date,
+      text: '', reactions: [], approvedAt: '2026-10-08T12:00:00.000Z', createdAt: '2026-10-08T12:00:00.000Z',
+    }));
+    expect(canApprovePlanPeriod(week, [first, second], approvals, '2026-10-07')).toBe(false);
+    expect(canApprovePlanPeriod(week, [first], approvals, '2026-10-08')).toBe(false);
+    expect(canApprovePlanPeriod(week, [first, second], [approvals[0]!, { ...approvals[1]!, approvedAt: null }], '2026-10-08')).toBe(false);
+    expect(canApprovePlanPeriod(week, [first, second], approvals, '2026-10-08')).toBe(true);
+    expect(canApprovePlanPeriod({ ...week, approvedAt: '2026-10-08T12:00:00.000Z' }, [first, second], approvals, '2026-10-09')).toBe(false);
   });
 
   it('finds one report among many', () => {
@@ -207,14 +246,14 @@ describe('filing a daily report', () => {
     expect(items.find((entry) => entry.id === 't1')?.done).toBe(true);
   });
 
-  it('trims the note and keeps the newest thirty reports', () => {
+  it('trims the note and keeps the newest seventy reports for delayed synchronization', () => {
     const state = createEmptyState();
-    const many = Array.from({ length: 35 }, (_, index) =>
+    const many = Array.from({ length: 75 }, (_, index) =>
       report('plan-1', addDays(TODAY, -(index + 1)), []),
     );
     let panels = state.panels;
     for (const entry of many) panels = withDayReport(panels, entry);
-    expect(panels.student.reports).toHaveLength(30);
+    expect(panels.student.reports).toHaveLength(70);
     expect(panels.student.reports?.[0]?.date).toBe(addDays(TODAY, -1));
 
     const noted = withDayReport(state.panels, { ...report('plan-1', addDays(TODAY, -1)), note: `  ${'x'.repeat(400)}  ` });
@@ -233,13 +272,16 @@ describe('filing a daily report', () => {
 });
 
 describe('receiving reports as a guardian', () => {
-  it('merges by id, newest first, capped at thirty', () => {
+  it('merges by id, newest first, capped at seventy', () => {
     const current = [report('plan-1', addDays(TODAY, -3))];
     const incoming = [report('plan-1', addDays(TODAY, -1)), report('plan-1', addDays(TODAY, -3))];
     const merged = mergeLinkReports(current, incoming);
     expect(merged.map((entry) => entry.date)).toEqual([addDays(TODAY, -1), addDays(TODAY, -3)]);
-    const overflow = Array.from({ length: 40 }, (_, index) => report(`plan-${index}`, addDays(TODAY, -1)));
-    expect(mergeLinkReports([], overflow)).toHaveLength(30);
+    const filed = report('plan-shared', addDays(TODAY, -2));
+    const duplicate = { ...filed, id: 'report-from-another-device', note: 'A competing filing.', createdAt: '2026-10-12T21:00:00.000Z' };
+    expect(mergeLinkReports([duplicate], [filed])).toEqual([filed]);
+    const overflow = Array.from({ length: 80 }, (_, index) => report(`plan-${index}`, addDays(TODAY, -1)));
+    expect(mergeLinkReports([], overflow)).toHaveLength(70);
   });
 });
 
@@ -436,21 +478,20 @@ describe('rolling a lesson over', () => {
     expect(rollTarget(week, item({ id: 'c', title: 'Free' }), [], TODAY)).toBeNull();
   });
 
-  it('skips past days, rest days, and days already reported', () => {
+  it('never rolls a past lesson, and skips rest or already-reported days for today’s lesson', () => {
     const week = plan({
       start: addDays(TODAY, -2),
-      // Tomorrow rests; the lesson rolls past it.
+      // Tomorrow rests; a lesson due today can move past it.
       restDays: [new Date(`${addDays(TODAY, 1)}T12:00:00Z`).getUTCDay()],
     });
-    const rolling = item({ id: 'a', title: 'Maths', date: addDays(TODAY, -2) });
-    // Today is reported, tomorrow rests — the day after tomorrow takes it.
-    const reports = [report('plan-1', TODAY)];
-    expect(rollTarget(week, rolling, reports, TODAY)).toBe(addDays(TODAY, 2));
-    // When every upcoming day is closed, there is nowhere to roll.
+    const past = item({ id: 'past', title: 'Maths', date: addDays(TODAY, -2) });
+    expect(rollTarget(week, past, [], TODAY)).toBeNull();
+    const todayItem = item({ id: 'today', title: 'Physics', date: TODAY });
+    expect(rollTarget(week, todayItem, [], TODAY)).toBe(addDays(TODAY, 2));
     const allReported = [TODAY, addDays(TODAY, 2), addDays(TODAY, 3), addDays(TODAY, 4)].map((date) =>
       report('plan-1', date),
     );
-    expect(rollTarget(week, rolling, allReported, TODAY)).toBeNull();
+    expect(rollTarget(week, todayItem, allReported, TODAY)).toBeNull();
   });
 
   it('picks the quietest upcoming day, earliest first when tied', () => {

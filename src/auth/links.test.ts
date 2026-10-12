@@ -45,6 +45,12 @@ function route(path: string, method: string, body?: string, search = ''): Promis
     case 'GET /api/auth/share':
     case 'PUT /api/auth/share':
       return api.then((m) => m.handleShare(request, store));
+    case 'POST /api/auth/homework-photos/delete':
+      return api.then((m) => m.handleHomeworkPhotoDelete(request, store, {
+        CLOUDINARY_CLOUD_NAME: 'demo',
+        CLOUDINARY_API_KEY: '1234567890',
+        CLOUDINARY_API_SECRET: 'test-secret-for-cloudinary',
+      }));
     default:
       return Promise.resolve(new Response('not found', { status: 404 }));
   }
@@ -58,6 +64,7 @@ beforeEach(() => {
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
       const target = new URL(url, 'https://planner.test');
+      if (target.hostname === 'api.cloudinary.com') return new Response(JSON.stringify({ result: 'ok' }), { status: 200 });
       const response = await route(target.pathname, (init?.method ?? 'GET').toUpperCase(), init?.body ? String(init.body) : undefined, target.search);
       const setCookie = response.headers.get('set-cookie');
       if (setCookie) jar = /Max-Age=0/.test(setCookie) ? '' : (setCookie.split(';')[0] ?? '');
@@ -473,6 +480,141 @@ describe('linking a guardian and a student', () => {
     const { readNotices, syncLinks } = await import('./links');
     const read = await readNotices((await syncLinks(withGoal)).panels);
     expect(read.panels.guardian.links[0]?.goalAnswers?.[0]?.state).toBe('declined');
+  }, 180_000);
+
+  it('shares guardian-assigned classes and homework, then deletes photo assets after approval', async () => {
+    await join('learnparent', 'learnparent@example.com', createEmptyState());
+    const { inviteStudent, syncLinks } = await import('./links');
+    const invited = await inviteStudent(createEmptyState().panels, 'learnstudent');
+
+    await join('learnstudent', 'learnstudent@example.com', createEmptyState());
+    const { acceptInvitation, syncStudentInbox } = await import('./links');
+    const { withStudentClassProgress } = await import('../learning');
+    const { approveHomeworkSubmission, sendClass, sendHomeworkAssignment, submitHomework, readNotices } = await import('./links');
+    let studentPanels = await acceptInvitation(createEmptyState().panels, invited.invitation.code);
+
+    await signInAs('learnparent');
+    const linkId = invited.invitation.link.linkId!;
+    let guardianPanels = (await syncLinks(invited.panels)).panels;
+    guardianPanels = await sendClass(guardianPanels, linkId, {
+      title: 'Algebra lesson', subject: 'Maths', description: 'Watch and take notes.', videoUrl: 'https://video.example/algebra',
+    });
+    guardianPanels = await sendHomeworkAssignment(guardianPanels, linkId, {
+      title: 'Exercise 1', instructions: 'Show your working.', subject: 'Maths', dueAt: null,
+    });
+
+    await signInAs('learnstudent');
+    studentPanels = (await syncStudentInbox(studentPanels, [])).panels;
+    expect(studentPanels.student.inbox.classes?.map((item) => item.title)).toEqual(['Algebra lesson']);
+    expect(studentPanels.student.inbox.homework?.map((item) => item.title)).toEqual(['Exercise 1']);
+
+    const assignedClass = studentPanels.student.inbox.classes![0]!;
+    studentPanels = withStudentClassProgress(studentPanels, {
+      classId: assignedClass.id, linkId, completedAt: '2026-10-12T21:00:00.000Z', updatedAt: '2026-10-12T21:00:00.000Z',
+    });
+    const assignedHomework = studentPanels.student.inbox.homework![0]!;
+    const publicId = `planner-homework/${linkId}/abcdef0123456789abcdef01`;
+    const photo = {
+      url: `https://res.cloudinary.com/demo/raw/upload/v123/${publicId}.bin`,
+      publicId, name: 'answer.jpg', mime: 'image/jpeg', bytes: 2048,
+    };
+    studentPanels = submitHomework(studentPanels, assignedHomework.id, [photo]);
+    const submission = studentPanels.student.homeworkSubmissions![0]!;
+    studentPanels = (await syncStudentInbox(studentPanels, [])).panels;
+
+    await signInAs('learnparent');
+    guardianPanels = (await readNotices(guardianPanels)).panels;
+    const guardianLink = guardianPanels.guardian.links[0]!;
+    expect(guardianLink.classProgress?.[0]?.completedAt).toBe('2026-10-12T21:00:00.000Z');
+    expect(guardianLink.homeworkSubmissions?.[0]?.status).toBe('submitted');
+    expect(guardianLink.homeworkSubmissions?.[0]?.photos).toHaveLength(1);
+
+    guardianPanels = await approveHomeworkSubmission(guardianPanels, linkId, submission.id, 'Excellent work.');
+    const approved = guardianPanels.guardian.links[0]?.homeworkSubmissions?.[0];
+    expect(approved).toMatchObject({ status: 'approved', photos: [], guardianNote: 'Excellent work.' });
+    const deletionsBeforeRetry = vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes('/raw/destroy')).length;
+    await approveHomeworkSubmission(guardianPanels, linkId, submission.id, 'Updated note should not rewrite approval.');
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes('/raw/destroy')).length).toBe(deletionsBeforeRetry);
+
+    await signInAs('learnstudent');
+    studentPanels = (await syncStudentInbox(studentPanels, [])).panels;
+    expect(studentPanels.student.homeworkSubmissions?.[0]).toMatchObject({
+      status: 'approved', photos: [], guardianNote: 'Excellent work.',
+    });
+  }, 180_000);
+
+  it('supports a first report reply, then keeps an approved day immutable across stale guardian state', async () => {
+    await join('reportparent', 'reportparent@example.com', createEmptyState());
+    const { inviteStudent, syncLinks, sendPlan, readNotices, sendAck, approvePlanPeriod, syncStudentInbox } = await import('./links');
+    const { todayISO } = await import('../dates');
+    const { withDayReport } = await import('../weekPlans');
+    const today = todayISO();
+    const date = addDays(today, -7);
+    const start = addDays(today, -8);
+    const invited = await inviteStudent(createEmptyState().panels, 'reportstudent');
+
+    await join('reportstudent', 'reportstudent@example.com', createEmptyState());
+    const { acceptInvitation } = await import('./links');
+    let studentPanels = await acceptInvitation(createEmptyState().panels, invited.invitation.code);
+    const linkId = invited.invitation.link.linkId!;
+
+    await signInAs('reportparent');
+    let guardianPanels = (await syncLinks(invited.panels)).panels;
+    guardianPanels = await sendPlan(guardianPanels, linkId, {
+      cadence: 'week', start, title: 'Daily report test', note: '',
+      items: [{ title: 'Maths', date, time: null, minutes: null, subject: null, url: null }],
+    });
+
+    await signInAs('reportstudent');
+    studentPanels = (await syncStudentInbox(studentPanels, [])).panels;
+    const studentPlan = studentPanels.student.inbox.plans[0]!;
+    const report = {
+      id: 'report-once', planId: studentPlan.id, linkId, date,
+      doneIds: [studentPlan.items[0]!.id], note: 'Finished.',
+      createdAt: `${date}T20:00:00.000Z`, updatedAt: `${date}T20:00:00.000Z`,
+    };
+    studentPanels = withDayReport(studentPanels, report, today);
+    studentPanels = (await syncStudentInbox(studentPanels, [])).panels;
+
+    await signInAs('reportparent');
+    guardianPanels = (await readNotices(guardianPanels)).panels;
+    const received = guardianPanels.guardian.links[0]?.reports?.[0];
+    expect(received?.id).toBe(report.id);
+
+    const ackDraft = { reportId: report.id, planId: studentPlan.id, date, text: 'I saw this.' };
+    guardianPanels = await sendAck(guardianPanels, linkId, ackDraft);
+    expect(guardianPanels.guardian.links[0]?.acks?.[0]?.text).toBe('I saw this.');
+    const staleGuardian = guardianPanels;
+    guardianPanels = await sendAck(guardianPanels, linkId, { ...ackDraft, approve: true });
+    expect(guardianPanels.guardian.links[0]?.acks?.[0]?.approvedAt).toBeTruthy();
+    await expect(sendAck(staleGuardian, linkId, { ...ackDraft, text: 'Change after approval.' })).rejects.toThrow('This approved daily report is locked.');
+    guardianPanels = await approvePlanPeriod(guardianPanels, linkId, studentPlan.id);
+    expect(guardianPanels.guardian.links[0]?.plans[0]?.approvedAt).toBeTruthy();
+
+    await signInAs('reportstudent');
+    studentPanels = (await syncStudentInbox(studentPanels, [])).panels;
+    expect(studentPanels.student.acks?.[0]?.approvedAt).toBeTruthy();
+    expect(studentPanels.student.inbox.plans[0]?.approvedAt).toBeTruthy();
+    expect(withDayReport(studentPanels, { ...report, note: 'Rewrite attempt.' }, today)).toBe(studentPanels);
+
+    // A stale device may still send an old tick, but the guardian's filed day
+    // remains authoritative after approval.
+    const stalePlan = {
+      ...studentPanels.student.inbox.plans[0]!,
+      items: studentPanels.student.inbox.plans[0]!.items.map((item) => ({ ...item, done: false })),
+    };
+    const staleStudent = {
+      ...studentPanels,
+      student: {
+        ...studentPanels.student,
+        reports: [],
+        inbox: { ...studentPanels.student.inbox, plans: [stalePlan] },
+      },
+    };
+    await syncStudentInbox(staleStudent, []);
+    await signInAs('reportparent');
+    guardianPanels = (await readNotices(guardianPanels)).panels;
+    expect(guardianPanels.guardian.links[0]?.plans[0]?.items[0]?.done).toBe(true);
   }, 180_000);
 });
 

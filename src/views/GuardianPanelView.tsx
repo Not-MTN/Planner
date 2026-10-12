@@ -51,9 +51,11 @@ import { PraiseComposer } from '../components/PraiseComposer';
 import { GuardianPlanComposer } from '../components/GuardianPlanComposer';
 import { WeekPlanCard } from '../components/WeekPlanCard';
 import { WeekPlanComposer } from '../components/WeekPlanComposer';
+import { GuardianAssignments } from '../components/GuardianAssignments';
 import {
   dropGoal,
   dropPlan,
+  approvePlanPeriod,
   inviteStudent,
   isInviteExpired,
   markNoticesRead,
@@ -69,6 +71,7 @@ import {
 } from '../auth/links';
 import {
   goalAnswerOnLink,
+  planEnd,
   planPeriodLabel,
   planProgress,
   withLinkAck,
@@ -88,7 +91,7 @@ import {
 import type { DayReport, GuardianLink, GuardianNotice, GuardianPlan, QueuedPlan, ReportAck } from '../types';
 import '../panels.css';
 
-type GuardianTab = 'week' | 'plan' | 'support';
+type GuardianTab = 'week' | 'plan' | 'assignments' | 'support';
 type PlanMode = 'steps' | 'lessons';
 
 const TAB_ID = 'guardian-student';
@@ -317,7 +320,7 @@ export function GuardianPanelView() {
     downloadBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), `timetable-${plan.id}.html`);
   };
 
-  const ackReport = async (link: GuardianLink, report: DayReport, text: string) => {
+  const ackReport = async (link: GuardianLink, report: DayReport, text: string, approve = false) => {
     if (!link.linkId) return;
     const existing = ackFor(link.acks ?? [], report.id);
     try {
@@ -329,12 +332,28 @@ export function GuardianPanelView() {
         // A reply lands on the reacted answer instead of orphaning its emoji.
         reactions: existing?.reactions ?? [],
         id: existing?.id,
+        approve,
       });
-      const ack = next.guardian.links.find((item) => item.linkId === link.linkId)?.acks?.[0];
+      const ack = next.guardian.links.find((item) => item.linkId === link.linkId)?.acks?.find((item) => item.reportId === report.id);
       // Apply only the new answer: slow requests must not replace an edited roster.
       if (ack) updatePanels((current) => withLinkAck(current, link.linkId!, ack));
+      if (approve) flash(t('Daily report approved. This day is locked.'));
     } catch (caught) {
-      flash(caught instanceof Error ? caught.message : t('That reply could not be sent.'));
+      flash(caught instanceof Error ? caught.message : approve ? t('That daily report could not be approved.') : t('That reply could not be sent.'));
+    }
+  };
+
+  const approveReport = async (link: GuardianLink, report: DayReport) => ackReport(link, report, '', true);
+
+  const approvePeriod = async (link: GuardianLink, plan: GuardianPlan) => {
+    if (!link.linkId) return;
+    try {
+      const next = await approvePlanPeriod(panels, link.linkId, plan.id);
+      const approved = next.guardian.links.find((item) => item.linkId === link.linkId)?.plans.find((item) => item.id === plan.id);
+      if (approved) updatePanels((current) => withLinkPlan(current, link.linkId!, approved));
+      flash(t('Week approved and closed.'));
+    } catch (caught) {
+      flash(caught instanceof Error ? caught.message : t('The week could not be approved yet.'));
     }
   };
 
@@ -513,6 +532,7 @@ export function GuardianPanelView() {
   const studentTabs: Array<PanelTab<GuardianTab>> = [
     { id: 'week', label: t('This week'), icon: CalendarIcon },
     { id: 'plan', label: t('Plan'), icon: WeekIcon, dot: queued.length > 0 },
+    { id: 'assignments', label: t('Classes'), icon: BookIcon },
     { id: 'support', label: t('Support'), icon: HeartIcon },
   ];
 
@@ -1080,6 +1100,8 @@ export function GuardianPanelView() {
                               variant="guardian"
                               acks={open.acks ?? []}
                               onAck={(report, text) => ackReport(open, report, text)}
+                              onApproveReport={(report) => approveReport(open, report)}
+                              onApprovePlanPeriod={(plan) => approvePeriod(open, plan)}
                               onReact={(report, ack, emoji) => reactReport(open, report, ack, emoji)}
                               onNudge={() => nudgeStudent(open)}
                               nudgeSent={nudgedToday(guardian.notices, open.username)}
@@ -1112,6 +1134,25 @@ export function GuardianPanelView() {
                                 </>
                               }
                             />
+                          );
+                        }
+                        const periodClosed = !!plan.approvedAt || planEnd(plan) < todayISO();
+                        if (periodClosed) {
+                          return (
+                            <li key={plan.id} className={cx('gplan-card week-period-summary', progress.done === progress.total && progress.total > 0 ? 'is-complete' : 'is-incomplete')}>
+                              <div className="gplan-head">
+                                <div>
+                                  <p className="gplan-kicker">{planPeriodLabel(plan)}</p>
+                                  <p className="gplan-title">{t('Period performance')}</p>
+                                </div>
+                                <div className="gplan-progress" aria-label={t('{0} of {1} done', { 0: progress.done, 1: progress.total })}>
+                                  <strong>{faNum(progress.done)}</strong>
+                                  <span>/{faNum(progress.total)}</span>
+                                </div>
+                              </div>
+                              <p className="week-period-state">{plan.approvedAt ? t('Approved by your guardian. This period is closed.') : t('This period has ended. Performance summary only.')}</p>
+                              <div className="gplan-bar" aria-hidden="true"><i style={{ width: `${percent}%` }} /></div>
+                            </li>
                           );
                         }
                         return (
@@ -1194,6 +1235,8 @@ export function GuardianPanelView() {
                 )}
               </section>
             ) : null}
+
+            {tab === 'assignments' ? <GuardianAssignments key={`${open.id}-assignments`} link={open} /> : null}
 
             {/* -------------------------------------------------------- Support */}
             {tab === 'support' ? (

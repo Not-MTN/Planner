@@ -22,6 +22,8 @@ import {
   handleAccountDelete,
   handleAccountVault,
   handleAuthStatus,
+  handleHomeworkPhotoDelete,
+  handleHomeworkUploadSign,
   handleLinkAccept,
   handleLinks,
   handleLogin,
@@ -60,6 +62,10 @@ import { handlePushConfig, handlePushDevice, handlePushDispatch, handlePushSubsc
 /** The server-side environment the API reads; never exposed to the browser. */
 export interface ApiEnv {
   DATABASE_URL?: string;
+  /** Cloudinary signs only encrypted homework-image upload/delete requests. */
+  CLOUDINARY_CLOUD_NAME?: string;
+  CLOUDINARY_API_KEY?: string;
+  CLOUDINARY_API_SECRET?: string;
   GROQ_API_KEY?: string;
   GROQ_MODEL?: string;
   /** Cheaper model used when editing an existing draft rather than writing one. */
@@ -149,6 +155,10 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
   switch (pathname) {
     case '/api/auth/account':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleAccountDelete(request, store));
+    case '/api/auth/homework-photos/sign':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleHomeworkUploadSign(request, store, env));
+    case '/api/auth/homework-photos/delete':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleHomeworkPhotoDelete(request, store, env));
     case '/api/auth/link-accept':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleLinkAccept(request, store));
     case '/api/auth/links':

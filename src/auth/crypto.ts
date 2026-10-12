@@ -250,6 +250,23 @@ export async function decryptBytes(ciphertext: string, key: CryptoKey): Promise<
   return new TextDecoder().decode(plain);
 }
 
+/** Binary AES-GCM for encrypted homework images: iv || ciphertext. */
+export async function encryptBinaryBytes(data: Uint8Array<ArrayBuffer>, key: CryptoKey): Promise<Uint8Array<ArrayBuffer>> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const cipher = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data));
+  const out = new Uint8Array(iv.length + cipher.length);
+  out.set(iv);
+  out.set(cipher, iv.length);
+  return out;
+}
+
+/** Opens an image encrypted by `encryptBinaryBytes`; never decodes it as text. */
+export async function decryptBinaryBytes(data: Uint8Array<ArrayBuffer>, key: CryptoKey): Promise<Uint8Array<ArrayBuffer>> {
+  if (data.length < 13) throw new VaultError('That data is not valid.');
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: data.slice(0, 12) }, key, data.slice(12));
+  return new Uint8Array(plain);
+}
+
 export async function encryptState(state: PlannerState, dek: CryptoKey): Promise<string> {
   return encryptJson(state, dek);
 }

@@ -61,6 +61,35 @@ export const MISSING_DB_AUTH_MESSAGE =
   'Accounts need a database. Add your Neon connection string as DATABASE_URL under Vercel → Project Settings → Environment Variables (or in .env.local) and restart.';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+export interface CloudinaryConfig {
+  CLOUDINARY_CLOUD_NAME?: string;
+  CLOUDINARY_API_KEY?: string;
+  CLOUDINARY_API_SECRET?: string;
+}
+
+interface CloudinaryCredentials {
+  cloudName: string;
+  apiKey: string;
+  apiSecret: string;
+}
+
+function cloudinaryCredentials(config: CloudinaryConfig): CloudinaryCredentials | null {
+  const cloudName = config.CLOUDINARY_CLOUD_NAME?.trim() ?? '';
+  const apiKey = config.CLOUDINARY_API_KEY?.trim() ?? '';
+  const apiSecret = config.CLOUDINARY_API_SECRET?.trim() ?? '';
+  if (!/^[a-z0-9-]{2,100}$/i.test(cloudName) || !/^[a-z0-9]{4,100}$/i.test(apiKey) || apiSecret.length < 8 || apiSecret.length > 200) return null;
+  return { cloudName, apiKey, apiSecret };
+}
+
+function cloudinarySignature(params: Record<string, string | number | boolean>, apiSecret: string): string {
+  const canonical = Object.entries(params)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `${key}=${value}`)
+    .join('&');
+  return createHash('sha1').update(`${canonical}${apiSecret}`).digest('hex');
+}
+
 /** Only used to keep the timing of a failed lookup equal to a failed password. */
 const DEFAULT_SALT = 'cGxhbm5lci1kZWNveQ==';
 
@@ -1296,6 +1325,97 @@ async function linkUser(request: Request, store: AuthStore | null): Promise<{ us
     return found ? { user: found.user, store } : null;
   } catch {
     return null;
+  }
+}
+
+/** Student: mint a short-lived signature scoped to one encrypted raw photo upload. */
+export async function handleHomeworkUploadSign(
+  request: Request,
+  store: AuthStore | null,
+  config: CloudinaryConfig,
+): Promise<Response> {
+  const blocked = guard(request, 'homework-photo-sign', 24) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'POST') return error(405, 'Method not allowed.');
+  const credentials = cloudinaryCredentials(config);
+  if (!credentials) return error(503, 'Encrypted photo uploads are not configured yet.', 'media_not_configured');
+  const session = await linkUser(request, store);
+  if (!session) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+  const body = await readJsonBody(request);
+  const linkId = cleanLinkId(body?.linkId);
+  if (!linkId) return error(400, 'Expected a homework link.');
+
+  try {
+    const incoming = await session.store.listIncomingLinks({ id: session.user.id, usernameLower: session.user.username_lower });
+    const link = incoming.find((row) => row.id === linkId && row.status === 'linked' && row.student_id === session.user.id);
+    if (!link) return error(404, 'That student link is not active.', 'not_found');
+    const timestamp = Math.floor(Date.now() / 1000);
+    const publicId = `planner-homework/${linkId}/${newStoreId().replaceAll('-', '').slice(0, 24)}`;
+    const params = { public_id: publicId, timestamp };
+    return json(200, {
+      cloudName: credentials.cloudName,
+      apiKey: credentials.apiKey,
+      publicId,
+      timestamp,
+      signature: cloudinarySignature(params, credentials.apiSecret),
+    });
+  } catch {
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
+}
+
+/** Link owners may delete encrypted homework assets after review or failed uploads. */
+export async function handleHomeworkPhotoDelete(
+  request: Request,
+  store: AuthStore | null,
+  config: CloudinaryConfig,
+): Promise<Response> {
+  const blocked = guard(request, 'homework-photo-delete', 24) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'POST') return error(405, 'Method not allowed.');
+  const credentials = cloudinaryCredentials(config);
+  if (!credentials) return error(503, 'Encrypted photo uploads are not configured yet.', 'media_not_configured');
+  const session = await linkUser(request, store);
+  if (!session) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+  const body = await readJsonBody(request);
+  const linkId = cleanLinkId(body?.linkId);
+  const ids = Array.isArray(body?.publicIds) ? body.publicIds : [];
+  if (!linkId || ids.length < 1 || ids.length > 3 || !ids.every((id) => typeof id === 'string' && new RegExp(`^planner-homework/${linkId}/[a-f0-9]{24}$`).test(id))) {
+    return error(400, 'Expected up to three photo ids for this homework link.');
+  }
+
+  try {
+    const outgoing = await session.store.listOutgoingLinks(session.user.id);
+    const guardianOwnsLink = outgoing.some((row) => row.id === linkId && row.status === 'linked');
+    let studentOwnsLink = false;
+    if (!guardianOwnsLink) {
+      const incoming = await session.store.listIncomingLinks({ id: session.user.id, usernameLower: session.user.username_lower });
+      studentOwnsLink = incoming.some((row) => row.id === linkId && row.status === 'linked' && row.student_id === session.user.id);
+    }
+    if (!guardianOwnsLink && !studentOwnsLink) return error(404, 'That student link is not active.', 'not_found');
+    for (const publicId of ids as string[]) {
+      const params = { invalidate: true, public_id: publicId, timestamp: Math.floor(Date.now() / 1000) };
+      const signature = cloudinarySignature(params, credentials.apiSecret);
+      const form = new URLSearchParams({
+        api_key: credentials.apiKey,
+        invalidate: 'true',
+        public_id: publicId,
+        signature,
+        timestamp: String(params.timestamp),
+      });
+      const response = await fetch(`https://api.cloudinary.com/v1_1/${credentials.cloudName}/raw/destroy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: form,
+      });
+      const result = await response.json().catch(() => null) as { result?: unknown; error?: { message?: unknown } } | null;
+      if (!response.ok || (result?.result !== 'ok' && result?.result !== 'not found')) {
+        return error(502, 'A homework photo could not be deleted yet.', 'photo_delete_failed');
+      }
+    }
+    return json(200, { ok: true, deleted: ids.length });
+  } catch {
+    return error(502, 'The homework photo service could not be reached. Try again.');
   }
 }
 

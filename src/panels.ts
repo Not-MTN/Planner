@@ -8,6 +8,7 @@
 import { addDays, parseISODate, startOfWeek, toISODate, todayISO } from './dates';
 import { t } from './i18n';
 import { completionDate } from './insights';
+import { studentCanTogglePlanItem } from './weekPlans';
 import { DAY_REPORTS_KEPT, GOAL_ANSWERS_KEPT, PANEL_GOALS_KEPT, QUEUED_PLANS_KEPT } from './types';
 import type { ChangeNote, GoalAnswer, GoalSuggestion, GuardianLink, GuardianPlan, Panels, PlanCadence, PlannerState, QueuedPlan, ReportAck, StudentSubject, WeekResults } from './types';
 
@@ -185,7 +186,8 @@ export function planPeriodLabel(plan: GuardianPlan, from = todayISO()): string {
 }
 
 /** Tick a plan item on or off, on the student's side. */
-export function withPlanItemToggled(panels: Panels, planId: string, itemId: string): Panels {
+export function withPlanItemToggled(panels: Panels, planId: string, itemId: string, today = todayISO()): Panels {
+  if (!studentCanTogglePlanItem(panels, planId, itemId, today)) return panels;
   const plans = panels.student.inbox.plans.map((plan) =>
     plan.id !== planId
       ? plan

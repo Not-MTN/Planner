@@ -3,7 +3,7 @@ import { createEmptyState } from './types';
 import { sanitizePanels, sanitizeState } from './storage';
 import { mergePanels, mergeStates } from './sync';
 import { daysUntil, splitExplanations, subjectMinutes, weekOf, weekResults, withExplanation, withFlushedPlans, withLinkPlan, withQueuedPlan, withSubject, withoutQueuedPlan, withoutSubject } from './panels';
-import type { ChangeNote, GuardianPlan, Panels, PlannerState, QueuedPlan, StudentSubject } from './types';
+import type { ChangeNote, ClassAssignment, ClassProgress, DayReport, GuardianPlan, HomeworkAssignment, HomeworkPhoto, HomeworkReview, HomeworkSubmission, Panels, PlannerState, QueuedPlan, ReportAck, StudentSubject } from './types';
 
 function note(week: string, id: string): ChangeNote {
   return { id, createdAt: `2026-03-0${id}T10:00:00.000Z`, weekOf: week, summary: `change ${id}`, reason: 'because' };
@@ -29,6 +29,49 @@ describe('panel storage', () => {
     const panels = withSubject(createEmptyState().panels, subject('s1', 'Physics'));
     const round = sanitizeState(JSON.parse(JSON.stringify(stateWith(panels))));
     expect(round?.panels.student.subjects[0]?.name).toBe('Physics');
+  });
+
+  it('preserves daily and period approvals through a save and load round trip', () => {
+    const base = createEmptyState().panels;
+    const linkId = '12345678-1234-1234-1234-123456789abc';
+    const approvedAt = '2026-10-12T12:00:00.000Z';
+    const plan: GuardianPlan = {
+      id: 'plan-one', author: 'Parent', linkId, cadence: 'week', start: '2026-10-01', title: 'Done', note: '',
+      items: [], approvedAt, createdAt: '2026-10-01T08:00:00.000Z', updatedAt: approvedAt,
+    };
+    const report: DayReport = {
+      id: 'report-one', planId: plan.id, linkId, date: '2026-10-02', doneIds: [], note: '',
+      createdAt: '2026-10-02T20:00:00.000Z', updatedAt: '2026-10-02T20:00:00.000Z',
+    };
+    const ack: ReportAck = {
+      id: 'ack-one', reportId: report.id, planId: plan.id, linkId, date: report.date, text: '', reactions: [],
+      approvedAt, createdAt: approvedAt,
+    };
+    const panels: Panels = {
+      ...base,
+      student: {
+        ...base.student,
+        enabled: true,
+        inbox: { ...base.student.inbox, plans: [plan] },
+        reports: [report],
+        acks: [ack],
+      },
+      guardian: {
+        ...base.guardian,
+        enabled: true,
+        kind: 'parent',
+        links: [{
+          id: 'local-link-one', username: 'student', displayName: 'Student', status: 'linked', history: [], linkId,
+          code: null, wrappedShareKey: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=', results: null,
+          plans: [plan], reports: [report], acks: [ack],
+        }],
+      },
+    };
+    const round = sanitizeState(JSON.parse(JSON.stringify(stateWith(panels))));
+    expect(round?.panels.student.inbox.plans[0]?.approvedAt).toBe(approvedAt);
+    expect(round?.panels.student.acks?.[0]?.approvedAt).toBe(approvedAt);
+    expect(round?.panels.guardian.links[0]?.plans[0]?.approvedAt).toBe(approvedAt);
+    expect(round?.panels.guardian.links[0]?.acks?.[0]?.approvedAt).toBe(approvedAt);
   });
 
   it('never enables the guardian panel without a kind', () => {
@@ -122,6 +165,100 @@ describe('panel merge', () => {
     const a = stateWith(withSubject(base, subject('s1', 'History')));
     const b = stateWith(withSubject(base, subject('s1', 'History')));
     expect(mergePanels(a.panels, b.panels).student.subjects).toHaveLength(1);
+  });
+
+  it('syncs learning data while keeping filed days and approvals immutable', () => {
+    const base = createEmptyState().panels;
+    const linkId = '12345678-1234-1234-1234-123456789abc';
+    const date = '2026-10-12';
+    const submittedAt = `${date}T18:00:00.000Z`;
+    const approvedAt = `${date}T20:00:00.000Z`;
+    const plan: GuardianPlan = {
+      id: 'plan-one', author: 'Parent', linkId, cadence: 'week', start: date, title: 'Week', note: '',
+      items: [{ id: 'lesson-one', title: 'Maths', date, time: null, minutes: null, subject: null, url: null, done: true }],
+      createdAt: `${date}T08:00:00.000Z`, updatedAt: `${date}T19:00:00.000Z`,
+    };
+    const report: DayReport = {
+      id: 'report-one', planId: plan.id, linkId, date, doneIds: [], note: 'Not finished.',
+      createdAt: `${date}T19:30:00.000Z`, updatedAt: `${date}T19:30:00.000Z`,
+    };
+    const pendingAck: ReportAck = {
+      id: 'ack-one', reportId: report.id, planId: plan.id, linkId, date, text: 'Seen', reactions: [],
+      approvedAt: null, createdAt: approvedAt,
+    };
+    const approvedAck: ReportAck = { ...pendingAck, approvedAt };
+    const classOne: ClassAssignment = {
+      id: 'class-one', linkId, author: 'Parent', title: 'Algebra', subject: 'Math', description: '',
+      videoUrl: 'https://video.example/algebra', createdAt: `${date}T08:00:00.000Z`,
+    };
+    const classTwo: ClassAssignment = { ...classOne, id: 'class-two', title: 'Geometry' };
+    const homeworkOne: HomeworkAssignment = {
+      id: 'homework-one', linkId, author: 'Parent', title: 'Exercise 1', instructions: '', subject: 'Math',
+      dueAt: null, createdAt: `${date}T08:00:00.000Z`,
+    };
+    const homeworkTwo: HomeworkAssignment = { ...homeworkOne, id: 'homework-two', title: 'Exercise 2' };
+    const photo: HomeworkPhoto = {
+      url: 'https://res.cloudinary.com/demo/raw/upload/v123/file.bin',
+      publicId: `planner-homework/${linkId}/abcdef0123456789abcdef01`, name: 'work.jpg', mime: 'image/jpeg', bytes: 100,
+    };
+    const pending: HomeworkSubmission = {
+      id: 'submission-one', assignmentId: homeworkOne.id, linkId, photos: [photo], submittedAt,
+      status: 'submitted', guardianNote: '', reviewedAt: null,
+    };
+    const approved: HomeworkSubmission = {
+      ...pending, status: 'approved', photos: [], guardianNote: 'Good work.', reviewedAt: approvedAt,
+    };
+    const review: HomeworkReview = {
+      id: 'review-one', assignmentId: homeworkOne.id, submissionId: pending.id, linkId, note: 'Good work.', approvedAt,
+    };
+    const oldProgress: ClassProgress = { classId: classOne.id, linkId, completedAt: null, updatedAt: `${date}T18:00:00.000Z` };
+    const newProgress: ClassProgress = { ...oldProgress, completedAt: approvedAt, updatedAt: approvedAt };
+    const localLink = {
+      id: 'local-link-one', username: 'student', displayName: 'Student', status: 'linked' as const, history: [], linkId,
+      code: null, wrappedShareKey: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=', results: null,
+      plans: [plan], reports: [], acks: [pendingAck], classes: [classOne], homework: [homeworkOne],
+      classProgress: [oldProgress], homeworkSubmissions: [pending], homeworkReviews: [],
+    };
+    const remoteLink = {
+      ...localLink, reports: [report], acks: [approvedAck], classes: [classTwo], homework: [homeworkTwo],
+      classProgress: [newProgress], homeworkSubmissions: [approved], homeworkReviews: [review],
+    };
+    const local: Panels = {
+      ...base,
+      student: {
+        ...base.student, enabled: true,
+        inbox: { ...base.student.inbox, plans: [plan], classes: [classOne], homework: [homeworkOne] },
+        reports: [], acks: [pendingAck], classProgress: [oldProgress], homeworkSubmissions: [pending],
+      },
+      guardian: { ...base.guardian, enabled: true, kind: 'parent', links: [localLink] },
+    };
+    const remote: Panels = {
+      ...base,
+      student: {
+        ...base.student, enabled: true,
+        inbox: { ...base.student.inbox, plans: [{ ...plan, items: [{ ...plan.items[0]!, done: false }] }], classes: [classTwo], homework: [homeworkTwo] },
+        reports: [report], acks: [approvedAck], classProgress: [newProgress], homeworkSubmissions: [approved],
+      },
+      guardian: { ...base.guardian, enabled: true, kind: 'parent', links: [remoteLink] },
+    };
+
+    const merged = mergePanels(local, remote);
+    expect(merged.student.reports).toHaveLength(1);
+    expect(merged.student.acks?.[0]?.approvedAt).toBe(approvedAt);
+    expect(merged.student.inbox.plans[0]?.items[0]?.done).toBe(false);
+    expect(merged.student.inbox.classes?.map((item) => item.id).sort()).toEqual(['class-one', 'class-two']);
+    expect(merged.student.inbox.homework?.map((item) => item.id).sort()).toEqual(['homework-one', 'homework-two']);
+    expect(merged.student.classProgress?.[0]?.completedAt).toBe(approvedAt);
+    expect(merged.student.homeworkSubmissions?.[0]).toMatchObject({ status: 'approved', photos: [], guardianNote: 'Good work.' });
+    const mergedLink = merged.guardian.links[0]!;
+    expect(mergedLink.reports).toHaveLength(1);
+    expect(mergedLink.acks?.[0]?.approvedAt).toBe(approvedAt);
+    expect(mergedLink.plans[0]?.items[0]?.done).toBe(false);
+    expect(mergedLink.classes?.map((item) => item.id).sort()).toEqual(['class-one', 'class-two']);
+    expect(mergedLink.homework?.map((item) => item.id).sort()).toEqual(['homework-one', 'homework-two']);
+    expect(mergedLink.classProgress?.[0]?.completedAt).toBe(approvedAt);
+    expect(mergedLink.homeworkSubmissions?.[0]).toMatchObject({ status: 'approved', photos: [], guardianNote: 'Good work.' });
+    expect(mergedLink.homeworkReviews?.[0]?.approvedAt).toBe(approvedAt);
   });
 });
 
