@@ -16,14 +16,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
 import {
-  BellIcon,
   BookIcon,
   CalendarIcon,
   CheckIcon,
   FlagIcon,
   FlameIcon,
   HeartIcon,
-  HomeIcon,
+  HorizonIcon,
   PrinterIcon,
   SlidersIcon,
   SparkIcon,
@@ -104,6 +103,7 @@ export function StudentPanelView() {
   const [askNote, setAskNote] = useState('');
   const [askSending, setAskSending] = useState(false);
   const [repairingLock, setRepairingLock] = useState<string | null>(null);
+  const [reportsOpen, setReportsOpen] = useState(false);
   const [studyPrefill, setStudyPrefill] = useState<StudentSubject | null>(null);
   const openAsks = useMemo(() => openRequests(panels.student.requests ?? [], todayISO()), [panels.student.requests]);
 
@@ -267,8 +267,7 @@ export function StudentPanelView() {
   const inbox = panels.student.inbox;
   const openGoals = openGoalSuggestions(panels);
   const unreadInbox = inbox.notices.filter((notice) => !notice.read).length;
-  // Finished planned days with no report — while any exist, the panel gives way
-  // to the lock screen, oldest day first.
+  // A report is a request, never a condition for using the student panel.
   const missingDays = useMemo(
     () => missingReportDays(inbox.plans, panels.student.reports ?? [], todayISO()),
     [inbox.plans, panels.student.reports],
@@ -298,13 +297,13 @@ export function StudentPanelView() {
     downloadBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), `week-plan-${plan.id}.html`);
   };
 
-  const askForPlan = async () => {
+  const askForPlan = async (changeNote?: string, linkId?: string) => {
     if (askSending) return;
-    const targets = panels.student.guardians.filter((guardian) => guardian.linkId);
+    const targets = panels.student.guardians.filter((guardian) => guardian.linkId && (!linkId || guardian.linkId === linkId));
     if (targets.length === 0) return;
     setAskSending(true);
     const now = new Date().toISOString();
-    const note = askNote.trim().slice(0, 140);
+    const note = (changeNote ?? askNote).trim().slice(0, 140);
     const next = {
       ...panels,
       student: {
@@ -365,9 +364,9 @@ export function StudentPanelView() {
     try {
       const synced = await syncStudentInbox(next, state.goals);
       updatePanels((latest) => (latest === next ? synced.panels : latest));
-      flash(cleared ? t('All caught up — your student panel is open again.') : t('Streak kept.'));
+      flash(cleared ? t('All caught up — thanks for checking in.') : t('Streak kept.'));
     } catch {
-      flash(cleared ? t('All caught up — your student panel is open again.') : t('Saved — it will send on the next sync.'));
+      flash(cleared ? t('All caught up — thanks for checking in.') : t('Saved — it will send on the next sync.'));
     }
   };
 
@@ -450,58 +449,6 @@ export function StudentPanelView() {
     );
   }
 
-  if (missingDays.length > 0) {
-    return (
-      <div className="view panels-view student-panel-view">
-        <header className="view-head panel-page-head">
-          <div>
-            <p className="kicker panel-page-kicker"><StudyIcon size={16} />{t("Student panel")}<span>{formatWeekRange(week)}</span></p>
-            <h1 className="view-title">{t("This week, and what’s coming")}</h1>
-          </div>
-          <div className="panel-page-actions">
-            <button type="button" className="btn btn-ghost btn-small" onClick={() => navigate({ name: 'home' })}><HomeIcon size={14} />{t("Switch panel")}</button>
-            <button type="button" className="btn btn-ghost btn-small" onClick={() => navigate({ name: 'panels' })}><SlidersIcon size={14} />{t("Manage panels")}</button>
-          </div>
-        </header>
-
-        <section className="card week-lock-card" aria-label={t("Your student panel is paused")}>
-          <p className="week-lock-icon"><BellIcon size={20} /></p>
-          <h2 className="card-title">{t("Your student panel is paused")}</h2>
-          <p className="view-sub">{t("Send the missing daily reports to continue. The days are listed below.")}</p>
-        </section>
-        {missingDays.map((day) => (
-          <section key={`${day.plan.id}-${day.date}`} className="card" aria-label={`${day.plan.title} · ${formatFullDate(day.date)}`}>
-            <header className="card-head">
-              <div>
-                <p className="kicker">{day.plan.title}</p>
-                <h2 className="card-title">{formatFullDate(day.date)}</h2>
-              </div>
-            </header>
-            <DayReportForm plan={day.plan} date={day.date} lessons={day.lessons} onDone={() => undefined} />
-            {!repairUsed(panels.student.reports ?? [], day.plan.id) &&
-            repairingLock !== `${day.plan.id}-${day.date}` ? (
-              <button
-                type="button"
-                className="btn btn-ghost btn-small"
-                onClick={() => setRepairingLock(`${day.plan.id}-${day.date}`)}
-              >
-                {t('Keep my streak')}
-              </button>
-            ) : null}
-            {repairingLock === `${day.plan.id}-${day.date}` ? (
-              <StreakRepairForm
-                onSave={(reason) =>
-                  repairDay(day.plan.id, day.date, reason).then(() => setRepairingLock(null))
-                }
-                onCancel={() => setRepairingLock(null)}
-              />
-            ) : null}
-          </section>
-        ))}
-      </div>
-    );
-  }
-
   const weekPlans = inbox.plans.filter((plan) => plan.cadence === 'week');
   const shortPlans = inbox.plans.filter((plan) => plan.cadence !== 'week');
 
@@ -512,7 +459,7 @@ export function StudentPanelView() {
           <p className="kicker panel-page-kicker"><StudyIcon size={16} />{t("Student panel")}<span>{formatWeekRange(week)}</span></p>
           <h1 className="view-title">{t("This week, and what’s coming")}</h1>
           <p className="view-sub">
-            {t("Your planner is underneath all of this — the panel only adds a study view.")}
+            {t("Subjects, exams and this week’s focus")}
           </p>
         </div>
         <div className="panel-page-actions">
@@ -520,7 +467,7 @@ export function StudentPanelView() {
             setDetails({ field: panels.student.field ?? '', grade: panels.student.grade ?? '' });
             setEditing((value) => !value);
           }}>{editing ? t("Cancel") : t("Change details")}</button>
-          <button type="button" className="btn btn-ghost btn-small" onClick={() => navigate({ name: 'home' })}><HomeIcon size={14} />{t("Switch panel")}</button>
+          <button type="button" className="btn btn-ghost btn-small" onClick={() => navigate({ name: 'home' })}><HorizonIcon size={14} />{t("Switch panel")}</button>
           <button type="button" className="btn btn-ghost btn-small" onClick={() => navigate({ name: 'panels' })}><SlidersIcon size={14} />{t("Manage panels")}</button>
         </div>
       </header>
@@ -576,6 +523,50 @@ export function StudentPanelView() {
           {panels.student.grade ? <span>{gradeLabel(panels.student.grade)}</span> : null}
         </p>
       )}
+
+      {missingDays.length > 0 ? (
+        <section className="card week-report-reminder" aria-label={t('Daily reports to send')}>
+          <div className="week-report-reminder-head">
+            <div>
+              <h2 className="card-title">{t('Daily reports to send')} · {faNum(missingDays.length)}</h2>
+              <p className="view-sub">{t('You can keep using your panel. Share these days when you are ready.')}</p>
+            </div>
+            <button type="button" className="btn btn-outline btn-small" aria-expanded={reportsOpen} onClick={() => setReportsOpen((open) => !open)}>
+              {reportsOpen ? t('Hide reports') : t('Review reports')}
+            </button>
+          </div>
+          {reportsOpen ? (
+            <div className="week-report-reminder-days">
+              {missingDays.map((day) => (
+                <section key={`${day.plan.id}-${day.date}`} className="card" aria-label={`${day.plan.title} · ${formatFullDate(day.date)}`}>
+                  <header className="card-head">
+                    <div>
+                      <p className="kicker">{day.plan.title}</p>
+                      <h2 className="card-title">{formatFullDate(day.date)}</h2>
+                    </div>
+                  </header>
+                  <DayReportForm plan={day.plan} date={day.date} lessons={day.lessons} onDone={() => undefined} />
+                  {!repairUsed(panels.student.reports ?? [], day.plan.id) && repairingLock !== `${day.plan.id}-${day.date}` ? (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-small"
+                      onClick={() => setRepairingLock(`${day.plan.id}-${day.date}`)}
+                    >
+                      {t('Keep my streak')}
+                    </button>
+                  ) : null}
+                  {repairingLock === `${day.plan.id}-${day.date}` ? (
+                    <StreakRepairForm
+                      onSave={(reason) => repairDay(day.plan.id, day.date, reason).then(() => setRepairingLock(null))}
+                      onCancel={() => setRepairingLock(null)}
+                    />
+                  ) : null}
+                </section>
+              ))}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       <PanelTabs id={TAB_ID} label={t('Student panel')} tabs={tabs} active={tab} onChange={setTab} />
 
@@ -729,6 +720,7 @@ export function StudentPanelView() {
                   </p>
                 ) : null}
 
+                {weekPlans.length > 0 ? <p className="hint">{t('A suggested plan. You can move unfinished lessons or ask for changes.')}</p> : null}
                 {weekPlans.map((plan) => (
                   <WeekPlanCard
                     key={plan.id}
@@ -743,6 +735,16 @@ export function StudentPanelView() {
                     onReportDay={(date) => setReporting(date ? { planId: plan.id, date } : null)}
                     actions={
                       <>
+                        {openAsks.length === 0 && panels.student.guardians.some((guardian) => guardian.linkId === plan.linkId) ? (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-small"
+                            disabled={askSending}
+                            onClick={() => void askForPlan(t('Could we adjust the plan for {0}?', { 0: plan.title }), plan.linkId)}
+                          >
+                            {t('Request a change')}
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           className="icon-btn round"

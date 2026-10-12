@@ -225,7 +225,7 @@ export function WeekPlanComposer({ link, onClose }: { link: GuardianLink; onClos
     >
       <fieldset disabled={sending}>
         <legend className="chart-title">{t('Plan lessons')}</legend>
-        <p className="hint">{t('They report each planned day back. A missing report pauses their panel until it arrives.')}</p>
+        <p className="hint">{t('They can share daily reports when ready. A missing report never blocks their panel.')}</p>
         <Field label={t('What is this plan?')}>
           <input
             className="input"

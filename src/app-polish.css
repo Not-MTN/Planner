@@ -1141,3 +1141,10 @@
     font-weight: 600;
   }
 }
+
+/* The panel picker and optional panels are independent workspaces. Neither
+   inherits the personal planner's sidebar, mobile toolbar or bottom tabs. */
+@media (min-width: 768px) {
+  .app-shell--standalone { grid-template-columns: minmax(0, 1fr); }
+}
+.app-shell--standalone .content { padding-bottom: 48px; }

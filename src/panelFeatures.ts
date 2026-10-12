@@ -2,7 +2,7 @@
 import { addDays, isValidISODate, todayISO } from './dates';
 import { t } from './i18n';
 import { daysUntil, newId, planEnd, weekOf, withSubject } from './panels';
-import type { GuardianLink, PlanCadence, PlannerState, StudentSubject, Task } from './types';
+import type { GuardianLink, GuardianNotice, PlanCadence, PlannerState, StudentSubject, Task } from './types';
 
 export const SUBJECT_LIMIT = 40;
 export const PLAN_STEP_LIMIT = 40;
@@ -96,7 +96,7 @@ export function saveStudentSubject(
 
 export type GuardianResultStatus = 'pending' | 'awaiting' | 'current' | 'older';
 export type RosterFilter = 'all' | 'current' | 'waiting' | 'older';
-export type RosterSort = 'name' | 'updated';
+export type RosterSort = 'attention' | 'name' | 'updated';
 
 /** Freshness is a fact, not a judgement about the student's performance. */
 export function guardianResultStatus(link: GuardianLink, today = todayISO()): GuardianResultStatus {
@@ -121,12 +121,41 @@ export function guardianStatusLabel(status: GuardianResultStatus): string {
   }
 }
 
+/** A small, local priority for the guardian's next *available* action.
+ * Neither weekly totals nor a student's performance determine urgency. */
+export type GuardianNextAction = 'request' | 'unread' | 'expired' | 'expiring' | 'pending' | 'awaiting' | 'older' | 'current';
+
+export function guardianNextAction(
+  link: GuardianLink,
+  notices: GuardianNotice[] = [],
+  today = todayISO(),
+  now = Date.now(),
+): GuardianNextAction {
+  if (link.status === 'pending') {
+    const expiry = link.expiresAt ? Date.parse(link.expiresAt) : NaN;
+    if (Number.isFinite(expiry) && expiry <= now) return 'expired';
+    if (Number.isFinite(expiry) && expiry - now <= 2 * 86_400_000) return 'expiring';
+    return 'pending';
+  }
+  const unread = notices.filter((notice) => !notice.read && notice.student === link.username);
+  if (unread.some((notice) => notice.kind === 'request')) return 'request';
+  if (unread.length) return 'unread';
+  return guardianResultStatus(link, today);
+}
+
+const ACTION_ORDER: Record<GuardianNextAction, number> = {
+  request: 0, unread: 1, expired: 2, expiring: 3,
+  older: 4, awaiting: 5, pending: 6, current: 7,
+};
+
 export function filterGuardianLinks(
   links: GuardianLink[],
   query: string,
   filter: RosterFilter,
   sort: RosterSort,
   today = todayISO(),
+  notices: GuardianNotice[] = [],
+  now = Date.now(),
 ): GuardianLink[] {
   const search = query.trim().replace(/^@/, '').toLowerCase();
   return links
@@ -138,6 +167,10 @@ export function filterGuardianLinks(
       );
     })
     .sort((a, b) => {
+      if (sort === 'attention') {
+        const order = ACTION_ORDER[guardianNextAction(a, notices, today, now)] - ACTION_ORDER[guardianNextAction(b, notices, today, now)];
+        if (order) return order;
+      }
       if (sort === 'updated') {
         const order = (b.results?.updatedAt ?? '').localeCompare(a.results?.updatedAt ?? '');
         if (order) return order;
