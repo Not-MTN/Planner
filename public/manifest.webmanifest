@@ -4,7 +4,7 @@
   "lang": "en",
   "dir": "ltr",
   "description": "A calm, local-first planner for your day, habits, and goals.",
-  "start_url": "/app#/today",
+  "start_url": "/app#/home",
   "display": "standalone",
   "background_color": "#f5f0e7",
   "theme_color": "#f5f0e7",

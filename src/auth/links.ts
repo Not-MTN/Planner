@@ -29,10 +29,11 @@ import {
   wrapKey,
 } from './crypto';
 import { AuthError, getActiveSession, request } from './session';
-import { newId, weekOf, weekResults, withGoalAnswer, withLinkGoal, withLinkPlan, withoutLinkGoal, withoutLinkPlan } from '../panels';
+import { newId, weekOf, weekResults, withGoalAnswer, withLinkAck, withLinkGoal, withLinkPlan, withoutLinkGoal, withoutLinkPlan, withoutQueuedPlan } from '../panels';
 import { t } from '../i18n';
-import { GOAL_ANSWERS_KEPT, GOAL_STEPS_MAX, PANEL_GOALS_KEPT, PRAISE_KEPT } from '../types';
-import type { Goal, GoalAnswer, GoalSuggestion, GuardianLink, GuardianNotice, GuardianPlan, Panels, PlanItem, PlannerState, StudentGuardian, WeekResults, WeekSubjectMinutes } from '../types';
+import { mergeAcks, mergeLinkReports, normalizeLessonUrl, openRequests, requestNotice } from '../weekPlans';
+import { ACK_REACTIONS, ACK_TEXT_MAX, DAY_REPORT_NOTE_MAX, DAY_REPORTS_WIRE, GOAL_ANSWERS_KEPT, GOAL_STEPS_MAX, PANEL_GOALS_KEPT, PLAN_REQUESTS_WIRE, PRAISE_KEPT } from '../types';
+import type { DayReport, Goal, GoalAnswer, GoalSuggestion, GuardianLink, GuardianNotice, GuardianPlan, Panels, PlanDraft, PlanItem, PlanRequest, PlannerState, ReportAck, StudentGuardian, WeekResults, WeekSubjectMinutes } from '../types';
 /** Matches the cap in storage.ts, so the vault and the view agree. */
 const WEEKS_KEPT = 12;
 import type { AcceptLinkResponse, LinksResponse, OutgoingLink, ShareResponse } from '../shared/authContract';
@@ -184,8 +185,9 @@ interface PlanTick {
  * Each link owns two encrypted slots the server can never read:
  *
  *   note_to_student — the guardian's outbox: notices and plans for the student
- *   note_to_guardian — the student's outbox: plan ticks, plus whatever the
- *                      other guardians said, so the adults stay in step
+ *   note_to_guardian — the student's outbox: plan ticks, daily reports,
+ *                      plus whatever the other guardians said, so the adults
+ *                      stay in step
  *
  * Both writers send full state rather than one-shot messages, so nothing is
  * lost to a well-timed overwrite — a reader who misses a poll simply catches
@@ -197,6 +199,8 @@ interface GuardianOutbox {
   plans: GuardianPlan[];
   /** Goals suggested to this student. Words only, until they say yes. */
   goals: GoalSuggestion[];
+  /** Answers to the student's daily reports, newest first. */
+  acks: ReportAck[];
 }
 
 interface StudentOutbox {
@@ -205,11 +209,18 @@ interface StudentOutbox {
   progress: PlanTick[];
   /** How the suggested goals were answered, and how far each has got. */
   answers: GoalAnswer[];
+  /** Daily reports for this guardian's week plans, newest first. */
+  reports: DayReport[];
+  /** Open asks for a week plan. */
+  requests: PlanRequest[];
 }
 
 const OUTBOX_PLANS = 5;
 const OUTBOX_NOTICES = 10;
-const PLAN_ITEMS_MAX = 40;
+/** A week holds seven days of lessons; sixty is eight a day with room to spare. */
+const PLAN_ITEMS_MAX = 60;
+/** Lesson times ride the wire as 24-hour HH:MM. */
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const OUTBOX_GOALS = 5;
 
 function wireNotice(value: unknown): Omit<GuardianNotice, 'read'> | null {
@@ -223,7 +234,8 @@ function wireNotice(value: unknown): Omit<GuardianNotice, 'read'> | null {
     summary: raw.summary.trim().slice(0, 160),
     weekOf: String(raw.weekOf ?? '').slice(0, 10),
     createdAt: String(raw.createdAt ?? new Date().toISOString()).slice(0, 40),
-    kind: raw.kind === 'praise' ? 'praise' : 'note',
+    kind:
+      raw.kind === 'praise' ? 'praise' : raw.kind === 'request' ? 'request' : raw.kind === 'nudge' ? 'nudge' : 'note',
   };
 }
 
@@ -242,8 +254,10 @@ function wirePlan(value: unknown): GuardianPlan | null {
         id: String(entry.id ?? '').slice(0, 80) || 'item',
         title: entry.title.trim().slice(0, 120),
         date: /^\d{4}-\d{2}-\d{2}$/.test(String(entry.date ?? '')) ? String(entry.date) : null,
+        time: TIME_RE.test(String(entry.time ?? '')) ? String(entry.time) : null,
         minutes: typeof entry.minutes === 'number' && Number.isFinite(entry.minutes) ? Math.max(0, Math.round(entry.minutes)) : null,
         subject: typeof entry.subject === 'string' && entry.subject.trim() ? entry.subject.trim().slice(0, 60) : null,
+        url: typeof entry.url === 'string' ? normalizeLessonUrl(entry.url) : null,
         done: entry.done === true,
       }];
     })
@@ -256,6 +270,9 @@ function wirePlan(value: unknown): GuardianPlan | null {
     start,
     title: String(raw.title ?? '').trim().slice(0, 120) || 'Plan',
     note: String(raw.note ?? '').trim().slice(0, 400),
+    field: typeof raw.field === 'string' && raw.field.trim() ? raw.field.trim().slice(0, 60) : null,
+    grade: typeof raw.grade === 'string' && raw.grade.trim() ? raw.grade.trim().slice(0, 60) : null,
+    restDays: [...new Set((Array.isArray(raw.restDays) ? raw.restDays : []).filter((day): day is number => Number.isInteger(day) && (day as number) >= 0 && (day as number) <= 6))].slice(0, 7),
     items,
     createdAt: String(raw.createdAt ?? new Date().toISOString()).slice(0, 40),
     updatedAt: String(raw.updatedAt ?? new Date().toISOString()).slice(0, 40),
@@ -302,6 +319,73 @@ function wireGoalAnswer(value: unknown): GoalAnswer | null {
   };
 }
 
+/** An answer to a daily report; malformed ones are dropped, never guessed at. */
+function wireReportAck(value: unknown): ReportAck | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = String(raw.id ?? '').slice(0, 80);
+  const reportId = String(raw.reportId ?? '').slice(0, 80);
+  const planId = String(raw.planId ?? '').slice(0, 80);
+  const date = String(raw.date ?? '');
+  if (!id || !reportId || !planId || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  return {
+    id,
+    reportId,
+    planId,
+    linkId: String(raw.linkId ?? '').slice(0, 64),
+    date,
+    text: typeof raw.text === 'string' ? raw.text.trim().slice(0, ACK_TEXT_MAX) : '',
+    reactions: sanitizeReactions(raw.reactions),
+    createdAt: String(raw.createdAt ?? new Date().toISOString()).slice(0, 40),
+  };
+}
+
+/** Only the offered emoji survive the wire, each once — eight is far more than three. */
+function sanitizeReactions(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const allowed = new Set<string>(ACK_REACTIONS);
+  return [...new Set(value.filter((entry): entry is string => typeof entry === 'string' && allowed.has(entry)))].slice(
+    0,
+    8,
+  );
+}
+
+/** An ask for a week plan; stale ones are filtered when the outbox is built, not here. */
+function wirePlanRequest(value: unknown): PlanRequest | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = String(raw.id ?? '').slice(0, 80);
+  if (!id) return null;
+  return {
+    id,
+    linkId: String(raw.linkId ?? '').slice(0, 64),
+    note: typeof raw.note === 'string' ? raw.note.trim().slice(0, 140) : '',
+    createdAt: String(raw.createdAt ?? new Date().toISOString()).slice(0, 40),
+  };
+}
+
+/** A student's report for one planned day; a malformed one is dropped, never guessed at. */
+function wireDayReport(value: unknown): DayReport | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = String(raw.id ?? '').slice(0, 80);
+  const planId = String(raw.planId ?? '').slice(0, 80);
+  const linkId = String(raw.linkId ?? '').slice(0, 64);
+  const date = String(raw.date ?? '');
+  if (!id || !planId || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  return {
+    id,
+    planId,
+    linkId,
+    date,
+    doneIds: (Array.isArray(raw.doneIds) ? raw.doneIds : []).filter((entry): entry is string => typeof entry === 'string').slice(0, PLAN_ITEMS_MAX),
+    note: typeof raw.note === 'string' ? raw.note.trim().slice(0, DAY_REPORT_NOTE_MAX) : '',
+    repair: raw.repair === true,
+    createdAt: String(raw.createdAt ?? new Date().toISOString()).slice(0, 40),
+    updatedAt: String(raw.updatedAt ?? new Date().toISOString()).slice(0, 40),
+  };
+}
+
 /**
  * `outgoing` reads what this account put out there rather than what it was
  * sent. Needed before writing: the two are different slots, and adding to the
@@ -330,7 +414,7 @@ async function writeSlot(linkId: string, wrappedShareKey: string, dek: CryptoKey
 }
 
 /** The guardian's outbox for one link; a legacy single note folds in as one notice. */
-function asGuardianOutbox(payload: unknown): { notices: Array<Omit<GuardianNotice, 'read'>>; plans: GuardianPlan[]; goals: GoalSuggestion[] } {
+function asGuardianOutbox(payload: unknown): { notices: Array<Omit<GuardianNotice, 'read'>>; plans: GuardianPlan[]; goals: GoalSuggestion[]; acks: ReportAck[] } {
   const raw = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
   const legacy = wireNotice(payload);
   const notices = [
@@ -343,11 +427,14 @@ function asGuardianOutbox(payload: unknown): { notices: Array<Omit<GuardianNotic
   const goals = (Array.isArray(raw.goals) ? raw.goals : [])
     .flatMap((item) => (wireGoalSuggestion(item) ? [wireGoalSuggestion(item)!] : []))
     .slice(0, OUTBOX_GOALS);
-  return { notices, plans, goals };
+  const acks = (Array.isArray(raw.acks) ? raw.acks : [])
+    .flatMap((item) => (wireReportAck(item) ? [wireReportAck(item)!] : []))
+    .slice(0, DAY_REPORTS_WIRE);
+  return { notices, plans, goals, acks };
 }
 
 /** The student's outbox for one link; a legacy relayed note folds in too. */
-function asStudentOutbox(payload: unknown): { relayed: Array<Omit<GuardianNotice, 'read'>>; progress: PlanTick[]; answers: GoalAnswer[] } {
+function asStudentOutbox(payload: unknown): { relayed: Array<Omit<GuardianNotice, 'read'>>; progress: PlanTick[]; answers: GoalAnswer[]; reports: DayReport[]; requests: PlanRequest[] } {
   const raw = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
   const legacy = wireNotice(payload);
   const relayed = [
@@ -369,7 +456,13 @@ function asStudentOutbox(payload: unknown): { relayed: Array<Omit<GuardianNotice
   const answers = (Array.isArray(raw.answers) ? raw.answers : [])
     .flatMap((item) => (wireGoalAnswer(item) ? [wireGoalAnswer(item)!] : []))
     .slice(0, OUTBOX_GOALS);
-  return { relayed, progress, answers };
+  const reports = (Array.isArray(raw.reports) ? raw.reports : [])
+    .flatMap((item) => (wireDayReport(item) ? [wireDayReport(item)!] : []))
+    .slice(0, DAY_REPORTS_WIRE);
+  const requests = (Array.isArray(raw.requests) ? raw.requests : [])
+    .flatMap((item) => (wirePlanRequest(item) ? [wirePlanRequest(item)!] : []))
+    .slice(0, PLAN_REQUESTS_WIRE);
+  return { relayed, progress, answers, reports, requests };
 }
 
 /**
@@ -392,11 +485,25 @@ export async function postPraise(panels: Panels, linkId: string, summary: string
   return postToStudent(panels, linkId, summary, 'praise');
 }
 
+/**
+ * Guardian: nudge about missing daily reports. The words are fixed — a nudge
+ * sent in frustration should still read kindly on arrival — and the view
+ * allows one a day (see `nudgedToday`). Same channel as any other notice.
+ */
+export async function postNudge(panels: Panels, linkId: string): Promise<Panels> {
+  return postToStudent(
+    panels,
+    linkId,
+    t('A gentle nudge — your daily reports are still missing. How is it going?'),
+    'nudge',
+  );
+}
+
 async function postToStudent(
   panels: Panels,
   linkId: string,
   summary: string,
-  kind: 'note' | 'praise',
+  kind: 'note' | 'praise' | 'nudge',
 ): Promise<Panels> {
   const session = await requireSession();
   const link = panels.guardian.links.find((item) => item.linkId === linkId);
@@ -405,7 +512,7 @@ async function postToStudent(
   if (!text) return panels;
 
   const note = {
-    id: newId(kind === 'praise' ? 'praise' : 'note'),
+    id: newId(kind === 'praise' ? 'praise' : kind === 'nudge' ? 'nudge' : 'note'),
     student: link.username,
     author: session.user.displayName || session.user.username,
     summary: text,
@@ -414,12 +521,13 @@ async function postToStudent(
     kind,
   };
   // Full-state write: whatever plans and goals are already out there must survive.
-  let outbox: GuardianOutbox = { v: 3, notices: [note], plans: [], goals: [] };
+  let outbox: GuardianOutbox = { v: 3, notices: [note], plans: [], goals: [], acks: [] };
   try {
     const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
     outbox = {
       v: 3,
       notices: [note, ...current.notices.filter((item) => item.id !== note.id)].slice(0, OUTBOX_NOTICES),
+      acks: current.acks,
       plans: current.plans,
       goals: current.goals,
     };
@@ -430,15 +538,6 @@ async function postToStudent(
   // The author sees their own words straight away, marked as read.
   const notice: GuardianNotice = { ...note, read: true };
   return { ...panels, guardian: { ...panels.guardian, notices: [notice, ...panels.guardian.notices].slice(0, 20) } };
-}
-
-export interface PlanDraft {
-  cadence: GuardianPlan['cadence'];
-  /** First day the plan covers (ISO). */
-  start: string;
-  title: string;
-  note: string;
-  items: Array<Pick<PlanItem, 'title' | 'date' | 'minutes' | 'subject'>>;
 }
 
 /**
@@ -459,25 +558,31 @@ export async function sendPlan(panels: Panels, linkId: string, draft: PlanDraft)
     start: draft.start,
     title: draft.title.trim().slice(0, 120) || t('Plan'),
     note: draft.note.trim().slice(0, 400),
+    field: draft.field?.trim() ? draft.field.trim().slice(0, 60) : null,
+    grade: draft.grade?.trim() ? draft.grade.trim().slice(0, 20) : null,
+    restDays: [...new Set((draft.restDays ?? []).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))].slice(0, 7),
     items: draft.items.slice(0, PLAN_ITEMS_MAX).map((item) => ({
       id: newId('item'),
       title: item.title.trim().slice(0, 120),
       date: item.date ?? null,
+      time: item.time && TIME_RE.test(item.time) ? item.time : null,
       minutes: item.minutes,
       subject: item.subject?.trim() ? item.subject.trim().slice(0, 60) : null,
+      url: item.url ? normalizeLessonUrl(item.url) : null,
       done: false,
     })),
     createdAt: now,
     updatedAt: now,
   };
 
-  let outbox: GuardianOutbox = { v: 3, notices: [], plans: [plan], goals: [] };
+  let outbox: GuardianOutbox = { v: 3, notices: [], plans: [plan], goals: [], acks: [] };
   try {
     const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
     outbox = {
       v: 3,
       notices: current.notices,
       plans: [plan, ...current.plans.filter((item) => item.id !== plan.id)].slice(0, OUTBOX_PLANS),
+      acks: current.acks,
       goals: current.goals,
     };
   } catch {
@@ -485,6 +590,33 @@ export async function sendPlan(panels: Panels, linkId: string, draft: PlanDraft)
   }
   await writeSlot(linkId, link.wrappedShareKey, session.dek, outbox);
   return withLinkPlan(panels, linkId, plan);
+}
+
+let planQueueFlushing = false;
+
+/**
+ * Guardian: send what is waiting, oldest first. One at a time, stopping at
+ * the first failure so a dead link cannot eat the plans behind it — and never
+ * attempted without a signal. Re-entry returns the panels untouched.
+ */
+export async function flushPlanQueue(panels: Panels): Promise<Panels> {
+  const waiting = panels.guardian.queuedPlans ?? [];
+  if (waiting.length === 0 || planQueueFlushing) return panels;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return panels;
+  planQueueFlushing = true;
+  try {
+    let current = panels;
+    for (const queued of waiting) {
+      try {
+        current = withoutQueuedPlan(await sendPlan(current, queued.linkId, queued.draft), queued.id);
+      } catch {
+        break;
+      }
+    }
+    return current;
+  } finally {
+    planQueueFlushing = false;
+  }
 }
 
 export interface GoalDraft {
@@ -522,7 +654,7 @@ export async function sendGoal(panels: Panels, linkId: string, draft: GoalDraft)
     createdAt: new Date().toISOString(),
   };
 
-  let outbox: GuardianOutbox = { v: 3, notices: [], plans: [], goals: [goal] };
+  let outbox: GuardianOutbox = { v: 3, notices: [], plans: [], goals: [goal], acks: [] };
   try {
     const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
     outbox = {
@@ -530,6 +662,7 @@ export async function sendGoal(panels: Panels, linkId: string, draft: GoalDraft)
       notices: current.notices,
       plans: current.plans,
       goals: [goal, ...current.goals.filter((item) => item.id !== goal.id)].slice(0, OUTBOX_GOALS),
+      acks: current.acks,
     };
   } catch {
     /* first write */
@@ -554,6 +687,7 @@ export async function dropGoal(panels: Panels, linkId: string, goalId: string): 
       notices: current.notices,
       plans: current.plans,
       goals: current.goals.filter((item) => item.id !== goalId),
+      acks: current.acks,
     } satisfies GuardianOutbox);
   } catch {
     /* dropping locally is still the right outcome */
@@ -572,12 +706,55 @@ export async function dropPlan(panels: Panels, linkId: string, planId: string): 
       v: 3,
       notices: current.notices,
       plans: current.plans.filter((item) => item.id !== planId),
+      acks: current.acks,
       goals: current.goals,
     } satisfies GuardianOutbox);
   } catch {
     /* dropping locally is still the right outcome */
   }
   return withoutLinkPlan(panels, linkId, planId);
+}
+
+/**
+ * Guardian: answer a daily report — seen, with a line back when there is
+ * something to say. The report it points at stays exactly as the student
+ * filed it.
+ */
+export async function sendAck(
+  panels: Panels,
+  linkId: string,
+  draft: { reportId: string; planId: string; date: string; text: string; reactions?: string[]; id?: string },
+): Promise<Panels> {
+  const session = await requireSession();
+  const link = panels.guardian.links.find((item) => item.linkId === linkId);
+  if (!link?.wrappedShareKey) throw new LinkError('That link is not ready yet.');
+  const ack: ReportAck = {
+    // An id reuses the answer being changed, so a reaction lands on the reply
+    // instead of beside it; without one this is a new answer.
+    id: draft.id?.slice(0, 80) || newId('ack'),
+    reportId: draft.reportId.slice(0, 80),
+    planId: draft.planId.slice(0, 80),
+    linkId,
+    date: draft.date,
+    text: draft.text.trim().slice(0, ACK_TEXT_MAX),
+    reactions: sanitizeReactions(draft.reactions),
+    createdAt: new Date().toISOString(),
+  };
+  let outbox: GuardianOutbox = { v: 3, notices: [], plans: [], goals: [], acks: [ack] };
+  try {
+    const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
+    outbox = {
+      v: 3,
+      notices: current.notices,
+      plans: current.plans,
+      goals: current.goals,
+      acks: [ack, ...current.acks.filter((item) => item.id !== ack.id)].slice(0, DAY_REPORTS_WIRE),
+    };
+  } catch {
+    /* first write */
+  }
+  await writeSlot(linkId, link.wrappedShareKey, session.dek, outbox);
+  return withLinkAck(panels, linkId, ack);
 }
 
 /**
@@ -601,13 +778,14 @@ export async function syncStudentInbox(
 
   let notices = panels.student.inbox.notices;
   let plans = panels.student.inbox.plans;
+  let acks = panels.student.acks ?? [];
   let suggestions = panels.student.inbox.goals ?? [];
   let praise = panels.student.praise ?? [];
   let changed = false;
   const added: { notices: GuardianNotice[]; plans: GuardianPlan[]; goals: GoalSuggestion[] } = { notices: [], plans: [], goals: [] };
 
   for (const source of guardians) {
-    let outbox: { notices: Array<Omit<GuardianNotice, 'read'>>; plans: GuardianPlan[]; goals: GoalSuggestion[] };
+    let outbox: { notices: Array<Omit<GuardianNotice, 'read'>>; plans: GuardianPlan[]; goals: GoalSuggestion[]; acks: ReportAck[] };
     try {
       outbox = asGuardianOutbox(await readSlot(source.linkId, source.wrappedShareKey, session.dek));
     } catch {
@@ -662,6 +840,22 @@ export async function syncStudentInbox(
       suggestions = kept;
       changed = true;
     }
+    // A plan the guardian took back disappears too — the promise dropPlan
+    // makes, kept here where the student's panel actually listens.
+    const offeredPlans = new Set(outbox.plans.map((item) => item.id));
+    const keptPlans = plans.filter((item) => item.linkId !== source.linkId || offeredPlans.has(item.id));
+    if (keptPlans.length !== plans.length) {
+      plans = keptPlans;
+      changed = true;
+    }
+    // Answers to daily reports land beside the reports they answer.
+    if (outbox.acks.length > 0) {
+      const merged = mergeAcks(acks, outbox.acks.filter((entry) => entry.linkId === source.linkId));
+      if (JSON.stringify(merged) !== JSON.stringify(acks)) {
+        acks = merged;
+        changed = true;
+      }
+    }
   }
 
   notices = notices.slice(0, 20);
@@ -704,7 +898,15 @@ export async function syncStudentInbox(
         return remembered ? [remembered] : [];
       })
       .slice(0, GOAL_ANSWERS_KEPT);
-    const outbox: StudentOutbox = { v: 3, relayed: passed, progress, answers };
+    // Daily reports for this guardian's plans ride along — the newest first.
+    const reports = (panels.student.reports ?? [])
+      .filter((entry) => entry.linkId === target.linkId)
+      .slice(0, DAY_REPORTS_WIRE);
+    // Open asks for a week plan keep travelling until they go stale.
+    const requests = openRequests(panels.student.requests ?? [])
+      .filter((entry) => entry.linkId === target.linkId)
+      .slice(-PLAN_REQUESTS_WIRE);
+    const outbox: StudentOutbox = { v: 3, relayed: passed, progress, answers, reports, requests };
     try {
       await writeSlot(target.linkId, target.wrappedShareKey, session.dek, outbox);
       relayed += passed.length;
@@ -714,7 +916,7 @@ export async function syncStudentInbox(
   }
 
   return {
-    panels: { ...panels, student: { ...panels.student, inbox: { notices, plans, goals: suggestions }, praise } },
+    panels: { ...panels, student: { ...panels.student, inbox: { notices, plans, goals: suggestions }, praise, acks } },
     added,
     relayed,
     changed,
@@ -734,7 +936,7 @@ export async function readNotices(panels: Panels): Promise<{ panels: Panels; cha
     // Re-read each time: the loop updates the entry as answers land on it.
     let link = links[index]!;
     if (link.status !== 'linked' || !link.linkId || !link.wrappedShareKey) continue;
-    let outbox: { relayed: Array<Omit<GuardianNotice, 'read'>>; progress: PlanTick[]; answers: GoalAnswer[] };
+    let outbox: { relayed: Array<Omit<GuardianNotice, 'read'>>; progress: PlanTick[]; answers: GoalAnswer[]; reports: DayReport[]; requests: PlanRequest[] };
     try {
       outbox = asStudentOutbox(await readSlot(link.linkId, link.wrappedShareKey, session.dek));
     } catch {
@@ -744,6 +946,12 @@ export async function readNotices(panels: Panels): Promise<{ panels: Panels; cha
     for (const note of outbox.relayed) {
       if (!note.summary || known.has(note.id)) continue;
       found.push({ ...note, student: note.student || link.username, read: false });
+    }
+    for (const request of outbox.requests) {
+      if (request.linkId !== link.linkId) continue;
+      const notice = requestNotice(request, link.displayName, link.username);
+      if (known.has(notice.id)) continue;
+      found.push(notice);
     }
     // Ticks land back on the plans they belong to.
     if (outbox.progress.length > 0 && link.plans.length > 0) {
@@ -774,6 +982,15 @@ export async function readNotices(panels: Panels): Promise<{ panels: Panels; cha
       if (JSON.stringify(goalAnswers) !== JSON.stringify(link.goalAnswers ?? [])) {
         changed = true;
         links[index] = { ...link, goalAnswers };
+        link = links[index]!;
+      }
+    }
+    // Daily reports land on the link they were written for.
+    if (outbox.reports.length > 0) {
+      const merged = mergeLinkReports(link.reports ?? [], outbox.reports.filter((entry) => entry.linkId === link.linkId));
+      if (JSON.stringify(merged) !== JSON.stringify(link.reports ?? [])) {
+        changed = true;
+        links[index] = { ...link, reports: merged };
         link = links[index]!;
       }
     }

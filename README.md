@@ -174,7 +174,7 @@ If the first line says `text/html`, protection is on; if the second prints a 404
 
 ## Student and guardian panels
 
-Panels are optional additions to the personal planner. Open **Today → See the panels** (or **All panels** in the sidebar) to add a student panel, a guardian panel, or both. Each can be removed without deleting the personal planner.
+Opening the app — or signing in — shows your panels first: personal, student, guardian. Pick one and it opens; each panel has a **Switch panel** way back, and the **Home** entry in the sidebar, tablet rail, and More sheet returns any time. Panels are optional additions to the personal planner: add a student panel, a guardian panel, or both from **Manage panels** (or **All panels** in the sidebar), and remove either at any time without deleting the personal planner.
 
 ### Student workspace
 
@@ -182,17 +182,20 @@ Panels are optional additions to the personal planner. Open **Today → See the 
 - **Upcoming exams:** upcoming dates sorted nearest first, with one-click revision-task drafts. Past exams stay in the subject tracker.
 - **Editable subjects:** set exam dates and weekly study targets, see remaining focus time, and rename subjects without losing task completion or focus attribution. Matching task and event categories are renamed together, in one undoable change. Removing a tracker keeps its tasks and history.
 - **Sharing preview:** see the exact weekly snapshot a guardian receives before sharing it. Totals cover the personal planner's whole week, not only tracked study tasks.
+- **Week plans and daily reports:** a guardian's week plan arrives as seven day rows with lesson times. Tick lessons off, report each finished day back with an optional note — and if a planned day ends with no report, the student panel pauses (with a daily reminder) until the missing days are filed. Filing works offline; the report travels on the next sync.
+- **The week, answered:** guardians can mark rest days (no report asked), reply to daily reports with a seen or a line back, and watch the review line count reported days and streaks. Students can ask for a plan with a note, push an unfinished lesson to its quietest upcoming day, and print the week as a wall timetable. Focused study time counts toward the week's lessons in the review line, and one missed day a week can be kept with a short explanation instead of a report. Reports offer one-tap quick notes, and a lesson with a prep link opens it straight from the day row. Guardians answer with a seen, a line back, or a quick reaction tap, and the focus timer says when a session outgrows a lesson's planned minutes.
 
 ### Guardian workspace
 
 - **Student circle:** linked/current/waiting counts, searchable names and usernames, result freshness filters, and name/latest-update sorting. Pending invitations and linked students awaiting their first share are separate states.
 - **Compact roster:** expand one student to see weekly charts, focused-subject totals, AI-guided questions, shared notes, and sent-plan progress. A snapshot is current when its own seven-day period includes today, even when the student and guardian use different week starts.
+- **Lesson planner:** plan a week lesson by lesson, starting any day, with built-in lessons from the Iranian curriculum for math, science, and humanities (grades 10–12) one tap away. Lessons sort by time; the field and grade are remembered per student. Mark rest days, set the exam date to be warned about a heavy load just before it, answer daily reports with a seen or a reply, send a fixed-word nudge when reports go missing, and attach a prep link to any lesson. A plan sent without a signal waits in a queue and goes out on its own when the connection returns.
 - **Plan composer:** send an editable day/week/month suggestion, optionally starting with exam preparation or balanced study. Each step can have a subject, effort estimate, and date within the plan's period. Current-period starters begin today rather than assigning work to elapsed days. Steps and total effort are previewed before sending; a linked student can receive plans before their first results arrive.
 - **Supportive messages:** turn an AI question into an editable note for the student and their guardian circle. Messages and plans use the existing encrypted links, not email.
 
-**Privacy boundary:** weekly results contain planned/completed counts, focused minutes, up to four subject totals, and the student's latest chosen headline. Task details, private notes, exam dates, targets, and detailed reasons are not sent automatically. The sharing preview and UI copy follow that same boundary. Guardian suggestions never silently create or change personal tasks or calendar entries; students see them in their panel and tick off steps themselves.
+**Privacy boundary:** weekly results contain planned/completed counts, focused minutes, up to four subject totals, and the student's latest chosen headline. Task details, private notes, exam dates, targets, and detailed reasons are not sent automatically. The sharing preview and UI copy follow that same boundary. Guardian suggestions never silently create or change personal tasks or calendar entries; students see them in their panel and tick off steps themselves. Daily reports carry only the day's ticks and the note the student chose to write.
 
-Both workspaces support mobile layouts, light/dark themes, keyboard controls, and Persian/RTL. Existing backups need no new schema or migration. Automated coverage includes helper and UI tests (`src/panelFeatures*.test.*`), slow-sync regression tests, and desktop/mobile browser checks (`e2e/panels.spec.ts`).
+Both workspaces support mobile layouts, light/dark themes, keyboard controls, and Persian/RTL. Existing backups need no new schema or migration. Both sides can print a week plan — lessons, ticks, and reports — to paper or a file when the print dialog is unavailable. Automated coverage includes helper and UI tests (`src/panelFeatures*.test.*`, `src/weekPlans*`), slow-sync regression tests, and desktop/mobile browser checks (`e2e/panels.spec.ts`).
 
 ## Languages (English / suomi / فارسی)
 

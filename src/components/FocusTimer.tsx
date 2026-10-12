@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
+import { todayISO } from '../dates';
 import { CheckIcon, CloseIcon, StopwatchIcon } from '../icons';
 import { faDigits, faNum, t, tn } from '../i18n';
+import type { PlanItem } from '../types';
+import { crossedTimeboxes, focusMatchesLesson, itemsForDay } from '../weekPlans';
+import { minutesLabel } from './charts';
 
 const DURATIONS = [15, 25, 45, 60];
 
@@ -58,14 +62,33 @@ function FocusOverlay({ sessionId, title, initialMinutes }: { sessionId: string 
   const [total, setTotal] = useState(initialMinutes * 60);
   const endRef = useRef(0);
   const titleRef = useRef(document.title);
+  /** Time-boxes already nudged this round, by lesson id. */
+  const nudgeRef = useRef<Set<string>>(new Set());
+  const lessonsRef = useRef<PlanItem[]>([]);
 
   const task = sessionId ? state.tasks.find((item) => item.id === sessionId) : undefined;
+  const sessionTitle = task?.title ?? title;
+  // Today's inbox lessons this session belongs to, with a planned length each.
+  // Mirrored into a ref so the ticking interval never needs resetting.
+  lessonsRef.current = state.panels.student.inbox.plans.flatMap((plan) =>
+    itemsForDay(plan, todayISO()).filter(
+      (lesson) => (lesson.minutes ?? 0) > 0 && focusMatchesLesson(sessionTitle, lesson, task?.category ?? null),
+    ),
+  );
 
   useEffect(() => {
     if (phase !== 'running') return;
     const id = window.setInterval(() => {
       const left = Math.max(0, Math.round((endRef.current - Date.now()) / 1000));
       setRemaining(left);
+      if (mode === 'focus' && left > 0) {
+        const crossed = crossedTimeboxes(lessonsRef.current, total - left, nudgeRef.current);
+        const first = crossed[0];
+        if (first?.minutes) {
+          for (const lesson of crossed) nudgeRef.current.add(lesson.id);
+          flash(t('Wrapping up? {0} planned {1}.', { 0: first.title, 1: minutesLabel(first.minutes) }));
+        }
+      }
       if (left <= 0) {
         setPhase('done');
         chime();
@@ -80,7 +103,7 @@ function FocusOverlay({ sessionId, title, initialMinutes }: { sessionId: string 
       }
     }, 250);
     return () => window.clearInterval(id);
-  }, [phase, celebrate, mode, logFocus, sessionId, task?.title, title, total]);
+  }, [phase, celebrate, flash, mode, logFocus, sessionId, task?.title, title, total]);
 
   /** Ending early still counts the minutes you actually focused. */
   const end = () => {
@@ -122,6 +145,7 @@ function FocusOverlay({ sessionId, title, initialMinutes }: { sessionId: string 
     const seconds = minutes * 60;
     setMode('focus');
     loggedRef.current = false;
+    nudgeRef.current = new Set();
     setTotal(seconds);
     setRemaining(seconds);
     endRef.current = Date.now() + seconds * 1000;

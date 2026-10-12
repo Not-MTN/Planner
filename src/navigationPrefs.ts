@@ -18,7 +18,8 @@ export function loadNavigationPages(): NavigationPage[] {
     const raw = JSON.parse(localStorage.getItem(KEY) ?? 'null') as unknown;
     if (!Array.isArray(raw)) return [...DEFAULT_NAVIGATION_PAGES];
     const selected = validPages(raw);
-    // Today is the reliable home destination and can never be hidden.
+    // Today is always available and can never be hidden. (The front door is
+    // the panel picker; Today is the personal panel's own front page.)
     return ['today', ...selected.filter((page) => page !== 'today')];
   } catch {
     return [...DEFAULT_NAVIGATION_PAGES];

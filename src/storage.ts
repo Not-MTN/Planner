@@ -1,9 +1,10 @@
 import { ACCENTS, categoryById, HABIT_ICONS, NOTE_KINDS, PRIORITIES } from './constants';
 import { isBase64 } from './shared/authContract';
 import { isValidISODate, isValidTime, localDateFromTimestamp, timeToMinutes } from './dates';
+import { normalizeLessonUrl } from './weekPlans';
 import { REPEAT_SET } from './recurrence';
 import { MAX_PLAN_DAYS } from './duration';
-import { AI_PLAN_LIMIT, GOAL_STEPS_MAX, PRAISE_KEPT, createEmptyPanels, createEmptyState, isGradeLevel, type AIDeclined, type AIDeclinedKind, type AIMemory, type AttachmentRef, type AIMemoryCategory, type ChangeNote, type EventInput, type FixedCommitment, type FocusLog, type GoalAnswer, type GoalSuggestion, type GuardianKind, type GuardianLink, type GuardianNotice, type GuardianPlan, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Panels, type PlanCadence, type PlanItem, type StudentGuardian, type StudentInbox, type StudentSubject, type Subtask, type TaskInput, type TaskRepeat, type WeekResults, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task, type WeekArchive } from './types';
+import { ACK_REACTIONS, ACK_TEXT_MAX, AI_PLAN_LIMIT, DAY_REPORT_NOTE_MAX, DAY_REPORTS_KEPT, GOAL_STEPS_MAX, PLAN_REQUESTS_KEPT, PRAISE_KEPT, QUEUED_PLANS_KEPT, createEmptyPanels, createEmptyState, isGradeLevel, type AIDeclined, type AIDeclinedKind, type AIMemory, type AttachmentRef, type AIMemoryCategory, type ChangeNote, type DayReport, type EventInput, type FixedCommitment, type FocusLog, type GoalAnswer, type GoalSuggestion, type GuardianKind, type GuardianLink, type GuardianNotice, type GuardianPlan, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Panels, type PlanCadence, type PlanDraft, type PlanItem, type PlanRequest, type QueuedPlan, type ReportAck, type StudentGuardian, type StudentInbox, type StudentSubject, type Subtask, type TaskInput, type TaskRepeat, type WeekResults, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task, type WeekArchive } from './types';
 import { t } from './i18n';
 import { downloadBlob } from './download';
 
@@ -689,7 +690,8 @@ function sanitizeGuardianNotice(value: unknown): GuardianNotice | null {
     weekOf: asString(raw.weekOf, 10) ?? '',
     createdAt: asString(raw.createdAt, 40) ?? new Date(0).toISOString(),
     read: raw.read === true,
-    kind: raw.kind === 'praise' ? 'praise' : 'note',
+    kind:
+      raw.kind === 'praise' ? 'praise' : raw.kind === 'request' ? 'request' : raw.kind === 'nudge' ? 'nudge' : 'note',
   };
 }
 
@@ -704,9 +706,128 @@ function sanitizePlanItem(value: unknown): PlanItem | null {
     id,
     title,
     date: /^\d{4}-\d{2}-\d{2}$/.test(String(raw.date ?? '')) ? String(raw.date) : null,
+    time: typeof raw.time === 'string' && isValidTime(raw.time) ? raw.time : null,
     minutes,
     subject: asString(raw.subject, 60)?.trim() || null,
+    url: typeof raw.url === 'string' ? normalizeLessonUrl(raw.url) : null,
     done: raw.done === true,
+  };
+}
+
+function sanitizePlanDraft(value: unknown): PlanDraft | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const cadence =
+    raw.cadence === 'day' || raw.cadence === 'week' || raw.cadence === 'month' ? (raw.cadence as PlanCadence) : null;
+  const start = asString(raw.start, 10) ?? '';
+  if (!cadence || !isValidISODate(start)) return null;
+  const items = (Array.isArray(raw.items) ? raw.items : [])
+    .flatMap((item) => {
+      if (!item || typeof item !== 'object') return [];
+      const entry = item as Record<string, unknown>;
+      const title = asString(entry.title, 120)?.trim();
+      if (!title) return [];
+      return [
+        {
+          title,
+          date: isValidISODate(String(entry.date ?? '')) ? String(entry.date) : null,
+          time: typeof entry.time === 'string' && isValidTime(entry.time) ? entry.time : null,
+          minutes:
+            typeof entry.minutes === 'number' && Number.isFinite(entry.minutes) ? Math.max(0, Math.round(entry.minutes)) : null,
+          subject: asString(entry.subject, 60)?.trim() || null,
+          url: typeof entry.url === 'string' ? normalizeLessonUrl(entry.url) : null,
+        },
+      ];
+    })
+    .slice(0, 60);
+  if (items.length === 0) return null;
+  return {
+    cadence,
+    start,
+    title: (asString(raw.title, 120) ?? '').trim(),
+    note: (asString(raw.note, 400) ?? '').trim(),
+    items,
+    field: asString(raw.field, 60)?.trim() || null,
+    grade: isGradeLevel(raw.grade) ? raw.grade : null,
+    restDays: [
+      ...new Set(
+        (Array.isArray(raw.restDays) ? raw.restDays : []).filter(
+          (day): day is number => Number.isInteger(day) && (day as number) >= 0 && (day as number) <= 6,
+        ),
+      ),
+    ].slice(0, 7),
+  };
+}
+
+function sanitizeQueuedPlan(value: unknown): QueuedPlan | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = asString(raw.id, 80);
+  const linkId = asString(raw.linkId, 64);
+  const draft = sanitizePlanDraft(raw.draft);
+  if (!id || !linkId || !draft) return null;
+  return { id, linkId, draft, createdAt: asString(raw.createdAt, 40) ?? new Date(0).toISOString() };
+}
+
+function sanitizeReportAck(value: unknown): ReportAck | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = asString(raw.id, 80);
+  const reportId = asString(raw.reportId, 80);
+  const planId = asString(raw.planId, 80);
+  const date = asString(raw.date, 10) ?? '';
+  if (!id || !reportId || !planId || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  return {
+    id,
+    reportId,
+    planId,
+    linkId: asString(raw.linkId, 64) ?? '',
+    date,
+    text: (asString(raw.text, ACK_TEXT_MAX) ?? '').trim(),
+    reactions: sanitizeReactions(raw.reactions),
+    createdAt: asString(raw.createdAt, 40) ?? new Date(0).toISOString(),
+  };
+}
+
+function sanitizeReactions(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const allowed = new Set<string>(ACK_REACTIONS);
+  return [...new Set(value.filter((entry): entry is string => typeof entry === 'string' && allowed.has(entry)))].slice(
+    0,
+    8,
+  );
+}
+
+function sanitizePlanRequest(value: unknown): PlanRequest | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = asString(raw.id, 80);
+  if (!id) return null;
+  return {
+    id,
+    linkId: asString(raw.linkId, 64) ?? '',
+    note: (asString(raw.note, 140) ?? '').trim(),
+    createdAt: asString(raw.createdAt, 40) ?? new Date(0).toISOString(),
+  };
+}
+
+function sanitizeDayReport(value: unknown): DayReport | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = asString(raw.id, 80);
+  const planId = asString(raw.planId, 80);
+  const date = asString(raw.date, 10) ?? '';
+  if (!id || !planId || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  return {
+    id,
+    planId,
+    linkId: asString(raw.linkId, 64) ?? '',
+    date,
+    doneIds: (Array.isArray(raw.doneIds) ? raw.doneIds : []).filter((entry): entry is string => typeof entry === 'string').slice(0, 60),
+    note: (asString(raw.note, DAY_REPORT_NOTE_MAX) ?? '').trim(),
+    repair: raw.repair === true,
+    createdAt: asString(raw.createdAt, 40) ?? new Date(0).toISOString(),
+    updatedAt: asString(raw.updatedAt, 40) ?? new Date(0).toISOString(),
   };
 }
 
@@ -725,6 +846,9 @@ function sanitizeGuardianPlan(value: unknown): GuardianPlan | null {
     start,
     title: (asString(raw.title, 120) ?? '').trim() || t('Plan'),
     note: (asString(raw.note, 400) ?? '').trim(),
+    field: asString(raw.field, 60)?.trim() || null,
+    grade: isGradeLevel(raw.grade) ? raw.grade : null,
+    restDays: [...new Set((Array.isArray(raw.restDays) ? raw.restDays : []).filter((day): day is number => Number.isInteger(day) && (day as number) >= 0 && (day as number) <= 6))].slice(0, 7),
     items: uniqueBy(
       (Array.isArray(raw.items) ? raw.items : []).flatMap((item) => {
         const planItem = sanitizePlanItem(item);
@@ -859,6 +983,24 @@ function sanitizeGuardianLink(value: unknown): GuardianLink | null {
       }),
       (item) => item.suggestionId,
     ).slice(0, PANEL_GOAL_LIMIT * 2),
+    reports: uniqueBy(
+      (Array.isArray(raw.reports) ? raw.reports : []).flatMap((item) => {
+        const report = sanitizeDayReport(item);
+        return report ? [report] : [];
+      }),
+      (item) => item.id,
+    )
+      .sort((a, b) => b.date.localeCompare(a.date) || b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, DAY_REPORTS_KEPT),
+    acks: uniqueBy(
+      (Array.isArray(raw.acks) ? raw.acks : []).flatMap((item) => {
+        const ack = sanitizeReportAck(item);
+        return ack ? [ack] : [];
+      }),
+      (item) => item.id,
+    )
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, DAY_REPORTS_KEPT),
   };
 }
 
@@ -957,8 +1099,50 @@ export function sanitizePanels(value: unknown): Panels {
       )
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         .slice(0, PRAISE_KEPT),
+      reports: uniqueBy(
+        (Array.isArray(student.reports) ? student.reports : []).flatMap((item) => {
+          const report = sanitizeDayReport(item);
+          return report ? [report] : [];
+        }),
+        (item) => item.id,
+      )
+        .sort((a, b) => b.date.localeCompare(a.date) || b.updatedAt.localeCompare(a.updatedAt))
+        .slice(0, DAY_REPORTS_KEPT),
+      acks: uniqueBy(
+        (Array.isArray(student.acks) ? student.acks : []).flatMap((item) => {
+          const ack = sanitizeReportAck(item);
+          return ack ? [ack] : [];
+        }),
+        (item) => item.id,
+      )
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, DAY_REPORTS_KEPT),
+      requests: uniqueBy(
+        (Array.isArray(student.requests) ? student.requests : []).flatMap((item) => {
+          const request = sanitizePlanRequest(item);
+          return request ? [request] : [];
+        }),
+        (item) => item.id,
+      )
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, PLAN_REQUESTS_KEPT),
     },
-    guardian: { enabled: guardian.enabled === true && kind !== null, kind, field: field(guardian.field), links, notices },
+    guardian: {
+      enabled: guardian.enabled === true && kind !== null,
+      kind,
+      field: field(guardian.field),
+      links,
+      notices,
+      queuedPlans: uniqueBy(
+        (Array.isArray(guardian.queuedPlans) ? guardian.queuedPlans : []).flatMap((item) => {
+          const queued = sanitizeQueuedPlan(item);
+          return queued ? [queued] : [];
+        }),
+        (item) => item.id,
+      )
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+        .slice(0, QUEUED_PLANS_KEPT),
+    },
   };
 }
 

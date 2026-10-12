@@ -39,6 +39,7 @@ function panelState(): unknown {
 }
 
 const SCREENS: Screen[] = [
+  { name: 'the panel picker', path: '/#/home', ready: '.home-view' },
   { name: 'today', path: '/#/today', ready: '.timeline-card' },
   { name: 'tasks', path: '/#/tasks', ready: '.view .page-head' },
   { name: 'insights', path: '/#/insights', ready: '.stat-row' },

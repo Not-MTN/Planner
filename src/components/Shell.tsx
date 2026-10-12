@@ -19,6 +19,7 @@ import {
   SearchIcon,
   HelpIcon,
   HeartIcon,
+  HomeIcon,
   HorizonIcon,
   SlidersIcon,
   SparklesIcon,
@@ -46,6 +47,9 @@ import { HabitsView } from '../views/HabitsView';
 import { NotesView } from '../views/NotesView';
 import { TasksView } from '../views/TasksView';
 import { MatrixView } from '../views/MatrixView';
+// The front door: it renders on the very first paint, so it ships with the
+// shell instead of waiting on a lazy chunk.
+import { HomeView } from '../views/HomeView';
 import { ShortcutsSheet } from './ShortcutsSheet';
 import { WeeklyReview } from './WeeklyReview';
 import { NotificationsSheet } from './NotificationsSheet';
@@ -290,7 +294,9 @@ export function Shell() {
   }, [tourStep, ready, navigate, today]);
   const closeTour = () => {
     setTourStep(null);
-    navigate({ name: 'today' });
+    // The tour ends where the app begins: the panel picker, with everything
+    // it just taught one press away.
+    navigate({ name: 'home' });
   };
   // One-time attention dot on the AI coach until it has been opened.
   const [aiSeen, setAiSeen] = useState(isAIVisited);
@@ -465,7 +471,7 @@ export function Shell() {
     );
   };
 
-  const moreActive = ['goals', 'notes', 'insights', 'ai', 'plans', 'matrix', 'review', 'panels', 'student', 'guardian'].includes(route.name);
+  const moreActive = ['goals', 'notes', 'insights', 'ai', 'plans', 'matrix', 'review', 'panels', 'student', 'guardian', 'home'].includes(route.name);
 
   return (
     <div className="app-shell">
@@ -490,7 +496,7 @@ export function Shell() {
         {t("Skip to content")}
       </a>
       <aside className="sidebar">
-        <button type="button" className="brand" onClick={() => navigate({ name: 'today' })}>
+        <button type="button" className="brand" onClick={() => navigate({ name: 'home' })}>
           <span className="brand-mark"><LeafIcon size={18} /></span>
           <span className="brand-text">
             <strong>{t("Planner")}</strong>
@@ -504,6 +510,12 @@ export function Shell() {
         </button>
         {/* Desktop: full labelled sidebar, all destinations visible without scrolling */}
         <nav className="side-nav side-nav-desktop" aria-label={t("Planner")}>
+          {/* The front door, always one press away. */}
+          <NavButton
+            item={{ name: 'home', label: t("Home"), icon: HomeIcon }}
+            active={route.name === 'home'}
+            onClick={() => go('home')}
+          />
           {planNav.length > 0 ? (
             <>
               <p className="nav-label">{t("Plan")}</p>
@@ -566,6 +578,10 @@ export function Shell() {
         {/* Tablet: 66px icon rail + contextual flyout (design board) */}
         <nav className="side-nav side-nav-rail" aria-label={t("Planner")}>
           <div className="rail-group">
+            <button type="button" className={cx('rail-btn', route.name === 'home' && 'active')} aria-label={t("Home")} title={t("Home")} onClick={() => { go('home'); setTabletFlyout(null); }}>
+              <HomeIcon size={19} />
+              <i className="rail-cat">{t("Home")}</i>
+            </button>
             <button type="button" className="rail-btn rail-search" aria-label={t("Search")} title={t("Search")} onClick={openPalette}>
               <SearchIcon size={18} />
             </button>
@@ -780,7 +796,7 @@ export function Shell() {
 
       <div className="workspace">
         <header className="mobile-bar">
-          <button type="button" className="brand" onClick={() => navigate({ name: 'today' })}>
+          <button type="button" className="brand" onClick={() => navigate({ name: 'home' })}>
             <span className="brand-mark"><LeafIcon size={16} /></span>
             <span className="brand-text"><strong>{t("Planner")}</strong></span>
           </button>
@@ -858,6 +874,7 @@ export function Shell() {
               ) : null}
               <div key={key} className="view-enter">
                 <Suspense fallback={<LoadingScreen />}>
+                  {route.name === 'home' ? <HomeView /> : null}
                   {route.name === 'today' || route.name === 'quickadd' ? <DayView date={today} /> : null}
                   {route.name === 'day' ? <DayView date={route.date} /> : null}
                   {route.name === 'calendar' ? <CalendarView /> : null}
@@ -955,6 +972,9 @@ export function Shell() {
             <div className="more-section more-section-ws">
               <p className="more-group-label">{t("Panels · separate workspace")}</p>
               <div className="more-grid more-grid-ws">
+                <button type="button" className={cx('more-tile more-tile-ws more-tile-wide', route.name === 'home' && 'on')} onClick={() => go('home')}>
+                  <HomeIcon size={18} /> <span>{t("Home")}</span>
+                </button>
                 {panelNav.map((item) => (
                   <button key={item.name} type="button" className={cx('more-tile more-tile-ws', route.name === item.name && 'on')} onClick={() => go(item.name)}>
                     <item.icon size={18} /> <span>{item.label}</span>

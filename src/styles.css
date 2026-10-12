@@ -3630,15 +3630,22 @@ html, body { overflow-x: clip; }
 .panel-invite { padding-bottom: 20px; }
 .panel-invite-copy { margin: 12px 0 14px; max-width: 62ch; font-size: 13.5px; line-height: 1.65; color: var(--muted); }
 
-.panel-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.panel-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 16px; }
 .panel-choice { display: flex; flex-direction: column; gap: 12px; }
 .panel-choice.is-on { border-color: color-mix(in srgb, var(--accent) 34%, var(--line)); }
 .panel-choice-head { display: flex; align-items: center; gap: 12px; }
 .panel-choice-icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 13px; }
 .panel-choice-icon.accent-blue { background: #e3edf4; color: #34688f; }
 .panel-choice-icon.accent-peach { background: #f6e8db; color: #94592e; }
+.panel-choice-icon.accent-sage { background: #e2eee5; color: #396b49; }
 [data-theme="dark"] .panel-choice-icon.accent-blue { background: #1f2c36; color: #7aa3c8; }
 [data-theme="dark"] .panel-choice-icon.accent-peach { background: #33231a; color: #c99a72; }
+[data-theme="dark"] .panel-choice-icon.accent-sage { background: #22302a; color: #7dab8c; }
+/* The front door introduces its three cards one after another. The global
+   reduced-motion rule stills this along with everything else. */
+.home-view .panel-choice { animation: rise 0.45s var(--ease) backwards; }
+.home-view .panel-choice:nth-child(2) { animation-delay: 0.06s; }
+.home-view .panel-choice:nth-child(3) { animation-delay: 0.12s; }
 .panel-choice-tag { margin: 2px 0 0; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
 .panel-points { margin: 0; padding-inline-start: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; line-height: 1.6; color: var(--ink-soft); }
 .panel-choice-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }

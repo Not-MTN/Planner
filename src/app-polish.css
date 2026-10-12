@@ -63,7 +63,8 @@
 /* Motion-sensitive users: keep the app, drop the choreography. */
 @media (prefers-reduced-motion: reduce) {
   .view-enter, .sheet, .modal-overlay, .toast { animation: none; }
-  .card, .btn, .nav-link, .tab, .tabbar, .icon-btn, .side-signout, .filter { transition-duration: 0.01ms; }
+  .card, .btn, .nav-link, .tab, .tabbar, .icon-btn, .react-btn, .side-signout, .filter { transition-duration: 0.01ms; }
+  .react-btn.is-on { transform: none; }
 }
 
 /* ---------- 2. Fields: one box, exactly one ---------- */

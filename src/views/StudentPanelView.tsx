@@ -8,7 +8,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
-import { CheckIcon, FlagIcon, SlidersIcon, StopwatchIcon, StudyIcon, TrashIcon } from '../icons';
+import { BellIcon, CalendarIcon, CheckIcon, FlagIcon, HomeIcon, PrinterIcon, SlidersIcon, StopwatchIcon, StudyIcon, TrashIcon } from '../icons';
 import { faNum, t } from '../i18n';
 import { GRADE_LABELS, gradeLabel, markInboxRead, newId, openGoalSuggestions, planPeriodLabel, planProgress, splitExplanations, subjectMinutes, weeklyHistory, weekOf, weekResults, withExplanation, withPlanItemToggled, withoutExplanation } from '../panels';
 import { CompletionRing, FocusTrend, SubjectSplit, SubjectTrend, WeekBars, minutesLabel } from '../components/charts';
@@ -17,11 +17,27 @@ import { friendlyGroqError, generateStudentAdvice, type StudentAdvice } from '..
 import { SparkIcon } from '../icons';
 import { acceptInvitation, answerGoalSuggestion, forgetPraise, removeLink, shareWeeklyResults, syncLinks, syncStudentInbox } from '../auth/links';
 import { AuthError } from '../auth/session';
-import type { ChangeNote, GoalSuggestion } from '../types';
+import { PLAN_REQUESTS_KEPT } from '../types';
+import type { ChangeNote, DayReport, GoalSuggestion, GuardianPlan } from '../types';
 import { Field, Empty } from '../components/ui';
 import { StudentWorkspace } from '../components/StudentWorkspace';
 import { upcomingExams } from '../panelFeatures';
-import { formatWeekRange, todayISO } from '../dates';
+import {
+  missingReportDays,
+  openRequests,
+  planFocusMinutes,
+  repairUsed,
+  rollTarget,
+  withDayReport,
+  withLessonRolled,
+} from '../weekPlans';
+import { timetableHtml, weekPlanHtml } from '../weekPlanPrint';
+import { downloadBlob } from '../download';
+import { printDocument } from '../printDocument';
+import { formatFullDate, formatWeekRange, todayISO } from '../dates';
+import { DayReportForm } from '../components/DayReportForm';
+import { StreakRepairForm } from '../components/StreakRepairForm';
+import { WeekPlanCard } from '../components/WeekPlanCard';
 import '../panels.css';
 
 export function StudentPanelView() {
@@ -35,6 +51,11 @@ export function StudentPanelView() {
   const [asking, setAsking] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [answering, setAnswering] = useState<string | null>(null);
+  const [reporting, setReporting] = useState<{ planId: string; date: string } | null>(null);
+  const [askNote, setAskNote] = useState('');
+  const [askSending, setAskSending] = useState(false);
+  const [repairingLock, setRepairingLock] = useState<string | null>(null);
+  const openAsks = useMemo(() => openRequests(panels.student.requests ?? [], todayISO()), [panels.student.requests]);
 
   // Keep in step with the server: a guardian may have ended the link, or sent
   // something new. Notes left by one guardian are passed to the others here —
@@ -194,6 +215,110 @@ export function StudentPanelView() {
   const inbox = panels.student.inbox;
   const openGoals = openGoalSuggestions(panels);
   const unreadInbox = inbox.notices.filter((notice) => !notice.read).length;
+  // Finished planned days with no report — while any exist, the panel below
+  // gives way to the lock screen, oldest day first.
+  const missingDays = useMemo(
+    () => missingReportDays(inbox.plans, panels.student.reports ?? [], todayISO()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [inbox.plans, panels.student.reports],
+  );
+
+  const printTimetable = (plan: GuardianPlan) => {
+    const html = timetableHtml(plan, panels.student.reports ?? [], {
+      student: plan.author,
+      side: 'student',
+      madeOn: todayISO(),
+      dir: document.documentElement.dir || 'ltr',
+      lang: document.documentElement.lang || 'en',
+    });
+    if (printDocument(html)) return;
+    downloadBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), `timetable-${plan.id}.html`);
+  };
+
+  const printWeekPlan = (plan: GuardianPlan) => {
+    const html = weekPlanHtml(plan, panels.student.reports ?? [], panels.student.acks ?? [], {
+      student: plan.author,
+      madeOn: todayISO(),
+      dir: document.documentElement.dir || 'ltr',
+      lang: document.documentElement.lang || 'en',
+      side: 'student',
+    });
+    if (printDocument(html)) return;
+    downloadBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), `week-plan-${plan.id}.html`);
+  };
+
+  const askForPlan = async () => {
+    if (askSending) return;
+    const targets = panels.student.guardians.filter((guardian) => guardian.linkId);
+    if (targets.length === 0) return;
+    setAskSending(true);
+    const now = new Date().toISOString();
+    const note = askNote.trim().slice(0, 140);
+    const next = {
+      ...panels,
+      student: {
+        ...panels.student,
+        requests: [
+          ...targets.map((guardian) => ({ id: newId('request'), linkId: guardian.linkId, note, createdAt: now })),
+          ...(panels.student.requests ?? []),
+        ].slice(0, PLAN_REQUESTS_KEPT),
+      },
+    };
+    updatePanels(() => next);
+    setAskNote('');
+    try {
+      const synced = await syncStudentInbox(next, state.goals);
+      updatePanels((latest) => (latest === next ? synced.panels : latest));
+      flash(t('Plan requested — waiting for your guardian.'));
+    } catch {
+      flash(t('Saved — it will send on the next sync.'));
+    } finally {
+      setAskSending(false);
+    }
+  };
+
+  const cancelAsk = () => {
+    updatePanels((latest) => ({ ...latest, student: { ...latest.student, requests: [] } }));
+  };
+
+  const rollLessonOn = (planId: string, itemId: string) => {
+    const plan = panels.student.inbox.plans.find((item) => item.id === planId);
+    if (!plan) return;
+    const rolled = plan.items.find((item) => item.id === itemId);
+    if (!rolled || !rollTarget(plan, rolled, panels.student.reports ?? [], todayISO())) return;
+    updatePanels((latest) => withLessonRolled(latest, planId, itemId, todayISO()));
+  };
+
+  const repairDay = async (planId: string, date: string, reason: string) => {
+    const plan = panels.student.inbox.plans.find((item) => item.id === planId);
+    if (!plan || repairUsed(panels.student.reports ?? [], planId)) return;
+    const now = new Date().toISOString();
+    const report: DayReport = {
+      id: newId('report'),
+      planId,
+      linkId: plan.linkId,
+      date,
+      doneIds: [],
+      note: reason.trim().slice(0, 140),
+      repair: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const wasMissing = missingReportDays(panels.student.inbox.plans, panels.student.reports ?? [], todayISO()).length;
+    const next = withDayReport(panels, report);
+    const cleared =
+      wasMissing > 0 &&
+      missingReportDays(next.student.inbox.plans, next.student.reports ?? [], todayISO()).length === 0;
+    updatePanels(() => next);
+    // Filed the moment it is saved; the sync only carries the reason over.
+    try {
+      const synced = await syncStudentInbox(next, state.goals);
+      updatePanels((latest) => (latest === next ? synced.panels : latest));
+      flash(cleared ? t('All caught up — your student panel is open again.') : t('Streak kept.'));
+    } catch {
+      flash(cleared ? t('All caught up — your student panel is open again.') : t('Saved — it will send on the next sync.'));
+    }
+  };
 
   const [noteDraft, setNoteDraft] = useState({ summary: '', reason: '' });
   const subjects = panels.student.subjects;
@@ -241,6 +366,58 @@ export function StudentPanelView() {
     );
   }
 
+  if (missingDays.length > 0) {
+    return (
+      <div className="view panels-view student-panel-view">
+        <header className="view-head panel-page-head">
+          <div>
+            <p className="kicker panel-page-kicker"><StudyIcon size={16} />{t("Student panel")}<span>{formatWeekRange(week)}</span></p>
+            <h1 className="view-title">{t("This week, and what’s coming")}</h1>
+          </div>
+          <div className="panel-page-actions">
+            <button type="button" className="btn btn-ghost btn-small" onClick={() => navigate({ name: 'home' })}><HomeIcon size={14} />{t("Switch panel")}</button>
+            <button type="button" className="btn btn-ghost btn-small" onClick={() => navigate({ name: 'panels' })}><SlidersIcon size={14} />{t("Manage panels")}</button>
+          </div>
+        </header>
+
+        <section className="card week-lock-card" aria-label={t("Your student panel is paused")}>
+          <p className="week-lock-icon"><BellIcon size={20} /></p>
+          <h2 className="card-title">{t("Your student panel is paused")}</h2>
+          <p className="view-sub">{t("Send the missing daily reports to continue. The days are listed below.")}</p>
+        </section>
+        {missingDays.map((day) => (
+          <section key={`${day.plan.id}-${day.date}`} className="card" aria-label={`${day.plan.title} · ${formatFullDate(day.date)}`}>
+            <header className="card-head">
+              <div>
+                <p className="kicker">{day.plan.title}</p>
+                <h2 className="card-title">{formatFullDate(day.date)}</h2>
+              </div>
+            </header>
+            <DayReportForm plan={day.plan} date={day.date} lessons={day.lessons} onDone={() => undefined} />
+            {!repairUsed(panels.student.reports ?? [], day.plan.id) &&
+            repairingLock !== `${day.plan.id}-${day.date}` ? (
+              <button
+                type="button"
+                className="btn btn-ghost btn-small"
+                onClick={() => setRepairingLock(`${day.plan.id}-${day.date}`)}
+              >
+                {t('Keep my streak')}
+              </button>
+            ) : null}
+            {repairingLock === `${day.plan.id}-${day.date}` ? (
+              <StreakRepairForm
+                onSave={(reason) =>
+                  repairDay(day.plan.id, day.date, reason).then(() => setRepairingLock(null))
+                }
+                onCancel={() => setRepairingLock(null)}
+              />
+            ) : null}
+          </section>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className="view panels-view student-panel-view">
       <header className="view-head panel-page-head">
@@ -256,6 +433,7 @@ export function StudentPanelView() {
             setDetails({ field: panels.student.field ?? '', grade: panels.student.grade ?? '' });
             setEditing((value) => !value);
           }}>{editing ? t("Cancel") : t("Change details")}</button>
+          <button type="button" className="btn btn-ghost btn-small" onClick={() => navigate({ name: 'home' })}><HomeIcon size={14} />{t("Switch panel")}</button>
           <button type="button" className="btn btn-ghost btn-small" onClick={() => navigate({ name: 'panels' })}><SlidersIcon size={14} />{t("Manage panels")}</button>
         </div>
       </header>
@@ -369,6 +547,35 @@ export function StudentPanelView() {
               </button>
             ) : null}
           </header>
+          <div className="week-ask-row">
+            {openAsks.length > 0 ? (
+              <>
+                <p className="hint">{t('Plan requested — waiting for your guardian.')}</p>
+                <button type="button" className="btn btn-ghost btn-tiny" onClick={cancelAsk}>
+                  {t('Cancel')}
+                </button>
+              </>
+            ) : (
+              <>
+                <input
+                  className="input"
+                  value={askNote}
+                  maxLength={140}
+                  placeholder={t('A note to go with it')}
+                  aria-label={t('A note to go with it')}
+                  onChange={(event) => setAskNote(event.target.value)}
+                />
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-small"
+                  disabled={askSending}
+                  onClick={() => void askForPlan()}
+                >
+                  {t('Ask for a plan')}
+                </button>
+              </>
+            )}
+          </div>
 
           {inbox.notices.length === 0 && inbox.plans.length === 0 && openGoals.length === 0 ? (
             <p className="empty-note">
@@ -440,13 +647,49 @@ export function StudentPanelView() {
             <ul className="gplan-list">
               {inbox.plans.map((plan) => {
                 const progress = planProgress(plan);
+                if (plan.cadence === 'week') {
+                  return (
+                    <WeekPlanCard
+                      key={plan.id}
+                      plan={plan}
+                      reports={panels.student.reports ?? []}
+                      acks={panels.student.acks ?? []}
+                      variant="student"
+                      focusMinutes={planFocusMinutes(plan, state.focusLog, state.tasks)}
+                      onToggleItem={(planId, itemId) => updatePanels((latest) => withPlanItemToggled(latest, planId, itemId))}
+                      onRollLesson={rollLessonOn}
+                      reportingDate={reporting?.planId === plan.id ? reporting.date : null}
+                      onReportDay={(date) => setReporting(date ? { planId: plan.id, date } : null)}
+                      actions={
+                        <>
+                          <button
+                            type="button"
+                            className="icon-btn round"
+                            aria-label={`${t('Print')} · ${plan.title}`}
+                            onClick={() => printWeekPlan(plan)}
+                          >
+                            <PrinterIcon size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-btn round"
+                            aria-label={`${t('Print timetable')} · ${plan.title}`}
+                            onClick={() => printTimetable(plan)}
+                          >
+                            <CalendarIcon size={14} />
+                          </button>
+                        </>
+                      }
+                    />
+                  );
+                }
                 return (
                   <li key={plan.id} className="gplan-card">
                     <div className="gplan-head">
                       <div>
                         <p className="gplan-kicker">
                           <span className={cx('gplan-cadence', `gplan-cadence-${plan.cadence}`)}>
-                            {plan.cadence === 'day' ? t("Day plan") : plan.cadence === 'week' ? t("Week plan") : t("Month plan")}
+                            {plan.cadence === 'day' ? t("Day plan") : t("Month plan")}
                           </span>
                           {planPeriodLabel(plan)}
                         </p>

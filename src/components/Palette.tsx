@@ -9,6 +9,7 @@ import {
   DotsIcon,
   DownloadIcon,
   FlagIcon,
+  HomeIcon,
   MoonIcon,
   NoteIcon,
   PlusIcon,
@@ -138,6 +139,7 @@ function PaletteInner() {
     }
 
     const commands: PaletteItem[] = [
+      { id: 'go-home', icon: HomeIcon, label: t("Home"), run: close(() => navigate({ name: 'home' })) },
       { id: 'go-today', icon: SunIcon, label: t("Go to Today"), run: close(() => navigate({ name: 'today' })) },
       { id: 'go-ai', icon: SparklesIcon, label: t("Go to AI coach"), sub: 'Talk or type — the AI plans with you', run: close(() => navigate({ name: 'ai', tab: 'plan' })) },
       { id: 'go-calendar', icon: CalendarIcon, label: t("Go to Calendar"), sub: 'Week, month, and what’s ahead', run: close(() => navigate({ name: 'calendar', tab: 'week', date: today })) },

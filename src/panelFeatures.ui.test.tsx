@@ -6,10 +6,10 @@ import { App } from './App';
 import { addDays, setWeekStart, todayISO } from './dates';
 import { loadDictionary, setLang } from './i18n';
 import { addTask, logFocus } from './mutate';
-import { weekOf, withLinkPlan } from './panels';
+import { weekOf, withLinkPlan, withQueuedPlan } from './panels';
 import { shortWeek } from './components/charts';
-import { postNotice, sendPlan, type PlanDraft } from './auth/links';
-import { createEmptyState, type GuardianLink, type GuardianPlan, type Panels, type PlannerState } from './types';
+import { flushPlanQueue, postNotice, sendPlan } from './auth/links';
+import { createEmptyState, type GuardianLink, type GuardianPlan, type Panels, type PlanDraft, type PlannerState } from './types';
 
 vi.mock('./auth/links', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./auth/links')>();
@@ -540,5 +540,24 @@ describe('guardian roster and planning', () => {
     expect(postNotice).toHaveBeenCalledWith(expect.anything(), aliceLinkId, 'What would help with revision?');
     expect(query('.notice-card').textContent).toContain('What would help with revision?');
     expect(query<HTMLTextAreaElement>('.notice-form textarea').value).toBe('');
+  });
+});
+
+describe('the send queue without a signal', () => {
+  it('leaves waiting plans untouched while offline', async () => {
+    const online = window.navigator.onLine;
+    Object.defineProperty(window.navigator, 'onLine', { value: false, configurable: true });
+    try {
+      const panels = withQueuedPlan(createEmptyState().panels, {
+        id: 'queue-1',
+        linkId: 'link-1',
+        draft: { cadence: 'week', start: '2026-10-12', title: 'Makeup week', note: '', items: [] },
+        createdAt: '2026-10-12T08:00:00.000Z',
+      });
+      // The real flush: the same object back, without ever reaching the wire.
+      await expect(flushPlanQueue(panels)).resolves.toBe(panels);
+    } finally {
+      Object.defineProperty(window.navigator, 'onLine', { value: online, configurable: true });
+    }
   });
 });

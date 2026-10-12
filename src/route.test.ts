@@ -57,6 +57,25 @@ describe('telling an address that belongs to the app from one that does not', ()
   });
 });
 
+describe('the front door', () => {
+  it('opens the panel picker when no address names a destination', () => {
+    expect(parseHash('')).toEqual({ name: 'home' });
+    expect(parseHash('#')).toEqual({ name: 'home' });
+    expect(parseHash('#/')).toEqual({ name: 'home' });
+  });
+
+  it('answers an unknown address with the picker rather than a guess', () => {
+    expect(parseHash('#/not-a-route')).toEqual({ name: 'home' });
+  });
+
+  it('leaves explicit destinations exactly where they point', () => {
+    expect(parseHash('#/home')).toEqual({ name: 'home' });
+    expect(parseHash('#/today')).toEqual({ name: 'today' });
+    expect(toHash({ name: 'home' })).toBe('#/home');
+    expect(appRouteFromHash('#/home')).toEqual({ name: 'home' });
+  });
+});
+
 describe('the link handed to a camera', () => {
   it('points at whichever copy of the app shows it', () => {
     expect(inviteLink(CODE, 'https://planner.example')).toBe(`https://planner.example/${inviteHash(CODE)}`);

@@ -336,6 +336,12 @@ export interface StudentPanel {
   explanations: ChangeNote[];
   /** What guardians sent: short notices and day/week/month plans. */
   inbox: StudentInbox;
+  /** Daily reports this student sent back, newest first. */
+  reports?: DayReport[];
+  /** Guardians' answers to daily reports, newest first. */
+  acks?: ReportAck[];
+  /** Open asks for a week plan, newest first. */
+  requests?: PlanRequest[];
   /**
    * Kind words, kept. Praise is the one thing worth re-reading, so it does not
    * fall out of the inbox when more notes arrive.
@@ -382,7 +388,7 @@ export interface GuardianNotice {
    * Praise, rather than something to act on. Kept apart because the two are
    * read at different times: a note on a Sunday, kind words on a bad Thursday.
    */
-  kind?: 'note' | 'praise';
+  kind?: 'note' | 'praise' | 'request' | 'nudge';
 }
 
 /** Praise worth keeping: a note for a bad week, not a task for a good one. */
@@ -397,6 +403,34 @@ export interface GuardianPanel {
   links: GuardianLink[];
   /** What the other guardians of those students changed, newest first. */
   notices: GuardianNotice[];
+  /** Plans that could not be sent yet — the wire picks them up when it can. */
+  queuedPlans?: QueuedPlan[];
+}
+
+/** A plan waiting for a signal: the whole draft, exactly as the guardian left it. */
+export interface QueuedPlan {
+  id: string;
+  linkId: string;
+  draft: PlanDraft;
+  createdAt: string;
+}
+
+/** How many unsent plans a guardian can keep waiting. */
+export const QUEUED_PLANS_KEPT = 10;
+
+export interface PlanDraft {
+  cadence: GuardianPlan['cadence'];
+  /** First day the plan covers (ISO). */
+  start: string;
+  title: string;
+  note: string;
+  items: Array<Pick<PlanItem, 'title' | 'date' | 'time' | 'minutes' | 'subject' | 'url'>>;
+  /** Curriculum field id, when the week was planned from built-in lessons. */
+  field?: string | null;
+  /** Grade id the week was planned for. */
+  grade?: string | null;
+  /** Weekdays (0 = Sunday) that need no daily report. */
+  restDays?: number[];
 }
 
 /** A guardian this student accepted. The key for their results lives in the vault. */
@@ -440,12 +474,19 @@ export interface PlanItem {
   title: string;
   /** Day within the plan this is for (ISO), or null when it fits anywhere. */
   date: string | null;
+  /** Start time (HH:MM), or null when the lesson fits anywhere in the day. Week plans sort by it. */
+  time?: string | null;
   /** Suggested time, in minutes. */
   minutes: number | null;
   /** Subject name, when the guardian tied it to one. */
   subject: string | null;
+  /** One prep link per lesson — a video, a worksheet — or null when there is none. */
+  url?: string | null;
   done: boolean;
 }
+
+/** A prep link fits in a tap and a sync — longer is almost certainly a paste gone wrong. */
+export const LESSON_URL_MAX = 500;
 
 /**
  * A plan a guardian makes for their student — a day, a week, or a month of it.
@@ -464,10 +505,92 @@ export interface GuardianPlan {
   start: string;
   title: string;
   note: string;
+  /** Curriculum field id when the week was planned from built-in lessons (see curriculum.ts). */
+  field?: string | null;
+  /** Grade id the week was planned for (see GRADE_LEVELS). */
+  grade?: string | null;
+  /** Weekdays (0 = Sunday) that need no daily report. Guardian-chosen rest days. */
+  restDays?: number[];
   items: PlanItem[];
   createdAt: string;
   updatedAt: string;
 }
+
+/**
+ * A student's report for one planned day: which lessons got done, in their own
+ * words when they add any. It travels back over the same encrypted link as the
+ * plan's ticks, so the guardian sees the day as the student lived it.
+ */
+export interface DayReport {
+  id: string;
+  /** The plan this day belongs to — the return address for the report. */
+  planId: string;
+  /** The link it travels on. */
+  linkId: string;
+  /** The reported day (ISO). */
+  date: string;
+  /** Plan item ids finished that day. */
+  doneIds: string[];
+  /** The student's own words about the day, when they wrote any. */
+  note: string;
+  /**
+   * A streak repair: the week's one mulligan, filed instead of a report for a
+   * day that got away. It counts as reported — the panel unlocks and the
+   * streak survives — but reads as kept, not done, on both sides.
+   */
+  repair?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Daily reports kept on each side, and how many ride along in one outbox write. */
+export const DAY_REPORTS_KEPT = 30;
+export const DAY_REPORTS_WIRE = 14;
+/** A report note is a few sentences, not an essay. */
+export const DAY_REPORT_NOTE_MAX = 280;
+
+/**
+ * A guardian's answer to one daily report: seen, with a line back when there
+ * is something to say. It travels guardian to student, the way the report
+ * came — reports stay immutable once sent, so the day as filed is never
+ * rewritten, only acknowledged.
+ */
+export interface ReportAck {
+  id: string;
+  reportId: string;
+  planId: string;
+  linkId: string;
+  date: string;
+  /** The line back, or '' for a bare seen. */
+  text: string;
+  /** Quick emoji taps on the report — only ACK_REACTIONS can ever appear here. */
+  reactions: string[];
+  createdAt: string;
+}
+
+/** The whole reaction vocabulary: offered as buttons, enforced on the wire. */
+export const ACK_REACTIONS = ['🎉', '💪', '❤️'] as const;
+
+/**
+ * A student asking for a week plan. Broadcast to every linked guardian; each
+ * one reads it as a notice with the lesson planner one tap away. Open requests
+ * ride the student outbox until the student cancels or they go stale.
+ */
+export interface PlanRequest {
+  id: string;
+  linkId: string;
+  /** What the student asked for, in their own words. */
+  note: string;
+  createdAt: string;
+}
+
+/** Open requests kept per student, and how many ride one outbox write. */
+export const PLAN_REQUESTS_KEPT = 5;
+export const PLAN_REQUESTS_WIRE = 5;
+/** An unanswered ask stops travelling after two weeks. */
+export const PLAN_REQUEST_DAYS = 14;
+/** A line back is a sentence, not a letter. */
+export const ACK_TEXT_MAX = 140;
 
 /** What a guardian has sent this student: brief notices and full plans. */
 export interface StudentInbox {
@@ -515,6 +638,10 @@ export interface GuardianLink {
   results: WeekResults | null;
   /** Plans sent to this student, newest first. Ticks come back and land on items. */
   plans: GuardianPlan[];
+  /** Daily reports this student sent back, newest first. */
+  reports?: DayReport[];
+  /** Answers sent to this student's daily reports, newest first. */
+  acks?: ReportAck[];
   /** Goals suggested to this student, newest first. */
   goals?: GoalSuggestion[];
   /** How this student answered them, newest last write wins. */
