@@ -317,6 +317,25 @@
 /* ---------- Mobile chrome ---------- */
 .mobile-bar, .tabbar, .fab, .mobile-date { display: none; }
 .mobile-bar-actions { display: flex; gap: 6px; }
+/* Standalone panels (guardian/student/home) — notifications accessible to every role, not only personal */
+.panel-bar {
+  display: flex;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  padding-top: calc(10px + env(safe-area-inset-top, 0px));
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--line);
+}
+.panel-bar .brand { padding: 0; width: auto; }
+.panel-bar-actions { display: flex; gap: 6px; }
+@supports not (color: color-mix(in srgb, red, blue)) {
+  .panel-bar { background: var(--bg); }
+}
 @media (max-width: 1023px) {
   .mobile-bar {
     display: flex;

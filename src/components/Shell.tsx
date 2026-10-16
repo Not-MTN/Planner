@@ -51,7 +51,7 @@ import { HomeView } from '../views/HomeView';
 import { ShortcutsSheet } from './ShortcutsSheet';
 import { WeeklyReview } from './WeeklyReview';
 import { NotificationsSheet } from './NotificationsSheet';
-import { clearNotifications, loadNotifications, markNotificationsRead, subscribeNotifications } from '../notificationCenter';
+import { clearNotifications, deleteNotification, loadNotifications, markNotificationsRead, subscribeNotifications } from '../notificationCenter';
 import { snoozeReminder } from '../reminders';
 import { loadMobileFavorites, loadNavigationPages, subscribeNavigationPages } from '../navigationPrefs';
 
@@ -811,7 +811,23 @@ export function Shell() {
               {isDark ? <SunIcon size={18} /> : <MoonIcon size={18} />}
             </button>
           </div>
-        </header> : null}
+        </header> : (
+          <header className="panel-bar">
+            <button type="button" className="brand" onClick={() => navigate({ name: 'home' })}>
+              <span className="brand-mark"><HorizonIcon size={16} /></span>
+              <span className="brand-text"><strong>{t("Panels")}</strong></span>
+            </button>
+            <div className="panel-bar-actions">
+              <button type="button" className="icon-btn round notification-trigger" aria-label={unreadNotifications ? t("Notifications · {0} unread", { 0: unreadNotifications }) : t("Notifications")} title={t("Notifications")} onClick={() => setNotificationsOpen(true)}>
+                <BellIcon size={18} />
+                {unreadNotifications > 0 ? <i className="notification-dot" aria-hidden="true" /> : null}
+              </button>
+              <button type="button" className="icon-btn round" aria-label={t("Search")} data-tour="search" onClick={openPalette}>
+                <SearchIcon size={18} />
+              </button>
+            </div>
+          </header>
+        )}
         {personalWorkspace ? <span className="mobile-date">{formatWeekdayShort(today)} {today.slice(8)}</span> : null}
         <main id="content" className="content" tabIndex={-1}>
           {!ready ? <LoadingScreen /> : (
@@ -1007,6 +1023,10 @@ export function Shell() {
             snoozeReminder(key, minutes);
             markNotificationsRead([key]);
             flash(t('Snoozed for {0} minutes.', { 0: minutes }));
+          }}
+          onDelete={(key) => {
+            deleteNotification(key);
+            flash(t('Notification deleted.'));
           }}
         />
       ) : null}

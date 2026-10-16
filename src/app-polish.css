@@ -1147,4 +1147,9 @@
 @media (min-width: 768px) {
   .app-shell--standalone { grid-template-columns: minmax(0, 1fr); }
 }
-.app-shell--standalone .content { padding-bottom: 48px; }
+.app-shell--standalone .content { padding-bottom: calc(48px + env(safe-area-inset-bottom, 0px)); }
+
+@media (pointer: coarse) {
+  .panel-bar .icon-btn { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
+  .notification-delete { min-height: 44px; }
+}

@@ -1053,11 +1053,15 @@
 .notification-snooze-label { display: inline-flex; align-items: center; gap: 4px; margin-inline-end: 3px; font-size: 10.5px; font-weight: 650; }
 .notification-snooze svg { flex: none; opacity: 0.72; }
 .notification-snooze .btn { padding: 2px 9px; min-height: 26px; border-radius: 999px; font-size: 10.5px; }
+.notification-actions { display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin: 0 14px 0 67px; padding: 0 0 11px; border-top: 1px solid color-mix(in srgb, var(--line) 48%, transparent); padding-top: 8px; }
+.notification-delete { color: var(--muted); }
+.notification-delete:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 22%, var(--line)); background: var(--danger-soft); }
 @media (max-width: 520px) {
   .notification-intro { padding: 14px; }
   .notification-toolbar { align-items: flex-start; }
   .notification-toolbar .set-actions { justify-content: flex-end; }
   .notification-snooze { margin-inline-start: 16px; }
+  .notification-actions { margin-inline-start: 16px; }
 }
 
 /* --- Recovery codes: the numbered list shown once, at account creation,

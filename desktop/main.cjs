@@ -237,14 +237,26 @@ async function installWindowsUpdate(event, untrustedOffer) {
   }
 
   // NSIS upgrades the same per-user installation (never uninstall first). The
-  // installer keeps the app's userData directory and reopens Planner when done.
+  // installer keeps the app's userData directory and reopens Planner when done
+  // (electron-builder.yml: nsis.runAfterFinish: true). The app must be fully
+  // closed before the installer replaces the executable, so give the spawn a
+  // moment to settle before quitting. A detached installer survives the quit
+  // and launches the new version — no manual reopen required.
   const installer = spawn(file, ['/S'], { detached: true, stdio: 'ignore', windowsHide: true });
   await new Promise((resolve, reject) => {
     installer.once('spawn', resolve);
     installer.once('error', reject);
   });
   installer.unref();
-  setTimeout(() => app.quit(), 350);
+  // 800 ms is enough for the detached process to be re-parented on Windows;
+  // the previous 350 ms occasionally quit before the OS had adopted the child,
+  // leaving a finished install with no window and a user who had to click
+  // the desktop icon again — which, before the second-instance fix above,
+  // did nothing while the tray icon was still hidden.
+  setTimeout(() => {
+    quitting = true;
+    app.quit();
+  }, 800);
   return { started: true };
 }
 
@@ -620,10 +632,10 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
+  // Clicking the desktop shortcut while Planner is hidden in the tray must
+  // bring the window back — otherwise the app looks like it failed to open.
   app.on('second-instance', () => {
-    if (!mainWindow) return;
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.focus();
+    showWindow();
   });
 
   app.whenReady().then(() => {
@@ -662,6 +674,7 @@ if (!gotLock) {
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
+      else showWindow();
     });
   });
 

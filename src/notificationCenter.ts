@@ -61,6 +61,25 @@ export function clearNotifications(): void {
   saveNotifications([]);
 }
 
+export function deleteNotification(key: string): void {
+  if (!key) return;
+  const current = loadNotifications();
+  const filtered = current.filter((item) => item.key !== key);
+  if (filtered.length === current.length) return;
+  saveNotifications(filtered);
+}
+
+export function deleteNotifications(keys: string[]): void {
+  if (keys.length === 0) return;
+  const selected = new Set(keys);
+  saveNotifications(loadNotifications().filter((item) => !selected.has(item.key)));
+}
+
+/** Remove a single notification regardless of its read state — available to every panel. */
+export function removeNotification(key: string): void {
+  deleteNotification(key);
+}
+
 export function subscribeNotifications(callback: () => void): () => void {
   if (typeof window === 'undefined') return () => undefined;
   window.addEventListener(CHANGE_EVENT, callback);

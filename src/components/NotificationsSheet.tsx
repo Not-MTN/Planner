@@ -1,5 +1,5 @@
 import type { PlannerNotification } from '../notificationCenter';
-import { BellIcon, CalendarIcon, CheckIcon, LeafIcon, SunIcon, TickIcon, StopwatchIcon } from '../icons';
+import { BellIcon, CalendarIcon, CheckIcon, LeafIcon, SunIcon, TickIcon, StopwatchIcon, TrashIcon } from '../icons';
 import { t } from '../i18n';
 import { SNOOZE_CHOICES } from '../reminders';
 import { Modal } from './ui';
@@ -39,6 +39,7 @@ export function NotificationsSheet({
   onClear,
   onRead,
   onSnooze,
+  onDelete,
 }: {
   items: PlannerNotification[];
   onClose: () => void;
@@ -47,6 +48,7 @@ export function NotificationsSheet({
   onClear: () => void;
   onRead: (key: string) => void;
   onSnooze: (key: string, minutes: number) => void;
+  onDelete: (key: string) => void;
 }) {
   const unread = items.filter((item) => !item.read).length;
   return (
@@ -101,6 +103,17 @@ export function NotificationsSheet({
                       {t('{0} min', { 0: minutes })}
                     </button>
                   ))}
+                </div>
+                <div className="notification-actions">
+                  <button
+                    type="button"
+                    className="btn btn-tiny btn-ghost notification-delete"
+                    aria-label={t('Delete notification: {0}', { 0: item.title })}
+                    title={t('Delete')}
+                    onClick={() => onDelete(item.key)}
+                  >
+                    <TrashIcon size={13} /> {t('Delete')}
+                  </button>
                 </div>
               </li>
             );
