@@ -23,6 +23,7 @@
     "check:deployment": "node scripts/check-deployment.mjs",
     "lint:workflows": "node scripts/lint-workflows.mjs",
     "check:toolchain": "node scripts/check-toolchain.mjs",
+    "check:release-tag": "node scripts/check-release-tag.mjs",
     "check:downloads": "node scripts/check-downloads.mjs",
     "size:report": "node scripts/report-sizes.mjs",
     "check:visual-baselines": "node scripts/check-visual-baselines.mjs",

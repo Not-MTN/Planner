@@ -1,0 +1,33 @@
+name: Release tag check
+
+# A release is a tag — but only a `v*` tag starts the Apps workflow that builds
+# and publishes it (`apps.yml`, `on.push.tags: ['v*']`). Every other name starts
+# no build at all, which is how `1.1.2` was pushed instead of `v1.1.2`: the
+# version bump was on `main`, every check was green, and no release appeared.
+#
+# So every tag push gets one small run that says which of those two things just
+# happened, and fails when a version tag cannot release anything. The script is
+# read from the default branch rather than from the tag's own commit, so a tag
+# pushed before this workflow existed is still checked the same way.
+
+on:
+  push:
+    tags: ['*']
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Does this tag release anything?
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - name: Check the tag name
+        # `GITHUB_REF_NAME` is the tag: this says whether it starts a release,
+        # and exits 1 with the two commands that fix it when a version was
+        # tagged without its `v`.
+        run: node scripts/check-release-tag.mjs "$GITHUB_REF_NAME"

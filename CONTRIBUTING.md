@@ -23,6 +23,7 @@ Other entry points:
 | `npm run test:e2e:visual` | Screenshot comparison against the committed baselines — see [docs/VISUAL_TESTS.md](docs/VISUAL_TESTS.md). |
 | `npm run size:report` | What every installer and the website carry. `-- --check 5` fails past the CI budget. |
 | `npm run check:toolchain` | `engines.node`, the Node version every workflow installs, and `.github/dependabot.yml`, checked against each other. |
+| `npm run check:release-tag` | Says whether a tag name would build a release — only `vMAJOR.MINOR.PATCH` does. `-- 1.1.2` is the mistake it catches. |
 | `npm run check:deployment` | Asks a live deployment whether accounts, sync, push and the deep-link files are set up. |
 
 There is no database to install: accounts fall back to an in-memory store in
