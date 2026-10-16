@@ -185,14 +185,16 @@ test('an update waits for the reader instead of reloading under them', async ({ 
  * `context.setOffline(false)` flips the network back inside the browser, and a
  * navigation issued in the next few milliseconds can be aborted mid-flight —
  * the service worker's own fetch is cut before it answers, and Playwright
- * reports `net::ERR_ABORTED`. That is the harness racing the browser, not the
- * app failing to serve the shell, so the check gets a second, settled attempt.
+ * reports `net::ERR_ABORTED` or a temporarily detached main-frame target.
+ * That is the harness racing the browser, not the app failing to serve the
+ * shell. Retry once only for those errors, never for a closed page, and still
+ * require the planner to render and the second reload to succeed.
  */
 async function reloadSettled(page: Page): Promise<Awaited<ReturnType<Page['reload']>>> {
   try {
     return await page.reload();
   } catch (error) {
-    if (!/ERR_ABORTED|frame was detached/.test(String(error))) throw error;
+    if (page.isClosed() || !/ERR_ABORTED|frame was detached|Not attached to an active page/.test(String(error))) throw error;
     await expectPlannerReady(page);
     return await page.reload();
   }
@@ -252,6 +254,7 @@ test('coming back online updates the worker rather than serving a stale shell', 
   await page.reload();
   await expectPlannerReady(page);
   await context.setOffline(false);
+  await page.waitForFunction(() => navigator.onLine);
 
   // The shell is network-first: one navigation with the network back must not
   // still be answering from the cache it fell back to.

@@ -3,6 +3,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { StrictMode, act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { App } from './App';
+import { waitForBoot } from './testing/wait';
 import { currentVersion, RELEASES_PAGE, type WindowsUpdateOffer } from './shared/updates';
 import {
   createStartupState,
@@ -103,6 +104,7 @@ async function mountApp(phase: StartupUpdatePhase, version?: string): Promise<vo
       </StrictMode>,
     );
   });
+  await waitForBoot(text);
 }
 
 function text(): string {
@@ -111,6 +113,10 @@ function text(): string {
 
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
+  // Update controls live in the personal workspace, not the panel chooser.
+  // Never depend on a route inherited from another test in the shared worker.
+  window.history.replaceState(null, '', '#/today');
   document.body.innerHTML = '';
   updater.checkPackagedUpdate.mockReset().mockResolvedValue({ status: 'unavailable', version: null, offer: null });
   updater.downloadPackagedUpdate.mockReset();
