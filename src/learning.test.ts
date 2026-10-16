@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sanitizeClassAssignment, sanitizeHomeworkPhoto, sanitizeHomeworkSubmission, withGuardianHomeworkReview } from './learning';
+import { classPlayerSource, sanitizeClassAssignment, sanitizeHomeworkPhoto, sanitizeHomeworkSubmission, withGuardianHomeworkReview, withoutLinkClass } from './learning';
 import { sanitizePanels } from './storage';
 import { createEmptyPanels } from './types';
 import type { ClassAssignment, GuardianLink, HomeworkAssignment, HomeworkPhoto, HomeworkReview, HomeworkSubmission, Panels } from './types';
@@ -59,6 +59,35 @@ describe('learning assignments and photo retention', () => {
     expect(sanitizeClassAssignment(classAssignment)).toEqual(classAssignment);
     expect(sanitizeClassAssignment({ ...classAssignment, videoUrl: 'javascript:alert(1)' })).toBeNull();
     expect(sanitizeClassAssignment({ ...classAssignment, videoUrl: 'http://video.example/lesson' })).toBeNull();
+  });
+
+  it('maps supported hosted video links to safe in-app player URLs', () => {
+    expect(classPlayerSource('https://youtu.be/abcdefghijk')).toEqual({ kind: 'embed', src: 'https://www.youtube-nocookie.com/embed/abcdefghijk?playsinline=1' });
+    expect(classPlayerSource('https://vimeo.com/123456789')).toEqual({ kind: 'embed', src: 'https://player.vimeo.com/video/123456789' });
+    expect(classPlayerSource('https://vimeo.com/123456789/abcDEF')).toEqual({ kind: 'embed', src: 'https://player.vimeo.com/video/123456789?h=abcDEF' });
+    expect(classPlayerSource('https://drive.google.com/file/d/abcdefghijk/view')).toEqual({ kind: 'embed', src: 'https://drive.google.com/file/d/abcdefghijk/preview' });
+    expect(classPlayerSource('https://www.aparat.com/v/AbC123x')).toEqual({ kind: 'embed', src: 'https://www.aparat.com/video/video/embed/videohash/AbC123x/vt/frame' });
+    expect(classPlayerSource('https://www.aparat.com/video/video/embed/videohash/AbC123x/vt/frame')).toEqual({ kind: 'embed', src: 'https://www.aparat.com/video/video/embed/videohash/AbC123x/vt/frame' });
+    for (const url of [
+      'https://namasha.com/v/1234',
+      'https://tamasha.com/v/1234',
+      'https://telewebion.com/episode/1234',
+      'https://www.filimo.com/m/1234',
+      'https://www.namava.ir/vod/1234',
+      'https://rubika.ir/video/1234',
+    ]) {
+      expect(classPlayerSource(url)).toEqual({ kind: 'embed', src: url });
+    }
+    expect(classPlayerSource('https://cdn.example.org/lesson.mp4')).toEqual({ kind: 'video', src: 'https://cdn.example.org/lesson.mp4' });
+    expect(classPlayerSource('https://video.example/watch?id=unknown')).toBeNull();
+  });
+
+  it('removes a class and its progress only from the selected guardian link', () => {
+    const panels = panelsWithLearning();
+    const next = withoutLinkClass(panels, linkId, classAssignment.id);
+    expect(next.guardian.links[0]?.classes).toEqual([]);
+    expect(next.guardian.links[0]?.classProgress).toEqual([]);
+    expect(next.student.inbox.classes).toEqual([classAssignment]);
   });
 
   it('accepts only opaque Cloudinary photo pointers', () => {

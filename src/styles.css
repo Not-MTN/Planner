@@ -1094,8 +1094,8 @@ h1, .page-head h1 {
 @media (max-width: 1023px) { .toast { bottom: calc(86px + env(safe-area-inset-bottom)); } }
 
 /* ---------- Ring & meter ---------- */
-.ring-wrap { position: relative; width: 128px; height: 128px; }
-.ring { width: 100%; height: 100%; transform: rotate(-90deg); }
+.ring-wrap { position: relative; width: 128px; height: 128px; container-type: inline-size; flex: none; }
+.ring { display: block; width: 100%; height: 100%; transform: rotate(-90deg); }
 .ring-track { fill: none; stroke: color-mix(in srgb, var(--ink) 9%, transparent); stroke-width: 7; }
 .ring-value {
   fill: none;
@@ -1106,15 +1106,36 @@ h1, .page-head h1 {
 }
 .ring-copy {
   position: absolute;
-  inset: 0;
+  inset: 12%;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0;
+  gap: 2px;
+  overflow: hidden;
 }
-.ring-copy strong { font-family: var(--serif); font-size: 26px; letter-spacing: -0.02em; }
-.ring-copy span { font-size: 11px; color: var(--muted); }
+.ring-copy strong {
+  max-width: 94%;
+  font-family: var(--serif);
+  font-size: 26px;
+  font-size: clamp(12px, 20cqw, 26px);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+.ring-copy strong.is-long { font-size: clamp(10px, 14cqw, 18px); }
+.ring-copy span {
+  max-width: 88%;
+  color: var(--muted);
+  font-size: 11px;
+  font-size: clamp(8px, 9cqw, 11px);
+  line-height: 1.15;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
 .meter {
   height: 6px;
   border-radius: 999px;
@@ -1446,7 +1467,7 @@ h1, .page-head h1 {
   animation: sheet-in 0.3s var(--ease);
 }
 .focus-close { position: absolute; top: 14px; inset-inline-end: 14px; border-color: transparent; background: transparent; }
-.focus-ring-wrap { position: relative; width: 232px; height: 232px; margin: 8px 0; }
+.focus-ring-wrap { position: relative; width: min(232px, calc(100vw - 48px)); aspect-ratio: 1; height: auto; margin: 8px 0; container-type: inline-size; flex: none; }
 .focus-ring { width: 100%; height: 100%; transform: rotate(-90deg); }
 .focus-ring-track { fill: none; stroke: color-mix(in srgb, var(--ink) 8%, transparent); stroke-width: 9; }
 .focus-ring-value { fill: none; stroke: var(--accent); stroke-width: 9; stroke-linecap: round; transition: stroke-dashoffset 0.4s linear; }
@@ -1461,8 +1482,8 @@ h1, .page-head h1 {
   gap: 2px;
   color: var(--ink);
 }
-.focus-ring-copy strong { font-family: var(--serif); font-size: 52px; font-weight: 480; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
-.focus-ring-copy span { color: var(--muted); font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 650; }
+.focus-ring-copy strong { max-width: 94%; font-family: var(--serif); font-size: 52px; font-size: clamp(30px, 22cqw, 52px); line-height: 1; font-weight: 480; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; white-space: nowrap; direction: ltr; unicode-bidi: isolate; }
+.focus-ring-copy span { max-width: 88%; color: var(--muted); font-size: 12.5px; letter-spacing: 0.04em; text-transform: uppercase; font-weight: 650; text-align: center; line-height: 1.15; overflow-wrap: anywhere; }
 .focus-title { font-family: var(--serif); font-size: 21px; font-weight: 500; letter-spacing: -0.01em; }
 .focus-durations { display: flex; gap: 7px; flex-wrap: wrap; justify-content: center; }
 .focus-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 4px; }
@@ -2495,15 +2516,16 @@ h1, .page-head h1 {
 .trend-point { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
 .chart-empty { min-height: 160px; display: grid; place-items: center; text-align: center; color: var(--muted); font-size: 13px; padding: 20px; }
 .donut-layout { min-height: 174px; display: flex; align-items: center; justify-content: center; gap: clamp(12px, 4vw, 34px); }
-.donut-wrap { width: min(170px, 50%); flex: none; }
+.donut-wrap { width: min(170px, 50%); flex: none; container-type: inline-size; }
 .donut-wrap svg { display: block; width: 100%; overflow: visible; }
 .donut-track { fill: none; stroke: var(--surface-3); stroke-width: 12; }
 .donut-segment { fill: none; stroke-width: 12; }
 .donut-segment.tasks { stroke: var(--cat-blue); }
 .donut-segment.events { stroke: var(--cat-peach); }
 .donut-segment.habits { stroke: var(--cat-sage); }
-.donut-total { fill: var(--ink); font: 650 24px var(--sans); }
-.donut-caption { fill: var(--muted); font: 10px var(--sans); }
+.donut-total { fill: var(--ink); font-family: var(--sans); font-size: 24px; font-size: clamp(13px, 14cqw, 24px); font-weight: 650; font-variant-numeric: tabular-nums; direction: ltr; }
+.donut-total.is-long { font-size: clamp(10px, 11cqw, 18px); }
+.donut-caption { fill: var(--muted); font-family: var(--sans); font-size: 10px; font-size: clamp(8px, 6cqw, 10px); }
 .donut-legend { display: flex; flex-direction: column; gap: 12px; min-width: 100px; }
 .donut-legend li { display: grid; grid-template-columns: 10px minmax(52px, 1fr) auto; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-soft); }
 .donut-legend strong { color: var(--ink); font-variant-numeric: tabular-nums; }
@@ -3840,13 +3862,14 @@ html, body { overflow-x: clip; }
 .chart-block .chart-note { margin: 2px 0 10px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .chart-empty { margin: 14px 0 0; font-size: 12.5px; color: var(--muted); }
 
-.completion-ring { position: relative; width: 84px; height: 84px; flex: 0 0 auto; }
-.completion-ring-svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.completion-ring { position: relative; width: 84px; height: 84px; flex: 0 0 auto; container-type: inline-size; }
+.completion-ring-svg { display: block; width: 100%; height: 100%; transform: rotate(-90deg); }
 .completion-ring-track { fill: none; stroke: color-mix(in srgb, var(--muted) 18%, transparent); stroke-width: 9; }
 .completion-ring-value { fill: none; stroke: var(--accent); stroke-width: 9; stroke-linecap: round; transition: stroke-dasharray 0.5s ease; }
-.completion-ring-label { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; }
-.completion-ring-label strong { font-size: 17px; font-variant-numeric: tabular-nums; color: var(--ink); }
-.completion-ring-label span { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.completion-ring-label { position: absolute; inset: 8%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; overflow: hidden; }
+.completion-ring-percent { max-width: 100%; color: var(--ink); font-size: 16px; font-size: clamp(10px, 20cqw, 16px); font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; direction: ltr; unicode-bidi: isolate; }
+.completion-ring-count { max-width: 100%; color: var(--muted); font-size: 10px; font-size: clamp(8px, 13cqw, 11px); line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; direction: ltr; unicode-bidi: isolate; }
+.completion-ring-count.is-long { font-size: clamp(7px, 10cqw, 9px); }
 .result-stack { display: flex; flex-direction: column; gap: 10px; }
 
 .split { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
@@ -4071,6 +4094,9 @@ html, body { overflow-x: clip; }
   .hero-panel .ring-wrap {
     margin: 0 auto;
   }
+  .hero-panel .ring-copy strong { font-size: 16px; }
+  .hero-panel .ring-copy strong.is-long { font-size: 10px; }
+  .hero-panel .ring-copy span { font-size: 8px; }
 
   .qa-row {
     width: 100%;

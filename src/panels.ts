@@ -174,6 +174,24 @@ export function planEnd(plan: Pick<GuardianPlan, 'cadence' | 'start'>): string {
   return toISODate(new Date(date.getFullYear(), date.getMonth() + 1, 0));
 }
 
+/** A student can clean up a plan from a former guardian or one ended a week ago. */
+export function studentCanDeletePlan(plan: GuardianPlan, currentGuardianLinkIds: string[], today = todayISO()): boolean {
+  return !currentGuardianLinkIds.includes(plan.linkId) || addDays(planEnd(plan), 7) <= today;
+}
+
+/** Remove a plan locally and remember the choice so active guardians won't resend it. */
+export function withoutStudentPlan(panels: Panels, planId: string): Panels {
+  const deletedPlanIds = [...new Set([...(panels.student.deletedPlanIds ?? []), planId])].slice(-200);
+  return {
+    ...panels,
+    student: {
+      ...panels.student,
+      deletedPlanIds,
+      inbox: { ...panels.student.inbox, plans: panels.student.inbox.plans.filter((plan) => plan.id !== planId) },
+    },
+  };
+}
+
 /** \"Week of 28 Sep\", \"Today\", or \"September 2026\" — what the plan covers. */
 export function planPeriodLabel(plan: GuardianPlan, from = todayISO()): string {
   if (plan.cadence === 'day') {

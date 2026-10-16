@@ -313,7 +313,12 @@ export function mergePanels(local: Panels, remote: Panels): Panels {
   };
   const studentReports = mergeReports(local.student.reports ?? [], remote.student.reports ?? []);
   const studentAcks = mergeAcks(local.student.acks ?? [], remote.student.acks ?? []);
-  const studentPlans = sealReportedDays(mergePlans(local.student.inbox?.plans ?? [], remote.student.inbox?.plans ?? []), studentReports);
+  const deletedPlanIds = [...new Set([...(local.student.deletedPlanIds ?? []), ...(remote.student.deletedPlanIds ?? [])])].slice(-200);
+  const deletedPlanIdSet = new Set(deletedPlanIds);
+  const studentPlans = sealReportedDays(
+    mergePlans(local.student.inbox?.plans ?? [], remote.student.inbox?.plans ?? []).filter((plan) => !deletedPlanIdSet.has(plan.id)),
+    studentReports,
+  );
   const studentHomeworkSubmissions = mergeHomeworkSubmissions(
     local.student.homeworkSubmissions ?? [], remote.student.homeworkSubmissions ?? [],
   );
@@ -325,6 +330,7 @@ export function mergePanels(local: Panels, remote: Panels): Panels {
       field: local.student.field ?? remote.student.field,
       grade: local.student.grade ?? remote.student.grade,
       guardians: byIdKey(local.student.guardians ?? [], remote.student.guardians ?? [], (item) => item.linkId).slice(0, 20),
+      deletedPlanIds,
       subjects: byId(local.student.subjects, remote.student.subjects).slice(0, 40),
       explanations: byId(local.student.explanations, remote.student.explanations)
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))

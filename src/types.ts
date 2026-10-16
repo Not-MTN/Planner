@@ -330,6 +330,8 @@ export interface StudentPanel {
   grade: string | null;
   /** Guardians this student shares weekly results with. */
   guardians: StudentGuardian[];
+  /** Plans the student has deleted, so an active guardian's next sync won't restore them. */
+  deletedPlanIds?: string[];
   /** Subjects the student tracks, with an optional exam date. */
   subjects: StudentSubject[];
   /** Why the student changed something significant. Detail kept for the active week only. */
@@ -911,6 +913,7 @@ export function createEmptyPanels(): Panels {
       field: null,
       grade: null,
       guardians: [],
+      deletedPlanIds: [],
       subjects: [],
       explanations: [],
       inbox: { notices: [], plans: [], goals: [] },

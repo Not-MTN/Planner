@@ -379,6 +379,7 @@ function CompletionDonut({ state, today, days }: { state: PlannerState; today: s
     { label: t("Habits"), value: habitWins, className: 'habits' },
   ];
   const total = segments.reduce((sum, item) => sum + item.value, 0);
+  const totalLabel = String(faNum(total));
   const radius = 43;
   const circumference = 2 * Math.PI * radius;
   let consumed = 0;
@@ -402,7 +403,15 @@ function CompletionDonut({ state, today, days }: { state: PlannerState; today: s
                   <circle key={segment.label} className={`donut-segment ${segment.className}`} cx="56" cy="56" r={radius} strokeDasharray={`${length} ${circumference - length}`} strokeDashoffset={-offset} transform="rotate(-90 56 56)" />
                 ) : null;
               })}
-              <text className="donut-total" x="56" y="54" textAnchor="middle">{faNum(total)}</text>
+              <text
+                className={cx('donut-total', totalLabel.length > 3 && 'is-long')}
+                x="56"
+                y="54"
+                textAnchor="middle"
+                direction="ltr"
+                textLength={totalLabel.length > 3 ? 64 : undefined}
+                lengthAdjust="spacingAndGlyphs"
+              >{totalLabel}</text>
               <text className="donut-caption" x="56" y="69" textAnchor="middle">{t('completed')}</text>
             </svg>
           </div>

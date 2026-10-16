@@ -210,6 +210,8 @@ export function CompletionRing({ done, planned }: RingProps) {
   const ratio = Math.min(1, done / total);
   const radius = 42;
   const circumference = 2 * Math.PI * radius;
+  const percentage = `${faNum(Math.round(ratio * 100))}%`;
+  const count = `${faNum(done)}/${faNum(planned)}`;
   return (
     <div className="completion-ring" role="img" aria-label={t('Completion: {0} of {1} planned items', { 0: done, 1: planned })}>
       <svg viewBox="0 0 100 100" className="completion-ring-svg">
@@ -223,9 +225,9 @@ export function CompletionRing({ done, planned }: RingProps) {
         />
       </svg>
       <div className="completion-ring-label">
-        <strong>{faNum(Math.round(ratio * 100))}%</strong>
-        <span>
-          {faNum(done)}/{faNum(planned)}
+        <strong className="completion-ring-percent" dir="ltr">{percentage}</strong>
+        <span className={cx('completion-ring-count', count.length > 5 && 'is-long')} dir="ltr">
+          {count}
         </span>
       </div>
     </div>

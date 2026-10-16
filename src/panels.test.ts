@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createEmptyState } from './types';
 import { sanitizePanels, sanitizeState } from './storage';
 import { mergePanels, mergeStates } from './sync';
-import { daysUntil, splitExplanations, subjectMinutes, weekOf, weekResults, withExplanation, withFlushedPlans, withLinkPlan, withQueuedPlan, withSubject, withoutQueuedPlan, withoutSubject } from './panels';
+import { daysUntil, splitExplanations, studentCanDeletePlan, subjectMinutes, weekOf, weekResults, withExplanation, withFlushedPlans, withLinkPlan, withQueuedPlan, withSubject, withoutQueuedPlan, withoutStudentPlan, withoutSubject } from './panels';
 import type { ChangeNote, ClassAssignment, ClassProgress, DayReport, GuardianPlan, HomeworkAssignment, HomeworkPhoto, HomeworkReview, HomeworkSubmission, Panels, PlannerState, QueuedPlan, ReportAck, StudentSubject } from './types';
 
 function note(week: string, id: string): ChangeNote {
@@ -29,6 +29,12 @@ describe('panel storage', () => {
     const panels = withSubject(createEmptyState().panels, subject('s1', 'Physics'));
     const round = sanitizeState(JSON.parse(JSON.stringify(stateWith(panels))));
     expect(round?.panels.student.subjects[0]?.name).toBe('Physics');
+  });
+
+  it('keeps deleted-plan markers through local storage sanitization', () => {
+    const base = createEmptyState().panels;
+    const safe = sanitizePanels({ ...base, student: { ...base.student, deletedPlanIds: ['plan-one'] } });
+    expect(safe.student.deletedPlanIds).toEqual(['plan-one']);
   });
 
   it('preserves daily and period approvals through a save and load round trip', () => {
@@ -143,6 +149,44 @@ describe('panel storage', () => {
 });
 
 describe('panel merge', () => {
+  it('lets students delete plans from former guardians or plans ended at least a week ago', () => {
+    const base = createEmptyState().panels;
+    const linkId = '12345678-1234-1234-1234-123456789abc';
+    const plan: GuardianPlan = {
+      id: 'old-plan', author: 'Parent', linkId, cadence: 'day', start: '2026-10-01', title: 'Old plan', note: '',
+      items: [], createdAt: '2026-10-01T08:00:00.000Z', updatedAt: '2026-10-01T08:00:00.000Z',
+    };
+    expect(studentCanDeletePlan(plan, [linkId], '2026-10-07')).toBe(false);
+    expect(studentCanDeletePlan(plan, [linkId], '2026-10-08')).toBe(true);
+    expect(studentCanDeletePlan(plan, ['another-guardian'], '2026-10-02')).toBe(true);
+    const withPlan: Panels = {
+      ...base,
+      student: { ...base.student, inbox: { ...base.student.inbox, plans: [plan] } },
+    };
+    const deleted = withoutStudentPlan(withPlan, plan.id);
+    expect(deleted.student.inbox.plans).toEqual([]);
+    expect(deleted.student.deletedPlanIds).toContain(plan.id);
+  });
+
+  it('keeps a student-deleted plan out of a later cross-device merge', () => {
+    const base = createEmptyState().panels;
+    const plan: GuardianPlan = {
+      id: 'deleted-plan', author: 'Parent', linkId: 'guardian-link', cadence: 'day', start: '2026-10-01', title: 'Old', note: '',
+      items: [], createdAt: '2026-10-01T08:00:00.000Z', updatedAt: '2026-10-01T08:00:00.000Z',
+    };
+    const local = stateWith({
+      ...base,
+      student: { ...base.student, deletedPlanIds: [plan.id] },
+    });
+    const remote = stateWith({
+      ...base,
+      student: { ...base.student, inbox: { ...base.student.inbox, plans: [plan] } },
+    });
+    const merged = mergeStates(local, remote);
+    expect(merged.panels.student.inbox.plans).toEqual([]);
+    expect(merged.panels.student.deletedPlanIds).toContain(plan.id);
+  });
+
   it('treats an added panel as added even when the other device never saw it', () => {
     const local = stateWith(withSubject(createEmptyState().panels, subject('s1', 'Biology')));
     local.panels.student.enabled = true;

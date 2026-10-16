@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { usePlanner } from '../context';
 import { formatFullDate } from '../dates';
 import { faNum, t } from '../i18n';
-import { CheckIcon, GlobeIcon, UploadIcon } from '../icons';
+import { CheckIcon, UploadIcon } from '../icons';
 import { withStudentClassProgress } from '../learning';
 import { HOMEWORK_PHOTOS_MAX } from '../types';
 import type { ClassAssignment, HomeworkAssignment, HomeworkPhoto, Panels } from '../types';
@@ -10,6 +10,7 @@ import { syncStudentInbox, submitHomework } from '../auth/links';
 import { uploadEncryptedHomeworkPhoto, deleteHomeworkPhotoAssets, HOMEWORK_PHOTO_MAX_BYTES } from '../homeworkMedia';
 import '../panels.css';
 import './learning.css';
+import { ClassVideoPlayer } from './ClassVideoPlayer';
 
 function formatDue(value: string | null): string | null {
   if (!value) return null;
@@ -144,10 +145,8 @@ function ClassCard({ assignment }: { assignment: ClassAssignment }) {
         </span>
       </div>
       {assignment.description ? <p className="learning-description">{assignment.description}</p> : null}
+      <ClassVideoPlayer videoUrl={assignment.videoUrl} title={assignment.title} />
       <div className="learning-card-actions">
-        <a className="btn btn-outline btn-small" href={assignment.videoUrl} target="_blank" rel="noopener noreferrer">
-          <GlobeIcon size={14} /> {t('Open video lesson')}
-        </a>
         <button type="button" className="btn btn-ghost btn-small" aria-pressed={completed} onClick={toggle}>
           <CheckIcon size={14} /> {completed ? t('Mark not done') : t('Mark complete')}
         </button>

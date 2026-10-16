@@ -490,7 +490,7 @@ describe('linking a guardian and a student', () => {
     await join('learnstudent', 'learnstudent@example.com', createEmptyState());
     const { acceptInvitation, syncStudentInbox } = await import('./links');
     const { withStudentClassProgress } = await import('../learning');
-    const { approveHomeworkSubmission, sendClass, sendHomeworkAssignment, submitHomework, readNotices } = await import('./links');
+    const { approveHomeworkSubmission, dropClass, sendClass, sendHomeworkAssignment, submitHomework, readNotices } = await import('./links');
     let studentPanels = await acceptInvitation(createEmptyState().panels, invited.invitation.code);
 
     await signInAs('learnparent');
@@ -541,6 +541,14 @@ describe('linking a guardian and a student', () => {
     expect(studentPanels.student.homeworkSubmissions?.[0]).toMatchObject({
       status: 'approved', photos: [], guardianNote: 'Excellent work.',
     });
+
+    await signInAs('learnparent');
+    guardianPanels = await dropClass(guardianPanels, linkId, assignedClass.id);
+    expect(guardianPanels.guardian.links[0]?.classes).toEqual([]);
+    await signInAs('learnstudent');
+    studentPanels = (await syncStudentInbox(studentPanels, [])).panels;
+    expect(studentPanels.student.inbox.classes).toEqual([]);
+    expect(studentPanels.student.classProgress).toEqual([]);
   }, 180_000);
 
   it('supports a first report reply, then keeps an approved day immutable across stale guardian state', async () => {
