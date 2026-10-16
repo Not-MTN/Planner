@@ -51,6 +51,14 @@ Three-part stable semver, nothing else: the contract check rejects `v1.2` and
 rejects pre-release suffixes, because the Android version name and the Windows
 app id have to stay permanently comparable.
 
+The `v` is part of the name, not decoration: `apps.yml` watches `v*` tags, so a
+version tagged without it starts no build at all. `1.1.2` was pushed that way,
+and the release it was supposed to publish simply never appeared — the version
+bump, the pull request and every check on it were all green, because all of
+them are upstream of the tag. **Release tag check** now runs on every tag push
+and fails when a version tag cannot release anything, naming the two commands
+that fix it; `npm run check:release-tag -- 1.1.2` says the same thing locally.
+
 The tag starts **Apps** (`apps.yml`). It builds on GitHub's runners, which is
 also the only place the packaging runs end to end:
 
@@ -75,6 +83,8 @@ The other workflows are for the pull request, not the tag: **Native builds**,
 **Browser tests**, **Visual regression**, **Security checks** and **Device
 smoke** run on `pull_request` (and on demand), and Security also runs on every
 push. By the time a tag exists, all of them have been green on that commit.
+**Release tag check** is the one that runs *because* of a tag push; it is there
+to say that the name which just went out will release something.
 
 ## 3. After the tag
 
@@ -106,6 +116,12 @@ push. By the time a tag exists, all of them have been green on that commit.
   pulled Play release keeps the code. The fix is a new patch tag, not a
   replacement — which is why the store steps are last and the device checklist
   is not optional.
+- **A tag with no release behind it** is almost always a tag without its `v`:
+  only `v*` starts `apps.yml`, so nothing was ever built. Push the `v` tag at
+  the same commit, then delete the misnamed one
+  (`git push origin :refs/tags/1.1.2`). **Release tag check** on the tag says
+  which of the two cases you are looking at, and so does
+  `npm run check:release-tag -- <tag>`.
 - **A bad deploy** is not a release at all: the website and the API roll
   forward independently, and an installed app keeps working offline from its own
   build. Roll the deployment back, leave the tags alone, and let the next patch
