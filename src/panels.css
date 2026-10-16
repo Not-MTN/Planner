@@ -421,6 +421,7 @@
 .week-day-row.today { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
 .week-day-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; }
 .week-day-name { font-family: var(--serif); font-size: 14px; font-weight: 600; color: var(--ink); }
+.week-day-jalali { font-family: 'Vazirmatn', var(--serif); font-size: 12px; font-weight: 600; color: #7c5cf0; background: #f5f3ff; border: 1px solid #ede9ff; border-radius: 999px; padding: 1px 8px; letter-spacing: 0; }
 .week-today {
   font-size: 10px;
   font-weight: 700;
@@ -592,6 +593,7 @@
 .week-grid tbody th { white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--muted); font-weight: 600; }
 .week-grid-day { display: block; font-weight: 700; color: var(--ink); }
 .week-grid-date { display: block; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
+.week-grid-jalali { display: block; font-family: 'Vazirmatn', var(--sans); font-size: 11px; font-weight: 600; color: #7c5cf0; background: #f5f3ff; border-radius: 999px; padding: 1px 6px; margin-top: 3px; text-align: center; }
 .week-grid-mark { display: block; font-weight: 700; }
 .week-grid-mark.reported { color: var(--cat-sage-text); }
 .week-grid-mark.rest { font-size: 11px; color: var(--cat-lav-text); }

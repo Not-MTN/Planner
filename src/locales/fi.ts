@@ -2343,4 +2343,13 @@ export const fi: Record<string, string> = {
   "students": "oppilasta",
   "{0} of {1} photos selected": "Valittu {0}/{1} kuvaa",
   "{0} photos": "{0} kuvaa",
+  "Download paused": "Lataus keskeytetty",
+  "Delete notification: {0}": "Poista ilmoitus: {0}",
+  "Notification deleted.": "Ilmoitus poistettu.",
+  "Pause download": "Keskeytä lataus",
+  "Cancel download": "Peruuta lataus",
+  "paused — will resume where it left off": "keskeytetty — jatkuu samasta kohdasta",
+  "Resume download": "Jatka latausta",
+  "Connection lost — {0} of {1} downloaded. Will resume where it left off.": "Yhteys katkesi — {0} / {1} ladattu. Jatketaan samasta kohdasta.",
+  "Could not pause the download.": "Latauksen keskeytys epäonnistui.",
 };

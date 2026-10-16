@@ -1,8 +1,8 @@
 {
   "name": "planner-desktop",
   "private": true,
-  "version": "1.0.0",
-  "description": "Planner for Windows, macOS and Linux — the same local-first planner, in a window of its own.",
+  "version": "1.1.2",
+  "description": "Planner for Windows, macOS and Linux \u2014 the same local-first planner, in a window of its own.",
   "author": "Planner",
   "license": "MIT",
   "homepage": "https://github.com/Not-MTN/Planner",

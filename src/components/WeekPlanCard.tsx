@@ -10,7 +10,7 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { cx } from '../cx';
-import { displayTime, formatFullDate, formatWeekdayShort, todayISO } from '../dates';
+import { displayTime, formatFullDate, formatJalaliLong, formatWeekdayShort, todayISO } from '../dates';
 import { faNum, t, tn } from '../i18n';
 import { BellIcon, CheckIcon, GlobeIcon } from '../icons';
 import { planEnd, planPeriodLabel, planProgress } from '../panels';
@@ -268,6 +268,7 @@ export function WeekPlanCard({
       >
         <div className="week-day-head">
           <span className="week-day-name">{date ? formatFullDate(date) : t('Any day')}</span>
+          {date ? (() => { const jalali = formatJalaliLong(date); return jalali ? <span className="week-day-jalali" dir="rtl">{jalali}</span> : null; })() : null}
           {date === today ? <span className="week-today">{t('Today')}</span> : null}
           {lessons.length > 0 ? (
             <span className="week-day-count">{t('{0} lessons', { 0: lessons.length })}</span>

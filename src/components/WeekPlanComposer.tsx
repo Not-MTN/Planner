@@ -10,7 +10,7 @@ import { useId, useState } from 'react';
 import { sendPlan } from '../auth/links';
 import { usePlanner } from '../context';
 import { CURRICULUM_FIELDS, CURRICULUM_GRADES, curriculumSuggestions, isCurriculumLesson } from '../curriculum';
-import { WEEKDAY_TOGGLES, addDays, formatFullDate, isValidISODate, isValidTime, todayISO } from '../dates';
+import { WEEKDAY_TOGGLES, addDays, formatFullDate, formatJalaliLong, isValidISODate, isValidTime, todayISO } from '../dates';
 import { cx } from '../cx';
 import { t } from '../i18n';
 import { GlobeIcon, PlusIcon, TrashIcon } from '../icons';
@@ -82,7 +82,13 @@ export function WeekPlanComposer({ link, onClose }: { link: GuardianLink; onClos
   const full = count >= WEEK_LESSON_LIMIT;
   const suggestions = curriculumSuggestions(draft.field, draft.grade);
   const examWarns = examWarningDates(draft.days, draft.start, draft.examDate);
-  const dayLabel = (offset: number) => (startOk ? formatFullDate(addDays(draft.start, offset)) : '—');
+  const dayLabel = (offset: number) => {
+    if (!startOk) return '—';
+    const iso = addDays(draft.start, offset);
+    const greg = formatFullDate(iso);
+    const jalali = formatJalaliLong(iso);
+    return jalali ? `${greg} · ${jalali}` : greg;
+  };
 
   const remember = (field: string, grade: string) => {
     setDraft((current) => ({ ...current, field, grade }));

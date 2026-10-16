@@ -8,9 +8,10 @@ import {
   type WindowsUpdateOffer,
 } from './updates';
 
-interface ProgressEvent {
+export interface ProgressEvent {
   bytesReceived: number;
   totalBytes: number;
+  speedBps?: number | null;
 }
 
 interface NativeUpdateRequest {
@@ -39,8 +40,11 @@ interface DesktopUpdaterBridge {
   platform: string;
   version: () => Promise<string>;
   getUpdateManifest: () => Promise<unknown>;
-  downloadUpdate: (offer: WindowsUpdateOffer) => Promise<{ ready: boolean }>;
+  downloadUpdate: (offer: WindowsUpdateOffer) => Promise<{ ready: boolean; resumed?: boolean; paused?: boolean; canceled?: boolean }>;
   installUpdate: (offer: WindowsUpdateOffer) => Promise<{ started: boolean }>;
+  pauseUpdate: () => Promise<{ paused: boolean }>;
+  resumeUpdate: () => Promise<{ resumed: boolean }>;
+  cancelUpdate: () => Promise<{ canceled: boolean }>;
   onUpdateProgress: (listener: (event: ProgressEvent) => void) => () => void;
 }
 
@@ -150,11 +154,69 @@ export async function downloadPackagedUpdate(
   }
   const removeListener = desktop.onUpdateProgress(onProgress);
   try {
-    const result = await desktop.downloadUpdate(offer);
-    if (!result.ready) throw new Error('The update download could not be verified.');
+    const result = await desktop.downloadUpdate(offer) as { ready?: boolean; paused?: boolean; canceled?: boolean };
+    if (result?.paused) {
+      const err = new Error('paused') as Error & { code?: string };
+      err.code = 'PAUSED';
+      throw err;
+    }
+    if (result?.canceled) {
+      const err = new Error('canceled') as Error & { code?: string };
+      err.code = 'CANCELED';
+      throw err;
+    }
+    if (!result?.ready) throw new Error('The update download could not be verified.');
   } finally {
     removeListener();
   }
+}
+
+export function canPausePackagedDownload(): boolean {
+  const desktop = desktopBridge();
+  return Boolean(desktop && desktop.platform === 'win32' && typeof desktop.pauseUpdate === 'function');
+}
+export function canCancelPackagedDownload(): boolean {
+  const desktop = desktopBridge();
+  // Desktop can cancel a resumable download; Android's native downloader handles its own lifecycle.
+  if (desktop && desktop.platform === 'win32' && typeof desktop.cancelUpdate === 'function') return true;
+  return false;
+}
+
+export async function pausePackagedDownload(): Promise<void> {
+  const desktop = desktopBridge();
+  if (!desktop || desktop.platform !== 'win32' || typeof desktop.pauseUpdate !== 'function') {
+    throw new Error('Pause is not available on this platform.');
+  }
+  await desktop.pauseUpdate();
+}
+
+export async function resumePackagedDownload(offer: UpdateOffer, onProgress: (progress: ProgressEvent) => void): Promise<void> {
+  const desktop = desktopBridge();
+  if (desktop && desktop.platform === 'win32' && typeof desktop.resumeUpdate === 'function') {
+    // Desktop resume keeps the partial file and continues with Range; fall
+    // back to a fresh download if the bridge does not support resume.
+    try {
+      const resumed = await desktop.resumeUpdate();
+      if (resumed?.resumed) {
+        // The main process resumed the fetch; progress will arrive via the
+        // existing listener. Re-enter the download path so verification still
+        // happens and the promise resolves only when the file is ready.
+        return downloadPackagedUpdate(offer, onProgress);
+      }
+    } catch {
+      // resumeUpdate may throw if there is nothing to resume — fall through to a normal download
+    }
+  }
+  return downloadPackagedUpdate(offer, onProgress);
+}
+
+export async function cancelPackagedDownload(): Promise<void> {
+  const desktop = desktopBridge();
+  if (desktop && desktop.platform === 'win32' && typeof desktop.cancelUpdate === 'function') {
+    await desktop.cancelUpdate();
+    return;
+  }
+  // No native cancel on this platform — the caller will reset UI state.
 }
 
 /** Apply an already-downloaded update; the native installer preserves app data. */

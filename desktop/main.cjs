@@ -92,6 +92,12 @@ let mainWindow = null;
 let currentWindowsOffer = null;
 let downloadedWindowsInstaller = null;
 let windowsDownloadInProgress = false;
+let windowsDownloadPaused = false;
+let windowsDownloadCanceled = false;
+let windowsDownloadAbort = null;
+let windowsDownloadOffer = null;
+let windowsDownloadPartialPath = null;
+let windowsDownloadBytesReceived = 0;
 
 function assertUpdateSender(event) {
   const frameUrl = event.senderFrame?.url ?? '';
@@ -167,59 +173,207 @@ async function downloadWindowsInstaller(event, untrustedOffer) {
   if (!offer || !sameWindowsOffer(offer, currentWindowsOffer)) {
     throw new Error('The requested installer does not match the latest verified update feed.');
   }
-  if (windowsDownloadInProgress) throw new Error('An update download is already in progress.');
+  // Allow re-entry when a previous download was paused — it will resume via Range.
+  if (windowsDownloadInProgress && !windowsDownloadPaused) {
+    throw new Error('An update download is already in progress.');
+  }
   windowsDownloadInProgress = true;
+  windowsDownloadPaused = false;
+  windowsDownloadCanceled = false;
+  windowsDownloadOffer = offer;
 
   const directory = path.join(app.getPath('temp'), 'Planner-update');
   const finalPath = path.join(directory, `${offer.version}-${offer.sha256}.exe`);
   const partialPath = `${finalPath}.part`;
+  windowsDownloadPartialPath = partialPath;
   fs.mkdirSync(directory, { recursive: true });
-  await fs.promises.rm(partialPath, { force: true });
+
+  // If a verified final already exists, skip the download.
+  try {
+    const finalStat = await fs.promises.stat(finalPath);
+    if (finalStat.isFile() && finalStat.size === offer.sizeBytes) {
+      const finalHash = await sha256File(finalPath);
+      if (finalHash === offer.sha256) {
+        downloadedWindowsInstaller = { ...offer, path: finalPath };
+        windowsDownloadInProgress = false;
+        return { ready: true };
+      }
+    }
+  } catch {}
+
+  // Determine resume offset from any existing partial.
+  let startBytes = 0;
+  try {
+    const st = await fs.promises.stat(partialPath);
+    if (st.isFile() && st.size > 0 && st.size < offer.sizeBytes) startBytes = st.size;
+    else if (st.isFile() && st.size >= offer.sizeBytes) {
+      // Stale or over-sized partial — verify before discarding; otherwise start over.
+      if (st.size === offer.sizeBytes) {
+        const h = await sha256File(partialPath).catch(() => null);
+        if (h === offer.sha256) {
+          await fs.promises.rm(finalPath, { force: true }).catch(() => {});
+          await fs.promises.rename(partialPath, finalPath).catch(() => {});
+          downloadedWindowsInstaller = { ...offer, path: finalPath };
+          windowsDownloadInProgress = false;
+          return { ready: true };
+        }
+      }
+      await fs.promises.rm(partialPath, { force: true }).catch(() => {});
+      startBytes = 0;
+    }
+  } catch {
+    startBytes = 0;
+  }
+
+  // Prepare hash — if resuming, feed the existing bytes first.
+  const digest = createHash('sha256');
+  if (startBytes > 0) {
+    await new Promise((resolve, reject) => {
+      const stream = fs.createReadStream(partialPath, { start: 0, end: startBytes - 1 });
+      stream.on('data', (chunk) => digest.update(chunk));
+      stream.on('error', reject);
+      stream.on('end', resolve);
+    });
+  }
+
+  windowsDownloadAbort = new AbortController();
+  const signal = windowsDownloadAbort.signal;
+  let bytesReceived = startBytes;
+  let lastProgressAt = 0;
+  let lastSpeedAt = Date.now();
+  let lastSpeedBytes = startBytes;
+  let speedBps = null;
+
+  const sendProgress = (force = false) => {
+    const now = Date.now();
+    const elapsed = (now - lastSpeedAt) / 1000;
+    if (elapsed >= 0.35 || force || bytesReceived === offer.sizeBytes) {
+      const delta = bytesReceived - lastSpeedBytes;
+      const instant = elapsed > 0 ? delta / elapsed : 0;
+      if (speedBps == null) speedBps = instant;
+      else if (delta > 0) speedBps = speedBps * 0.55 + instant * 0.45;
+      lastSpeedAt = now;
+      lastSpeedBytes = bytesReceived;
+    }
+    windowsDownloadBytesReceived = bytesReceived;
+    if (!event.sender.isDestroyed()) {
+      if (force || now - lastProgressAt > 180 || bytesReceived === offer.sizeBytes) {
+        lastProgressAt = now;
+        event.sender.send('planner:update-progress', {
+          bytesReceived,
+          totalBytes: offer.sizeBytes,
+          speedBps: speedBps != null && Number.isFinite(speedBps) ? Math.round(speedBps) : null,
+        });
+      }
+    }
+  };
+
+  // Initial progress so the bar jumps to the resumed offset immediately.
+  sendProgress(true);
 
   try {
-    const response = await net.fetch(offer.downloadUrl, {
-      headers: { Accept: 'application/octet-stream', 'Accept-Encoding': 'identity' },
-    });
+    const headers = { Accept: 'application/octet-stream', 'Accept-Encoding': 'identity' };
+    if (startBytes > 0) headers.Range = `bytes=${startBytes}-`;
+    const response = await net.fetch(offer.downloadUrl, { headers, signal });
+    // Handle Range support
+    if (startBytes > 0 && response.status === 200) {
+      // Server ignored Range — discard partial and restart from 0.
+      await fs.promises.rm(partialPath, { force: true }).catch(() => {});
+      windowsDownloadAbort = null;
+      windowsDownloadInProgress = false;
+      // recurse as a fresh download (will not have partial now)
+      return downloadWindowsInstaller(event, offer);
+    }
+    if (startBytes > 0 && response.status !== 206 && response.status !== 200) {
+      throw new Error(`The installer download returned HTTP ${response.status}.`);
+    }
     if (!response.ok || !response.body) throw new Error(`The installer download returned HTTP ${response.status}.`);
     if (response.url && !isTrustedUpdateUrl(response.url)) throw new Error('The installer redirected to an untrusted host.');
     const declaredSize = Number(response.headers.get('content-length'));
-    if (Number.isFinite(declaredSize) && declaredSize > 0 && declaredSize !== offer.sizeBytes) {
-      throw new Error('The installer size does not match the update feed.');
+    // For 206, content-length is the remaining bytes; for 200 it's total.
+    const expectedRemaining = offer.sizeBytes - startBytes;
+    if (Number.isFinite(declaredSize) && declaredSize > 0) {
+      if (response.status === 206 && declaredSize !== expectedRemaining) {
+        // tolerate mismatched range length but ensure we don't exceed total
+        if (declaredSize > expectedRemaining) throw new Error('The installer size does not match the update feed.');
+      } else if (response.status === 200 && declaredSize !== offer.sizeBytes) {
+        throw new Error('The installer size does not match the update feed.');
+      }
     }
 
-    const digest = createHash('sha256');
-    let bytesReceived = 0;
-    let lastProgressAt = 0;
     const progress = new Transform({
       transform(chunk, _encoding, callback) {
+        if (signal.aborted) {
+          callback(new Error(signal.reason || 'aborted'));
+          return;
+        }
         bytesReceived += chunk.length;
         if (bytesReceived > offer.sizeBytes) {
           callback(new Error('The installer is larger than the update feed declares.'));
           return;
         }
         digest.update(chunk);
-        const now = Date.now();
-        if (now - lastProgressAt > 120 || bytesReceived === offer.sizeBytes) {
-          lastProgressAt = now;
-          if (!event.sender.isDestroyed()) {
-            event.sender.send('planner:update-progress', { bytesReceived, totalBytes: offer.sizeBytes });
-          }
-        }
+        sendProgress(false);
         callback(null, chunk);
       },
     });
-    await pipeline(Readable.fromWeb(response.body), progress, fs.createWriteStream(partialPath, { flags: 'wx' }));
+
+    const writeFlags = startBytes > 0 ? 'a' : 'wx';
+    // If appending, ensure file exists; if wx and file exists we already handled partial.
+    const out = fs.createWriteStream(partialPath, { flags: writeFlags });
+    await pipeline(Readable.fromWeb(response.body), progress, out);
+
+    // Final flush of progress
+    sendProgress(true);
+
     if (bytesReceived !== offer.sizeBytes) throw new Error('The installer download ended before the expected size.');
-    if (digest.digest('hex') !== offer.sha256) throw new Error('The installer checksum does not match the update feed.');
-    await fs.promises.rm(finalPath, { force: true });
+    const hex = digest.digest('hex');
+    if (hex !== offer.sha256) throw new Error('The installer checksum does not match the update feed.');
+    await fs.promises.rm(finalPath, { force: true }).catch(() => {});
     await fs.promises.rename(partialPath, finalPath);
     downloadedWindowsInstaller = { ...offer, path: finalPath };
+    windowsDownloadOffer = null;
+    windowsDownloadPartialPath = null;
     return { ready: true };
   } catch (error) {
-    await fs.promises.rm(partialPath, { force: true });
+    const isAbort = signal.aborted || (error && (error.name === 'AbortError' || String(error.message).toLowerCase().includes('aborted')));
+    if (windowsDownloadPaused && isAbort) {
+      // Paused — keep the partial for resume.
+      return { paused: true };
+    }
+    if (windowsDownloadCanceled && isAbort) {
+      await fs.promises.rm(partialPath, { force: true }).catch(() => {});
+      windowsDownloadOffer = null;
+      windowsDownloadPartialPath = null;
+      return { canceled: true };
+    }
+    // Network / transient error — keep partial so the next attempt resumes.
+    // Only delete on validation errors (size/sha mismatch) which throw with specific messages.
+    const msg = error instanceof Error ? error.message : String(error);
+    const isValidation = msg.includes('checksum') || msg.includes('larger than') || msg.includes('ended before');
+    if (isValidation) {
+      await fs.promises.rm(partialPath, { force: true }).catch(() => {});
+      windowsDownloadOffer = null;
+      windowsDownloadPartialPath = null;
+    } else {
+      // keep partial and offer for resume; ensure progress reflects current bytes
+      sendProgress(true);
+    }
     throw error;
   } finally {
-    windowsDownloadInProgress = false;
+    windowsDownloadAbort = null;
+    // Don't clear inProgress if we are paused — the download is still considered active and resumption will reuse the same slot.
+    if (!windowsDownloadPaused || windowsDownloadCanceled) {
+      windowsDownloadInProgress = false;
+      if (windowsDownloadCanceled) {
+        windowsDownloadPaused = false;
+        windowsDownloadCanceled = false;
+      }
+    } else if (windowsDownloadPaused) {
+      // keep inProgress true so a second concurrent download is still blocked
+    } else {
+      windowsDownloadInProgress = false;
+    }
   }
 }
 
@@ -237,14 +391,26 @@ async function installWindowsUpdate(event, untrustedOffer) {
   }
 
   // NSIS upgrades the same per-user installation (never uninstall first). The
-  // installer keeps the app's userData directory and reopens Planner when done.
+  // installer keeps the app's userData directory and reopens Planner when done
+  // (electron-builder.yml: nsis.runAfterFinish: true). The app must be fully
+  // closed before the installer replaces the executable, so give the spawn a
+  // moment to settle before quitting. A detached installer survives the quit
+  // and launches the new version — no manual reopen required.
   const installer = spawn(file, ['/S'], { detached: true, stdio: 'ignore', windowsHide: true });
   await new Promise((resolve, reject) => {
     installer.once('spawn', resolve);
     installer.once('error', reject);
   });
   installer.unref();
-  setTimeout(() => app.quit(), 350);
+  // 800 ms is enough for the detached process to be re-parented on Windows;
+  // the previous 350 ms occasionally quit before the OS had adopted the child,
+  // leaving a finished install with no window and a user who had to click
+  // the desktop icon again — which, before the second-instance fix above,
+  // did nothing while the tray icon was still hidden.
+  setTimeout(() => {
+    quitting = true;
+    app.quit();
+  }, 800);
   return { started: true };
 }
 
@@ -620,10 +786,10 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
+  // Clicking the desktop shortcut while Planner is hidden in the tray must
+  // bring the window back — otherwise the app looks like it failed to open.
   app.on('second-instance', () => {
-    if (!mainWindow) return;
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.focus();
+    showWindow();
   });
 
   app.whenReady().then(() => {
@@ -656,12 +822,53 @@ if (!gotLock) {
     });
     ipcMain.handle('planner:update-download', (event, offer) => downloadWindowsInstaller(event, offer));
     ipcMain.handle('planner:update-install', (event, offer) => installWindowsUpdate(event, offer));
+    ipcMain.handle('planner:update-pause', async (event) => {
+      assertUpdateSender(event);
+      if (!windowsDownloadInProgress || windowsDownloadPaused) throw new Error('No active download to pause.');
+      windowsDownloadPaused = true;
+      windowsDownloadAbort?.abort();
+      // Give the pipeline a tick to notice the abort and keep the partial.
+      await new Promise((r) => setTimeout(r, 60));
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        try { mainWindow.webContents.send('planner:update-progress', { bytesReceived: windowsDownloadBytesReceived, totalBytes: windowsDownloadOffer?.sizeBytes ?? null, speedBps: null }); } catch {}
+      }
+      return { paused: true };
+    });
+    ipcMain.handle('planner:update-resume', async (event) => {
+      assertUpdateSender(event);
+      if (!windowsDownloadPaused || !windowsDownloadOffer) throw new Error('No paused download to resume.');
+      windowsDownloadPaused = false;
+      // The actual resume happens when the renderer re-calls downloadUpdate with the same offer.
+      // We just unblock the slot so the next download can re-enter and use Range.
+      windowsDownloadInProgress = false;
+      windowsDownloadAbort = null;
+      return { resumed: true };
+    });
+    ipcMain.handle('planner:update-cancel', async (event) => {
+      assertUpdateSender(event);
+      if (!windowsDownloadInProgress && !windowsDownloadPaused) throw new Error('No download to cancel.');
+      windowsDownloadCanceled = true;
+      windowsDownloadPaused = false;
+      windowsDownloadAbort?.abort();
+      const p = windowsDownloadPartialPath || (windowsDownloadOffer ? path.join(app.getPath('temp'), 'Planner-update', `${windowsDownloadOffer.version}-${windowsDownloadOffer.sha256}.exe.part`) : null);
+      await new Promise((r) => setTimeout(r, 60));
+      if (p) await fs.promises.rm(p, { force: true }).catch(() => {});
+      windowsDownloadOffer = null;
+      windowsDownloadPartialPath = null;
+      windowsDownloadInProgress = false;
+      windowsDownloadAbort = null;
+      windowsDownloadPaused = false;
+      windowsDownloadCanceled = false;
+      windowsDownloadBytesReceived = 0;
+      return { canceled: true };
+    });
     loadPreferences();
     if (preferences.background) buildTray();
     createWindow();
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
+      else showWindow();
     });
   });
 

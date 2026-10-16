@@ -2492,4 +2492,13 @@ export const fa: Record<string, string> = {
   "students": "دانش‌آموزان",
   "{0} of {1} photos selected": "{0} از {1} عکس انتخاب شد",
   "{0} photos": "{0} عکس",
+  "Download paused": "بارگیری متوقف شد",
+  "Delete notification: {0}": "حذف اعلان: {0}",
+  "Notification deleted.": "اعلان حذف شد.",
+  "Pause download": "توقف بارگیری",
+  "Cancel download": "لغو بارگیری",
+  "paused — will resume where it left off": "متوقف شد — از همان‌جا ادامه می‌یابد",
+  "Resume download": "ادامهٔ بارگیری",
+  "Connection lost — {0} of {1} downloaded. Will resume where it left off.": "ارتباط قطع شد — {0} از {1} بارگیری شد. از همان‌جا ادامه می‌یابد.",
+  "Could not pause the download.": "توقف بارگیری ممکن نشد.",
 };
