@@ -1,11 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { usePlanner } from '../context';
-import { CheckIcon, GlobeIcon, UploadIcon } from '../icons';
+import { CheckIcon, TrashIcon, UploadIcon } from '../icons';
 import { t, faNum } from '../i18n';
 import { normalizeClassVideoUrl } from '../learning';
-import { approveHomeworkSubmission, sendClass, sendHomeworkAssignment } from '../auth/links';
+import { approveHomeworkSubmission, dropClass, sendClass, sendHomeworkAssignment } from '../auth/links';
 import { decryptHomeworkPhoto } from '../homeworkMedia';
 import './learning.css';
+import { ClassVideoPlayer } from './ClassVideoPlayer';
 import type { ClassAssignment, GuardianLink, HomeworkPhoto, HomeworkSubmission } from '../types';
 
 function dueText(value: string | null): string | null {
@@ -48,8 +49,22 @@ function SelectedStudents({
 }
 
 function ClassAssignmentCard({ assignment, link }: { assignment: ClassAssignment; link: GuardianLink }) {
+  const { panels, updatePanels, flash } = usePlanner();
+  const [busy, setBusy] = useState(false);
   const progress = link.classProgress?.find((item) => item.classId === assignment.id);
   const completed = !!progress?.completedAt;
+  const remove = async () => {
+    if (busy || !link.linkId) return;
+    setBusy(true);
+    try {
+      updatePanels(await dropClass(panels, link.linkId, assignment.id));
+      flash(t('Class removed from the student and your list.'));
+    } catch (error) {
+      flash(error instanceof Error ? error.message : t('The class could not be removed.'));
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <li className={`learning-card ${completed ? 'is-complete' : 'is-incomplete'}`}>
       <div className="learning-card-head">
@@ -62,11 +77,12 @@ function ClassAssignmentCard({ assignment, link }: { assignment: ClassAssignment
         </span>
       </div>
       {assignment.description ? <p className="learning-description">{assignment.description}</p> : null}
+      <ClassVideoPlayer videoUrl={assignment.videoUrl} title={assignment.title} />
       <div className="learning-card-actions">
-        <a className="btn btn-outline btn-small" href={assignment.videoUrl} target="_blank" rel="noopener noreferrer">
-          <GlobeIcon size={14} /> {t('Open video lesson')}
-        </a>
         <span className="learning-meta">{t('Assigned {0}', { 0: dueText(assignment.createdAt) ?? assignment.createdAt.slice(0, 10) })}</span>
+        <button type="button" className="btn btn-ghost btn-small" disabled={busy} onClick={() => void remove()}>
+          {busy ? <span className="spinner" aria-hidden="true" /> : <TrashIcon size={14} />}{t('Remove class')}
+        </button>
       </div>
       <p className="learning-privacy">{t('Planner keeps only the video link, not the video file.')}</p>
     </li>

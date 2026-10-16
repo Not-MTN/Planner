@@ -187,7 +187,7 @@ export function Ring({ value, label, caption }: { value: number; label: string; 
         />
       </svg>
       <div className="ring-copy">
-        <strong>{label}</strong>
+        <strong className={cx('ring-number', label.length > 5 && 'is-long')} dir="ltr">{label}</strong>
         <span>{caption}</span>
       </div>
     </div>

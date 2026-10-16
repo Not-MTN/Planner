@@ -53,6 +53,8 @@ import {
   withExplanation,
   withPlanItemToggled,
   withoutExplanation,
+  studentCanDeletePlan,
+  withoutStudentPlan,
 } from '../panels';
 import { completionDate } from '../insights';
 import { CompletionRing, FocusTrend, SubjectSplit, SubjectTrend, WeekBars, minutesLabel } from '../components/charts';
@@ -456,6 +458,13 @@ export function StudentPanelView() {
 
   const weekPlans = inbox.plans.filter((plan) => plan.cadence === 'week');
   const shortPlans = inbox.plans.filter((plan) => plan.cadence !== 'week');
+  const currentGuardianLinkIds = panels.student.guardians.map((guardian) => guardian.linkId);
+  const canDeletePlan = (plan: GuardianPlan) => studentCanDeletePlan(plan, currentGuardianLinkIds);
+  const deletePlan = (plan: GuardianPlan) => {
+    if (!canDeletePlan(plan)) return;
+    updatePanels((latest) => withoutStudentPlan(latest, plan.id));
+    flash(t('Plan deleted.'));
+  };
 
   return (
     <div className="view panels-view student-panel-view">
@@ -773,6 +782,11 @@ export function StudentPanelView() {
                         >
                           <CalendarIcon size={14} />
                         </button>
+                        {canDeletePlan(plan) ? (
+                          <button type="button" className="icon-btn round" aria-label={`${t('Delete plan')} · ${plan.title}`} onClick={() => deletePlan(plan)}>
+                            <TrashIcon size={14} />
+                          </button>
+                        ) : null}
                       </>
                     }
                   />
@@ -802,6 +816,7 @@ export function StudentPanelView() {
                               </div>
                             </div>
                             <p className="week-period-state">{plan.approvedAt ? t('Approved by your guardian. This period is closed.') : t('This period has ended. Performance summary only.')}</p>
+                            {canDeletePlan(plan) ? <button type="button" className="btn btn-ghost btn-small" onClick={() => deletePlan(plan)}><TrashIcon size={14} />{t('Delete plan')}</button> : null}
                             <div className="gplan-bar" aria-hidden="true">
                               <i style={{ width: `${progress.total ? Math.round((progress.done / progress.total) * 100) : 0}%` }} />
                             </div>
@@ -852,6 +867,7 @@ export function StudentPanelView() {
                             </ul>
                           ) : null}
                           <p className="gplan-from">{t("From {0}", { 0: plan.author })}</p>
+                          {canDeletePlan(plan) ? <button type="button" className="btn btn-ghost btn-small" onClick={() => deletePlan(plan)}><TrashIcon size={14} />{t('Delete plan')}</button> : null}
                         </li>
                       );
                     })}

@@ -1132,6 +1132,9 @@ export function sanitizePanels(value: unknown): Panels {
       field: field(student.field),
       grade,
       guardians,
+      deletedPlanIds: Array.isArray(student.deletedPlanIds)
+        ? [...new Set(student.deletedPlanIds.filter((id): id is string => typeof id === 'string' && id.length <= 80))].slice(-200)
+        : [],
       subjects,
       explanations,
       inbox: sanitizeStudentInbox(student.inbox),

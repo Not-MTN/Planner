@@ -42,6 +42,7 @@ import {
   withGuardianHomeworkReview,
   withLinkClass,
   withLinkHomework,
+  withoutLinkClass,
   withStudentHomeworkSubmission,
 } from '../learning';
 import { canApprovePlanPeriod, mergeAcks, mergeLinkReports, normalizeLessonUrl, openRequests, requestNotice } from '../weekPlans';
@@ -717,6 +718,20 @@ export async function sendClass(panels: Panels, linkId: string, draft: ClassDraf
   return withLinkClass(panels, linkId, assignment);
 }
 
+/** Guardian: remove this class from the student and the guardian's own assignment list. */
+export async function dropClass(panels: Panels, linkId: string, classId: string): Promise<Panels> {
+  const session = await requireSession();
+  const link = panels.guardian.links.find((item) => item.linkId === linkId);
+  if (!link?.wrappedShareKey) throw new LinkError('That student link is not ready yet.');
+  const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
+  await writeSlot(linkId, link.wrappedShareKey, session.dek, {
+    v: 3,
+    ...current,
+    classes: current.classes.filter((item) => item.id !== classId),
+  } satisfies GuardianOutbox);
+  return withoutLinkClass(panels, linkId, classId);
+}
+
 export interface HomeworkDraft {
   title: string;
   instructions: string;
@@ -1009,7 +1024,8 @@ export async function syncStudentInbox(
   if (guardians.length === 0) return { panels, added: { notices: [], plans: [], goals: [] }, relayed: 0, changed: false };
 
   let notices = panels.student.inbox.notices;
-  let plans = panels.student.inbox.plans;
+  const deletedPlanIds = new Set(panels.student.deletedPlanIds ?? []);
+  let plans = panels.student.inbox.plans.filter((plan) => !deletedPlanIds.has(plan.id));
   let acks = panels.student.acks ?? [];
   let suggestions = panels.student.inbox.goals ?? [];
   let classes = panels.student.inbox.classes ?? [];
@@ -1017,7 +1033,7 @@ export async function syncStudentInbox(
   let classProgress = panels.student.classProgress ?? [];
   let homeworkSubmissions = panels.student.homeworkSubmissions ?? [];
   let praise = panels.student.praise ?? [];
-  let changed = false;
+  let changed = plans.length !== panels.student.inbox.plans.length;
   const added: { notices: GuardianNotice[]; plans: GuardianPlan[]; goals: GoalSuggestion[] } = { notices: [], plans: [], goals: [] };
 
   for (const source of guardians) {
@@ -1043,6 +1059,7 @@ export async function syncStudentInbox(
       }
     }
     for (const plan of outbox.plans) {
+      if (deletedPlanIds.has(plan.id)) continue;
       const existing = plans.find((item) => item.id === plan.id);
       if (!existing) {
         plans = [plan, ...plans];

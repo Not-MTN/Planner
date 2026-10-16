@@ -184,6 +184,71 @@ export function withLinkClass(panels: Panels, linkId: string, assignment: ClassA
   return { ...panels, guardian: { ...panels.guardian, links } };
 }
 
+/** Remove a class from the guardian's assignment and progress lists. */
+export function withoutLinkClass(panels: Panels, linkId: string, classId: string): Panels {
+  const links = panels.guardian.links.map((link) => link.linkId !== linkId
+    ? link
+    : {
+        ...link,
+        classes: (link.classes ?? []).filter((item) => item.id !== classId),
+        classProgress: (link.classProgress ?? []).filter((item) => item.classId !== classId),
+      });
+  return { ...panels, guardian: { ...panels.guardian, links } };
+}
+
+/** Map supported hosted links to a safe in-app player source. */
+export function classPlayerSource(value: string): { kind: 'video' | 'embed'; src: string } | null {
+  const secure = normalizeClassVideoUrl(value);
+  if (!secure) return null;
+  const url = new URL(secure);
+  const host = url.hostname.toLowerCase().replace(/^www\./, '');
+  if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'youtube-nocookie.com' || host === 'youtu.be') {
+    const segments = url.pathname.split('/').filter(Boolean);
+    const id = host === 'youtu.be'
+      ? segments[0]
+      : url.searchParams.get('v') || (['embed', 'shorts', 'live'].includes(segments[0] ?? '') ? segments[1] : '');
+    return id && /^[A-Za-z0-9_-]{11}$/.test(id)
+      ? { kind: 'embed', src: `https://www.youtube-nocookie.com/embed/${id}?playsinline=1` }
+      : null;
+  }
+  if (host === 'vimeo.com' || host === 'player.vimeo.com') {
+    const match = url.pathname.match(/(?:^|\/)video\/(\d+)|(?:^|\/)(\d+)(?:$|\/)/);
+    const id = match?.[1] || match?.[2];
+    if (!id) return null;
+    const segments = url.pathname.split('/').filter(Boolean);
+    const privacyHash = url.searchParams.get('h') || (segments[0] === id ? segments[1] : '');
+    const query = privacyHash && /^[A-Za-z0-9]+$/.test(privacyHash) ? `?h=${encodeURIComponent(privacyHash)}` : '';
+    return { kind: 'embed', src: `https://player.vimeo.com/video/${id}${query}` };
+  }
+  if (host === 'aparat.com') {
+    const segments = url.pathname.split('/').filter(Boolean);
+    const embedMatch = url.pathname.match(/\/videohash\/([A-Za-z0-9_-]+)/i);
+    const id = embedMatch?.[1]
+      || (segments[0] === 'v' ? segments[1] : '')
+      || (segments.length === 3 && segments[1] === 'video' ? segments[2] : '');
+    return id && /^[A-Za-z0-9_-]{4,64}$/.test(id)
+      ? { kind: 'embed', src: `https://www.aparat.com/video/video/embed/videohash/${id}/vt/frame` }
+      : null;
+  }
+  const iranianVideoHosts = [
+    'namasha.com', 'namasha.ir', 'tamasha.com', 'telewebion.com',
+    'filimo.com', 'namava.ir', 'rubika.ir', 'rubika.com',
+  ];
+  if (iranianVideoHosts.some((domain) => host === domain || host.endsWith(`.${domain}`))) {
+    // Use provider-supplied embed URLs when present, otherwise try the HTTPS page itself.
+    // Providers that disallow framing remain available through the external-link fallback.
+    return { kind: 'embed', src: secure };
+  }
+  if (host === 'drive.google.com') {
+    const id = url.pathname.match(/\/file\/d\/([A-Za-z0-9_-]+)/)?.[1] || url.searchParams.get('id');
+    return id && /^[A-Za-z0-9_-]{10,}$/.test(id)
+      ? { kind: 'embed', src: `https://drive.google.com/file/d/${id}/preview` }
+      : null;
+  }
+  if (/\.(mp4|webm|ogg)$/i.test(url.pathname)) return { kind: 'video', src: secure };
+  return null;
+}
+
 export function withLinkHomework(panels: Panels, linkId: string, assignment: HomeworkAssignment): Panels {
   const links = panels.guardian.links.map((link) => link.linkId !== linkId
     ? link
