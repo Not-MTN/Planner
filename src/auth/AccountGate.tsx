@@ -213,6 +213,8 @@ function updateStatusText(state: StartupState): string {
     }
     case 'verifying':
       return t('Verifying update…');
+    case 'paused':
+      return t('Download paused');
     case 'ready-to-apply':
       return t('Update ready to install');
     case 'applying':

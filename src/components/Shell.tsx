@@ -66,7 +66,7 @@ const GuardianPanelView = lazy(() => import('../views/GuardianPanelView').then((
 import { applyUpdate, onUpdateAvailable } from '../pwa';
 import { RELEASES_PAGE, dismissVersion } from '../shared/updates';
 import { supportsPackagedUpdates } from '../shared/updateRuntime';
-import { checkAndStartPackagedUpdate, installPackagedUpdate, startPackagedUpdate } from '../shared/updateActions';
+import { cancelPackagedUpdate, checkAndStartPackagedUpdate, installPackagedUpdate, pausePackagedUpdate, resumePackagedUpdate, startPackagedUpdate } from '../shared/updateActions';
 import { dismissStartupUpdate, useStartupState } from '../shared/startup';
 import { isAIVisited, onTourRequest, requestTour, TOUR_STOPS, tourRouteFor, tourStartIndex } from '../tour';
 import { onAboutRequest, requestAbout } from '../about';
@@ -243,11 +243,42 @@ export function Shell() {
   const updateOffer = updateState?.offer ?? null;
   const showUpdateNotice = Boolean(
     startup && updateOffer && updateState &&
-    ['available', 'downloading', 'verifying', 'ready-to-apply', 'applying', 'complete', 'error'].includes(updateState.phase),
+    ['available', 'downloading', 'verifying', 'paused', 'ready-to-apply', 'applying', 'complete', 'error'].includes(updateState.phase),
   );
   const packagedUpdatesSupported = supportsPackagedUpdates();
   const updateActionBusy = Boolean(updateState &&
-    ['checking', 'downloading', 'verifying', 'ready-to-apply', 'applying'].includes(updateState.phase));
+    ['checking', 'downloading', 'verifying', 'paused', 'ready-to-apply', 'applying'].includes(updateState.phase));
+
+  const formatBytes = (bytes: number | null | undefined): string => {
+    if (bytes == null || !Number.isFinite(bytes)) return '—';
+    if (bytes < 1024) return `${bytes} B`;
+    const kb = bytes / 1024;
+    if (kb < 1024) return `${kb.toFixed(kb < 10 ? 1 : 0)} KB`;
+    const mb = kb / 1024;
+    if (mb < 1024) return `${mb.toFixed(mb < 10 ? 1 : 0)} MB`;
+    const gb = mb / 1024;
+    return `${gb.toFixed(1)} GB`;
+  };
+  const formatSpeed = (bps: number | null | undefined): string => {
+    if (bps == null || !Number.isFinite(bps) || bps <= 0) return '';
+    if (bps < 1024) return `${Math.round(bps)} B/s`;
+    const kb = bps / 1024;
+    if (kb < 1024) return `${kb.toFixed(1)} KB/s`;
+    const mb = kb / 1024;
+    return `${mb.toFixed(1)} MB/s`;
+  };
+  const pauseDownload = async () => {
+    if (!startup) return;
+    await pausePackagedUpdate(startup.setState);
+  };
+  const resumeDownload = async () => {
+    if (!startup || !updateOffer) return;
+    await resumePackagedUpdate(updateOffer, startup.setState);
+  };
+  const cancelDownload = async () => {
+    if (!startup) return;
+    await cancelPackagedUpdate(startup.setState);
+  };
 
   const refreshUpdates = async () => {
     if (!startup || manualUpdateCheckBusy || updateActionBusy) return;
@@ -1088,6 +1119,52 @@ export function Shell() {
                   value={updateState.progress?.bytesReceived ?? 0}
                   aria-label={t('Update download progress')}
                 />
+                <div className="update-download-meta" aria-live="polite">
+                  <span className="update-download-bytes">
+                    {updateState.progress
+                      ? `${formatBytes(updateState.progress.bytesReceived)} / ${formatBytes(updateState.progress.totalBytes ?? updateOffer.sizeBytes)}`
+                      : formatBytes(0) + ' / ' + formatBytes(updateOffer.sizeBytes)}
+                    {updateState.progress?.speedBps ? ` · ${formatSpeed(updateState.progress.speedBps)}` : ''}
+                  </span>
+                </div>
+                <div className="update-download-controls">
+                  <button type="button" className="btn btn-tiny update-pause-action" onClick={() => void pauseDownload()} aria-label={t('Pause download')}>
+                    {t('Pause')}
+                  </button>
+                  <button type="button" className="btn btn-tiny btn-ghost update-cancel-action" onClick={() => void cancelDownload()} aria-label={t('Cancel download')}>
+                    {t('Cancel')}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            {updateState.phase === 'paused' ? (
+              <div className="update-download-status">
+                <span className="update-toast-state update-toast-state--paused">
+                  <span className="update-toast-state-dot" aria-hidden="true" />
+                  {t('Download paused')}
+                </span>
+                <progress
+                  className="update-download-progress"
+                  max={updateState.progress?.totalBytes || updateOffer.sizeBytes}
+                  value={updateState.progress?.bytesReceived ?? 0}
+                  aria-label={t('Update download progress')}
+                />
+                <div className="update-download-meta" aria-live="polite">
+                  <span className="update-download-bytes">
+                    {updateState.progress
+                      ? `${formatBytes(updateState.progress.bytesReceived)} / ${formatBytes(updateState.progress.totalBytes ?? updateOffer.sizeBytes)}`
+                      : formatBytes(0) + ' / ' + formatBytes(updateOffer.sizeBytes)}{' '}
+                    {t('paused — will resume where it left off')}
+                  </span>
+                </div>
+                <div className="update-download-controls">
+                  <button type="button" className="btn btn-tiny update-resume-action" onClick={() => void resumeDownload()} aria-label={t('Resume download')}>
+                    {t('Resume')}
+                  </button>
+                  <button type="button" className="btn btn-tiny btn-ghost update-cancel-action" onClick={() => void cancelDownload()} aria-label={t('Cancel download')}>
+                    {t('Cancel')}
+                  </button>
+                </div>
               </div>
             ) : null}
             {updateState.phase === 'ready-to-apply' ? (
@@ -1103,10 +1180,38 @@ export function Shell() {
               </span>
             ) : null}
             {updateState.phase === 'error' && updateState.error ? (
-              <span className="update-toast-state update-toast-state--error">
-                <span className="update-toast-state-dot" aria-hidden="true" />
-                {t('Update failed: {0}', { 0: updateState.error })}
-              </span>
+              <div className="update-download-status update-download-status--error">
+                <span className="update-toast-state update-toast-state--error">
+                  <span className="update-toast-state-dot" aria-hidden="true" />
+                  {updateState.progress && updateState.progress.bytesReceived > 0 && updateState.progress.bytesReceived < (updateState.progress.totalBytes ?? updateOffer.sizeBytes)
+                    ? t('Connection lost — {0} of {1} downloaded. Will resume where it left off.', {
+                        0: formatBytes(updateState.progress.bytesReceived),
+                        1: formatBytes(updateState.progress.totalBytes ?? updateOffer.sizeBytes),
+                      })
+                    : t('Update failed: {0}', { 0: updateState.error })}
+                </span>
+                {updateState.progress && updateState.progress.bytesReceived > 0 ? (
+                  <>
+                    <progress
+                      className="update-download-progress"
+                      max={updateState.progress.totalBytes || updateOffer.sizeBytes}
+                      value={updateState.progress.bytesReceived}
+                      aria-label={t('Update download progress')}
+                    />
+                    <div className="update-download-meta">
+                      <span>{`${formatBytes(updateState.progress.bytesReceived)} / ${formatBytes(updateState.progress.totalBytes ?? updateOffer.sizeBytes)}`}</span>
+                    </div>
+                    <div className="update-download-controls">
+                      <button type="button" className="btn btn-tiny update-resume-action" onClick={() => void resumeDownload()} aria-label={t('Resume download')}>
+                        {t('Resume')}
+                      </button>
+                      <button type="button" className="btn btn-tiny btn-ghost update-cancel-action" onClick={() => void cancelDownload()} aria-label={t('Cancel download')}>
+                        {t('Cancel')}
+                      </button>
+                    </div>
+                  </>
+                ) : null}
+              </div>
             ) : null}
           </div>
           <div className="update-toast-actions">

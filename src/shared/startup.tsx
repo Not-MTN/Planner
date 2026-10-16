@@ -27,6 +27,7 @@ export type StartupUpdatePhase =
   | 'dismissed'
   | 'downloading'
   | 'verifying'
+  | 'paused'
   | 'ready-to-apply'
   | 'applying'
   | 'complete'
@@ -36,6 +37,7 @@ export type StartupUpdatePhase =
 export interface UpdateProgress {
   bytesReceived: number;
   totalBytes: number | null;
+  speedBps?: number | null;
 }
 
 export interface StartupUpdateState {

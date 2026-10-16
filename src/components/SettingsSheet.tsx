@@ -756,6 +756,8 @@ function packagedUpdateStatus(update: StartupUpdateState, installedVersion: stri
     }
     case 'verifying':
       return t("Verifying update…");
+    case 'paused':
+      return t("Download paused");
     case 'ready-to-apply':
       return t("Update ready to install.");
     case 'applying':
@@ -775,7 +777,7 @@ function UpdateSection() {
   if (!startup || !supportsPackagedUpdates()) return null;
 
   const update = startup.state.update;
-  const actionInProgress = ['checking', 'downloading', 'verifying', 'ready-to-apply', 'applying'].includes(update.phase);
+  const actionInProgress = ['checking', 'downloading', 'verifying', 'paused', 'ready-to-apply', 'applying'].includes(update.phase);
   const updateOffer = update.offer;
   const canStartExistingOffer = Boolean(updateOffer && ['available', 'error'].includes(update.phase));
   const platformCopy = shellPlatform() === 'android'

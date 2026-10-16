@@ -22,6 +22,9 @@ contextBridge.exposeInMainWorld('plannerDesktop', {
   getUpdateManifest: () => ipcRenderer.invoke('planner:update-manifest'),
   downloadUpdate: (offer) => ipcRenderer.invoke('planner:update-download', offer),
   installUpdate: (offer) => ipcRenderer.invoke('planner:update-install', offer),
+  pauseUpdate: () => ipcRenderer.invoke('planner:update-pause'),
+  resumeUpdate: () => ipcRenderer.invoke('planner:update-resume'),
+  cancelUpdate: () => ipcRenderer.invoke('planner:update-cancel'),
   /** `{ background, backgroundExplained }` — the installation's own settings. */
   getPreferences: () => ipcRenderer.invoke('planner:preferences-get'),
   setPreferences: (patch) => ipcRenderer.invoke('planner:preferences-set', patch),
