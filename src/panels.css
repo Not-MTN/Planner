@@ -736,29 +736,6 @@
 .momentum-bar { height: 7px; border-radius: 99px; overflow: hidden; background: color-mix(in srgb, var(--accent) 12%, var(--surface-2)); }
 .momentum-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width 0.3s var(--ease); }
 
-/* -------------------------------------------------- the picker's add tile */
-.panel-choice-add {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  width: 100%;
-  padding: 20px;
-  text-align: start;
-  cursor: pointer;
-  border: 1px dashed var(--line-strong);
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--surface-2) 70%, transparent);
-  color: var(--ink);
-  font: inherit;
-  transition: transform 0.18s var(--ease), box-shadow 0.18s var(--ease), border-color 0.18s;
-}
-.panel-choice-add:hover { transform: translateY(-2px); box-shadow: var(--shadow-soft); border-color: color-mix(in srgb, var(--accent) 40%, var(--line-strong)); }
-.panel-choice-add:active { transform: scale(0.995); }
-.panel-choice-add .panel-choice-icon { background: var(--accent-soft); color: var(--accent); }
-.panel-choice-add-copy { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.panel-choice-add-copy > strong { font-size: 15px; font-weight: 640; }
-.panel-choice-add-copy > span { font-size: 12.5px; line-height: 1.5; color: var(--muted); }
-
 /* ------------------------------------------------------ guardian, one student */
 .plan-tab-card { gap: 12px; }
 .plan-mode-switch { align-self: flex-start; }
@@ -779,14 +756,12 @@
   .momentum-card { gap: 12px; }
   .momentum-start { width: 100%; justify-content: center; }
   .momentum-stats { grid-template-columns: minmax(0, 1fr); gap: 10px; }
-  .panel-choice-add { padding: 16px; }
 }
 @media (pointer: coarse) {
   .panel-tab { min-height: 48px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .momentum-bar > span { transition: none; }
-  .panel-choice-add:hover { transform: none; }
 }
 
 /* Guardian: the next useful step comes before the dashboard numbers. */

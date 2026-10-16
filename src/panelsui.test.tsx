@@ -44,6 +44,13 @@ function buttons(): HTMLButtonElement[] {
 }
 
 async function clickText(needle: string): Promise<void> {
+  // Panel routes are lazy-loaded. A fixed number of render ticks can finish
+  // before a cold import on CI, so wait for the actual next interaction.
+  await waitFor(
+    () => buttons().some((item) => (item.textContent ?? '').trim().includes(needle)),
+    10_000,
+    `a button containing "${needle}"`,
+  );
   const button = buttons().find((item) => (item.textContent ?? '').trim().includes(needle));
   if (!button) throw new Error(`No button containing "${needle}". Buttons: ${buttons().map((b) => (b.textContent ?? '').trim()).join(' | ')}`);
   await act(async () => {
