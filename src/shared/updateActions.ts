@@ -107,8 +107,8 @@ export function startPackagedUpdate(offer: UpdateOffer, setState: StartupStateSe
 
     const trackSpeed = createSpeedTracker();
     // seed tracker with initial bytes so speed doesn't spike from 0 after resume
-    // @ts-ignore - initialProgress is set inside setState updater which TS can't track
     if (initialProgress != null) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       trackSpeed((initialProgress as any).bytesReceived, (initialProgress as any).speedBps ?? null);
     }
 

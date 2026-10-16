@@ -96,6 +96,7 @@ let windowsDownloadPaused = false;
 let windowsDownloadCanceled = false;
 let windowsDownloadAbort = null;
 let windowsDownloadOffer = null;
+let windowsDownloadPartialPath = null;
 let windowsDownloadBytesReceived = 0;
 
 function assertUpdateSender(event) {
@@ -176,7 +177,6 @@ async function downloadWindowsInstaller(event, untrustedOffer) {
   if (windowsDownloadInProgress && !windowsDownloadPaused) {
     throw new Error('An update download is already in progress.');
   }
-  const wasPaused = windowsDownloadPaused && windowsDownloadOffer && sameWindowsOffer(offer, windowsDownloadOffer);
   windowsDownloadInProgress = true;
   windowsDownloadPaused = false;
   windowsDownloadCanceled = false;
