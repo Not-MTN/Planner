@@ -202,6 +202,7 @@ export function setDisplayPrefs(prefs: DisplayPrefs): void {
 }
 
 let jalaliFormatter: Intl.DateTimeFormat | null | undefined;
+let jalaliShortFormatter: Intl.DateTimeFormat | null | undefined;
 
 /** "29 شهریور 1404" — the Jalali date for an ISO day, null when unsupported. */
 export function formatJalaliLong(iso: string): string | null {
@@ -221,6 +222,27 @@ export function formatJalaliLong(iso: string): string | null {
   if (!jalaliFormatter) return null;
   try {
     return faDigits(jalaliFormatter.format(parseISODate(iso)));
+  } catch {
+    return null;
+  }
+}
+
+/** "29 شهریور" — Jalali day and month, for compact places like the timetable. */
+export function formatJalaliShort(iso: string): string | null {
+  if (jalaliShortFormatter === undefined) {
+    try {
+      jalaliShortFormatter = new Intl.DateTimeFormat('fa-IR-u-ca-persian', {
+        numberingSystem: 'latn',
+        day: 'numeric',
+        month: 'long',
+      });
+    } catch {
+      jalaliShortFormatter = null;
+    }
+  }
+  if (!jalaliShortFormatter) return null;
+  try {
+    return faDigits(jalaliShortFormatter.format(parseISODate(iso)));
   } catch {
     return null;
   }

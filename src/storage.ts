@@ -756,7 +756,7 @@ function sanitizePlanDraft(value: unknown): PlanDraft | null {
           (day): day is number => Number.isInteger(day) && (day as number) >= 0 && (day as number) <= 6,
         ),
       ),
-    ].slice(0, 7),
+    ],
   };
 }
 
@@ -850,7 +850,7 @@ function sanitizeGuardianPlan(value: unknown): GuardianPlan | null {
     note: (asString(raw.note, 400) ?? '').trim(),
     field: asString(raw.field, 60)?.trim() || null,
     grade: isGradeLevel(raw.grade) ? raw.grade : null,
-    restDays: [...new Set((Array.isArray(raw.restDays) ? raw.restDays : []).filter((day): day is number => Number.isInteger(day) && (day as number) >= 0 && (day as number) <= 6))].slice(0, 7),
+    restDays: [...new Set((Array.isArray(raw.restDays) ? raw.restDays : []).filter((day): day is number => Number.isInteger(day) && (day as number) >= 0 && (day as number) <= 6))],
     items: uniqueBy(
       (Array.isArray(raw.items) ? raw.items : []).flatMap((item) => {
         const planItem = sanitizePlanItem(item);

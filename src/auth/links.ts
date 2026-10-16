@@ -303,7 +303,7 @@ function wirePlan(value: unknown): GuardianPlan | null {
     note: String(raw.note ?? '').trim().slice(0, 400),
     field: typeof raw.field === 'string' && raw.field.trim() ? raw.field.trim().slice(0, 60) : null,
     grade: typeof raw.grade === 'string' && raw.grade.trim() ? raw.grade.trim().slice(0, 60) : null,
-    restDays: [...new Set((Array.isArray(raw.restDays) ? raw.restDays : []).filter((day): day is number => Number.isInteger(day) && (day as number) >= 0 && (day as number) <= 6))].slice(0, 7),
+    restDays: [...new Set((Array.isArray(raw.restDays) ? raw.restDays : []).filter((day): day is number => Number.isInteger(day) && (day as number) >= 0 && (day as number) <= 6))],
     items,
     approvedAt: wireTimestamp(raw.approvedAt),
     createdAt: String(raw.createdAt ?? new Date().toISOString()).slice(0, 40),
@@ -626,7 +626,7 @@ export async function sendPlan(panels: Panels, linkId: string, draft: PlanDraft)
     note: draft.note.trim().slice(0, 400),
     field: draft.field?.trim() ? draft.field.trim().slice(0, 60) : null,
     grade: draft.grade?.trim() ? draft.grade.trim().slice(0, 20) : null,
-    restDays: [...new Set((draft.restDays ?? []).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))].slice(0, 7),
+    restDays: [...new Set((draft.restDays ?? []).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))],
     items: draft.items.slice(0, PLAN_ITEMS_MAX).map((item) => ({
       id: newId('item'),
       title: item.title.trim().slice(0, 120),

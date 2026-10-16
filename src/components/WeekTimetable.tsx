@@ -6,7 +6,7 @@
  * read — the grid is for the glance, and for the wall once printed.
  */
 import { cx } from '../cx';
-import { displayTime, formatMonthShort, formatWeekdayShort, todayISO } from '../dates';
+import { displayTime, formatJalaliShort, formatMonthShort, formatWeekdayShort, todayISO } from '../dates';
 import { faNum, t } from '../i18n';
 import type { DayReport, GuardianPlan } from '../types';
 import { timetableModel } from '../weekPlans';
@@ -40,6 +40,7 @@ export function WeekTimetable({
                   <span className="week-grid-date">
                     {faNum(Number(date.slice(8, 10)))} {formatMonthShort(date)}
                   </span>
+                  {(() => { const jalali = formatJalaliShort(date); return jalali ? <span className="week-grid-jalali" dir="rtl">{jalali}</span> : null; })()}
                   {grid.reported(date) ? (
                     <span className="week-grid-mark reported">✓</span>
                   ) : grid.rest(date) ? (
