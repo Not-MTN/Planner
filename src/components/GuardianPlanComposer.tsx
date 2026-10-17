@@ -3,7 +3,8 @@ import { usePlanner } from '../context';
 import { sendPlan } from '../auth/links';
 import { draftGuardianProposal, friendlyGroqError } from '../ai';
 import { isValidISODate } from '../dates';
-import { PlusIcon, TrashIcon } from '../icons';
+import { lessonDurationLabel, lessonTimeLabel, normalizeLessonEnd } from '../weekPlans';
+import { ClockIcon, PlusIcon, TrashIcon } from '../icons';
 import { t } from '../i18n';
 import {
   emptyPlanStep,
@@ -147,7 +148,10 @@ export function GuardianPlanComposer({
             title: item.title.trim(),
             subject: item.subject.trim() || null,
             date: item.date || null,
+            time: item.time || null,
+            end: normalizeLessonEnd(item.time, item.end),
             minutes: item.minutes ? Math.round(Number(item.minutes)) : null,
+            url: null,
           })),
       });
       const previousIds = new Set(link.plans.map((plan) => plan.id));
@@ -320,7 +324,40 @@ export function GuardianPlanComposer({
                     onChange={(event) => patchStep(item.id, { date: event.target.value })}
                   />
                 </Field>
+                <Field label={t('From')} hint={t('Optional')}>
+                  <input
+                    className="input"
+                    type="time"
+                    aria-label={t('Step {0} start time', { 0: index + 1 })}
+                    value={item.time}
+                    onChange={(event) => patchStep(item.id, { time: event.target.value })}
+                  />
+                </Field>
+                <Field label={t('To')}>
+                  <input
+                    className="input"
+                    type="time"
+                    aria-label={t('Step {0} end time', { 0: index + 1 })}
+                    min={item.time || undefined}
+                    value={item.end}
+                    onChange={(event) => patchStep(item.id, { end: event.target.value })}
+                  />
+                </Field>
               </div>
+              {item.time && item.end && !normalizeLessonEnd(item.time, item.end) ? (
+                <p className="field-error" role="alert">
+                  {t('A lesson has to end after it starts.')}
+                </p>
+              ) : null}
+              {item.time ? (
+                <p className="hint week-step-time">
+                  <ClockIcon size={13} />
+                  {lessonTimeLabel({ time: item.time, end: item.end })}
+                  {lessonDurationLabel({ time: item.time, end: item.end })
+                    ? ` · ${lessonDurationLabel({ time: item.time, end: item.end })}`
+                    : ''}
+                </p>
+              ) : null}
             </li>
           ))}
         </ol>

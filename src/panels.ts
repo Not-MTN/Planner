@@ -8,9 +8,9 @@
 import { addDays, parseISODate, startOfWeek, toISODate, todayISO } from './dates';
 import { t } from './i18n';
 import { completionDate } from './insights';
-import { studentCanTogglePlanItem } from './weekPlans';
+import { mergeChangeRequests, studentCanTogglePlanItem } from './weekPlans';
 import { DAY_REPORTS_KEPT, GOAL_ANSWERS_KEPT, PANEL_GOALS_KEPT, QUEUED_PLANS_KEPT } from './types';
-import type { ChangeNote, GoalAnswer, GoalSuggestion, GuardianLink, GuardianPlan, Panels, PlanCadence, PlannerState, QueuedPlan, ReportAck, StudentSubject, WeekResults } from './types';
+import type { ChangeNote, GoalAnswer, GoalSuggestion, GuardianLink, GuardianPlan, Panels, PlanCadence, PlanChangeRequest, PlannerState, QueuedPlan, ReportAck, StudentSubject, WeekResults } from './types';
 
 export function weekOf(date = todayISO()): string {
   return startOfWeek(date);
@@ -278,6 +278,24 @@ export function withLinkAck(panels: Panels, linkId: string, ack: ReportAck): Pan
     link.linkId !== linkId
       ? link
       : { ...link, acks: [ack, ...(link.acks ?? []).filter((item) => item.id !== ack.id)].slice(0, DAY_REPORTS_KEPT) },
+  );
+  return { ...panels, guardian: { ...panels.guardian, links } };
+}
+
+/**
+ * Guardian: fold the change requests a student has sent into their link,
+ * newest first. Answers replace the open asks they answer (see
+ * `mergeChangeRequests`), so a request never shows up twice.
+ */
+export function withLinkChangeRequests(
+  panels: Panels,
+  linkId: string,
+  requests: PlanChangeRequest[],
+): Panels {
+  const links = panels.guardian.links.map((link) =>
+    link.linkId !== linkId
+      ? link
+      : { ...link, changeRequests: mergeChangeRequests(link.changeRequests ?? [], requests) },
   );
   return { ...panels, guardian: { ...panels.guardian, links } };
 }

@@ -29,8 +29,9 @@ import {
   wrapKey,
 } from './crypto';
 import { AuthError, getActiveSession, request } from './session';
-import { newId, weekOf, weekResults, withGoalAnswer, withLinkAck, withLinkGoal, withLinkPlan, withoutLinkGoal, withoutLinkPlan, withoutQueuedPlan } from '../panels';
+import { newId, weekOf, weekResults, withGoalAnswer, withLinkAck, withLinkChangeRequests, withLinkGoal, withLinkPlan, withoutLinkGoal, withoutLinkPlan, withoutQueuedPlan } from '../panels';
 import { t } from '../i18n';
+import { todayISO } from '../dates';
 import { deleteHomeworkPhotoAssets } from '../homeworkMedia';
 import {
   normalizeClassVideoUrl,
@@ -45,9 +46,28 @@ import {
   withoutLinkClass,
   withStudentHomeworkSubmission,
 } from '../learning';
-import { canApprovePlanPeriod, mergeAcks, mergeLinkReports, normalizeLessonUrl, openRequests, requestNotice } from '../weekPlans';
-import { ACK_REACTIONS, ACK_TEXT_MAX, DAY_REPORT_NOTE_MAX, DAY_REPORTS_WIRE, GOAL_ANSWERS_KEPT, GOAL_STEPS_MAX, HOMEWORK_ITEMS_KEPT, HOMEWORK_NOTE_MAX, PANEL_GOALS_KEPT, PLAN_REQUESTS_WIRE, PRAISE_KEPT } from '../types';
-import type { ClassAssignment, ClassProgress, DayReport, Goal, GoalAnswer, GoalSuggestion, GuardianLink, GuardianNotice, GuardianPlan, HomeworkAssignment, HomeworkPhoto, HomeworkReview, HomeworkSubmission, Panels, PlanDraft, PlanItem, PlanRequest, PlannerState, ReportAck, StudentGuardian, WeekResults, WeekSubjectMinutes } from '../types';
+import {
+  answeredChangeRequest,
+  applyChangeRequest,
+  canApprovePlanPeriod,
+  canEditPlanDay,
+  changeRequestNotice,
+  diffPlanDay,
+  itemsForDay,
+  mergeAcks,
+  mergeChangeRequests,
+  openChangeRequests,
+  mergeLinkReports,
+  normalizeLessonEnd,
+  normalizeLessonUrl,
+  openRequests,
+  planDayChangeSummary,
+  requestNotice,
+  withPlanDaysRewritten,
+  type PlanDayEdit,
+} from '../weekPlans';
+import { ACK_REACTIONS, ACK_TEXT_MAX, DAY_REPORT_NOTE_MAX, DAY_REPORTS_WIRE, GOAL_ANSWERS_KEPT, GOAL_STEPS_MAX, HOMEWORK_ITEMS_KEPT, HOMEWORK_NOTE_MAX, PANEL_GOALS_KEPT, PLAN_CHANGES_KEPT, PLAN_CHANGES_WIRE, PLAN_CHANGE_NOTE_MAX, PLAN_CHANGE_TITLE_MAX, PLAN_REQUESTS_WIRE, PRAISE_KEPT } from '../types';
+import type { ClassAssignment, ClassProgress, DayReport, Goal, GoalAnswer, GoalSuggestion, GuardianLink, GuardianNotice, GuardianPlan, HomeworkAssignment, HomeworkPhoto, HomeworkReview, HomeworkSubmission, Panels, PlanChangeRequest, PlanDraft, PlanItem, PlanRequest, PlannerState, ReportAck, StudentGuardian, WeekResults, WeekSubjectMinutes } from '../types';
 /** Matches the cap in storage.ts, so the vault and the view agree. */
 const WEEKS_KEPT = 12;
 import type { AcceptLinkResponse, LinksResponse, OutgoingLink, ShareResponse } from '../shared/authContract';
@@ -221,6 +241,12 @@ interface GuardianOutbox {
   homework: HomeworkAssignment[];
   /** Guardian approval decisions retained for synchronization. */
   homeworkReviews: HomeworkReview[];
+  /**
+   * Answers to the student's change requests, newest first. They ride here so
+   * an approval or a decline reaches the student on their next pull, exactly
+   * as the answers to daily reports do.
+   */
+  changeAnswers: PlanChangeRequest[];
 }
 
 interface StudentOutbox {
@@ -237,6 +263,8 @@ interface StudentOutbox {
   homeworkSubmissions: HomeworkSubmission[];
   /** Open asks for a week plan. */
   requests: PlanRequest[];
+  /** Asks for one change to a plan that has already been sent. */
+  changes: PlanChangeRequest[];
 }
 
 const OUTBOX_PLANS = 5;
@@ -286,6 +314,10 @@ function wirePlan(value: unknown): GuardianPlan | null {
         title: entry.title.trim().slice(0, 120),
         date: /^\d{4}-\d{2}-\d{2}$/.test(String(entry.date ?? '')) ? String(entry.date) : null,
         time: TIME_RE.test(String(entry.time ?? '')) ? String(entry.time) : null,
+        end: normalizeLessonEnd(
+          TIME_RE.test(String(entry.time ?? '')) ? String(entry.time) : null,
+          TIME_RE.test(String(entry.end ?? '')) ? String(entry.end) : null,
+        ),
         minutes: typeof entry.minutes === 'number' && Number.isFinite(entry.minutes) ? Math.max(0, Math.round(entry.minutes)) : null,
         subject: typeof entry.subject === 'string' && entry.subject.trim() ? entry.subject.trim().slice(0, 60) : null,
         url: typeof entry.url === 'string' ? normalizeLessonUrl(entry.url) : null,
@@ -397,6 +429,40 @@ function wirePlanRequest(value: unknown): PlanRequest | null {
   };
 }
 
+/**
+ * An ask for one change to a plan. Malformed ones are dropped rather than
+ * guessed at, and an answer that arrives on the same record travels back with
+ * it — the student reads the decision on their next pull.
+ */
+function wirePlanChangeRequest(value: unknown): PlanChangeRequest | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = String(raw.id ?? '').slice(0, 80);
+  const planId = String(raw.planId ?? '').slice(0, 80);
+  const title = typeof raw.title === 'string' ? raw.title.trim().slice(0, PLAN_CHANGE_TITLE_MAX) : '';
+  if (!id || !planId || !title) return null;
+  if (raw.kind !== 'add' && raw.kind !== 'remove') return null;
+  const date = String(raw.date ?? '');
+  const time = TIME_RE.test(String(raw.time ?? '')) ? String(raw.time) : null;
+  const end = TIME_RE.test(String(raw.end ?? '')) ? String(raw.end) : null;
+  return {
+    id,
+    planId,
+    linkId: String(raw.linkId ?? '').slice(0, 64),
+    kind: raw.kind,
+    title,
+    date: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null,
+    itemId: typeof raw.itemId === 'string' && raw.itemId ? raw.itemId.slice(0, 80) : null,
+    time,
+    end: normalizeLessonEnd(time, end),
+    note: typeof raw.note === 'string' ? raw.note.trim().slice(0, PLAN_CHANGE_NOTE_MAX) : '',
+    state: raw.state === 'approved' ? 'approved' : raw.state === 'declined' ? 'declined' : 'open',
+    reply: typeof raw.reply === 'string' ? raw.reply.trim().slice(0, PLAN_CHANGE_NOTE_MAX) : '',
+    answeredAt: wireTimestamp(raw.answeredAt),
+    createdAt: String(raw.createdAt ?? new Date().toISOString()).slice(0, 40),
+  };
+}
+
 /** A student's report for one planned day; a malformed one is dropped, never guessed at. */
 function wireDayReport(value: unknown): DayReport | null {
   if (!value || typeof value !== 'object') return null;
@@ -481,7 +547,10 @@ function asGuardianOutbox(payload: unknown): Omit<GuardianOutbox, 'v'> {
       return clean ? [clean] : [];
     })
     .slice(-HOMEWORK_ITEMS_KEPT);
-  return { notices, plans, goals, acks, classes, homework, homeworkReviews };
+  const changeAnswers = (Array.isArray(raw.changeAnswers) ? raw.changeAnswers : [])
+    .flatMap((item) => (wirePlanChangeRequest(item) ? [wirePlanChangeRequest(item)!] : []))
+    .slice(0, PLAN_CHANGES_WIRE);
+  return { notices, plans, goals, acks, classes, homework, homeworkReviews, changeAnswers };
 }
 
 /** The student's outbox for one link; a legacy relayed note folds in too. */
@@ -525,7 +594,10 @@ function asStudentOutbox(payload: unknown): Omit<StudentOutbox, 'v'> {
   const requests = (Array.isArray(raw.requests) ? raw.requests : [])
     .flatMap((item) => (wirePlanRequest(item) ? [wirePlanRequest(item)!] : []))
     .slice(0, PLAN_REQUESTS_WIRE);
-  return { relayed, progress, answers, reports, classProgress, homeworkSubmissions, requests };
+  const changes = (Array.isArray(raw.changes) ? raw.changes : [])
+    .flatMap((item) => (wirePlanChangeRequest(item) ? [wirePlanChangeRequest(item)!] : []))
+    .slice(0, PLAN_CHANGES_WIRE);
+  return { relayed, progress, answers, reports, classProgress, homeworkSubmissions, requests, changes };
 }
 
 /**
@@ -584,7 +656,7 @@ async function postToStudent(
     kind,
   };
   // Full-state write: whatever plans and goals are already out there must survive.
-  let outbox: GuardianOutbox = { v: 3, notices: [note], plans: [], goals: [], acks: [], classes: [], homework: [], homeworkReviews: [] };
+  let outbox: GuardianOutbox = { v: 3, notices: [note], plans: [], goals: [], acks: [], classes: [], homework: [], homeworkReviews: [], changeAnswers: [] };
   try {
     const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
     outbox = {
@@ -596,6 +668,7 @@ async function postToStudent(
       classes: current.classes,
       homework: current.homework,
       homeworkReviews: current.homeworkReviews,
+      changeAnswers: current.changeAnswers,
     };
   } catch {
     /* first write, or the slot is empty */
@@ -632,6 +705,10 @@ export async function sendPlan(panels: Panels, linkId: string, draft: PlanDraft)
       title: item.title.trim().slice(0, 120),
       date: item.date ?? null,
       time: item.time && TIME_RE.test(item.time) ? item.time : null,
+      end: normalizeLessonEnd(
+        item.time && TIME_RE.test(item.time) ? item.time : null,
+        item.end && TIME_RE.test(item.end) ? item.end : null,
+      ),
       minutes: item.minutes,
       subject: item.subject?.trim() ? item.subject.trim().slice(0, 60) : null,
       url: item.url ? normalizeLessonUrl(item.url) : null,
@@ -641,7 +718,7 @@ export async function sendPlan(panels: Panels, linkId: string, draft: PlanDraft)
     updatedAt: now,
   };
 
-  let outbox: GuardianOutbox = { v: 3, notices: [], plans: [plan], goals: [], acks: [], classes: [], homework: [], homeworkReviews: [] };
+  let outbox: GuardianOutbox = { v: 3, notices: [], plans: [plan], goals: [], acks: [], classes: [], homework: [], homeworkReviews: [], changeAnswers: [] };
   try {
     const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
     outbox = {
@@ -653,12 +730,165 @@ export async function sendPlan(panels: Panels, linkId: string, draft: PlanDraft)
       classes: current.classes,
       homework: current.homework,
       homeworkReviews: current.homeworkReviews,
+      changeAnswers: current.changeAnswers,
     };
   } catch {
     /* first write */
   }
   await writeSlot(linkId, link.wrappedShareKey, session.dek, outbox);
   return withLinkPlan(panels, linkId, plan);
+}
+
+/**
+ * Guardian: change one day of a plan that is still running.
+ *
+ * A week stays editable while it is open, but only from today onwards: a day
+ * that has gone by holds the ticks and the report that answered it, and
+ * rewriting it would quietly undo a filing the student already made. The rest
+ * of the week moves as the guardian asks, the plan keeps its id so nothing is
+ * orphaned, and the student reads what changed as a notice beside the plan.
+ */
+export async function updatePlanDays(
+  panels: Panels,
+  linkId: string,
+  planId: string,
+  edits: PlanDayEdit[],
+  today = todayISO(),
+): Promise<Panels> {
+  const session = await requireSession();
+  const link = panels.guardian.links.find((item) => item.linkId === linkId);
+  if (!link?.wrappedShareKey) throw new LinkError('That link is not ready yet.');
+  const local = link.plans.find((item) => item.id === planId);
+  if (!local) throw new LinkError('That plan is no longer available.');
+
+  let outbox: GuardianOutbox = {
+    v: 3,
+    notices: [],
+    plans: [local],
+    goals: [],
+    acks: [],
+    classes: [],
+    homework: [],
+    homeworkReviews: [],
+    changeAnswers: [],
+  };
+  let plan = local;
+  try {
+    const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
+    // The slot is the shared truth: another guardian may have changed this week
+    // already, and it is their version that gets rewritten, not a stale copy.
+    plan = current.plans.find((item) => item.id === planId) ?? local;
+    outbox = { v: 3, ...current, plans: current.plans.length > 0 ? current.plans : [local] };
+  } catch {
+    /* first write, or the slot is empty */
+  }
+
+  if (plan.approvedAt) throw new LinkError('This period is closed. Nothing in it can change any more.');
+  if (edits.length === 0) throw new LinkError('Nothing to change yet.');
+  if (edits.some((edit) => !canEditPlanDay(plan, edit.date, today))) {
+    throw new LinkError('That day has gone by. Only the rest of the plan can change.');
+  }
+  const updated = withPlanDaysRewritten(plan, edits, today);
+  if (!updated) throw new LinkError('A week plan can hold up to 60 lessons.');
+  const summary = edits
+    .map((edit) =>
+      planDayChangeSummary(edit.date, diffPlanDay(itemsForDay(plan, edit.date), itemsForDay(updated, edit.date))),
+    )
+    .join(' · ')
+    .slice(0, 160);
+  const note: Omit<GuardianNotice, 'read'> = {
+    id: newId('change'),
+    student: link.username,
+    author: session.user.displayName || session.user.username,
+    summary: summary.slice(0, 160),
+    weekOf: weekOf(),
+    createdAt: new Date().toISOString(),
+    kind: 'note',
+  };
+  await writeSlot(linkId, link.wrappedShareKey, session.dek, {
+    ...outbox,
+    notices: [note, ...outbox.notices.filter((item) => item.id !== note.id)].slice(0, OUTBOX_NOTICES),
+    plans: [updated, ...outbox.plans.filter((item) => item.id !== planId)].slice(0, OUTBOX_PLANS),
+  } satisfies GuardianOutbox);
+  // The author sees their own line straight away, marked as read.
+  const noticed: Panels = {
+    ...panels,
+    guardian: {
+      ...panels.guardian,
+      notices: [{ ...note, read: true }, ...panels.guardian.notices].slice(0, 20),
+    },
+  };
+  return withLinkPlan(noticed, linkId, updated);
+}
+
+/**
+ * Guardian: answer a student's ask for a change to the plan.
+ *
+ * Approving makes the change here and on the student's side through the same
+ * `applyChangeRequest`, so a week is never half-changed while the two panels
+ * catch up with each other. Declining leaves the plan exactly as it was and
+ * carries a line back — a refusal with no reason is the one answer a student
+ * cannot learn anything from.
+ */
+export async function answerChangeRequest(
+  panels: Panels,
+  linkId: string,
+  requestId: string,
+  decision: 'approved' | 'declined',
+  reply = '',
+  today = todayISO(),
+): Promise<Panels> {
+  const session = await requireSession();
+  const link = panels.guardian.links.find((item) => item.linkId === linkId);
+  if (!link?.wrappedShareKey) throw new LinkError('That link is not ready yet.');
+  const request = (link.changeRequests ?? []).find((item) => item.id === requestId);
+  if (!request) throw new LinkError('That request is no longer waiting.');
+  if (request.state !== 'open') return panels;
+  const plan = link.plans.find((item) => item.id === request.planId);
+  if (!plan) throw new LinkError('That plan is no longer available.');
+
+  const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
+  // The slot is the shared truth, so an approval lands on the week as it
+  // actually stands rather than on this device's copy of it.
+  const base = current.plans.find((item) => item.id === request.planId) ?? plan;
+  let updated = base;
+  if (decision === 'approved') {
+    const changed = applyChangeRequest(base, request, today);
+    if (!changed) {
+      throw new LinkError('That ask can no longer be made — the day has gone by, or the lesson is already ticked off.');
+    }
+    updated = changed;
+  }
+  const answered = answeredChangeRequest({ ...request, linkId }, decision, reply);
+  const note: Omit<GuardianNotice, 'read'> = {
+    id: newId('answer'),
+    student: link.username,
+    author: session.user.displayName || session.user.username,
+    summary: `${decision === 'approved' ? t('Change approved: {0}', { 0: request.title }) : t('Change declined: {0}', { 0: request.title })}${
+      answered.reply ? ` — ${answered.reply}` : ''
+    }`.slice(0, 160),
+    weekOf: weekOf(),
+    createdAt: new Date().toISOString(),
+    kind: 'note',
+  };
+  await writeSlot(linkId, link.wrappedShareKey, session.dek, {
+    v: 3,
+    ...current,
+    notices: [note, ...current.notices.filter((item) => item.id !== note.id)].slice(0, OUTBOX_NOTICES),
+    plans: [updated, ...current.plans.filter((item) => item.id !== updated.id)].slice(0, OUTBOX_PLANS),
+    changeAnswers: [answered, ...current.changeAnswers.filter((item) => item.id !== answered.id)].slice(
+      0,
+      PLAN_CHANGES_WIRE,
+    ),
+  } satisfies GuardianOutbox);
+  const noticed: Panels = {
+    ...panels,
+    guardian: {
+      ...panels.guardian,
+      notices: [{ ...note, read: true }, ...panels.guardian.notices].slice(0, 20),
+    },
+  };
+  return withLinkChangeRequests(withLinkPlan(noticed, linkId, updated), linkId, [answered]);
 }
 
 /** Guardian: finish an ended period. A week waits for each daily report to be approved. */
@@ -887,7 +1117,7 @@ export async function sendGoal(panels: Panels, linkId: string, draft: GoalDraft)
     createdAt: new Date().toISOString(),
   };
 
-  let outbox: GuardianOutbox = { v: 3, notices: [], plans: [], goals: [goal], acks: [], classes: [], homework: [], homeworkReviews: [] };
+  let outbox: GuardianOutbox = { v: 3, notices: [], plans: [], goals: [goal], acks: [], classes: [], homework: [], homeworkReviews: [], changeAnswers: [] };
   try {
     const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
     outbox = {
@@ -899,6 +1129,7 @@ export async function sendGoal(panels: Panels, linkId: string, draft: GoalDraft)
       classes: current.classes,
       homework: current.homework,
       homeworkReviews: current.homeworkReviews,
+      changeAnswers: current.changeAnswers,
     };
   } catch {
     /* first write */
@@ -927,6 +1158,7 @@ export async function dropGoal(panels: Panels, linkId: string, goalId: string): 
       classes: current.classes,
       homework: current.homework,
       homeworkReviews: current.homeworkReviews,
+      changeAnswers: current.changeAnswers,
     } satisfies GuardianOutbox);
   } catch {
     /* dropping locally is still the right outcome */
@@ -950,6 +1182,7 @@ export async function dropPlan(panels: Panels, linkId: string, planId: string): 
       classes: current.classes,
       homework: current.homework,
       homeworkReviews: current.homeworkReviews,
+      changeAnswers: [],
     } satisfies GuardianOutbox);
   } catch {
     /* dropping locally is still the right outcome */
@@ -1033,6 +1266,7 @@ export async function syncStudentInbox(
   let classProgress = panels.student.classProgress ?? [];
   let homeworkSubmissions = panels.student.homeworkSubmissions ?? [];
   let praise = panels.student.praise ?? [];
+  let changeRequests = panels.student.changeRequests ?? [];
   let changed = plans.length !== panels.student.inbox.plans.length;
   const added: { notices: GuardianNotice[]; plans: GuardianPlan[]; goals: GoalSuggestion[] } = { notices: [], plans: [], goals: [] };
 
@@ -1155,6 +1389,18 @@ export async function syncStudentInbox(
         changed = true;
       }
     }
+    // An answer to a change request lands on the ask it answers, so the student
+    // reads an approval or a decline where they asked the question.
+    if (outbox.changeAnswers.length > 0) {
+      const merged = mergeChangeRequests(
+        changeRequests,
+        outbox.changeAnswers.filter((entry) => entry.linkId === source.linkId),
+      );
+      if (JSON.stringify(merged) !== JSON.stringify(changeRequests)) {
+        changeRequests = merged;
+        changed = true;
+      }
+    }
   }
 
   notices = notices.slice(0, 20);
@@ -1211,6 +1457,12 @@ export async function syncStudentInbox(
     const requests = openRequests(panels.student.requests ?? [])
       .filter((entry) => entry.linkId === target.linkId)
       .slice(-PLAN_REQUESTS_WIRE);
+    // Asks for one change to a plan travel until they go stale too. An answered
+    // one keeps riding along a little longer, so a second guardian device sees
+    // the decision rather than an ask nobody has answered.
+    const changes = openChangeRequests(changeRequests)
+      .filter((entry) => entry.linkId === target.linkId)
+      .slice(-PLAN_CHANGES_WIRE);
     const outbox: StudentOutbox = {
       v: 3,
       relayed: passed,
@@ -1220,6 +1472,7 @@ export async function syncStudentInbox(
       classProgress: classProgressForLink,
       homeworkSubmissions: homeworkSubmissionsForLink,
       requests,
+      changes,
     };
     try {
       await writeSlot(target.linkId, target.wrappedShareKey, session.dek, outbox);
@@ -1239,6 +1492,7 @@ export async function syncStudentInbox(
         acks,
         classProgress,
         homeworkSubmissions,
+        changeRequests: changeRequests.slice(0, PLAN_CHANGES_KEPT),
       },
     },
     added,
@@ -1276,6 +1530,25 @@ export async function readNotices(panels: Panels): Promise<{ panels: Panels; cha
       const notice = requestNotice(request, link.displayName, link.username);
       if (known.has(notice.id)) continue;
       found.push(notice);
+    }
+    // An ask to change a plan is worth a line in the roster: it is waiting on
+    // this guardian, and only an open one is — an answered ask is history.
+    for (const request of outbox.changes) {
+      if (request.linkId !== link.linkId || request.state !== 'open') continue;
+      const notice = changeRequestNotice(request, link.displayName, link.username);
+      if (known.has(notice.id)) continue;
+      found.push(notice);
+    }
+    if (outbox.changes.length > 0) {
+      const merged = mergeChangeRequests(
+        link.changeRequests ?? [],
+        outbox.changes.filter((entry) => entry.linkId === link.linkId),
+      );
+      if (JSON.stringify(merged) !== JSON.stringify(link.changeRequests ?? [])) {
+        changed = true;
+        links[index] = { ...link, changeRequests: merged };
+        link = links[index]!;
+      }
     }
     // Ticks land back on the plans they belong to.
     if ((outbox.progress.length > 0 || outbox.reports.length > 0) && link.plans.length > 0) {

@@ -1,7 +1,8 @@
 /** Actionable panel features, computed locally without widening the sharing boundary. */
-import { addDays, isValidISODate, todayISO } from './dates';
+import { addDays, isValidISODate, isValidTime, todayISO } from './dates';
 import { t } from './i18n';
 import { daysUntil, newId, planEnd, weekOf, withSubject } from './panels';
+import { normalizeLessonEnd } from './weekPlans';
 import type { GuardianLink, GuardianNotice, PlanCadence, PlannerState, StudentSubject, Task } from './types';
 
 export const SUBJECT_LIMIT = 40;
@@ -185,6 +186,10 @@ export interface PlanStepDraft {
   subject: string;
   minutes: string;
   date: string;
+  /** When the step starts (HH:MM as typed), or empty for "any time that day". */
+  time: string;
+  /** When it ends, so "maths from 9 to 11" is what the step says. */
+  end: string;
 }
 
 export interface PanelPlanDraft {
@@ -196,7 +201,7 @@ export interface PanelPlanDraft {
 }
 
 export function emptyPlanStep(): PlanStepDraft {
-  return { id: newId('step'), title: '', subject: '', minutes: '', date: '' };
+  return { id: newId('step'), title: '', subject: '', minutes: '', date: '', time: '', end: '' };
 }
 
 /** Reject impossible dates, out-of-period steps and non-finite effort before sending. */
@@ -215,6 +220,9 @@ export function planDraftError(draft: PanelPlanDraft): string | null {
     )
   )
     return t('Choose between 1 and 1440 minutes per step, or leave it empty.');
+  if (items.some((item) => item.time && !isValidTime(item.time))) return t('Choose a valid time.');
+  if (items.some((item) => item.end && !normalizeLessonEnd(item.time, item.end)))
+    return t('A lesson has to end after it starts.');
   if (draft.items.some((item) => !item.title.trim() && (item.date || item.minutes || item.subject.trim())))
     return t('Give each filled-in step a title.');
   if (items.length > PLAN_STEP_LIMIT) return t('A plan can have up to 40 steps.');
