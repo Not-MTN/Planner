@@ -1,11 +1,11 @@
 import { ACCENTS, categoryById, HABIT_ICONS, NOTE_KINDS, PRIORITIES } from './constants';
 import { isBase64 } from './shared/authContract';
 import { isValidISODate, isValidTime, localDateFromTimestamp, timeToMinutes } from './dates';
-import { normalizeLessonUrl } from './weekPlans';
+import { normalizeLessonEnd, normalizeLessonUrl } from './weekPlans';
 import { sanitizeClassAssignment, sanitizeClassProgress, sanitizeHomeworkAssignment, sanitizeHomeworkReview, sanitizeHomeworkSubmission } from './learning';
 import { REPEAT_SET } from './recurrence';
 import { MAX_PLAN_DAYS } from './duration';
-import { ACK_REACTIONS, ACK_TEXT_MAX, AI_PLAN_LIMIT, DAY_REPORT_NOTE_MAX, DAY_REPORTS_KEPT, GOAL_STEPS_MAX, HOMEWORK_ITEMS_KEPT, PLAN_REQUESTS_KEPT, PRAISE_KEPT, QUEUED_PLANS_KEPT, createEmptyPanels, createEmptyState, isGradeLevel, type AIDeclined, type AIDeclinedKind, type AIMemory, type AttachmentRef, type AIMemoryCategory, type ChangeNote, type DayReport, type EventInput, type FixedCommitment, type FocusLog, type GoalAnswer, type GoalSuggestion, type GuardianKind, type GuardianLink, type GuardianNotice, type GuardianPlan, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Panels, type PlanCadence, type PlanDraft, type PlanItem, type PlanRequest, type QueuedPlan, type ReportAck, type StudentGuardian, type StudentInbox, type StudentSubject, type Subtask, type TaskInput, type TaskRepeat, type WeekResults, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task, type WeekArchive } from './types';
+import { ACK_REACTIONS, ACK_TEXT_MAX, AI_PLAN_LIMIT, DAY_REPORT_NOTE_MAX, DAY_REPORTS_KEPT, GOAL_STEPS_MAX, HOMEWORK_ITEMS_KEPT, PLAN_CHANGES_KEPT, PLAN_CHANGE_NOTE_MAX, PLAN_CHANGE_TITLE_MAX, PLAN_REQUESTS_KEPT, PRAISE_KEPT, QUEUED_PLANS_KEPT, createEmptyPanels, createEmptyState, isGradeLevel, type AIDeclined, type AIDeclinedKind, type AIMemory, type AttachmentRef, type AIMemoryCategory, type ChangeNote, type DayReport, type EventInput, type FixedCommitment, type FocusLog, type GoalAnswer, type GoalSuggestion, type GuardianKind, type GuardianLink, type GuardianNotice, type GuardianPlan, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Panels, type PlanCadence, type PlanChangeRequest, type PlanDraft, type PlanItem, type PlanRequest, type QueuedPlan, type ReportAck, type StudentGuardian, type StudentInbox, type StudentSubject, type Subtask, type TaskInput, type TaskRepeat, type WeekResults, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task, type WeekArchive } from './types';
 import { t } from './i18n';
 import { downloadBlob } from './download';
 
@@ -708,6 +708,7 @@ function sanitizePlanItem(value: unknown): PlanItem | null {
     title,
     date: /^\d{4}-\d{2}-\d{2}$/.test(String(raw.date ?? '')) ? String(raw.date) : null,
     time: typeof raw.time === 'string' && isValidTime(raw.time) ? raw.time : null,
+    end: normalizeLessonEnd(typeof raw.time === 'string' ? raw.time : null, typeof raw.end === 'string' ? raw.end : null),
     minutes,
     subject: asString(raw.subject, 60)?.trim() || null,
     url: typeof raw.url === 'string' ? normalizeLessonUrl(raw.url) : null,
@@ -733,6 +734,10 @@ function sanitizePlanDraft(value: unknown): PlanDraft | null {
           title,
           date: isValidISODate(String(entry.date ?? '')) ? String(entry.date) : null,
           time: typeof entry.time === 'string' && isValidTime(entry.time) ? entry.time : null,
+          end: normalizeLessonEnd(
+            typeof entry.time === 'string' ? entry.time : null,
+            typeof entry.end === 'string' ? entry.end : null,
+          ),
           minutes:
             typeof entry.minutes === 'number' && Number.isFinite(entry.minutes) ? Math.max(0, Math.round(entry.minutes)) : null,
           subject: asString(entry.subject, 60)?.trim() || null,
@@ -809,6 +814,35 @@ function sanitizePlanRequest(value: unknown): PlanRequest | null {
     id,
     linkId: asString(raw.linkId, 64) ?? '',
     note: (asString(raw.note, 140) ?? '').trim(),
+    createdAt: asString(raw.createdAt, 40) ?? new Date(0).toISOString(),
+  };
+}
+
+/** A change the student asked for, and the answer when one came back. */
+function sanitizePlanChangeRequest(value: unknown): PlanChangeRequest | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = asString(raw.id, 80);
+  const planId = asString(raw.planId, 80);
+  const title = asString(raw.title, PLAN_CHANGE_TITLE_MAX)?.trim();
+  if (!id || !planId || !title) return null;
+  if (raw.kind !== 'add' && raw.kind !== 'remove') return null;
+  const date = asString(raw.date, 10);
+  const time = asString(raw.time, 5);
+  return {
+    id,
+    planId,
+    linkId: asString(raw.linkId, 64) ?? '',
+    kind: raw.kind,
+    title,
+    date: date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null,
+    itemId: asString(raw.itemId, 80),
+    time: time && isValidTime(time) ? time : null,
+    end: normalizeLessonEnd(time, asString(raw.end, 5)),
+    note: (asString(raw.note, PLAN_CHANGE_NOTE_MAX) ?? '').trim(),
+    state: raw.state === 'approved' ? 'approved' : raw.state === 'declined' ? 'declined' : 'open',
+    reply: (asString(raw.reply, PLAN_CHANGE_NOTE_MAX) ?? '').trim(),
+    answeredAt: typeof raw.answeredAt === 'string' && Number.isFinite(Date.parse(raw.answeredAt)) ? raw.answeredAt.slice(0, 40) : null,
     createdAt: asString(raw.createdAt, 40) ?? new Date(0).toISOString(),
   };
 }
@@ -1053,6 +1087,15 @@ function sanitizeGuardianLink(value: unknown): GuardianLink | null {
       }),
       (item) => item.submissionId,
     ).sort((a, b) => b.approvedAt.localeCompare(a.approvedAt)).slice(0, HOMEWORK_ITEMS_KEPT),
+    changeRequests: uniqueBy(
+      (Array.isArray(raw.changeRequests) ? raw.changeRequests : []).flatMap((item) => {
+        const request = sanitizePlanChangeRequest(item);
+        return request && (!linkId || request.linkId === linkId) ? [request] : [];
+      }),
+      (item) => item.id,
+    )
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, PLAN_CHANGES_KEPT),
   };
 }
 
@@ -1195,6 +1238,15 @@ export function sanitizePanels(value: unknown): Panels {
       )
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         .slice(0, PLAN_REQUESTS_KEPT),
+      changeRequests: uniqueBy(
+        (Array.isArray(student.changeRequests) ? student.changeRequests : []).flatMap((item) => {
+          const request = sanitizePlanChangeRequest(item);
+          return request && guardians.some((guardian) => guardian.linkId === request.linkId) ? [request] : [];
+        }),
+        (item) => item.id,
+      )
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, PLAN_CHANGES_KEPT),
     },
     guardian: {
       enabled: guardian.enabled === true && kind !== null,

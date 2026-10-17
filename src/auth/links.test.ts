@@ -14,7 +14,7 @@ import { createMemoryAuthStore } from '../server/authStore';
 import { resetRateLimits } from '../server/security';
 import { normalizeLinkCode } from './crypto';
 import { createShareKey, formatLinkCode, importDek, keyFromLinkCode, unwrapKeyRaw, wrapKey } from './crypto';
-import type { GoalSuggestion, PlannerState } from '../types';
+import type { GoalSuggestion, PlanChangeRequest, PlannerState } from '../types';
 
 const store = createMemoryAuthStore();
 let jar = '';
@@ -624,5 +624,193 @@ describe('linking a guardian and a student', () => {
     guardianPanels = (await readNotices(guardianPanels)).panels;
     expect(guardianPanels.guardian.links[0]?.plans[0]?.items[0]?.done).toBe(true);
   }, 180_000);
-});
 
+  it('lets a guardian change a running week, and a student ask for a change that gets an answer', async () => {
+    // The week is already out there and being lived by: today is inside it, and
+    // yesterday is a record. Both sides have to end up reading the same week,
+    // and neither may quietly rewrite a day that has gone by.
+    await join('editparent', 'editparent@example.com', createEmptyState());
+    const {
+      inviteStudent,
+      syncLinks,
+      sendPlan,
+      readNotices,
+      syncStudentInbox,
+      updatePlanDays,
+      answerChangeRequest,
+      approvePlanPeriod,
+    } = await import('./links');
+    const { todayISO } = await import('../dates');
+    const { buildChangeRequest, itemsForDay, withStudentChangeRequest } = await import('../weekPlans');
+    const today = todayISO();
+    const start = addDays(today, -1);
+    const invited = await inviteStudent(createEmptyState().panels, 'editstudent');
+    const linkId = invited.invitation.link.linkId!;
+
+    await join('editstudent', 'editstudent@example.com', createEmptyState());
+    const { acceptInvitation } = await import('./links');
+    let studentPanels = await acceptInvitation(createEmptyState().panels, invited.invitation.code);
+
+    await signInAs('editparent');
+    let guardianPanels = (await syncLinks(invited.panels)).panels;
+    guardianPanels = await sendPlan(guardianPanels, linkId, {
+      cadence: 'week',
+      start,
+      title: 'A running week',
+      note: '',
+      items: [
+        { title: 'History', date: addDays(today, -1), time: '09:00', end: '10:00', minutes: null, subject: null, url: null },
+        { title: 'Maths', date: today, time: '09:00', minutes: null, subject: null, url: null },
+        { title: 'Chemistry', date: addDays(today, 2), time: '14:00', minutes: null, subject: null, url: null },
+      ],
+    });
+    const sent = guardianPanels.guardian.links[0]!.plans[0]!;
+    const mathsId = sent.items.find((entry) => entry.title === 'Maths')!.id;
+    const chemId = sent.items.find((entry) => entry.title === 'Chemistry')!.id;
+
+    // Yesterday is not a draft any more.
+    await expect(
+      updatePlanDays(guardianPanels, linkId, sent.id, [{ date: addDays(today, -1), lessons: [] }]),
+    ).rejects.toThrow('That day has gone by.');
+    // Today onwards is still editable: Maths gets an end, and a lesson is added.
+    guardianPanels = await updatePlanDays(guardianPanels, linkId, sent.id, [
+      {
+        date: today,
+        lessons: [
+          { id: mathsId, title: 'Maths', time: '10:00', end: '12:00' },
+          { title: 'Geometry', time: '15:00' },
+        ],
+      },
+    ]);
+    const edited = guardianPanels.guardian.links[0]!.plans[0]!;
+    expect(itemsForDay(edited, today).map((entry) => entry.title)).toEqual(['Maths', 'Geometry']);
+    expect(itemsForDay(edited, today)[0]).toMatchObject({ id: mathsId, time: '10:00', end: '12:00' });
+    expect(itemsForDay(edited, addDays(today, -1))[0]).toMatchObject({ title: 'History', time: '09:00', end: '10:00' });
+    expect(edited.updatedAt).not.toBe(sent.updatedAt);
+    expect(guardianPanels.guardian.notices[0]?.summary).toContain('Plan changed for');
+
+    await signInAs('editstudent');
+    studentPanels = (await syncStudentInbox(studentPanels, [])).panels;
+    let plan = studentPanels.student.inbox.plans[0]!;
+    expect(plan.id).toBe(sent.id);
+    expect(itemsForDay(plan, today).map((entry) => entry.title)).toEqual(['Maths', 'Geometry']);
+    expect(itemsForDay(plan, addDays(today, -1))[0]).toMatchObject({ time: '09:00', end: '10:00' });
+    expect(studentPanels.student.inbox.notices.some((notice) => notice.summary.includes('Plan changed for'))).toBe(true);
+
+    // The student asks for a lesson to be added, and the ask travels to the guardian.
+    const request = buildChangeRequest(
+      plan,
+      linkId,
+      {
+        kind: 'add',
+        title: 'Physics',
+        date: addDays(today, 1),
+        time: '16:00',
+        end: '17:30',
+        note: 'We have a test that morning.',
+      },
+      today,
+    )!;
+    studentPanels = withStudentChangeRequest(studentPanels, request);
+    studentPanels = (await syncStudentInbox(studentPanels, [])).panels;
+    // Asking changes nothing in the week itself.
+    expect(itemsForDay(studentPanels.student.inbox.plans[0]!, addDays(today, 1))).toEqual([]);
+
+    await signInAs('editparent');
+    guardianPanels = (await readNotices(guardianPanels)).panels;
+    const asks = guardianPanels.guardian.links[0]!.changeRequests!;
+    expect(asks).toHaveLength(1);
+    expect(asks[0]).toMatchObject({ id: request.id, state: 'open', title: 'Physics', note: 'We have a test that morning.' });
+    expect(guardianPanels.guardian.notices.some((notice) => notice.summary.includes('asked to add Physics'))).toBe(true);
+
+    // Approving it changes the week, here and on the next sync over there.
+    guardianPanels = await answerChangeRequest(guardianPanels, linkId, request.id, 'approved', 'Good idea.');
+    expect(itemsForDay(guardianPanels.guardian.links[0]!.plans[0]!, addDays(today, 1))).toMatchObject([
+      { title: 'Physics', time: '16:00', end: '17:30' },
+    ]);
+    expect(guardianPanels.guardian.links[0]!.changeRequests![0]).toMatchObject({
+      state: 'approved',
+      reply: 'Good idea.',
+    });
+    expect(guardianPanels.guardian.notices[0]?.summary).toContain('Change approved: Physics');
+
+    await signInAs('editstudent');
+    studentPanels = (await syncStudentInbox(studentPanels, [])).panels;
+    plan = studentPanels.student.inbox.plans[0]!;
+    expect(itemsForDay(plan, addDays(today, 1))[0]).toMatchObject({ title: 'Physics', time: '16:00', end: '17:30' });
+    expect(studentPanels.student.changeRequests![0]).toMatchObject({ id: request.id, state: 'approved', reply: 'Good idea.' });
+
+    // A second ask, declined with a word back, leaves the week exactly as it was.
+    const removal = buildChangeRequest(
+      plan,
+      linkId,
+      { kind: 'remove', title: 'Chemistry', itemId: chemId, date: addDays(today, 2) },
+      today,
+    )!;
+    studentPanels = withStudentChangeRequest(studentPanels, removal);
+    studentPanels = (await syncStudentInbox(studentPanels, [])).panels;
+
+    await signInAs('editparent');
+    guardianPanels = (await readNotices(guardianPanels)).panels;
+    expect(guardianPanels.guardian.links[0]!.changeRequests!.map((entry) => entry.id)).toContain(removal.id);
+    guardianPanels = await answerChangeRequest(guardianPanels, linkId, removal.id, 'declined', 'It is the week before the exam.');
+    expect(itemsForDay(guardianPanels.guardian.links[0]!.plans[0]!, addDays(today, 2))[0]).toMatchObject({
+      title: 'Chemistry',
+    });
+    expect(guardianPanels.guardian.notices[0]?.summary).toContain('Change declined: Chemistry');
+    // An ask that already has an answer is not answered twice.
+    expect(await answerChangeRequest(guardianPanels, linkId, removal.id, 'approved')).toBe(guardianPanels);
+
+    await signInAs('editstudent');
+    studentPanels = (await syncStudentInbox(studentPanels, [])).panels;
+    const answered = studentPanels.student.changeRequests!.find((entry) => entry.id === removal.id);
+    expect(answered).toMatchObject({ state: 'declined', reply: 'It is the week before the exam.' });
+    expect(itemsForDay(studentPanels.student.inbox.plans[0]!, addDays(today, 2))[0]).toMatchObject({ title: 'Chemistry' });
+
+    // A week whose period has ended can be closed, and a closed week cannot be
+    // edited any more — checked against the week as it stands in the slot, not
+    // as either device happens to hold it.
+    await signInAs('editparent');
+    guardianPanels = await sendPlan(guardianPanels, linkId, {
+      cadence: 'week',
+      start: addDays(today, -9),
+      title: 'A week that is over',
+      note: '',
+      // Nothing was asked for in it, so there is no report to wait for and the
+      // period can be closed the moment it has ended.
+      items: [],
+    });
+    const over = guardianPanels.guardian.links[0]!.plans.find((entry) => entry.title === 'A week that is over')!;
+    guardianPanels = await approvePlanPeriod(guardianPanels, linkId, over.id);
+    expect(guardianPanels.guardian.links[0]!.plans.find((entry) => entry.id === over.id)!.approvedAt).toBeTruthy();
+    await expect(
+      updatePlanDays(guardianPanels, linkId, over.id, [{ date: addDays(today, -9), lessons: [] }]),
+    ).rejects.toThrow('This period is closed.');
+    // An ask that lands after the close is refused with the reason, rather than
+    // answered as though the week could still move.
+    const lateAsk: PlanChangeRequest = {
+      id: 'change-late',
+      linkId,
+      planId: over.id,
+      date: addDays(today, -9),
+      kind: 'add',
+      title: 'Astronomy',
+      note: '',
+      state: 'open',
+      createdAt: `${today}T09:00:00.000Z`,
+    };
+    const holdingLateAsk = {
+      ...guardianPanels,
+      guardian: {
+        ...guardianPanels.guardian,
+        links: guardianPanels.guardian.links.map((link) => ({
+          ...link,
+          changeRequests: [lateAsk, ...(link.changeRequests ?? [])],
+        })),
+      },
+    };
+    await expect(answerChangeRequest(holdingLateAsk, linkId, lateAsk.id, 'approved')).rejects.toThrow(
+      'That ask can no longer be made',
+    );
+  }, 180_000);
+});

@@ -6,10 +6,17 @@
  * read — the grid is for the glance, and for the wall once printed.
  */
 import { cx } from '../cx';
-import { displayTime, formatJalaliShort, formatMonthShort, formatWeekdayShort, todayISO } from '../dates';
+import { displayTime, formatJalaliShort, formatMonthShort, formatWeekdayShort, isValidTime, todayISO } from '../dates';
 import { faNum, t } from '../i18n';
-import type { DayReport, GuardianPlan } from '../types';
-import { timetableModel } from '../weekPlans';
+import type { DayReport, GuardianPlan, PlanItem } from '../types';
+import { lessonDurationLabel, timetableModel } from '../weekPlans';
+
+/** The row already says when a lesson starts; the cell only has to say when it stops. */
+function lessonSpan(lesson: PlanItem): string | null {
+  if (!lesson.time || !lesson.end || !isValidTime(lesson.end)) return null;
+  const duration = lessonDurationLabel(lesson);
+  return duration ? `${displayTime(lesson.end)} · ${duration}` : displayTime(lesson.end);
+}
 
 export function WeekTimetable({
   plan,
@@ -59,6 +66,7 @@ export function WeekTimetable({
                     {grid.lessonsFor(date, time).map((lesson) => (
                       <span key={lesson.id} className={cx('week-grid-lesson', lesson.done && 'done')}>
                         {lesson.title}
+                        {lessonSpan(lesson) ? <em className="week-grid-span">{lessonSpan(lesson)}</em> : null}
                       </span>
                     ))}
                   </td>

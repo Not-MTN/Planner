@@ -6,10 +6,10 @@
  * link is decided in `auth/links.ts`, and these are the shapes both sides
  * agree on before anything is sent.
  */
-import { addDays, isValidISODate, isValidTime, parseISODate, todayISO, toISODate, weekdayIndex } from './dates';
+import { addDays, displayTime, formatDuration, formatFullDate, isValidISODate, isValidTime, parseISODate, timeToMinutes, todayISO, toISODate, weekdayIndex } from './dates';
 import { t } from './i18n';
 import type { Reminder } from './reminders';
-import { ACK_REACTIONS, DAY_REPORTS_KEPT, DAY_REPORT_NOTE_MAX, LESSON_URL_MAX, PLAN_REQUEST_DAYS, type DayReport, type FocusLog, type GuardianNotice, type GuardianPlan, type Panels, type PlanItem, type PlanRequest, type ReportAck, type Task } from './types';
+import { ACK_REACTIONS, DAY_REPORTS_KEPT, DAY_REPORT_NOTE_MAX, LESSON_URL_MAX, PLAN_CHANGE_DAYS, PLAN_CHANGES_KEPT, PLAN_CHANGE_NOTE_MAX, PLAN_CHANGE_TITLE_MAX, PLAN_REQUEST_DAYS, type DayReport, type FocusLog, type GuardianNotice, type GuardianPlan, type Panels, type PlanChangeKind, type PlanChangeRequest, type PlanItem, type PlanRequest, type ReportAck, type Task } from './types';
 
 /** A week plan holds seven days of lessons; sixty is eight a day with room to spare. */
 export const WEEK_LESSON_LIMIT = 60;
@@ -209,7 +209,10 @@ export function mergeLinkReports(current: DayReport[], incoming: DayReport[]): D
 export interface WeekLessonDraft {
   id: string;
   name: string;
+  /** Start, as typed — HH:MM once it is valid. */
   time: string;
+  /** End, as typed. Kept only when it comes after the start; optional, as most lessons have no end to give. */
+  end?: string;
   /** Prep link as typed — normalized on send, so drafts may hold anything. */
   url: string;
 }
@@ -256,6 +259,8 @@ export function weekPlanDraftError(draft: WeekPlanDraft): string | null {
   if (!draft.title.trim() || named.length === 0) return t('Give the plan a name and at least one thing to do.');
   if (!isValidISODate(draft.start)) return t('Choose a valid start date.');
   if (named.some((lesson) => lesson.time && !isValidTime(lesson.time))) return t('Choose a valid time.');
+  if (named.some((lesson) => lesson.end && !normalizeLessonEnd(lesson.time, lesson.end)))
+    return t('A lesson has to end after it starts.');
   if (named.some((lesson) => lesson.url.trim() && !normalizeLessonUrl(lesson.url)))
     return t('One of the links is not a valid web address.');
   if (named.length > WEEK_LESSON_LIMIT) return t('A week plan can hold up to 60 lessons.');
@@ -604,4 +609,448 @@ export function crossedTimeboxes(
   return lessons.filter(
     (lesson) => (lesson.minutes ?? 0) > 0 && elapsedSeconds >= lesson.minutes! * 60 && !nudgedIds.has(lesson.id),
   );
+}
+
+/* --------------------------------------------------------- lesson times (14) */
+
+/**
+ * The end of a lesson, kept only when it is a real time that comes after the
+ * start. Anything else is dropped rather than stored: a lesson that ends before
+ * it begins would sort the day into nonsense and print a span nobody can read.
+ * An end with no start goes too — "until eleven" says nothing on its own.
+ */
+export function normalizeLessonEnd(
+  time: string | null | undefined,
+  end: string | null | undefined,
+): string | null {
+  if (!end || !isValidTime(end)) return null;
+  if (!time || !isValidTime(time)) return null;
+  return timeToMinutes(end) > timeToMinutes(time) ? end : null;
+}
+
+/** How long a lesson runs, in minutes. Null when it has no span to measure. */
+export function lessonSpanMinutes(item: Pick<PlanItem, 'time' | 'end'>): number | null {
+  const end = normalizeLessonEnd(item.time, item.end);
+  if (!item.time || !end) return null;
+  return timeToMinutes(end) - timeToMinutes(item.time);
+}
+
+/**
+ * When a lesson runs, as the plan says it: "9 – 11 am" for a span, "9 am" for
+ * a start alone, and nothing at all for a lesson that fits anywhere in the day.
+ */
+export function lessonTimeLabel(item: Pick<PlanItem, 'time' | 'end'>): string | null {
+  if (!item.time || !isValidTime(item.time)) return null;
+  const start = displayTime(item.time);
+  const end = normalizeLessonEnd(item.time, item.end);
+  if (!end) return start;
+  return t('{0} – {1}', { 0: start, 1: displayTime(end) });
+}
+
+/** "2 h" beside the span — the length of the lesson, for the day's arithmetic. */
+export function lessonDurationLabel(item: Pick<PlanItem, 'time' | 'end'>): string | null {
+  if (!item.time) return null;
+  return formatDuration(item.time, normalizeLessonEnd(item.time, item.end));
+}
+
+/* ----------------------------------------------- changing a running plan (15) */
+
+/** A new lesson's id, in the shape `newId('item')` makes on the way out. */
+function lessonId(): string {
+  return `item-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** Every day a plan covers, oldest first — seven for a week, a month for a month. */
+export function planDays(plan: Pick<GuardianPlan, 'cadence' | 'start'>): string[] {
+  if (!isValidISODate(plan.start)) return [];
+  const end = planPeriodEnd(plan);
+  const days: string[] = [];
+  for (let cursor = plan.start; cursor <= end && days.length < 31; cursor = addDays(cursor, 1)) days.push(cursor);
+  return days;
+}
+
+/**
+ * Whether one day of a plan may still be changed.
+ *
+ * Days that have gone by are a record: what was asked, what was ticked, what
+ * was reported and answered. Rewriting them would quietly undo a filing, so
+ * the week stays editable only from today onwards — and not at all once the
+ * guardian has closed the period.
+ */
+export function canEditPlanDay(plan: GuardianPlan, date: string, today = todayISO()): boolean {
+  if (plan.approvedAt || !isValidISODate(date)) return false;
+  if (date < today) return false;
+  return planDays(plan).includes(date);
+}
+
+/** The days of a plan a guardian may still change, oldest first. */
+export function editablePlanDays(plan: GuardianPlan, today = todayISO()): string[] {
+  return planDays(plan).filter((date) => canEditPlanDay(plan, date, today));
+}
+
+/** A lesson as the editor holds it: an id when it already exists, a title always. */
+export interface PlanLessonInput {
+  id?: string | null;
+  title: string;
+  time?: string | null;
+  end?: string | null;
+  minutes?: number | null;
+  subject?: string | null;
+  url?: string | null;
+  done?: boolean;
+}
+
+function cleanLessonInput(input: PlanLessonInput): PlanItem | null {
+  const title = input.title.trim().slice(0, PLAN_CHANGE_TITLE_MAX);
+  if (!title) return null;
+  const time = input.time && isValidTime(input.time) ? input.time : null;
+  return {
+    id: input.id?.slice(0, 80) || lessonId(),
+    title,
+    date: null,
+    time,
+    end: normalizeLessonEnd(time, input.end),
+    minutes:
+      typeof input.minutes === 'number' && Number.isFinite(input.minutes)
+        ? Math.max(0, Math.round(input.minutes))
+        : null,
+    subject: input.subject?.trim() ? input.subject.trim().slice(0, 60) : null,
+    url: input.url ? normalizeLessonUrl(input.url) : null,
+    done: input.done === true,
+  };
+}
+
+export interface PlanDayChange {
+  added: string[];
+  removed: string[];
+  retimed: string[];
+}
+
+/**
+ * What one day's rewrite did, in the three things worth telling a student
+ * about: lessons that appeared, lessons that went, and lessons that moved.
+ */
+export function diffPlanDay(before: PlanItem[], after: PlanItem[]): PlanDayChange {
+  const titleOf = (items: PlanItem[]) => items.map((item) => item.title.trim().toLowerCase());
+  const beforeTitles = titleOf(before);
+  const afterTitles = titleOf(after);
+  const byTitle = new Map(after.map((item) => [item.title.trim().toLowerCase(), item]));
+  return {
+    added: after.filter((item) => !beforeTitles.includes(item.title.trim().toLowerCase())).map((item) => item.title),
+    removed: before.filter((item) => !afterTitles.includes(item.title.trim().toLowerCase())).map((item) => item.title),
+    retimed: before
+      .filter((item) => {
+        const next = byTitle.get(item.title.trim().toLowerCase());
+        return !!next && (next.time ?? null) !== (item.time ?? null) && !!next.time;
+      })
+      .map((item) => item.title),
+  };
+}
+
+/**
+ * Guardian: rewrite one day of a plan that is still running.
+ *
+ * Only a day that has not gone by may be rewritten (`canEditPlanDay`), and only
+ * that day moves: every other day comes through exactly as it was, ids and
+ * ticks intact, so a report already filed still answers the lessons it was
+ * about. Null when the day is locked or the week would overflow.
+ */
+export function withPlanDayRewritten(
+  plan: GuardianPlan,
+  date: string,
+  lessons: PlanLessonInput[],
+  today = todayISO(),
+  now = new Date(),
+): GuardianPlan | null {
+  if (!canEditPlanDay(plan, date, today)) return null;
+  const day = lessons.flatMap((input) => {
+    const clean = cleanLessonInput(input);
+    return clean ? [{ ...clean, date }] : [];
+  });
+  const kept = plan.items.filter((item) => item.date !== date);
+  if (kept.length + day.length > WEEK_LESSON_LIMIT) return null;
+  return {
+    ...plan,
+    items: sortPlanItems([...kept, ...day]),
+    updatedAt: now.toISOString(),
+  };
+}
+
+/**
+ * What a day's rewrite did, in one line for the student's inbox. A change to a
+ * plan they are living by is worth being told about in words, not only in the
+ * week looking different on the next sync.
+ */
+export function planDayChangeSummary(date: string, change: PlanDayChange): string {
+  const day = isValidISODate(date) ? formatFullDate(date) : date;
+  const parts: string[] = [];
+  if (change.added.length > 0) parts.push(t('added {0}', { 0: change.added.join(', ') }));
+  if (change.removed.length > 0) parts.push(t('took off {0}', { 0: change.removed.join(', ') }));
+  if (change.retimed.length > 0) parts.push(t('gave {0} a new time', { 0: change.retimed.join(', ') }));
+  if (parts.length === 0) return t('The plan for {0} is unchanged.', { 0: day });
+  return `${t('Plan changed for {0}', { 0: day })}: ${parts.join('; ')}`;
+}
+
+/** One day's rewrite: the day, and the lessons it should hold from now on. */
+export interface PlanDayEdit {
+  date: string;
+  lessons: PlanLessonInput[];
+}
+
+/**
+ * Guardian: rewrite several days of a running plan at once, so one week's worth
+ * of adjustments is one change and one line to the student rather than seven.
+ * Null when any day in the batch is locked — a change is applied whole or not
+ * at all, so nobody has to guess which half of it landed.
+ */
+export function withPlanDaysRewritten(
+  plan: GuardianPlan,
+  edits: PlanDayEdit[],
+  today = todayISO(),
+  now = new Date(),
+): GuardianPlan | null {
+  if (edits.length === 0) return null;
+  if (edits.some((edit) => !canEditPlanDay(plan, edit.date, today))) return null;
+  let next: GuardianPlan = plan;
+  for (const edit of edits) {
+    const changed = withPlanDayRewritten(next, edit.date, edit.lessons, today, now);
+    if (!changed) return null;
+    next = changed;
+  }
+  return next;
+}
+
+/* ------------------------------------------------------- change asks (16) */
+
+/** A change ask as the student types it. */
+export interface PlanChangeDraft {
+  kind: PlanChangeKind;
+  title: string;
+  /** The lesson a removal points at, so an approval drops the right one. */
+  itemId?: string | null;
+  date: string | null;
+  time?: string | null;
+  end?: string | null;
+  note?: string;
+}
+
+/**
+ * Build one ask, ready to travel.
+ *
+ * Null when it cannot be made: no lesson named, a plan that has closed, or a
+ * day that has gone by. Asking about yesterday would only be noise on both
+ * sides, so the ask is refused here rather than answered later.
+ */
+export function buildChangeRequest(
+  plan: GuardianPlan,
+  linkId: string,
+  draft: PlanChangeDraft,
+  today = todayISO(),
+  now = new Date(),
+): PlanChangeRequest | null {
+  const title = draft.title.trim().slice(0, PLAN_CHANGE_TITLE_MAX);
+  if (!title) return null;
+  if (!canRequestPlanChange(plan, draft.date, today)) return null;
+  const time = draft.time && isValidTime(draft.time) ? draft.time : null;
+  return {
+    id: `change-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    linkId,
+    planId: plan.id,
+    date: draft.date && isValidISODate(draft.date) ? draft.date : null,
+    kind: draft.kind === 'remove' ? 'remove' : 'add',
+    title,
+    itemId: draft.kind === 'remove' ? draft.itemId?.slice(0, 80) ?? null : null,
+    time,
+    end: normalizeLessonEnd(time, draft.end),
+    note: (draft.note ?? '').trim().slice(0, PLAN_CHANGE_NOTE_MAX),
+    state: 'open',
+    reply: '',
+    answeredAt: null,
+    createdAt: now.toISOString(),
+  };
+}
+
+/** Student: put an ask for a change on its way to every guardian who can answer it. */
+export function withStudentChangeRequest(panels: Panels, request: PlanChangeRequest): Panels {
+  return {
+    ...panels,
+    student: {
+      ...panels.student,
+      changeRequests: [request, ...(panels.student.changeRequests ?? []).filter((item) => item.id !== request.id)].slice(
+        0,
+        PLAN_CHANGES_KEPT,
+      ),
+    },
+  };
+}
+
+/** Student: take back an ask nobody has answered yet. */
+export function withoutStudentChangeRequest(panels: Panels, requestId: string): Panels {
+  const request = (panels.student.changeRequests ?? []).find((item) => item.id === requestId);
+  if (!request || request.state !== 'open') return panels;
+  return {
+    ...panels,
+    student: {
+      ...panels.student,
+      changeRequests: (panels.student.changeRequests ?? []).filter((item) => item.id !== requestId),
+    },
+  };
+}
+
+/**
+ * A change request the student may still make: the plan is open, and the day is
+ * today or later. Yesterday's lessons are not the student's to ask about
+ * either — the day is already reported, and asking would only be noise.
+ */
+export function canRequestPlanChange(plan: GuardianPlan, date: string | null, today = todayISO()): boolean {
+  if (plan.approvedAt || !isValidISODate(plan.start)) return false;
+  if (!date) return today >= plan.start && today <= planPeriodEnd(plan);
+  return canEditPlanDay(plan, date, today);
+}
+
+/** Asks still open or freshly answered, oldest first — the order they were asked in. */
+export function openChangeRequests(requests: PlanChangeRequest[], today = todayISO()): PlanChangeRequest[] {
+  const earliest = addDays(today, -PLAN_CHANGE_DAYS);
+  return requests
+    .filter((request) => request.createdAt.slice(0, 10) >= earliest)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+/** What a guardian has to decide, oldest first. */
+export function pendingChangeRequests(requests: PlanChangeRequest[], today = todayISO()): PlanChangeRequest[] {
+  return openChangeRequests(requests, today).filter((request) => request.state === 'open');
+}
+
+/** One request, worded for the panel: "Add · Thursday, 15 October · Mathematics". */
+export function changeRequestLabel(request: PlanChangeRequest): string {
+  const kind = request.kind === 'add' ? t('Add') : t('Remove');
+  const when = request.date && isValidISODate(request.date) ? formatFullDate(request.date) : t('Any day');
+  return `${kind} · ${when} · ${request.title}`;
+}
+
+/**
+ * What approving an ask does to the plan — the change itself, so both sides
+ * make it the same way.
+ *
+ * Null when the ask can no longer be honoured: the day went by while it waited,
+ * the lesson it pointed at is gone, or the week is full. A guardian reading
+ * that gets told the ask is too late rather than silently changing nothing.
+ */
+export function applyChangeRequest(
+  plan: GuardianPlan,
+  request: PlanChangeRequest,
+  today = todayISO(),
+  now = new Date(),
+): GuardianPlan | null {
+  if (!canRequestPlanChange(plan, request.date, today)) return null;
+  if (request.kind === 'remove') {
+    const target =
+      plan.items.find((item) => item.id === request.itemId) ??
+      plan.items.find(
+        (item) =>
+          item.title.trim().toLowerCase() === request.title.trim().toLowerCase() &&
+          (item.date ?? null) === (request.date ?? null),
+      );
+    if (!target || target.done) return null;
+    return { ...plan, items: plan.items.filter((item) => item.id !== target.id), updatedAt: now.toISOString() };
+  }
+  const clean = cleanLessonInput({
+    title: request.title,
+    time: request.time ?? null,
+    end: request.end ?? null,
+  });
+  if (!clean) return null;
+  if (plan.items.length + 1 > WEEK_LESSON_LIMIT) return null;
+  const exists = plan.items.some(
+    (item) =>
+      item.title.trim().toLowerCase() === clean.title.trim().toLowerCase() &&
+      (item.date ?? null) === (request.date ?? null),
+  );
+  if (exists) return null;
+  return {
+    ...plan,
+    items: sortPlanItems([...plan.items, { ...clean, date: request.date ?? null }]),
+    updatedAt: now.toISOString(),
+  };
+}
+
+/**
+ * Fold change requests from the wire into the ones already held. An answer
+ * always wins over the open ask it answers, and the latest answer wins over an
+ * older one, so a decline followed by an approval reads as the approval.
+ */
+export function mergeChangeRequests(
+  current: PlanChangeRequest[],
+  incoming: PlanChangeRequest[],
+): PlanChangeRequest[] {
+  const byId = new Map(current.map((request) => [request.id, request]));
+  for (const request of incoming) {
+    const previous = byId.get(request.id);
+    if (!previous) {
+      byId.set(request.id, request);
+      continue;
+    }
+    if (previous.state !== 'open' && request.state === 'open') continue;
+    if (
+      previous.state !== 'open' &&
+      request.state !== 'open' &&
+      (previous.answeredAt ?? '') > (request.answeredAt ?? '')
+    ) {
+      continue;
+    }
+    byId.set(request.id, request);
+  }
+  return [...byId.values()]
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, PLAN_CHANGES_KEPT);
+}
+
+/** A guardian's answer, stamped onto the ask it answers. */
+export function answeredChangeRequest(
+  request: PlanChangeRequest,
+  state: 'approved' | 'declined',
+  reply: string,
+  now = new Date(),
+): PlanChangeRequest {
+  return {
+    ...request,
+    state,
+    reply: reply.trim().slice(0, PLAN_CHANGE_NOTE_MAX),
+    answeredAt: now.toISOString(),
+  };
+}
+
+/** Whether one ask can still be answered: open, and its day has not gone by. */
+export function canAnswerChangeRequest(
+  plan: GuardianPlan | undefined,
+  request: PlanChangeRequest,
+  today = todayISO(),
+): boolean {
+  if (request.state !== 'open') return false;
+  if (!plan) return false;
+  return canRequestPlanChange(plan, request.date, today);
+}
+
+/** "Nina asked to add Mathematics on Thursday" — what the guardian reads first. */
+export function changeRequestNotice(
+  request: PlanChangeRequest,
+  studentName: string,
+  studentUsername: string,
+): GuardianNotice {
+  const asked =
+    request.kind === 'add'
+      ? t('{0} asked to add {1} to the plan', { 0: studentName, 1: request.title })
+      : t('{0} asked to take {1} off the plan', { 0: studentName, 1: request.title });
+  const when = request.date && isValidISODate(request.date) ? ` · ${formatFullDate(request.date)}` : '';
+  const summary = `${asked}${when}${request.note ? `: ${request.note}` : ''}`;
+  return {
+    id: `change-${request.id}`,
+    student: studentUsername,
+    author: studentName,
+    summary: summary.slice(0, 160),
+    weekOf: '',
+    createdAt: request.createdAt,
+    read: false,
+    kind: 'request',
+  };
 }

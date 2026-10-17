@@ -24,8 +24,10 @@ import {
   BookIcon,
   CalendarIcon,
   CheckIcon,
+  EyeIcon,
   HeartIcon,
   HorizonIcon,
+  PencilIcon,
   PlusIcon,
   PrinterIcon,
   SearchIcon,
@@ -51,6 +53,9 @@ import { PraiseComposer } from '../components/PraiseComposer';
 import { GuardianPlanComposer } from '../components/GuardianPlanComposer';
 import { WeekPlanCard } from '../components/WeekPlanCard';
 import { WeekPlanComposer } from '../components/WeekPlanComposer';
+import { WeekPlanEditor } from '../components/WeekPlanEditor';
+import { PrintPreview, type PrintableDocument } from '../components/PrintPreview';
+import { GuardianChangeRequests } from '../components/PlanChangeRequests';
 import { GuardianAssignments } from '../components/GuardianAssignments';
 import {
   dropGoal,
@@ -79,7 +84,7 @@ import {
   withoutLinkPlan,
   withoutQueuedPlan,
 } from '../panels';
-import { ackFor, nudgedToday, toggleReaction } from '../weekPlans';
+import { ackFor, editablePlanDays, nudgedToday, toggleReaction } from '../weekPlans';
 import {
   filterGuardianLinks,
   guardianNextAction,
@@ -132,6 +137,10 @@ export function GuardianPanelView() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<RosterFilter>('all');
   const [sort, setSort] = useState<RosterSort>('attention');
+  // Both hold ids, not the plan itself: a week that has just been changed must
+  // be read again from the roster rather than shown from the copy that was open.
+  const [preview, setPreview] = useState<{ linkId: string; planId: string } | null>(null);
+  const [editingPlan, setEditingPlan] = useState<{ linkId: string; planId: string } | null>(null);
   const guardian = panels.guardian;
   const unread = guardian.notices.filter((notice) => !notice.read).length;
   const rows = filterGuardianLinks(guardian.links, search, filter, sort, todayISO(), guardian.notices);
@@ -298,27 +307,35 @@ export function GuardianPanelView() {
     downloadBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), `advising-${link.username || link.id}.html`);
   };
 
-  const printWeekPlan = (link: GuardianLink, plan: GuardianPlan) => {
-    const html = weekPlanHtml(plan, link.reports ?? [], link.acks ?? [], {
-      student: link.displayName,
-      madeOn: todayISO(),
-      dir: document.documentElement.dir || 'ltr',
-      lang: document.documentElement.lang || 'en',
-    });
-    if (printDocument(html)) return;
-    downloadBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), `week-plan-${plan.id}.html`);
-  };
-
-  const printTimetable = (link: GuardianLink, plan: GuardianPlan) => {
-    const html = timetableHtml(plan, link.reports ?? [], {
-      student: link.displayName,
-      madeOn: todayISO(),
-      dir: document.documentElement.dir || 'ltr',
-      lang: document.documentElement.lang || 'en',
-    });
-    if (printDocument(html)) return;
-    downloadBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), `timetable-${plan.id}.html`);
-  };
+  /**
+   * The two pages a week plan prints as, built here and shown in the app first.
+   * Nothing is opened in a new window until the guardian has seen the page and
+   * chosen to print or keep it.
+   */
+  const planDocuments = (link: GuardianLink, plan: GuardianPlan): PrintableDocument[] => [
+    {
+      id: 'week',
+      label: t('Week plan'),
+      filename: `week-plan-${plan.id}.html`,
+      html: weekPlanHtml(plan, link.reports ?? [], link.acks ?? [], {
+        student: link.displayName,
+        madeOn: todayISO(),
+        dir: document.documentElement.dir || 'ltr',
+        lang: document.documentElement.lang || 'en',
+      }),
+    },
+    {
+      id: 'timetable',
+      label: t('Timetable'),
+      filename: `timetable-${plan.id}.html`,
+      html: timetableHtml(plan, link.reports ?? [], {
+        student: link.displayName,
+        madeOn: todayISO(),
+        dir: document.documentElement.dir || 'ltr',
+        lang: document.documentElement.lang || 'en',
+      }),
+    },
+  ];
 
   const ackReport = async (link: GuardianLink, report: DayReport, text: string, approve = false) => {
     if (!link.linkId) return;
@@ -1084,6 +1101,10 @@ export function GuardianPanelView() {
                   </section>
                 ) : null}
 
+                {/* An ask from the student comes first: it is waiting on this
+                    guardian, and the week beside it may be about to change. */}
+                <GuardianChangeRequests link={open} />
+
                 {open.plans.length > 0 ? (
                   <section className="gplan-sent" aria-label={t('Plans you sent')}>
                     <p className="chart-title">{t('Plans you sent')}</p>
@@ -1107,21 +1128,24 @@ export function GuardianPanelView() {
                               nudgeSent={nudgedToday(guardian.notices, open.username)}
                               actions={
                                 <>
+                                  {!plan.approvedAt && editablePlanDays(plan).length > 0 ? (
+                                    <button
+                                      type="button"
+                                      className="btn btn-ghost btn-tiny"
+                                      onClick={() => setEditingPlan({ linkId: open.id, planId: plan.id })}
+                                    >
+                                      <PencilIcon size={14} />
+                                      {t('Change plan')}
+                                    </button>
+                                  ) : null}
                                   <button
                                     type="button"
                                     className="icon-btn round"
-                                    aria-label={`${t('Print')} · ${plan.title}`}
-                                    onClick={() => printWeekPlan(open, plan)}
+                                    aria-label={`${t('Preview and print')} · ${plan.title}`}
+                                    title={t('Preview and print')}
+                                    onClick={() => setPreview({ linkId: open.id, planId: plan.id })}
                                   >
-                                    <PrinterIcon size={14} />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="icon-btn round"
-                                    aria-label={`${t('Print timetable')} · ${plan.title}`}
-                                    onClick={() => printTimetable(open, plan)}
-                                  >
-                                    <CalendarIcon size={14} />
+                                    <EyeIcon size={14} />
                                   </button>
                                   <button
                                     type="button"
@@ -1417,6 +1441,26 @@ export function GuardianPanelView() {
         <HeartIcon size={15} />
         {t('Support, not surveillance. Weekly results stay separate from their private planner.')}
       </p>
+
+      {(() => {
+        const link = guardian.links.find((item) => item.id === preview?.linkId) ?? null;
+        const plan = link?.plans.find((item) => item.id === preview?.planId) ?? null;
+        if (!link || !plan) return null;
+        return (
+          <PrintPreview
+            title={plan.title}
+            documents={planDocuments(link, plan)}
+            onClose={() => setPreview(null)}
+          />
+        );
+      })()}
+
+      {(() => {
+        const link = guardian.links.find((item) => item.id === editingPlan?.linkId) ?? null;
+        const plan = link?.plans.find((item) => item.id === editingPlan?.planId) ?? null;
+        if (!link || !plan) return null;
+        return <WeekPlanEditor link={link} plan={plan} onClose={() => setEditingPlan(null)} />;
+      })()}
     </div>
   );
 }

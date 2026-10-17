@@ -348,6 +348,8 @@ export interface StudentPanel {
   homeworkSubmissions?: HomeworkSubmission[];
   /** Open asks for a week plan, newest first. */
   requests?: PlanRequest[];
+  /** Changes this student asked for on a plan, newest first — with the answers. */
+  changeRequests?: PlanChangeRequest[];
   /**
    * Kind words, kept. Praise is the one thing worth re-reading, so it does not
    * fall out of the inbox when more notes arrive.
@@ -430,7 +432,7 @@ export interface PlanDraft {
   start: string;
   title: string;
   note: string;
-  items: Array<Pick<PlanItem, 'title' | 'date' | 'time' | 'minutes' | 'subject' | 'url'>>;
+  items: Array<Pick<PlanItem, 'title' | 'date' | 'time' | 'end' | 'minutes' | 'subject' | 'url'>>;
   /** Curriculum field id, when the week was planned from built-in lessons. */
   field?: string | null;
   /** Grade id the week was planned for. */
@@ -482,6 +484,11 @@ export interface PlanItem {
   date: string | null;
   /** Start time (HH:MM), or null when the lesson fits anywhere in the day. Week plans sort by it. */
   time?: string | null;
+  /**
+   * End time (HH:MM), so "maths from 9 to 11" is what the plan says rather
+   * than a start nobody can measure. Null when the guardian gave a start only.
+   */
+  end?: string | null;
   /** Suggested time, in minutes. */
   minutes: number | null;
   /** Subject name, when the guardian tied it to one. */
@@ -671,6 +678,54 @@ export const PLAN_REQUEST_DAYS = 14;
 /** A line back is a sentence, not a letter. */
 export const ACK_TEXT_MAX = 140;
 
+/** What the student is asking for: a lesson put in, or one taken off. */
+export type PlanChangeKind = 'add' | 'remove';
+
+/**
+ * A student asking for one change to a plan that has already been sent.
+ *
+ * The plan belongs to the guardian, so this is a request and never an edit:
+ * the student says what they would like on a day that has not gone by, and the
+ * guardian approves it — which makes the change on both sides — or declines it
+ * with a line back. It travels on the same encrypted link as the plan's ticks,
+ * and the answer travels home on the guardian's.
+ */
+export interface PlanChangeRequest {
+  id: string;
+  /** The link it travels on. */
+  linkId: string;
+  /** The plan being changed. */
+  planId: string;
+  /** The day the change is for (ISO). Always today or later. */
+  date: string | null;
+  kind: PlanChangeKind;
+  /** The lesson being asked for, or the one being asked to drop. */
+  title: string;
+  /** The lesson a removal points at, so an approval drops the right one. */
+  itemId?: string | null;
+  /** When the added lesson should run. Both null when it fits anywhere. */
+  time?: string | null;
+  end?: string | null;
+  /** The student's reason, in their own words. */
+  note: string;
+  /** Open until a guardian answers; the answer lands on the same record. */
+  state: 'open' | 'approved' | 'declined';
+  /** What the guardian wrote back. */
+  reply?: string;
+  answeredAt?: string | null;
+  createdAt: string;
+}
+
+/** Change requests kept on each side, and how many ride one outbox write. */
+export const PLAN_CHANGES_KEPT = 12;
+export const PLAN_CHANGES_WIRE = 12;
+/** A reason for a change is a sentence, not a letter. */
+export const PLAN_CHANGE_NOTE_MAX = 140;
+/** A lesson name asked for is the same length as one the guardian types. */
+export const PLAN_CHANGE_TITLE_MAX = 120;
+/** An unanswered change request stops travelling after two weeks. */
+export const PLAN_CHANGE_DAYS = 14;
+
 /** What a guardian has sent this student: brief notices and full plans. */
 export interface StudentInbox {
   /** Newest first. */
@@ -738,6 +793,8 @@ export interface GuardianLink {
   homeworkReviews?: HomeworkReview[];
   /** How this student answered them, newest last write wins. */
   goalAnswers?: GoalAnswer[];
+  /** Changes this student asked for on a sent plan, newest first. */
+  changeRequests?: PlanChangeRequest[];
   /** When a pending code stops working. Null once accepted, or if unknown. */
   expiresAt?: string | null;
 }

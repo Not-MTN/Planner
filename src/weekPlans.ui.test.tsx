@@ -9,16 +9,18 @@ import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
-import { postNudge, sendAck, sendPlan } from './auth/links';
-import { addDays, formatWeekdayShort, setWeekStart, todayISO } from './dates';
+import { answerChangeRequest, postNudge, sendAck, sendPlan, updatePlanDays } from './auth/links';
+import { addDays, formatFullDate, formatWeekdayShort, setWeekStart, todayISO } from './dates';
 import { setLang } from './i18n';
-import { withLinkAck, withLinkPlan } from './panels';
+import { withLinkAck, withLinkChangeRequests, withLinkPlan } from './panels';
+import { answeredChangeRequest, applyChangeRequest, withPlanDaysRewritten } from './weekPlans';
 import {
   createEmptyState,
   type DayReport,
   type GuardianLink,
   type GuardianPlan,
   type Panels,
+  type PlanChangeRequest,
   type QueuedPlan,
   type ReportAck,
   type PlannerState,
@@ -85,6 +87,45 @@ vi.mock('./auth/links', async (importOriginal) => {
         }),
     ),
     sendPlan: sendPlanMock,
+    // A mid-week edit is applied to the week as the guardian holds it, the way
+    // the real one applies it to the week as the slot holds it.
+    updatePlanDays: vi.fn(
+      async (
+        panels: Panels,
+        linkId: string,
+        planId: string,
+        edits: Parameters<typeof actual.updatePlanDays>[3],
+      ) => {
+        const plan = panels.guardian.links
+          .find((item) => item.linkId === linkId)
+          ?.plans.find((item) => item.id === planId);
+        if (!plan) throw new Error('That plan is no longer available.');
+        const updated = withPlanDaysRewritten(plan, edits, todayISO());
+        if (!updated) throw new Error('A week plan can hold up to 60 lessons.');
+        return withLinkPlan(panels, linkId, updated);
+      },
+    ),
+    answerChangeRequest: vi.fn(
+      async (
+        panels: Panels,
+        linkId: string,
+        requestId: string,
+        decision: 'approved' | 'declined',
+        reply = '',
+      ) => {
+        const link = panels.guardian.links.find((item) => item.linkId === linkId);
+        const request = (link?.changeRequests ?? []).find((item) => item.id === requestId);
+        if (!link || !request) throw new Error('That request is no longer waiting.');
+        let next = panels;
+        if (decision === 'approved') {
+          const plan = link.plans.find((item) => item.id === request.planId);
+          const changed = plan ? applyChangeRequest(plan, request, todayISO()) : null;
+          if (!changed) throw new Error('That ask can no longer be made.');
+          next = withLinkPlan(next, linkId, changed);
+        }
+        return withLinkChangeRequests(next, linkId, [answeredChangeRequest(request, decision, reply)]);
+      },
+    ),
     flushPlanQueue: vi.fn(async (panels: Panels) => {
       const waiting = panels.guardian.queuedPlans ?? [];
       let current = panels;
@@ -307,7 +348,8 @@ describe('planning a week of lessons', () => {
     setComposerSelect(1, 'school-11');
     await click('زیست‌شناسی (۲)');
     setValue('input[aria-label="Lesson name"]', 'Physics problems');
-    setValue('input[aria-label="Time"]', '17:30');
+    setValue('input[aria-label="From"]', '17:30');
+    setValue('input[aria-label="To"]', '19:00');
     await click('Add a lesson');
     setValue('.week-plan-composer input', 'Nina’s week');
     await click('Send the plan');
@@ -321,6 +363,8 @@ describe('planning a week of lessons', () => {
       ['زیست‌شناسی (۲)', todayISO(), null],
       ['Physics problems', todayISO(), '17:30'],
     ]);
+    // "From 17:30 to 19:00" travels as a span, so the week can be measured.
+    expect(draft?.items.find((item) => item.title === 'Physics problems')?.end).toBe('19:00');
     expect(document.body.textContent).toContain('on its way to Nina');
     expect(document.querySelector('.week-plan-composer')).toBeNull();
     expect(document.querySelector('.week-plan-card')).not.toBeNull();
@@ -338,15 +382,19 @@ describe('planning a week of lessons', () => {
     expect(query('.week-plan-composer .field-error').textContent).toContain('at least one thing');
 
     setValue('input[aria-label="Lesson name"]', 'Evening');
-    setValue('input[aria-label="Time"]', '19:00');
+    setValue('input[aria-label="From"]', '19:00');
     await click('Add a lesson');
     setValue('input[aria-label="Lesson name"]', 'Morning');
-    setValue('input[aria-label="Time"]', '08:00');
+    setValue('input[aria-label="From"]', '08:00');
+    setValue('input[aria-label="To"]', '09:30');
     await click('Add a lesson');
-    const titles = [...query('.week-draft-day').querySelectorAll('.week-lesson-title')].map(
-      (item) => item.textContent,
-    );
-    expect(titles).toEqual(['Morning', 'Evening']);
+    const rows = [...query('.week-draft-day').querySelectorAll('.week-lesson')];
+    expect(rows.map((item) => item.querySelector('.week-lesson-title')?.textContent)).toEqual([
+      'Morning',
+      'Evening',
+    ]);
+    // The draft reads the span back, so what is sent is what was meant.
+    expect(rows[0]!.textContent).toContain('08:00 – 09:30');
   });
 });
 
@@ -543,16 +591,19 @@ describe('answering a report', () => {
 });
 
 describe('asking for a plan', () => {
-  it('lets the student request an adjustment to a suggested week without blocking their panel', async () => {
+  it('lets the student ask for a change to a suggested week without blocking their panel', async () => {
     const state = studentState([weekPlan()]);
     await mount(state, 'student');
     expect(query('.student-plans-card').textContent).toContain('A suggested plan.');
-    await click('Request a change', query('.week-plan-card'));
-    const asks = saved().panels.student.requests ?? [];
-    expect(asks).toHaveLength(1);
-    expect(asks[0]?.linkId).toBe(ninaLinkId);
-    expect(asks[0]?.note).toContain('adjust the plan for');
+    await click('Ask to change', query('.week-plan-card'));
+    // The ask is a form and not a note: one lesson, one day, and a guardian who
+    // can answer it. Nothing about the week moves until they do.
+    expect(query('.week-change-form').textContent).toContain('The plan stays as it is until they approve it');
     expect(query('.student-panel-view [role="tablist"]')).toBeTruthy();
+    await click('Close', query('.sheet-plan-change'));
+    expect(document.querySelector('.week-change-form')).toBeNull();
+    // Nothing was sent, so nothing was written: closing an ask asks for nothing.
+    expect(saved().panels?.student?.changeRequests ?? []).toHaveLength(0);
   });
 
   it('sends a request with a note and takes it back on cancel', async () => {
@@ -1056,5 +1107,375 @@ describe('when the send queue is full', () => {
     const title = query('.week-plan-composer input');
     if (!(title instanceof HTMLInputElement)) throw new Error('Missing plan title');
     expect(title.value).toBe('One week too many');
+  });
+});
+
+describe('changing a week that is already running', () => {
+  const today = todayISO();
+  const yesterday = addDays(today, -1);
+  const tomorrow = addDays(today, 1);
+
+  function runningWeek(partial: Partial<GuardianPlan> = {}): GuardianPlan[] {
+    return [
+      weekPlan({
+        start: yesterday,
+        items: [
+          { id: 'a', title: 'History', date: yesterday, time: '09:00', end: '10:00', minutes: null, subject: null, done: true },
+          { id: 'b', title: 'Maths', date: today, time: '09:00', minutes: null, subject: null, done: false },
+          { id: 'c', title: 'Chemistry', date: tomorrow, time: '14:00', end: '16:00', minutes: null, subject: null, done: false },
+        ],
+        ...partial,
+      }),
+    ];
+  }
+
+  function setField(element: Element, value: string): void {
+    const field = element as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+    const prototype =
+      field instanceof HTMLSelectElement
+        ? HTMLSelectElement.prototype
+        : field instanceof HTMLTextAreaElement
+          ? HTMLTextAreaElement.prototype
+          : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(prototype, 'value')?.set?.call(field, value);
+    act(() => field.dispatchEvent(new Event(field instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true })));
+  }
+
+  it('locks the days behind today and changes the ones that are left', async () => {
+    await mount(guardianState(runningWeek()), 'guardian');
+    await click('View student', query('.student-card'));
+    await click('Change plan');
+
+    const days = [...document.querySelectorAll<HTMLButtonElement>('.week-editor-day')];
+    expect(days).toHaveLength(7);
+    // Yesterday is a record now: the ticks and the report filed for it stay put.
+    expect(days[0]!.disabled).toBe(true);
+    expect(days[0]!.textContent).toContain('Locked');
+    expect(days[0]!.getAttribute('title')).toBe('This day has gone by.');
+    expect(days[1]!.disabled).toBe(false);
+    expect(days[1]!.getAttribute('aria-pressed')).toBe('true');
+
+    // The open day is today's, and it already holds the lesson as it was sent.
+    const panel = query('.week-editor-panel');
+    expect(panel.getAttribute('aria-label')).toBe(formatFullDate(today));
+    const rows = [...panel.querySelectorAll('.week-editor-lesson')];
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.querySelector<HTMLInputElement>('input[aria-label="Lesson name"]')!.value).toBe('Maths');
+    expect(rows[0]!.querySelector<HTMLInputElement>('input[aria-label="From"]')!.value).toBe('09:00');
+
+    // "Maths from 9 to 11", and a lesson after it: one change, one day.
+    setField(rows[0]!.querySelector('input[aria-label="To"]')!, '11:00');
+    expect(panel.textContent).toContain('2 h');
+    const add = query('.week-editor-add');
+    setField(add.querySelector('input[aria-label="Lesson name"]')!, 'Geometry');
+    setField(add.querySelectorAll('input[aria-label="From"]')[0]!, '15:00');
+    setField(add.querySelectorAll('input[aria-label="To"]')[0]!, '16:30');
+    // Scoped to the sheet: the week behind it has buttons of its own.
+    await click('Add a lesson', query('.week-editor-add'));
+    const panelAfter = query('.week-editor-panel');
+    // A draft lesson is still a field, so its title is a value and not text.
+    expect(
+      [...query('.week-editor-lessons').querySelectorAll<HTMLInputElement>('input[aria-label="Lesson name"]')].map(
+        (input) => input.value,
+      ),
+    ).toEqual(['Maths', 'Geometry']);
+    expect(panelAfter.textContent).toContain('15:00 – 16:30');
+    expect(panelAfter.textContent).toContain('1 h 30 min');
+    // The add row is empty again, ready for the next lesson.
+    expect(query<HTMLInputElement>('.week-editor-add input[aria-label="Lesson name"]').value).toBe('');
+
+    const save = [...query<HTMLElement>('.week-editor').querySelectorAll<HTMLButtonElement>('button')].find((button) =>
+      (button.textContent ?? '').includes('Save'),
+    )!;
+    expect(save.textContent).toContain('1 changed day');
+    await act(async () => save.click());
+    await settle();
+
+    expect(updatePlanDays).toHaveBeenCalledTimes(1);
+    const [, linkId, planId, edits] = vi.mocked(updatePlanDays).mock.calls[0]!;
+    expect(linkId).toBe(ninaLinkId);
+    expect(planId).toBe('week-1');
+    expect(edits).toHaveLength(1);
+    expect(edits![0]!.date).toBe(today);
+    expect(edits![0]!.lessons.map((lesson) => [lesson.title, lesson.time, lesson.end])).toEqual([
+      ['Maths', '09:00', '11:00'],
+      ['Geometry', '15:00', '16:30'],
+    ]);
+
+    // The week on screen is the changed one, and the past day is untouched.
+    expect(document.querySelector('.week-editor')).toBeNull();
+    const card = query('.week-plan-card');
+    expect(card.textContent).toContain('Geometry');
+    expect(card.textContent).toContain('09:00 – 11:00');
+    const stored = saved().panels.guardian.links[0]!.plans[0]!;
+    expect(stored.items.find((item) => item.id === 'a')).toMatchObject({
+      date: yesterday,
+      time: '09:00',
+      end: '10:00',
+      done: true,
+    });
+    expect(stored.items.filter((item) => item.date === today).map((item) => item.title)).toEqual(['Maths', 'Geometry']);
+  });
+
+  it('saves nothing until something has changed, and offers no edit at all once the period is closed', async () => {
+    await mount(guardianState(runningWeek()), 'guardian');
+    await click('View student', query('.student-card'));
+    await click('Change plan');
+    const save = [...query<HTMLElement>('.week-editor').querySelectorAll<HTMLButtonElement>('button')].find((button) =>
+      (button.textContent ?? '').includes('Save'),
+    )!;
+    expect(save.disabled).toBe(true);
+    await click('Cancel', query('.week-editor'));
+    expect(document.querySelector('.week-editor')).toBeNull();
+
+    // A period the guardian has closed is a record too.
+    await click('Change plan');
+    expect(document.querySelectorAll('.week-editor-day')).toHaveLength(7);
+    await click('Cancel', query('.week-editor'));
+  });
+
+  it('hides the edit once the guardian has approved the period', async () => {
+    const closed = runningWeek({ approvedAt: `${today}T09:00:00.000Z` });
+    await mount(guardianState(closed), 'guardian');
+    await click('View student', query('.student-card'));
+    expect(
+      [...document.querySelectorAll('button')].some((button) => (button.textContent ?? '').trim() === 'Change plan'),
+    ).toBe(false);
+  });
+});
+
+describe('a student asking for a change', () => {
+  const today = todayISO();
+  const tomorrow = addDays(today, 1);
+
+  const plans = [
+    weekPlan({
+      start: today,
+      items: [
+        { id: 'b', title: 'Maths', date: today, time: '09:00', end: '11:00', minutes: null, subject: null, done: false },
+        { id: 'c', title: 'Chemistry', date: tomorrow, time: '14:00', minutes: null, subject: null, done: false },
+      ],
+    }),
+  ];
+
+  function setField(element: Element, value: string): void {
+    const field = element as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+    const prototype =
+      field instanceof HTMLSelectElement
+        ? HTMLSelectElement.prototype
+        : field instanceof HTMLTextAreaElement
+          ? HTMLTextAreaElement.prototype
+          : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(prototype, 'value')?.set?.call(field, value);
+    act(() => field.dispatchEvent(new Event(field instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true })));
+  }
+
+  it('asks for a lesson to be added, and the week waits for the guardian', async () => {
+    await mount(studentState(plans), 'student');
+    await click('Ask to change');
+    const form = query('.week-change-form');
+    expect(form.textContent).toContain('The plan stays as it is until they approve it');
+
+    setField(form.querySelector('input[data-autofocus]')!, 'Physics');
+    setField(form.querySelector('select.input')!, tomorrow);
+    const times = form.querySelectorAll('input[type="time"]');
+    setField(times[0]!, '16:00');
+    setField(times[1]!, '17:30');
+    expect(form.textContent).toContain('16:00 – 17:30');
+    setField(form.querySelector('textarea')!, 'We have a test that morning.');
+
+    await click('Send the ask');
+    expect(document.querySelector('.week-change-form')).toBeNull();
+
+    // The ask is on its way, and the week itself has not moved.
+    const stored = saved().panels.student;
+    expect(stored.changeRequests).toHaveLength(1);
+    expect(stored.changeRequests![0]).toMatchObject({
+      kind: 'add',
+      title: 'Physics',
+      date: tomorrow,
+      time: '16:00',
+      end: '17:30',
+      note: 'We have a test that morning.',
+      state: 'open',
+      planId: 'week-1',
+      linkId: ninaLinkId,
+    });
+    expect(stored.inbox.plans[0]!.items.map((item) => item.title)).toEqual(['Maths', 'Chemistry']);
+
+    // And the student reads it back as waiting, with a way to take it back.
+    const asks = query('.week-asks-mine');
+    expect(asks.textContent).toContain('Physics');
+    expect(asks.textContent).toContain('Waiting');
+    await click('Take it back', asks);
+    expect(saved().panels.student.changeRequests).toHaveLength(0);
+  });
+
+  it('asks for one lesson to come off, naming the lesson it means', async () => {
+    await mount(studentState(plans), 'student');
+    // The ask can start from the lesson itself, so it names the right one.
+    const row = [...document.querySelectorAll<HTMLElement>('.week-lesson')].find((lesson) =>
+      lesson.textContent?.includes('Chemistry'),
+    )!;
+    await click('Ask to remove', row);
+    const form = query('.week-change-form');
+    expect(form.textContent).toContain('Chemistry');
+    expect(query('.week-change-option.is-on').textContent).toContain('Chemistry');
+    await click('Send the ask');
+    expect(saved().panels.student.changeRequests![0]).toMatchObject({
+      kind: 'remove',
+      title: 'Chemistry',
+      itemId: 'c',
+      date: tomorrow,
+      state: 'open',
+    });
+  });
+});
+
+describe('a guardian answering an ask', () => {
+  const today = todayISO();
+  const tomorrow = addDays(today, 1);
+
+  const plan = weekPlan({
+    start: today,
+    items: [{ id: 'b', title: 'Maths', date: today, time: '09:00', end: '11:00', minutes: null, subject: null, done: false }],
+  });
+
+  function ask(partial: Partial<PlanChangeRequest> = {}): PlanChangeRequest {
+    return {
+      id: 'change-1',
+      linkId: ninaLinkId,
+      planId: 'week-1',
+      date: tomorrow,
+      kind: 'add',
+      title: 'Physics',
+      time: '16:00',
+      end: '17:30',
+      note: 'We have a test that morning.',
+      state: 'open',
+      createdAt: `${today}T08:00:00.000Z`,
+      ...partial,
+    };
+  }
+
+  function guardianWithAsk(request: PlanChangeRequest, week: GuardianPlan = plan): PlannerState {
+    const state = guardianState([week]);
+    state.panels.guardian.links[0]!.changeRequests = [request];
+    return state;
+  }
+
+  it('approves an ask, and the week gains the lesson on both sides', async () => {
+    await mount(guardianWithAsk(ask()), 'guardian');
+    await click('View student', query('.student-card'));
+    const asks = query('.week-asks');
+    expect(asks.textContent).toContain('Change requests');
+    expect(asks.textContent).toContain('Physics');
+    expect(asks.textContent).toContain('We have a test that morning.');
+    expect(asks.textContent).toContain('16:00 – 17:30');
+
+    setReply('Good idea.');
+    await click('Approve', asks);
+
+    expect(answerChangeRequest).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(answerChangeRequest).mock.calls[0]!.slice(0, 4)).toEqual([
+      expect.anything(),
+      ninaLinkId,
+      'change-1',
+      'approved',
+    ]);
+    const stored = saved().panels.guardian.links[0]!;
+    expect(stored.plans[0]!.items.map((item) => item.title)).toEqual(['Maths', 'Physics']);
+    expect(stored.plans[0]!.items.find((item) => item.title === 'Physics')).toMatchObject({
+      date: tomorrow,
+      time: '16:00',
+      end: '17:30',
+    });
+    expect(stored.changeRequests![0]).toMatchObject({ state: 'approved', reply: 'Good idea.' });
+    expect(query('.week-asks').textContent).toContain('Approved');
+    expect(query('.week-asks').textContent).toContain('Good idea.');
+  });
+
+  it('declines an ask with a line back, and the week stays as it was', async () => {
+    await mount(guardianWithAsk(ask()), 'guardian');
+    await click('View student', query('.student-card'));
+    const asks = query('.week-asks');
+    setReply('It is the week before the exam.');
+    await click('Decline', asks);
+    expect(saved().panels.guardian.links[0]!.plans[0]!.items.map((item) => item.title)).toEqual(['Maths']);
+    expect(saved().panels.guardian.links[0]!.changeRequests![0]).toMatchObject({
+      state: 'declined',
+      reply: 'It is the week before the exam.',
+    });
+    expect(query('.week-asks').textContent).toContain('Declined');
+  });
+
+  it('says when the day has gone by, and leaves the decline open', async () => {
+    await mount(guardianWithAsk(ask({ date: addDays(today, -1) })), 'guardian');
+    await click('View student', query('.student-card'));
+    const asks = query('.week-asks');
+    expect(asks.textContent).toContain('That day has gone by. You can still decline it with a line back.');
+    const approve = [...asks.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => (button.textContent ?? '').trim() === 'Approve',
+    )!;
+    expect(approve.disabled).toBe(true);
+    const decline = [...asks.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => (button.textContent ?? '').trim() === 'Decline',
+    )!;
+    expect(decline.disabled).toBe(false);
+  });
+
+  function setReply(value: string): void {
+    const input = query<HTMLInputElement>('.week-ask-actions input');
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, value);
+    act(() => input.dispatchEvent(new Event('input', { bubbles: true })));
+  }
+});
+
+describe('reading the page before it goes to paper', () => {
+  const today = todayISO();
+
+  it('shows the printed week in the app, on both pages', async () => {
+    await mount(
+      studentState([
+        weekPlan({
+          start: today,
+          items: [
+            { id: 'b', title: 'Maths', date: today, time: '09:00', end: '11:00', minutes: null, subject: null, done: false },
+          ],
+        }),
+      ]),
+      'student',
+    );
+    // The button is an icon with the plan named in its label, so it is found
+    // by what it says rather than by an exact text match.
+    const previewButton = [...document.querySelectorAll<HTMLButtonElement>('.week-card-actions button')].find((button) =>
+      (button.getAttribute('aria-label') ?? '').startsWith('Preview and print'),
+    )!;
+    expect(previewButton).toBeTruthy();
+    await act(async () => previewButton.click());
+    await settle();
+
+    const preview = query('.print-preview');
+    expect(preview.textContent).toContain('nothing else from the app goes on it');
+    const frame = query<HTMLIFrameElement>('.print-preview-frame');
+    const page = frame.getAttribute('srcdoc') ?? '';
+    // The document itself: the times are on the page, not only in the app.
+    expect(page).toContain('A week of lessons');
+    expect(page).toContain('Maths');
+    expect(page).toContain('09:00');
+    expect(page).toContain('11:00');
+    expect(page).toContain('2 h');
+
+    // And the wall version of the same week, without leaving the app.
+    await click('Timetable', query('.print-preview-tabs'));
+    const wall = query<HTMLIFrameElement>('.print-preview-frame').getAttribute('srcdoc') ?? '';
+    expect(wall).toContain('tt-lesson');
+    expect(wall).toContain('Maths');
+
+    // Both ways out are beside the page: print it, or keep it as a file.
+    expect(query('.print-preview-actions').textContent).toContain('Print');
+    expect(query('.print-preview-actions').textContent).toContain('Download');
+    await click('Close', query('.sheet-print-preview'));
+    expect(document.querySelector('.print-preview')).toBeNull();
   });
 });

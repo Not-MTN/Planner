@@ -10,17 +10,20 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { cx } from '../cx';
-import { displayTime, formatFullDate, formatJalaliLong, formatWeekdayShort, todayISO } from '../dates';
+import { formatFullDate, formatJalaliLong, formatWeekdayShort, todayISO } from '../dates';
 import { faNum, t, tn } from '../i18n';
-import { BellIcon, CheckIcon, GlobeIcon } from '../icons';
+import { BellIcon, CheckIcon, ClockIcon, GlobeIcon } from '../icons';
 import { planEnd, planPeriodLabel, planProgress } from '../panels';
 import { ACK_REACTIONS } from '../types';
 import type { DayReport, GuardianPlan, PlanItem, ReportAck } from '../types';
 import {
   ackFor,
   canApprovePlanPeriod,
+  canEditPlanDay,
   datelessItems,
   isRestDay,
+  lessonDurationLabel,
+  lessonTimeLabel,
   missingReportDays,
   itemsForDay,
   planWeekDays,
@@ -187,6 +190,7 @@ export function WeekPlanCard({
   onReportDay,
   canReportDay,
   onRollLesson,
+  onAskChangeItem,
   onAck,
   onApproveReport,
   onApprovePlanPeriod,
@@ -213,6 +217,11 @@ export function WeekPlanCard({
   canReportDay?: (planId: string, date: string) => boolean;
   /** Student: pushing an unfinished lesson to the next day. */
   onRollLesson?: (planId: string, itemId: string) => void;
+  /**
+   * Student: asking the guardian about one lesson. The plan is the guardian's,
+   * so this opens an ask and changes nothing until they answer it.
+   */
+  onAskChangeItem?: (itemId: string) => void;
   /** Guardian: answering a report. Without it, answers render read-only. */
   onAck?: (report: DayReport, text: string) => Promise<void>;
   /** Guardian: sealing a submitted daily report. */
@@ -312,7 +321,15 @@ export function WeekPlanCard({
                     <span className="week-lesson-title">{item.title}</span>
                   </span>
                 )}
-                {item.time ? <span className="week-time">{displayTime(item.time)}</span> : null}
+                {item.time ? (
+                  <span className="week-time">
+                    <ClockIcon size={13} />
+                    {lessonTimeLabel(item)}
+                    {lessonDurationLabel(item) ? (
+                      <span className="week-time-span">{lessonDurationLabel(item)}</span>
+                    ) : null}
+                  </span>
+                ) : null}
                 <LessonMeta item={item} />
                 {item.url ? (
                   <a
@@ -332,6 +349,15 @@ export function WeekPlanCard({
                     onClick={() => onRollLesson(plan.id, item.id)}
                   >
                     {t('Move to {0}', { 0: formatWeekdayShort(target) })}
+                  </button>
+                ) : null}
+                {onAskChangeItem && !item.done && !!date && canEditPlanDay(plan, date, today) ? (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-tiny week-ask-remove"
+                    onClick={() => onAskChangeItem(item.id)}
+                  >
+                    {t('Ask to remove')}
                   </button>
                 ) : null}
               </li>

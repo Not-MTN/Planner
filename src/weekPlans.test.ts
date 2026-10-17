@@ -5,26 +5,53 @@
  * old plan can never lock a panel.
  */
 import { describe, expect, it } from 'vitest';
-import { addDays } from './dates';
-import { createEmptyState, type GuardianNotice, type GuardianPlan, type PlanItem } from './types';
+import { addDays, formatFullDate } from './dates';
+import {
+  createEmptyState,
+  PLAN_CHANGE_DAYS,
+  PLAN_CHANGES_KEPT,
+  type GuardianNotice,
+  type GuardianPlan,
+  type PlanChangeRequest,
+  type PlanItem,
+} from './types';
 import { withPlanItemToggled } from './panels';
 import {
   ackFor,
+  answeredChangeRequest,
+  applyChangeRequest,
+  buildChangeRequest,
+  canAnswerChangeRequest,
   canApprovePlanPeriod,
+  canEditPlanDay,
+  canRequestPlanChange,
+  changeRequestLabel,
+  changeRequestNotice,
   crossedTimeboxes,
   datelessItems,
+  diffPlanDay,
+  editablePlanDays,
   emptyWeekPlanDraft,
   examWarningDates,
   focusMatchesLesson,
   isRestDay,
   itemsForDay,
+  lessonDurationLabel,
+  lessonSpanMinutes,
+  lessonTimeLabel,
   mergeAcks,
+  mergeChangeRequests,
   mergeLinkReports,
   missingReportDays,
   missingReportReminders,
+  normalizeLessonEnd,
   normalizeLessonUrl,
   nudgedToday,
+  openChangeRequests,
   openRequests,
+  pendingChangeRequests,
+  planDayChangeSummary,
+  planDays,
   planFocusMinutes,
   planWeekDays,
   repairUsed,
@@ -36,10 +63,15 @@ import {
   studentCanTogglePlanItem,
   timetableModel,
   toggleReaction,
+  WEEK_LESSON_LIMIT,
   weekPlanDraftError,
   weekReview,
   withDayReport,
   withLessonRolled,
+  withPlanDayRewritten,
+  withPlanDaysRewritten,
+  withStudentChangeRequest,
+  withoutStudentChangeRequest,
 } from './weekPlans';
 
 const TODAY = '2026-10-12';
@@ -699,5 +731,414 @@ describe('the time-box nudge', () => {
   it('never fires twice for the same lesson', () => {
     const lessons = [lesson('a', 1)];
     expect(crossedTimeboxes(lessons, 3600, new Set(['a']))).toEqual([]);
+  });
+});
+
+/* --------------------------------------------------------- lesson times (14) */
+
+describe('a lesson as a span of time', () => {
+  it('keeps an end only when the lesson ends after it starts', () => {
+    expect(normalizeLessonEnd('09:00', '11:00')).toBe('11:00');
+    expect(normalizeLessonEnd('09:00', '09:00')).toBeNull();
+    expect(normalizeLessonEnd('11:00', '09:00')).toBeNull();
+    expect(normalizeLessonEnd(null, '11:00')).toBeNull();
+    expect(normalizeLessonEnd('09:00', 'eleven')).toBeNull();
+  });
+
+  it('measures the span, and words it the way the card reads it', () => {
+    expect(lessonSpanMinutes({ time: '09:00', end: '11:00' })).toBe(120);
+    expect(lessonSpanMinutes({ time: '09:00', end: null })).toBeNull();
+    expect(lessonTimeLabel({ time: '09:00', end: '11:00' })).toBe('09:00 – 11:00');
+    expect(lessonTimeLabel({ time: '09:00', end: '08:00' })).toBe('09:00');
+    expect(lessonTimeLabel({ time: null, end: '11:00' })).toBeNull();
+    expect(lessonDurationLabel({ time: '09:00', end: '11:00' })).toBe('2 h');
+    expect(lessonDurationLabel({ time: '09:00', end: '10:30' })).toBe('1 h 30 min');
+    expect(lessonDurationLabel({ time: '09:00', end: null })).toBeNull();
+  });
+
+  it('sorts a day by when a lesson starts, span or no span', () => {
+    const sorted = sortPlanItems([
+      item({ id: 'late', title: 'Late', date: TODAY, time: '16:00', end: '17:30' }),
+      item({ id: 'early', title: 'Early', date: TODAY, time: '09:00', end: '11:00' }),
+      item({ id: 'any', title: 'Any time', date: TODAY }),
+    ]);
+    expect(sorted.map((entry) => entry.id)).toEqual(['early', 'late', 'any']);
+  });
+});
+
+/* ----------------------------------------------- changing a running plan (15) */
+
+describe('changing a plan that is already running', () => {
+  const CLOSED = `${TODAY}T08:00:00.000Z`;
+
+  const running = (partial: Partial<GuardianPlan> = {}) =>
+    plan({
+      start: addDays(TODAY, -2),
+      items: [
+        item({ id: 'past', title: 'History', date: addDays(TODAY, -2), time: '09:00', end: '10:00', done: true }),
+        item({ id: 'today', title: 'Maths', date: TODAY, time: '09:00' }),
+        item({ id: 'next', title: 'Chemistry', date: addDays(TODAY, 1), time: '14:00', end: '16:00' }),
+      ],
+      ...partial,
+    });
+
+  it('lists every day the plan covers', () => {
+    expect(planDays(running())).toEqual([
+      addDays(TODAY, -2),
+      addDays(TODAY, -1),
+      TODAY,
+      addDays(TODAY, 1),
+      addDays(TODAY, 2),
+      addDays(TODAY, 3),
+      addDays(TODAY, 4),
+    ]);
+    expect(planDays(running({ start: 'not a date' }))).toEqual([]);
+  });
+
+  it('leaves today and the days after it open, and never a day that has gone by', () => {
+    const week = running();
+    expect(canEditPlanDay(week, addDays(TODAY, -1), TODAY)).toBe(false);
+    expect(canEditPlanDay(week, TODAY, TODAY)).toBe(true);
+    expect(canEditPlanDay(week, addDays(TODAY, 4), TODAY)).toBe(true);
+    expect(canEditPlanDay(week, addDays(TODAY, 5), TODAY)).toBe(false);
+    expect(canEditPlanDay(running({ approvedAt: CLOSED }), TODAY, TODAY)).toBe(false);
+    expect(editablePlanDays(week, TODAY)).toEqual([
+      TODAY,
+      addDays(TODAY, 1),
+      addDays(TODAY, 2),
+      addDays(TODAY, 3),
+      addDays(TODAY, 4),
+    ]);
+    expect(editablePlanDays(running({ approvedAt: CLOSED }), TODAY)).toEqual([]);
+  });
+
+  it('rewrites one day and leaves every other day exactly as it was', () => {
+    const changed = withPlanDayRewritten(
+      running(),
+      TODAY,
+      [
+        { id: 'today', title: 'Maths', time: '10:00', end: '12:00' },
+        { title: 'Geometry', time: '15:00' },
+      ],
+      TODAY,
+      new Date('2026-10-12T12:00:00.000Z'),
+    )!;
+    expect(itemsForDay(changed, TODAY).map((entry) => entry.title)).toEqual(['Maths', 'Geometry']);
+    expect(itemsForDay(changed, TODAY)[0]).toMatchObject({ id: 'today', time: '10:00', end: '12:00' });
+    // The day that has gone by keeps its tick, and the day after keeps its span.
+    expect(itemsForDay(changed, addDays(TODAY, -2))[0]).toMatchObject({ id: 'past', done: true, time: '09:00' });
+    expect(itemsForDay(changed, addDays(TODAY, 1))[0]).toMatchObject({ id: 'next', time: '14:00', end: '16:00' });
+    // A changed week has to look changed on the wire, or the edit never travels.
+    expect(changed.updatedAt).toBe('2026-10-12T12:00:00.000Z');
+  });
+
+  it('refuses a past day, a closed period, and a week that would overflow', () => {
+    expect(withPlanDayRewritten(running(), addDays(TODAY, -2), [], TODAY)).toBeNull();
+    expect(withPlanDayRewritten(running({ approvedAt: CLOSED }), TODAY, [], TODAY)).toBeNull();
+    const full = running({
+      items: Array.from({ length: WEEK_LESSON_LIMIT - 1 }, (_, index) =>
+        item({ id: `fill-${index}`, title: `Lesson ${index}`, date: addDays(TODAY, 2) }),
+      ),
+    });
+    expect(
+      withPlanDayRewritten(full, TODAY, [{ title: 'One more' }, { title: 'And another' }], TODAY),
+    ).toBeNull();
+    // Rewriting a day replaces it, so the same day can be emptied back down.
+    expect(withPlanDayRewritten(full, addDays(TODAY, 2), [{ title: 'One lesson' }], TODAY)?.items).toHaveLength(1);
+  });
+
+  it('drops a lesson with nothing in it, and an end before the start', () => {
+    const changed = withPlanDayRewritten(
+      running(),
+      TODAY,
+      [{ title: '    ' }, { id: 'today', title: 'Maths', time: '11:00', end: '09:00' }],
+      TODAY,
+    )!;
+    expect(itemsForDay(changed, TODAY)).toHaveLength(1);
+    expect(itemsForDay(changed, TODAY)[0]).toMatchObject({ title: 'Maths', time: '11:00', end: null });
+  });
+
+  it('applies several days at once, or none of them', () => {
+    const week = running();
+    const changed = withPlanDaysRewritten(
+      week,
+      [
+        { date: TODAY, lessons: [{ id: 'today', title: 'Maths', time: '09:00', end: '11:00' }] },
+        { date: addDays(TODAY, 1), lessons: [{ id: 'next', title: 'Chemistry', time: '15:00', end: '17:00' }] },
+      ],
+      TODAY,
+    )!;
+    expect(itemsForDay(changed, TODAY)[0]).toMatchObject({ time: '09:00', end: '11:00' });
+    expect(itemsForDay(changed, addDays(TODAY, 1))[0]).toMatchObject({ time: '15:00', end: '17:00' });
+    expect(itemsForDay(changed, addDays(TODAY, -2))).toHaveLength(1);
+    // One locked day in the batch locks the whole change: half-applied weeks are
+    // the kind of thing a guardian cannot see from the other side.
+    expect(
+      withPlanDaysRewritten(
+        week,
+        [
+          { date: TODAY, lessons: [] },
+          { date: addDays(TODAY, -1), lessons: [] },
+        ],
+        TODAY,
+      ),
+    ).toBeNull();
+    expect(withPlanDaysRewritten(week, [], TODAY)).toBeNull();
+  });
+
+  it('says what a day did, in one line for the student', () => {
+    const week = running();
+    const changed = withPlanDayRewritten(
+      week,
+      TODAY,
+      [{ id: 'today', title: 'Maths', time: '10:00', end: '12:00' }, { title: 'Geometry', time: '15:00' }],
+      TODAY,
+    )!;
+    expect(diffPlanDay(itemsForDay(week, TODAY), itemsForDay(changed, TODAY))).toEqual({
+      added: ['Geometry'],
+      removed: [],
+      retimed: ['Maths'],
+    });
+    expect(diffPlanDay(itemsForDay(week, TODAY), itemsForDay(week, TODAY))).toEqual({
+      added: [],
+      removed: [],
+      retimed: [],
+    });
+    const summary = planDayChangeSummary(TODAY, { added: ['Geometry'], removed: [], retimed: ['Maths'] });
+    expect(summary).toContain('Plan changed for');
+    expect(summary).toContain(formatFullDate(TODAY));
+    expect(summary).toContain('Geometry');
+    expect(summary).toContain('Maths');
+    expect(planDayChangeSummary(TODAY, { added: [], removed: [], retimed: [] })).toContain('unchanged');
+  });
+});
+
+/* ------------------------------------------------------- change asks (16) */
+
+describe('asking the guardian for a change', () => {
+  const CLOSED = `${TODAY}T08:00:00.000Z`;
+
+  const week = (partial: Partial<GuardianPlan> = {}) =>
+    plan({
+      start: addDays(TODAY, -1),
+      items: [
+        item({ id: 'history', title: 'History', date: addDays(TODAY, -1), done: true }),
+        item({ id: 'maths', title: 'Maths', date: TODAY, time: '09:00', end: '11:00' }),
+        item({ id: 'chem', title: 'Chemistry', date: addDays(TODAY, 2), time: '14:00' }),
+      ],
+      ...partial,
+    });
+
+  const ask = (partial: Partial<PlanChangeRequest> = {}): PlanChangeRequest => ({
+    id: 'change-1',
+    linkId: 'link-1',
+    planId: 'plan-1',
+    date: TODAY,
+    kind: 'add',
+    title: 'Physics',
+    note: '',
+    state: 'open',
+    createdAt: `${TODAY}T08:00:00.000Z`,
+    ...partial,
+  });
+
+  it('builds an ask for a day that has not gone by', () => {
+    const built = buildChangeRequest(
+      week(),
+      'link-1',
+      {
+        kind: 'add',
+        title: '  Physics  ',
+        date: addDays(TODAY, 1),
+        time: '10:00',
+        end: '12:00',
+        note: '  We have a test that morning.  ',
+      },
+      TODAY,
+      new Date('2026-10-12T09:00:00.000Z'),
+    )!;
+    expect(built).toMatchObject({
+      linkId: 'link-1',
+      planId: 'plan-1',
+      kind: 'add',
+      title: 'Physics',
+      date: addDays(TODAY, 1),
+      time: '10:00',
+      end: '12:00',
+      note: 'We have a test that morning.',
+      state: 'open',
+      itemId: null,
+      reply: '',
+      answeredAt: null,
+      createdAt: '2026-10-12T09:00:00.000Z',
+    });
+    expect(built.id).toMatch(/^change-/);
+  });
+
+  it('refuses an ask with no lesson, for a past day, or on a closed plan', () => {
+    expect(buildChangeRequest(week(), 'link-1', { kind: 'add', title: '   ', date: TODAY }, TODAY)).toBeNull();
+    expect(
+      buildChangeRequest(week(), 'link-1', { kind: 'add', title: 'Physics', date: addDays(TODAY, -1) }, TODAY),
+    ).toBeNull();
+    expect(
+      buildChangeRequest(week({ approvedAt: CLOSED }), 'link-1', { kind: 'add', title: 'Physics', date: TODAY }, TODAY),
+    ).toBeNull();
+    // An end before the start travels as no end at all, not as a nonsense span.
+    const built = buildChangeRequest(
+      week(),
+      'link-1',
+      { kind: 'add', title: 'Physics', date: TODAY, time: '11:00', end: '09:00' },
+      TODAY,
+    )!;
+    expect(built.end).toBeNull();
+  });
+
+  it('points a removal at the lesson it names, and an add at nothing', () => {
+    const removal = buildChangeRequest(
+      week(),
+      'link-1',
+      { kind: 'remove', title: 'Chemistry', itemId: 'chem', date: addDays(TODAY, 2) },
+      TODAY,
+    )!;
+    expect(removal).toMatchObject({ kind: 'remove', itemId: 'chem', title: 'Chemistry' });
+    expect(
+      buildChangeRequest(week(), 'link-1', { kind: 'add', title: 'Physics', itemId: 'maths', date: TODAY }, TODAY)!
+        .itemId,
+    ).toBeNull();
+  });
+
+  it('travels with the student, and can be taken back while it is open', () => {
+    const panels = createEmptyState().panels;
+    const withAsk = withStudentChangeRequest(panels, ask());
+    expect(withAsk.student.changeRequests).toHaveLength(1);
+    expect(withoutStudentChangeRequest(withAsk, 'change-1').student.changeRequests).toHaveLength(0);
+    // An answered ask is a record of what happened, not something to take back.
+    const answered = withStudentChangeRequest(panels, ask({ state: 'approved', answeredAt: `${TODAY}T09:00:00.000Z` }));
+    expect(withoutStudentChangeRequest(answered, 'change-1')).toBe(answered);
+    // Only twelve are kept, so a week of asking does not grow the state forever.
+    const capped = Array.from({ length: PLAN_CHANGES_KEPT + 2 }, (_, index) =>
+      ask({ id: `change-${index}`, createdAt: `${TODAY}T08:${String(index).padStart(2, '0')}:00.000Z` }),
+    ).reduce((state, request) => withStudentChangeRequest(state, request), panels);
+    expect(capped.student.changeRequests).toHaveLength(PLAN_CHANGES_KEPT);
+  });
+
+  it('says whether an ask is still worth making', () => {
+    expect(canRequestPlanChange(week(), TODAY, TODAY)).toBe(true);
+    expect(canRequestPlanChange(week(), null, TODAY)).toBe(true);
+    expect(canRequestPlanChange(week(), addDays(TODAY, -1), TODAY)).toBe(false);
+    expect(canRequestPlanChange(week(), addDays(TODAY, 9), TODAY)).toBe(false);
+    expect(canRequestPlanChange(week({ approvedAt: CLOSED }), TODAY, TODAY)).toBe(false);
+    // With no day named, the ask is refused only once the whole period is behind.
+    expect(canRequestPlanChange(week({ start: addDays(TODAY, -20) }), null, TODAY)).toBe(false);
+  });
+
+  it('keeps the asks that matter, oldest first', () => {
+    const requests = [
+      ask({ id: 'c3', createdAt: `${TODAY}T10:00:00.000Z` }),
+      ask({ id: 'c1', createdAt: `${TODAY}T08:00:00.000Z` }),
+      ask({ id: 'c2', createdAt: `${TODAY}T09:00:00.000Z`, state: 'approved', answeredAt: `${TODAY}T11:00:00.000Z` }),
+      ask({ id: 'old', createdAt: `${addDays(TODAY, -(PLAN_CHANGE_DAYS + 1))}T08:00:00.000Z` }),
+    ];
+    expect(openChangeRequests(requests, TODAY).map((entry) => entry.id)).toEqual(['c1', 'c2', 'c3']);
+    expect(pendingChangeRequests(requests, TODAY).map((entry) => entry.id)).toEqual(['c1', 'c3']);
+  });
+
+  it('words an ask for the panel, and for the guardian\u2019s notices', () => {
+    expect(changeRequestLabel(ask())).toBe(`Add · ${formatFullDate(TODAY)} · Physics`);
+    expect(changeRequestLabel(ask({ kind: 'remove', title: 'Chemistry', date: null }))).toBe(
+      'Remove · Any day · Chemistry',
+    );
+    const notice = changeRequestNotice(ask({ note: 'We have a test.' }), 'Nina', 'nina');
+    expect(notice).toMatchObject({
+      id: 'change-change-1',
+      student: 'nina',
+      author: 'Nina',
+      kind: 'request',
+      read: false,
+      createdAt: `${TODAY}T08:00:00.000Z`,
+    });
+    expect(notice.summary).toContain('Nina asked to add Physics to the plan');
+    expect(notice.summary).toContain('We have a test.');
+    expect(changeRequestNotice(ask({ kind: 'remove', title: 'Chemistry' }), 'Nina', 'nina').summary).toContain(
+      'Nina asked to take Chemistry off the plan',
+    );
+  });
+
+  it('applies an approved ask to the plan, the same way on both sides', () => {
+    const approved = applyChangeRequest(
+      week(),
+      ask({ date: addDays(TODAY, 1), time: '10:00', end: '12:00' }),
+      TODAY,
+      new Date('2026-10-12T12:00:00.000Z'),
+    )!;
+    expect(itemsForDay(approved, addDays(TODAY, 1)).find((entry) => entry.title === 'Physics')).toMatchObject({
+      time: '10:00',
+      end: '12:00',
+      date: addDays(TODAY, 1),
+    });
+    expect(approved.updatedAt).toBe('2026-10-12T12:00:00.000Z');
+    // The same ask twice is the same week, not two of the same lesson.
+    expect(applyChangeRequest(approved, ask({ date: addDays(TODAY, 1) }), TODAY)).toBeNull();
+    // A removal drops the lesson it points at, and only that one.
+    const removed = applyChangeRequest(
+      week(),
+      ask({ kind: 'remove', title: 'Chemistry', itemId: 'chem', date: addDays(TODAY, 2) }),
+      TODAY,
+    )!;
+    expect(removed.items.map((entry) => entry.id)).not.toContain('chem');
+    expect(removed.items).toHaveLength(2);
+    // An ask whose id went stale still finds the lesson it named, by day and title.
+    const stale = applyChangeRequest(
+      week(),
+      ask({ kind: 'remove', title: 'Chemistry', itemId: 'an-id-from-an-older-sync', date: addDays(TODAY, 2) }),
+      TODAY,
+    )!;
+    expect(stale.items.map((entry) => entry.id)).not.toContain('chem');
+  });
+
+  it('refuses an ask the week can no longer honour', () => {
+    // The day went by while the ask waited.
+    expect(applyChangeRequest(week(), ask({ date: addDays(TODAY, -1) }), TODAY)).toBeNull();
+    // The lesson it points at is already ticked off.
+    expect(
+      applyChangeRequest(
+        week(),
+        ask({ kind: 'remove', title: 'History', itemId: 'history', date: addDays(TODAY, -1) }),
+        TODAY,
+      ),
+    ).toBeNull();
+    // A lesson that is not in the plan is not removed by an ask that names it.
+    expect(
+      applyChangeRequest(week(), ask({ kind: 'remove', title: 'Astronomy', itemId: 'gone', date: TODAY }), TODAY),
+    ).toBeNull();
+    // And the plan is closed.
+    expect(applyChangeRequest(week({ approvedAt: CLOSED }), ask(), TODAY)).toBeNull();
+  });
+
+  it('answers an ask once, and an answer beats the open ask it answers', () => {
+    const request = ask();
+    const declined = answeredChangeRequest(request, 'declined', '  Not this week.  ', new Date('2026-10-12T12:00:00.000Z'));
+    expect(declined).toMatchObject({
+      state: 'declined',
+      reply: 'Not this week.',
+      answeredAt: '2026-10-12T12:00:00.000Z',
+    });
+    // A device that still holds the open ask must not undo the answer.
+    expect(mergeChangeRequests([declined], [request]).map((entry) => entry.state)).toEqual(['declined']);
+    // The latest answer wins over an older one, whichever side it arrives from.
+    const later = answeredChangeRequest(request, 'approved', 'Yes', new Date('2026-10-12T14:00:00.000Z'));
+    expect(mergeChangeRequests([later], [declined])[0]?.state).toBe('approved');
+    expect(mergeChangeRequests([declined], [later])[0]?.state).toBe('approved');
+    expect(mergeChangeRequests([], [request])).toEqual([request]);
+  });
+
+  it('knows when an answer is still possible', () => {
+    expect(canAnswerChangeRequest(week(), ask(), TODAY)).toBe(true);
+    expect(canAnswerChangeRequest(week(), ask({ state: 'declined' }), TODAY)).toBe(false);
+    expect(canAnswerChangeRequest(week(), ask({ date: addDays(TODAY, -1) }), TODAY)).toBe(false);
+    expect(canAnswerChangeRequest(undefined, ask(), TODAY)).toBe(false);
+    // This answers "can the ask still be honoured", which is what approving
+    // needs. A day that has gone by can still be declined with a word back —
+    // the panel offers that separately, because the student is owed an answer.
   });
 });

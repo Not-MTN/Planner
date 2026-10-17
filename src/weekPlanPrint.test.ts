@@ -38,7 +38,7 @@ describe('the printed week', () => {
     expect(html).toContain('08:00');
     expect(html).toContain('Maths');
     expect(html).toContain('✓');
-    expect(html.match(/<section>/g)).toHaveLength(7);
+    expect(html.match(/<section/g)).toHaveLength(7);
   });
 
   it('shows reported days with the student’s words, and finished days without as missing', () => {
@@ -156,6 +156,9 @@ describe('rest days, answers, and the wall grid', () => {
     );
     expect(html).toContain('Seen');
     expect(html).toContain('Well done.');
+    // A reaction is an emoji, so it gets its own space on the line rather than
+    // leaning against the words the guardian wrote.
+    expect(html).toContain('<span class="reacts">🎉</span>');
   });
 
   it('lays the week out as days across and times down', () => {
@@ -174,7 +177,111 @@ describe('rest days, answers, and the wall grid', () => {
     expect(html).toContain('Maths');
     expect(html).toContain('Any time');
     expect(html).toContain('Reading');
-    expect(html).toContain('✓ Maths');
+    expect(html).toMatch(/tt-tick">✓<\/span><span class="tt-title">Maths/);
+  });
+});
+
+describe('one verdict per day', () => {
+  const friday = '2026-10-09';
+
+  it('lets a filed report outrank the rest mark, and never calls a rest day missing', () => {
+    const restWithReport = weekPlanHtml(
+      plan({
+        start: '2026-10-05',
+        restDays: [5],
+        items: [{ id: 'f', title: 'Maths', date: friday, time: '08:00', minutes: null, subject: null, done: true }],
+      }),
+      [
+        {
+          id: 'report-fri',
+          planId: 'plan-1',
+          linkId: 'link-1',
+          date: friday,
+          doneIds: ['f'],
+          note: 'Did it anyway.',
+          createdAt: `${friday}T20:00:00.000Z`,
+          updatedAt: `${friday}T20:00:00.000Z`,
+        },
+      ],
+      [],
+      { student: 'Sara', madeOn: TODAY },
+    );
+    expect(restWithReport).toContain('flag reported">Reported');
+    expect(restWithReport).not.toContain('flag rest');
+    expect(restWithReport).toContain('Did it anyway.');
+
+    // The same day with nothing filed is a rest day, not a missing one.
+    const quietRest = weekPlanHtml(
+      plan({
+        start: '2026-10-05',
+        restDays: [5],
+        items: [{ id: 'f', title: 'Maths', date: friday, time: '08:00', minutes: null, subject: null, done: false }],
+      }),
+      [],
+      [],
+      { student: 'Sara', madeOn: TODAY },
+    );
+    expect(quietRest).toContain('flag rest">Rest day');
+    expect(quietRest).not.toContain('Missing');
+  });
+
+  it('words a kept day the same on the wall grid as on the week page', () => {
+    const week = plan({
+      start: '2026-10-05',
+      items: [{ id: 'f', title: 'Maths', date: friday, time: '08:00', minutes: null, subject: null, done: true }],
+    });
+    const reports = [
+      {
+        id: 'report-fri',
+        planId: 'plan-1',
+        linkId: 'link-1',
+        date: friday,
+        doneIds: ['f'],
+        note: 'Caught up on Saturday.',
+        repair: true,
+        createdAt: `${friday}T20:00:00.000Z`,
+        updatedAt: `${friday}T20:00:00.000Z`,
+      },
+    ];
+    // The two pages are printed side by side, so they cannot disagree about
+    // what a day was: kept is kept on both.
+    expect(timetableHtml(week, reports, { student: 'Sara', madeOn: TODAY })).toContain('tt-mark">Streak kept');
+    expect(weekPlanHtml(week, reports, [], { student: 'Sara', madeOn: TODAY })).toContain(
+      'flag reported">Streak kept',
+    );
+  });
+});
+
+describe('the week at a glance on paper', () => {
+  it('measures planned time from the spans, and from the estimates where there is no span', () => {
+    const html = weekPlanHtml(
+      plan({
+        items: [
+          { id: 'a', title: 'Maths', date: TODAY, time: '09:00', end: '11:00', minutes: null, subject: null, done: false },
+          { id: 'b', title: 'Physics', date: TODAY, time: '14:00', minutes: 45, subject: null, done: false },
+        ],
+      }),
+      [],
+      [],
+      { student: 'Sara', madeOn: TODAY },
+    );
+    // Two hours on the clock, plus the forty-five minutes someone typed.
+    expect(html).toContain('<strong>2 h 45 min</strong>');
+    expect(html).toContain('Planned time');
+    expect(html).toMatch(/<strong>2<\/strong><span>Lessons<\/span>/);
+    // And the lesson itself reads as the span it was given, with its length.
+    expect(html).toContain('09:00 – 11:00<span class="dur">2 h</span>');
+    expect(html).toContain('14:00');
+  });
+
+  it('says nothing it cannot measure', () => {
+    const html = weekPlanHtml(plan({ items: [{ id: 'a', title: 'Reading', date: TODAY, time: null, minutes: null, subject: null, done: false }] }), [], [], {
+      student: 'Sara',
+      madeOn: TODAY,
+    });
+    expect(html).toContain('<strong>—</strong><span>Planned time</span>');
+    // A lesson with no time of its own gets no empty time column.
+    expect(html).not.toContain('>Time</th>');
   });
 });
 

@@ -13,13 +13,15 @@ import { CURRICULUM_FIELDS, CURRICULUM_GRADES, curriculumSuggestions, isCurricul
 import { WEEKDAY_TOGGLES, addDays, formatFullDate, formatJalaliLong, isValidISODate, isValidTime, todayISO } from '../dates';
 import { cx } from '../cx';
 import { t } from '../i18n';
-import { GlobeIcon, PlusIcon, TrashIcon } from '../icons';
+import { ClockIcon, GlobeIcon, PlusIcon, TrashIcon } from '../icons';
 import { gradeLabel, newId, planEnd, withLinkPlan, withQueuedPlan } from '../panels';
 import { QUEUED_PLANS_KEPT } from '../types';
 import type { GuardianLink, PlanDraft } from '../types';
 import {
   emptyWeekPlanDraft,
   examWarningDates,
+  lessonTimeLabel,
+  normalizeLessonEnd,
   normalizeLessonUrl,
   WEEK_LESSON_LIMIT,
   weekPlanDraftError,
@@ -69,6 +71,7 @@ export function WeekPlanComposer({ link, onClose }: { link: GuardianLink; onClos
   const [draft, setDraft] = useState(() => ({ ...emptyWeekPlanDraft(todayISO()), ...loadPrefs(link.id) }));
   const [name, setName] = useState('');
   const [time, setTime] = useState('');
+  const [endTime, setEndTime] = useState('');
   const [addDay, setAddDay] = useState(0);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -104,18 +107,28 @@ export function WeekPlanComposer({ link, onClose }: { link: GuardianLink; onClos
     }));
   };
 
-  const addLesson = (lessonName: string, lessonTime: string, offset: number) => {
+  const addLesson = (lessonName: string, lessonTime: string, lessonEnd: string, offset: number) => {
     const clean = lessonName.trim();
     if (!clean || full) return;
     if (lessonTime && !isValidTime(lessonTime)) {
       setError(t('Choose a valid time.'));
       return;
     }
+    if (lessonEnd && !normalizeLessonEnd(lessonTime, lessonEnd)) {
+      setError(t('A lesson has to end after it starts.'));
+      return;
+    }
     setDraft((current) => ({
       ...current,
       days: current.days.map((day) =>
         day.offset === offset
-          ? { ...day, lessons: [...day.lessons, { id: newId('lesson'), name: clean, time: lessonTime, url: '' }] }
+          ? {
+              ...day,
+              lessons: [
+                ...day.lessons,
+                { id: newId('lesson'), name: clean, time: lessonTime, end: lessonEnd, url: '' },
+              ],
+            }
           : day,
       ),
     }));
@@ -124,10 +137,11 @@ export function WeekPlanComposer({ link, onClose }: { link: GuardianLink; onClos
 
   const addCustom = () => {
     if (!name.trim()) return;
-    addLesson(name, time, addDay);
-    if (name.trim() && (!time || isValidTime(time))) {
+    addLesson(name, time, endTime, addDay);
+    if (name.trim() && (!time || isValidTime(time)) && (!endTime || normalizeLessonEnd(time, endTime))) {
       setName('');
       setTime('');
+      setEndTime('');
     }
   };
 
@@ -191,6 +205,7 @@ export function WeekPlanComposer({ link, onClose }: { link: GuardianLink; onClos
             title: lesson.name.trim(),
             date: addDays(draft.start, day.offset),
             time: lesson.time || null,
+            end: normalizeLessonEnd(lesson.time, lesson.end),
             url: normalizeLessonUrl(lesson.url),
             minutes: null,
             subject: isCurriculumLesson(lesson.name, draft.field, draft.grade) ? lesson.name.trim() : null,
@@ -355,7 +370,7 @@ export function WeekPlanComposer({ link, onClose }: { link: GuardianLink; onClos
                   type="button"
                   className="btn btn-ghost btn-tiny"
                   disabled={!startOk || full}
-                  onClick={() => addLesson(lesson, '', addDay)}
+                  onClick={() => addLesson(lesson, '', '', addDay)}
                 >
                   {lesson}
                 </button>
@@ -380,19 +395,38 @@ export function WeekPlanComposer({ link, onClose }: { link: GuardianLink; onClos
               }
             }}
           />
-          <input
-            className="input week-time-input"
-            type="time"
-            aria-label={t('Time')}
-            value={time}
-            onChange={(event) => setTime(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                addCustom();
-              }
-            }}
-          />
+          <span className="week-time-pair">
+            <input
+              className="input week-time-input"
+              type="time"
+              aria-label={t('From')}
+              title={t('From')}
+              value={time}
+              onChange={(event) => setTime(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  addCustom();
+                }
+              }}
+            />
+            <span aria-hidden="true">–</span>
+            <input
+              className="input week-time-input"
+              type="time"
+              aria-label={t('To')}
+              title={t('To')}
+              min={time || undefined}
+              value={endTime}
+              onChange={(event) => setEndTime(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  addCustom();
+                }
+              }}
+            />
+          </span>
           <select
             className="input"
             aria-label={t('Date')}
@@ -432,7 +466,12 @@ export function WeekPlanComposer({ link, onClose }: { link: GuardianLink; onClos
                 <ul className="week-lessons">
                   {[...day.lessons].sort(byTimeThenName).map((lesson) => (
                     <li key={lesson.id} className="week-lesson">
-                      {lesson.time ? <span className="week-time">{lesson.time}</span> : null}
+                      {lesson.time ? (
+                        <span className="week-time">
+                          <ClockIcon size={13} />
+                          {lessonTimeLabel({ time: lesson.time, end: lesson.end })}
+                        </span>
+                      ) : null}
                       <span className="week-lesson-title">{lesson.name}</span>
                       <button
                         type="button"

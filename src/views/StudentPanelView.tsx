@@ -12,7 +12,7 @@
  * explanations stay private in this planner, and nothing here changes anything
  * the personal planner keeps.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
 import {
@@ -22,8 +22,8 @@ import {
   FlagIcon,
   FlameIcon,
   HeartIcon,
+  EyeIcon,
   HorizonIcon,
-  PrinterIcon,
   SlidersIcon,
   SparkIcon,
   StopwatchIcon,
@@ -71,6 +71,7 @@ import { StudentLearningHub } from '../components/StudentLearningHub';
 import { upcomingExams } from '../panelFeatures';
 import {
   canSubmitDayReport,
+  editablePlanDays,
   missingReportDays,
   openRequests,
   planFocusMinutes,
@@ -81,12 +82,13 @@ import {
   withLessonRolled,
 } from '../weekPlans';
 import { timetableHtml, weekPlanHtml } from '../weekPlanPrint';
-import { downloadBlob } from '../download';
-import { printDocument } from '../printDocument';
 import { formatFullDate, formatWeekRange, todayISO } from '../dates';
 import { DayReportForm } from '../components/DayReportForm';
 import { StreakRepairForm } from '../components/StreakRepairForm';
 import { WeekPlanCard } from '../components/WeekPlanCard';
+import { PrintPreview, type PrintableDocument } from '../components/PrintPreview';
+import { PlanChangeForm } from '../components/PlanChangeForm';
+import { StudentChangeRequests } from '../components/PlanChangeRequests';
 import '../panels.css';
 
 type StudentTab = 'today' | 'week' | 'subjects' | 'classes' | 'sharing';
@@ -111,6 +113,9 @@ export function StudentPanelView() {
   const [repairingLock, setRepairingLock] = useState<string | null>(null);
   const [reportsOpen, setReportsOpen] = useState(false);
   const [studyPrefill, setStudyPrefill] = useState<StudentSubject | null>(null);
+  // The plan being read before it goes to paper, and the ask being written.
+  const [previewPlan, setPreviewPlan] = useState<string | null>(null);
+  const [changeAsk, setChangeAsk] = useState<{ planId: string; itemId?: string | null } | null>(null);
   const openAsks = useMemo(() => openRequests(panels.student.requests ?? [], todayISO()), [panels.student.requests]);
 
   // Keep in step with the server: a guardian may have ended the link, or sent
@@ -279,29 +284,38 @@ export function StudentPanelView() {
     [inbox.plans, panels.student.reports],
   );
 
-  const printTimetable = (plan: GuardianPlan) => {
-    const html = timetableHtml(plan, panels.student.reports ?? [], {
-      student: plan.author,
-      side: 'student',
-      madeOn: todayISO(),
-      dir: document.documentElement.dir || 'ltr',
-      lang: document.documentElement.lang || 'en',
-    });
-    if (printDocument(html)) return;
-    downloadBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), `timetable-${plan.id}.html`);
-  };
-
-  const printWeekPlan = (plan: GuardianPlan) => {
-    const html = weekPlanHtml(plan, panels.student.reports ?? [], panels.student.acks ?? [], {
-      student: plan.author,
-      madeOn: todayISO(),
-      dir: document.documentElement.dir || 'ltr',
-      lang: document.documentElement.lang || 'en',
-      side: 'student',
-    });
-    if (printDocument(html)) return;
-    downloadBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), `week-plan-${plan.id}.html`);
-  };
+  /**
+   * The two pages a week plan prints as, built here and read in the app first.
+   * Nothing opens in a window of its own until the student has seen the page:
+   * the times, the ticks and the reports they filed, exactly as paper would
+   * show them, with print and download beside it.
+   */
+  const planDocuments = (plan: GuardianPlan): PrintableDocument[] => [
+    {
+      id: 'week',
+      label: t('Week plan'),
+      filename: `week-plan-${plan.id}.html`,
+      html: weekPlanHtml(plan, panels.student.reports ?? [], panels.student.acks ?? [], {
+        student: plan.author,
+        madeOn: todayISO(),
+        dir: document.documentElement.dir || 'ltr',
+        lang: document.documentElement.lang || 'en',
+        side: 'student',
+      }),
+    },
+    {
+      id: 'timetable',
+      label: t('Timetable'),
+      filename: `timetable-${plan.id}.html`,
+      html: timetableHtml(plan, panels.student.reports ?? [], {
+        student: plan.author,
+        side: 'student',
+        madeOn: todayISO(),
+        dir: document.documentElement.dir || 'ltr',
+        lang: document.documentElement.lang || 'en',
+      }),
+    },
+  ];
 
   const askForPlan = async (changeNote?: string, linkId?: string) => {
     if (askSending) return;
@@ -741,8 +755,8 @@ export function StudentPanelView() {
                   </p>
                 ) : null}
                 {weekPlans.map((plan) => (
+                  <Fragment key={plan.id}>
                   <WeekPlanCard
-                    key={plan.id}
                     plan={plan}
                     reports={panels.student.reports ?? []}
                     acks={panels.student.acks ?? []}
@@ -751,36 +765,30 @@ export function StudentPanelView() {
                     onToggleItem={(planId, itemId) => updatePanels((latest) => withPlanItemToggled(latest, planId, itemId))}
                     canToggleItem={(planId, itemId) => studentCanTogglePlanItem(panels, planId, itemId)}
                     onRollLesson={missingDays.length === 0 ? rollLessonOn : undefined}
+                    onAskChangeItem={(itemId) => setChangeAsk({ planId: plan.id, itemId })}
                     canReportDay={(planId, date) => canSubmitDayReport(panels, planId, date)}
                     reportingDate={reporting?.planId === plan.id ? reporting.date : null}
                     onReportDay={(date) => setReporting(date ? { planId: plan.id, date } : null)}
                     actions={
                       <>
-                        {openAsks.length === 0 && panels.student.guardians.some((guardian) => guardian.linkId === plan.linkId) ? (
+                        {editablePlanDays(plan).length > 0 &&
+                        panels.student.guardians.some((guardian) => guardian.linkId === plan.linkId) ? (
                           <button
                             type="button"
                             className="btn btn-ghost btn-small"
-                            disabled={askSending}
-                            onClick={() => void askForPlan(t('Could we adjust the plan for {0}?', { 0: plan.title }), plan.linkId)}
+                            onClick={() => setChangeAsk({ planId: plan.id })}
                           >
-                            {t('Request a change')}
+                            {t('Ask to change')}
                           </button>
                         ) : null}
                         <button
                           type="button"
                           className="icon-btn round"
-                          aria-label={`${t('Print')} · ${plan.title}`}
-                          onClick={() => printWeekPlan(plan)}
+                          aria-label={`${t('Preview and print')} · ${plan.title}`}
+                          title={t('Preview and print')}
+                          onClick={() => setPreviewPlan(plan.id)}
                         >
-                          <PrinterIcon size={14} />
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-btn round"
-                          aria-label={`${t('Print timetable')} · ${plan.title}`}
-                          onClick={() => printTimetable(plan)}
-                        >
-                          <CalendarIcon size={14} />
+                          <EyeIcon size={14} />
                         </button>
                         {canDeletePlan(plan) ? (
                           <button type="button" className="icon-btn round" aria-label={`${t('Delete plan')} · ${plan.title}`} onClick={() => deletePlan(plan)}>
@@ -790,6 +798,8 @@ export function StudentPanelView() {
                       </>
                     }
                   />
+                  <StudentChangeRequests planId={plan.id} />
+                  </Fragment>
                 ))}
 
                 {shortPlans.length > 0 ? (
@@ -1251,6 +1261,26 @@ export function StudentPanelView() {
           {t("Manage panels")}
         </button>
       </p>
+
+      {(() => {
+        const plan = inbox.plans.find((item) => item.id === previewPlan) ?? null;
+        if (!plan) return null;
+        return (
+          <PrintPreview title={plan.title} documents={planDocuments(plan)} onClose={() => setPreviewPlan(null)} />
+        );
+      })()}
+
+      {(() => {
+        const plan = inbox.plans.find((item) => item.id === changeAsk?.planId) ?? null;
+        if (!plan) return null;
+        return (
+          <PlanChangeForm
+            plan={plan}
+            defaultItemId={changeAsk?.itemId ?? null}
+            onClose={() => setChangeAsk(null)}
+          />
+        );
+      })()}
     </div>
   );
 }

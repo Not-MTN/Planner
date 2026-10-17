@@ -197,7 +197,9 @@
   .guardian-student-grid > .student-card { padding: 16px; }
   .student-summary-values { gap: 18px; }
   .plan-step-row .panel-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .plan-step-row .panel-form-grid > .field:last-child { grid-column: 1 / -1; }
+  /* Five fields: subject, minutes, date, from, to. The date takes a row of its
+     own so the from/to pair is never split across two lines. */
+  .plan-step-row .panel-form-grid > .field:nth-child(3) { grid-column: 1 / -1; }
   .plan-period-fields { grid-template-columns: minmax(0, 1fr); }
   .plan-end-label { padding-block-end: 0; flex-direction: row; gap: 10px; }
   .sharing-preview-values { gap: 8px; }
@@ -826,3 +828,288 @@
 .week-period-summary { border-inline-start: 4px solid var(--status-incomplete); }
 .week-period-summary.is-complete { border-inline-start-color: var(--status-complete); }
 .week-period-summary.is-incomplete { border-inline-start-color: var(--status-incomplete); }
+
+/* ------------------------------------------------ lesson times, as a span
+   A lesson is not a start with nothing after it: "maths from 9 to 11" is what
+   the guardian meant, and what the student has to fit the day around. The pair
+   of inputs reads as one range, and the range reads back the same everywhere
+   the lesson appears — the draft, the card, the grid, and the printed page. */
+
+.week-time-pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+}
+.week-time-pair > span[aria-hidden] { color: var(--muted); font-size: 12px; }
+.week-time-pair .week-time-input { width: 104px; flex: 0 1 auto; }
+.week-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.week-time svg { color: var(--accent); flex: none; }
+.week-time-span {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+.week-step-time { display: flex; align-items: center; gap: 5px; margin: 4px 0 0; }
+.week-step-time svg { color: var(--accent); }
+.week-grid-span {
+  display: block;
+  font-size: 10.5px;
+  font-style: normal;
+  font-weight: 600;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------ changing a running plan
+   The days behind today stay visible but locked: they hold the ticks and the
+   reports already filed, and a week that hid its past would read as a plan that
+   started this morning. */
+
+.sheet-plan-editor { max-width: 720px; }
+.week-editor { display: flex; flex-direction: column; gap: 12px; }
+.week-editor > .hint { margin: 0; }
+.week-editor-days {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 6px;
+}
+.week-editor-day {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s, box-shadow 0.15s;
+}
+.week-editor-day:hover:not(:disabled) { border-color: var(--line-strong); }
+.week-editor-day.is-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.week-editor-day.is-locked { cursor: not-allowed; opacity: 0.62; background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.week-editor-weekday { font-size: 12.5px; font-weight: 700; color: var(--ink); }
+.week-editor-date {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.week-editor-date em {
+  font-family: 'Vazirmatn', var(--serif);
+  font-style: normal;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.week-editor-count { font-size: 10.5px; color: var(--muted); }
+.week-editor-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.week-editor-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+  background: var(--surface-2);
+}
+.week-editor-panel > .chart-title { margin: 0; }
+.week-editor-lessons { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.week-editor-lesson { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.week-editor-lesson > .input:first-child { flex: 1 1 160px; min-width: 0; }
+.week-editor-span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.week-editor-span em {
+  font-style: normal;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+.week-editor-add { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-top: 4px; border-top: 1px dashed var(--line-strong); }
+.week-editor-add > .input:first-child { flex: 1 1 160px; min-width: 0; }
+.week-editor-add .btn { margin-inline-start: auto; }
+
+/* ------------------------------------------------ asks for a change
+   The plan is the guardian's, so a student's ask is a question with a state:
+   waiting, approved, or declined with a line back. Both sides read the same
+   three states in the same colours the panel already uses. */
+
+.week-asks { display: flex; flex-direction: column; gap: 6px; margin: 12px 0 0; }
+.week-asks > .chart-title { display: flex; align-items: center; gap: 7px; margin: 0; }
+.week-asks-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--cat-peach);
+  color: var(--cat-peach-text);
+  font-size: 10.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.week-asks > .hint { margin: 0; }
+.week-ask-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.week-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-inline-start: 3px solid var(--line-strong);
+  border-radius: var(--radius-small);
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+}
+.week-ask > * { margin: 0; }
+.week-ask.is-open { border-inline-start-color: var(--cat-peach); }
+.week-ask.is-answered.approved { border-inline-start-color: var(--status-complete); }
+.week-ask.is-answered.declined { border-inline-start-color: var(--status-incomplete); }
+.week-ask-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; font-size: 13px; }
+.week-ask-head .week-pill { margin-inline-start: auto; }
+.week-ask-kind {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.week-ask-kind.add { background: var(--accent-soft); color: var(--accent); }
+.week-ask-kind.remove { background: color-mix(in srgb, var(--cat-peach) 22%, transparent); color: var(--cat-peach-text); }
+.week-ask-title { font-weight: 650; color: var(--ink); overflow-wrap: anywhere; }
+.week-ask-day,
+.week-ask-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.week-ask-time svg { color: var(--accent); }
+.week-ask-note { font-size: 12.5px; color: var(--ink-soft); overflow-wrap: anywhere; }
+.week-ask-reply { font-size: 12.5px; color: var(--ink-soft); }
+.week-ask-plan { font-size: 11.5px; color: var(--muted); }
+.week-ask-late { font-size: 12px; font-weight: 600; color: var(--cat-peach-text); }
+.week-ask-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.week-ask-actions .input { flex: 1 1 140px; min-width: 0; }
+.week-ask .btn-tiny { min-height: 32px; }
+.week-asks-mine .btn-tiny { align-self: flex-start; }
+
+.week-ask-remove { flex: none; }
+
+.sheet-plan-change { max-width: 560px; }
+.week-change-form { display: flex; flex-direction: column; gap: 10px; }
+.week-change-form > .hint { margin: 0; }
+.week-change-kind { display: flex; flex-wrap: wrap; gap: 6px; }
+.week-change-kind .is-on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.week-change-pick { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 42dvh; overflow-y: auto; }
+.week-change-option {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.week-change-option.is-on { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.week-change-day { font-size: 11.5px; color: var(--muted); flex-basis: 100%; }
+.week-change-title { font-size: 13px; font-weight: 650; color: var(--ink); }
+.week-change-time { display: inline-flex; align-items: center; gap: 4px; margin-inline-start: auto; font-size: 11.5px; color: var(--accent); font-variant-numeric: tabular-nums; }
+
+/* ------------------------------------------------ the page before the paper
+   The preview is the printed document itself, in a frame of its own: the same
+   HTML that goes to the printer, read on screen first. Nothing from the app —
+   no sidebar, no tabs, no theme — walks onto the page. */
+
+.sheet-print-preview { max-width: 940px; }
+.print-preview { display: flex; flex-direction: column; gap: 8px; }
+.print-preview > .hint { margin: 0; }
+.print-preview-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.print-preview-tabs { display: flex; gap: 4px; }
+.print-preview-tabs .is-on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.print-preview-label { font-size: 12.5px; font-weight: 650; color: var(--ink-soft); }
+.print-preview-actions { display: flex; gap: 6px; margin-inline-start: auto; }
+.print-preview-stage { position: relative; }
+.print-preview-frame {
+  display: block;
+  width: 100%;
+  height: min(66dvh, 720px);
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: #fff;
+}
+.print-preview-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 0;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  color: var(--muted);
+  font-size: 12.5px;
+}
+@media (max-width: 640px) {
+  .print-preview-actions { margin-inline-start: 0; width: 100%; }
+  .print-preview-actions .btn { flex: 1; }
+  .week-editor-days { grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); }
+  .week-editor-lesson > .input:first-child { flex-basis: 100%; }
+}
+/* The dense buttons keep the 44px floor the rest of the app gives them on a
+   phone; only the two controls that are not `.btn` at all need it said here. */
+@media (pointer: coarse) {
+  .week-editor-day { min-height: 44px; }
+  .week-change-option { min-height: 44px; }
+}

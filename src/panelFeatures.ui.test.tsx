@@ -478,11 +478,23 @@ describe('guardian roster and planning', () => {
     setValue('input[aria-label="Step 1 subject"]', 'Physics');
     setValue('input[aria-label="Step 1 minutes"]', '25');
     setValue('input[aria-label="Step 1 date"]', todayISO());
+    // "From 9 to 11" is the part the plan used to lose on the way out: the
+    // composer kept the fields but never carried the times into the draft.
+    setValue('input[aria-label="Step 1 start time"]', '09:00');
+    setValue('input[aria-label="Step 1 end time"]', '11:00');
     await click('Send the plan');
     expect(sendPlan).toHaveBeenCalledTimes(1);
     expect(vi.mocked(sendPlan).mock.calls[0][1]).toBe(ninaLinkId);
     expect(vi.mocked(sendPlan).mock.calls[0][2].items).toEqual([
-      { title: 'Practice chapter 4', subject: 'Physics', minutes: 25, date: todayISO() },
+      {
+        title: 'Practice chapter 4',
+        subject: 'Physics',
+        minutes: 25,
+        date: todayISO(),
+        time: '09:00',
+        end: '11:00',
+        url: null,
+      },
     ]);
     expect(saved().panels.guardian.links.find((link) => link.id === 'nina')?.plans[0].title).toBe('Physics revision');
     expect(document.querySelector('.guardian-plan-composer')).toBeNull();
@@ -515,7 +527,7 @@ describe('guardian roster and planning', () => {
     setValue('input[aria-label="Step 1 title"]', 'Practice chapter 4 twice');
     await click('Send the plan');
     expect(vi.mocked(sendPlan).mock.calls[0][2].items).toEqual([
-      { title: 'Practice chapter 4 twice', subject: 'Physics', minutes: 25, date: null },
+      { title: 'Practice chapter 4 twice', subject: 'Physics', minutes: 25, date: null, time: null, end: null, url: null },
     ]);
   });
 

@@ -375,6 +375,33 @@ export function SlidersIcon(props: IconProps) {
   );
 }
 
+export function ClockIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7.5V12l3 2" />
+    </Svg>
+  );
+}
+
+export function LockIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="5" y="10.5" width="14" height="9.5" rx="2.2" />
+      <path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" />
+    </Svg>
+  );
+}
+
+export function EyeIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" />
+      <circle cx="12" cy="12" r="3" />
+    </Svg>
+  );
+}
+
 export function StopwatchIcon(props: IconProps) {
   return (
     <Svg {...props}>
