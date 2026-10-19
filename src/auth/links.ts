@@ -70,18 +70,30 @@ import { ACK_REACTIONS, ACK_TEXT_MAX, CHAT_TEXT_MAX, CHAT_WIRE, DAY_REPORT_NOTE_
 import type { ChatMessage, ClassAssignment, ClassProgress, DayReport, Exam, ExamSubmission, Goal, GoalAnswer, GoalSuggestion, GuardianLink, GuardianNotice, GuardianPlan, HomeworkAssignment, HomeworkPhoto, HomeworkReview, HomeworkSubmission, Panels, PlanChangeRequest, PlanDraft, PlanItem, PlanRequest, PlannerState, ReportAck, StudentGuardian, WeekResults, WeekSubjectMinutes } from '../types';
 import { mergeChat, sanitizeChatMessage, withChatMessage } from '../chat';
 import {
+  buildComposedExam,
+  drawVariantId,
+  examHasAttempt,
+  examKind,
+  keylessExam,
   mergeExams,
   mergeExamSubmissions,
   sanitizeExam,
   sanitizeExamSubmission,
+  scoreKeyQuestions,
   submitExam,
+  uploadDeadline,
   withGuardianExamResult,
   withLinkExam,
   withoutLinkExam,
+  withStudentExamDraft,
   withStudentExamSubmission,
+  withoutStudentExamDraft,
+  type ExamComposerDraft,
   type ExamDraft,
   buildExamQuestions,
 } from '../exams';
+import { commitExamAnswers, fetchReleasedExamKey, sealExamKey } from '../examSeal';
+import type { ExamFile, StudentExamDraft } from '../types';
 /** Matches the cap in storage.ts, so the vault and the view agree. */
 const WEEKS_KEPT = 12;
 import type { AcceptLinkResponse, LinksResponse, OutgoingLink, ShareResponse } from '../shared/authContract';
@@ -150,6 +162,26 @@ export async function inviteStudent(panels: Panels, username: string, displayNam
     panels: { ...panels, guardian: { ...panels.guardian, links: [...panels.guardian.links, link] } },
     invitation: { link, code, expiresAt },
   };
+}
+
+/**
+ * The cheap change signal behind live messaging.
+ *
+ * Returns the server's last-write timestamp per link with no decryption. The
+ * polling layer compares it against what it last saw and only pays for a full
+ * encrypted sync when something actually moved. A signed-out device gets an
+ * empty map — polling simply has nothing to ask about yet.
+ */
+export async function fetchLinkActivity(): Promise<Record<string, string>> {
+  if (!getActiveSession()) return {};
+  const result = await request<{ links?: Array<{ linkId: string; updatedAt: string }> }>('/api/auth/link-activity');
+  const activity: Record<string, string> = {};
+  for (const entry of result.links ?? []) {
+    if (typeof entry?.linkId === 'string' && typeof entry?.updatedAt === 'string') {
+      activity[entry.linkId] = entry.updatedAt;
+    }
+  }
+  return activity;
 }
 
 /** Guardian: pull the newest results for every linked student. */
@@ -1257,6 +1289,284 @@ export function sitExam(
     throw new LinkError('That exam has already been handed in.');
   }
   return withStudentExamSubmission(panels, submitExam(exam, answers, now));
+}
+
+/* ====================================================== file-based exams */
+
+/**
+ * Guardian: send a composed exam.
+ *
+ * A test exam's answer key is sealed to the server out-of-band and a keyless
+ * copy travels in the student outbox; the guardian's own panels keep the full
+ * key for review. A paper exam carries only its question file and clock.
+ */
+export async function sendComposedExam(
+  panels: Panels,
+  linkId: string,
+  draft: ExamComposerDraft,
+): Promise<Panels> {
+  const session = await requireSession();
+  const link = panels.guardian.links.find((item) => item.linkId === linkId);
+  if (!link?.wrappedShareKey || link.status !== 'linked') throw new LinkError('That student link is not ready yet.');
+  const exam = sanitizeExam(
+    buildComposedExam(draft, {
+      id: newId('exam'),
+      linkId,
+      author: session.user.displayName || session.user.username,
+      now: new Date(),
+    }),
+  );
+  if (!exam) throw new LinkError('That exam could not be saved. Check its name and questions.');
+
+  if (examKind(exam) === 'test' && exam.variants?.length) {
+    await sealExamKey(linkId, link.wrappedShareKey, exam.id, {
+      examId: exam.id,
+      variants: exam.variants.map((variant) => ({ id: variant.id, questions: variant.questions })),
+      sealedAt: new Date().toISOString(),
+    });
+  }
+
+  const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
+  const outbox: GuardianOutbox = {
+    v: 3,
+    ...current,
+    // The student never receives an answer: only the keyless paper.
+    exams: [keylessExam(exam), ...current.exams.filter((item) => item.id !== exam.id)].slice(0, EXAMS_WIRE),
+  };
+  await writeSlot(linkId, link.wrappedShareKey, session.dek, outbox);
+  // The guardian's local record keeps the full key for their own review.
+  return withLinkExam(panels, linkId, exam);
+}
+
+/** Student: open an exam. The clock starts here and is persisted immediately. */
+export function beginExam(panels: Panels, examId: string, now = new Date()): { panels: Panels; draft: StudentExamDraft } {
+  const exam = (panels.student.inbox.exams ?? []).find((item) => item.id === examId);
+  if (!exam) throw new LinkError('That exam is no longer available.');
+  const existing = (panels.student.examSubmissions ?? []).find((item) => item.examId === examId);
+  if (examHasAttempt(existing)) throw new LinkError('That exam has already been handed in.');
+  const kind = examKind(exam);
+  const startedAt = now.toISOString();
+  const held = panels.student.examDrafts?.[examId];
+  // Re-opening continues the same sitting: a fresh start would be a second
+  // attempt wearing a different clock.
+  const draft: StudentExamDraft = held ?? {
+    examId,
+    linkId: exam.linkId,
+    kind,
+    startedAt,
+    answers: {},
+    variantId: kind === 'test' ? drawVariantId(exam) : null,
+    uploadDeadline: kind === 'paper' ? uploadDeadline(exam, startedAt) : null,
+    phase: 'sitting',
+  };
+  return { panels: withStudentExamDraft(panels, draft), draft };
+}
+
+/** Student: record an answer in the persisted sitting draft. */
+export function withExamAnswer(panels: Panels, examId: string, questionId: string, choice: number): Panels {
+  const held = panels.student.examDrafts?.[examId];
+  if (!held) return panels;
+  const draft: StudentExamDraft = { ...held, answers: { ...held.answers, [questionId]: choice } };
+  return withStudentExamDraft(panels, draft);
+}
+
+/**
+ * Student: hand in a test exam.
+ *
+ * The answers are committed to the server before the answer key is allowed to
+ * leave it; only then is the paper graded, so the score cannot be steered by a
+ * key seen early. Legacy key-in-paper exams keep their local-only grading.
+ */
+export async function submitTestExam(
+  panels: Panels,
+  examId: string,
+  now = new Date(),
+): Promise<{ panels: Panels; submission: ExamSubmission }> {
+  const exam = (panels.student.inbox.exams ?? []).find((item) => item.id === examId);
+  const draft = panels.student.examDrafts?.[examId];
+  if (!exam || !draft) throw new LinkError('Start the exam before handing it in.');
+  if ((panels.student.examSubmissions ?? []).some((item) => item.examId === examId)) {
+    throw new LinkError('That exam has already been handed in.');
+  }
+  const guardian = panels.student.guardians.find((item) => item.linkId === exam.linkId);
+  if (!guardian?.wrappedShareKey) throw new LinkError('That link is not ready yet.');
+  const at = now.toISOString();
+
+  let score = 0;
+  let total = 0;
+  let keyReleasedAt: string | null = null;
+  let detail: { right: string[]; wrong: string[]; blank: string[] } | null = null;
+  const variant = exam.variants?.find((item) => item.id === draft.variantId) ?? exam.variants?.[0];
+
+  if (variant) {
+    const committed = await commitExamAnswers(exam.linkId, guardian.wrappedShareKey, {
+      examId,
+      variantId: draft.variantId,
+      answers: draft.answers,
+      startedAt: draft.startedAt,
+      committedAt: at,
+    });
+    if (committed === 'already') throw new LinkError('That exam has already been handed in. Only one attempt is allowed.');
+    const key = await fetchReleasedExamKey(exam.linkId, guardian.wrappedShareKey, examId);
+    const keyedVariant = key?.variants.find((item) => item.id === draft.variantId) ?? key?.variants[0];
+    if (!keyedVariant) throw new LinkError('The answer key could not be read. Try again in a moment.');
+    const graded = scoreKeyQuestions(keyedVariant.questions, draft.answers);
+    score = graded.score;
+    total = graded.total;
+    detail = { right: graded.right, wrong: graded.wrong, blank: graded.blank };
+    keyReleasedAt = new Date().toISOString();
+  } else {
+    // Legacy exam: the key rode inside the paper, so it grades on-device.
+    const legacy = submitExam(exam, { answers: draft.answers, written: {} }, now);
+    score = legacy.score;
+    total = legacy.marked;
+  }
+
+  const submission: ExamSubmission = {
+    id: newId('sitting'),
+    examId,
+    linkId: exam.linkId,
+    answers: draft.answers,
+    written: {},
+    score,
+    marked: total,
+    submittedAt: at,
+    status: 'submitted',
+    kind: 'test',
+    variantId: draft.variantId,
+    startedAt: draft.startedAt,
+    keyReleasedAt,
+    right: detail?.right ?? [],
+    wrong: detail?.wrong ?? [],
+    blank: detail?.blank ?? [],
+  };
+  const next = withStudentExamSubmission(panels, submission);
+  return { panels: withoutStudentExamDraft(next, examId), submission };
+}
+
+/** Student: turn a paper exam that ran past its window into a reported miss. */
+export function markPaperMissed(panels: Panels, examId: string, now = new Date()): Panels {
+  const exam = (panels.student.inbox.exams ?? []).find((item) => item.id === examId);
+  const draft = panels.student.examDrafts?.[examId];
+  if (!exam || !draft || (panels.student.examSubmissions ?? []).some((item) => item.examId === examId)) return panels;
+  const submission: ExamSubmission = {
+    id: newId('sitting'),
+    examId,
+    linkId: exam.linkId,
+    answers: {},
+    written: {},
+    score: 0,
+    marked: 0,
+    submittedAt: now.toISOString(),
+    status: 'missed',
+    kind: 'paper',
+    files: [],
+    startedAt: draft.startedAt,
+    uploadDeadline: draft.uploadDeadline,
+    late: true,
+  };
+  // The sitting is over either way: drop its draft (and any files pending in
+  // it) so a stale timer can never come back to life after the miss is filed.
+  const filed = withStudentExamSubmission(panels, submission);
+  return withoutStudentExamDraft(filed, examId);
+}
+
+/** Student: upload answer papers for a paper exam, inside the granted window. */
+export function submitPaperFiles(
+  panels: Panels,
+  examId: string,
+  files: ExamFile[],
+  now = new Date(),
+): Panels {
+  const exam = (panels.student.inbox.exams ?? []).find((item) => item.id === examId);
+  const draft = panels.student.examDrafts?.[examId];
+  const prior = (panels.student.examSubmissions ?? []).find((item) => item.examId === examId);
+  if (!exam) throw new LinkError('That exam is no longer available.');
+  // A normal hand-in rides the live draft. A re-upload after a granted miss
+  // rides the prior sitting — its draft was cleared when the miss was filed.
+  if (!draft && !(prior && prior.resubmitGrantedAt)) {
+    throw new LinkError('Start the exam before uploading answers.');
+  }
+  if (files.length === 0) throw new LinkError('Add at least one answer file.');
+  const granted = prior?.resubmitGrantedAt ?? null;
+  const deadlineISO = draft?.uploadDeadline ?? prior?.uploadDeadline ?? null;
+  const late = deadlineISO ? now.getTime() > Date.parse(deadlineISO) : false;
+  if (late && !granted) throw new LinkError('The upload window has closed. Ask your guardian to let you try again.');
+  const submission: ExamSubmission = {
+    id: prior?.id ?? newId('sitting'),
+    examId,
+    linkId: exam.linkId,
+    answers: {},
+    written: {},
+    score: prior?.score ?? 0,
+    marked: prior?.marked ?? 0,
+    submittedAt: now.toISOString(),
+    status: 'submitted',
+    kind: 'paper',
+    files,
+    startedAt: draft?.startedAt ?? prior?.startedAt ?? null,
+    uploadDeadline: deadlineISO,
+    late,
+    resubmitGrantedAt: granted,
+    feedback: prior?.feedback ?? '',
+    reviewedAt: prior?.reviewedAt ?? null,
+  };
+  const next = withStudentExamSubmission(panels, submission);
+  return withoutStudentExamDraft(next, examId);
+}
+
+/** Guardian: re-open the upload window on a paper exam that missed it. */
+export async function grantResubmission(panels: Panels, linkId: string, examId: string): Promise<Panels> {
+  const session = await requireSession();
+  const link = panels.guardian.links.find((item) => item.linkId === linkId);
+  if (!link?.wrappedShareKey) throw new LinkError('That student link is not ready yet.');
+  const sitting = (link.examResults ?? []).find((item) => item.examId === examId);
+  if (!sitting) throw new LinkError('There is no sitting to re-open.');
+  const granted: ExamSubmission = {
+    ...sitting,
+    resubmitGrantedAt: new Date().toISOString(),
+    // Still missed until the new files arrive; the flag is what opens the window.
+    status: sitting.files?.length ? sitting.status : 'missed',
+  };
+  const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
+  await writeSlot(linkId, link.wrappedShareKey, session.dek, {
+    v: 3,
+    ...current,
+    examFeedback: [granted, ...current.examFeedback.filter((item) => item.id !== granted.id)].slice(0, EXAM_RESULTS_WIRE),
+  } satisfies GuardianOutbox);
+  return withGuardianExamResult(panels, granted);
+}
+
+/** Guardian: mark an uploaded answer paper and send the words back. */
+export async function markPaperSubmission(
+  panels: Panels,
+  linkId: string,
+  submissionId: string,
+  score: number,
+  maxScore: number,
+  feedback: string,
+): Promise<Panels> {
+  const session = await requireSession();
+  const link = panels.guardian.links.find((item) => item.linkId === linkId);
+  if (!link?.wrappedShareKey) throw new LinkError('That student link is not ready yet.');
+  const sitting = (link.examResults ?? []).find((item) => item.id === submissionId);
+  if (!sitting) throw new LinkError('That sitting is no longer waiting.');
+  const reviewed: ExamSubmission = {
+    ...sitting,
+    score: Math.max(0, Math.round(score)),
+    marked: Math.max(1, Math.round(maxScore)),
+    maxScore: Math.max(1, Math.round(maxScore)),
+    feedback: feedback.trim().slice(0, EXAM_FEEDBACK_MAX),
+    reviewedAt: new Date().toISOString(),
+    status: 'reviewed',
+  };
+  const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
+  await writeSlot(linkId, link.wrappedShareKey, session.dek, {
+    v: 3,
+    ...current,
+    examFeedback: [reviewed, ...current.examFeedback.filter((item) => item.id !== submissionId)].slice(0, EXAM_RESULTS_WIRE),
+  } satisfies GuardianOutbox);
+  return withGuardianExamResult(panels, reviewed);
 }
 
 let planQueueFlushing = false;

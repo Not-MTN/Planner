@@ -140,6 +140,23 @@ CREATE TABLE IF NOT EXISTS planner_passkeys (
 
 CREATE INDEX IF NOT EXISTS planner_passkeys_user_idx ON planner_passkeys (user_id);
 
+-- Commit-then-reveal answer keys for file/test exams. The guardian seals the
+-- key when sending an exam; the student's answers are committed before the
+-- key can ever leave the server, so no key material exists on their device
+-- until their one attempt is sealed. Both columns stay encrypted — the server
+-- only enforces the ordering and the single-attempt rule.
+CREATE TABLE IF NOT EXISTS planner_exam_seals (
+  link_id           text NOT NULL REFERENCES planner_links(id) ON DELETE CASCADE,
+  exam_id           text NOT NULL,
+  key_ciphertext    text,
+  commit_ciphertext text,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  committed_at      timestamptz,
+  PRIMARY KEY (link_id, exam_id)
+);
+
+CREATE INDEX IF NOT EXISTS planner_exam_seals_link_idx ON planner_exam_seals (link_id);
+
 -- ---------------------------------------------------------------------------
 -- Starting over (optional)
 -- ---------------------------------------------------------------------------

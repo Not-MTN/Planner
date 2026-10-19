@@ -25,11 +25,92 @@ import {
   EXAM_WRITTEN_MAX,
   EXAM_FEEDBACK_MAX,
   EXAMS_KEPT,
+  EXAM_VARIANTS_MAX,
+  EXAM_FILES_MAX,
+  EXAM_UPLOAD_MIN_MIN,
+  EXAM_UPLOAD_MIN_MAX,
+  EXAM_UPLOAD_WINDOW_MIN,
+  EXAM_VARIANT_LABEL_MAX,
+  EXAM_POINTS_MAX,
 } from './types';
-import type { Exam, ExamQuestion, ExamSubmission, Panels } from './types';
+import type {
+  Exam,
+  ExamFile,
+  ExamKeyQuestion,
+  ExamKind,
+  ExamQuestion,
+  ExamSittingStatus,
+  ExamSubmission,
+  ExamVariant,
+  Panels,
+  StudentExamDraft,
+} from './types';
 
 const ID_MAX = 80;
 const LINK_MAX = 64;
+const FILE_NAME_MAX = 180;
+const SITTING_STATUSES: ExamSittingStatus[] = ['sitting', 'uploading', 'submitted', 'missed', 'reviewed'];
+
+/** Which kind an exam is, treating everything sent before the split as a test. */
+export function examKind(exam: Exam): ExamKind {
+  return exam.kind === 'paper' ? 'paper' : 'test';
+}
+
+/** An encrypted file pointer as the wire carries it. Malformed ones are dropped. */
+export function sanitizeExamFile(value: unknown): ExamFile | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const url = typeof raw.url === 'string' ? raw.url.trim().slice(0, 2048) : '';
+  const publicId = typeof raw.publicId === 'string' ? raw.publicId.trim().slice(0, 240) : '';
+  const name = typeof raw.name === 'string' ? raw.name.trim().slice(0, FILE_NAME_MAX) : '';
+  const mime = typeof raw.mime === 'string' ? raw.mime.trim().slice(0, 160) : '';
+  const bytes = typeof raw.bytes === 'number' && Number.isFinite(raw.bytes) ? Math.max(0, Math.round(raw.bytes)) : 0;
+  if (!url || !publicId || !name || bytes <= 0) return null;
+  return { url, publicId, name, mime: mime || 'application/octet-stream', bytes };
+}
+
+/** One graded question (multiple choice or true/false) as the wire carries it. */
+export function sanitizeExamKeyQuestion(value: unknown): ExamKeyQuestion | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = text(raw.id, ID_MAX);
+  if (!id) return null;
+  const type = raw.type === 'boolean' ? 'boolean' : 'single';
+  const options = (Array.isArray(raw.options) ? raw.options : [])
+    .flatMap((option) => {
+      const clean = text(option, EXAM_CHOICE_MAX);
+      return clean ? [clean] : [];
+    })
+    .slice(0, EXAM_CHOICES_MAX);
+  const answer =
+    typeof raw.answer === 'number' && Number.isInteger(raw.answer) && raw.answer >= 0 && raw.answer < options.length
+      ? raw.answer
+      : null;
+  const points =
+    typeof raw.points === 'number' && Number.isFinite(raw.points)
+      ? Math.max(1, Math.min(EXAM_POINTS_MAX, Math.round(raw.points)))
+      : 1;
+  if (options.length < 2) return null;
+  return { id, type, options, answer, points };
+}
+
+/** One test variant as the wire carries it. */
+export function sanitizeExamVariant(value: unknown): ExamVariant | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = text(raw.id, ID_MAX);
+  if (!id) return null;
+  const label = text(raw.label, EXAM_VARIANT_LABEL_MAX) || id.slice(0, 12);
+  const file = sanitizeExamFile(raw.file);
+  const questions = (Array.isArray(raw.questions) ? raw.questions : [])
+    .flatMap((question) => {
+      const clean = sanitizeExamKeyQuestion(question);
+      return clean ? [clean] : [];
+    })
+    .slice(0, EXAM_QUESTIONS_MAX);
+  if (questions.length === 0) return null;
+  return { id, label, file, questions };
+}
 
 function text(value: unknown, max: number): string {
   return typeof value === 'string' ? value.trim().slice(0, max) : '';
@@ -77,19 +158,34 @@ export function sanitizeExam(value: unknown): Exam | null {
   const title = text(raw.title, EXAM_TITLE_MAX);
   const createdAt = timestamp(raw.createdAt);
   if (!id || !linkId || !title || !createdAt) return null;
+  const kind: ExamKind = raw.kind === 'paper' ? 'paper' : 'test';
   const questions = (Array.isArray(raw.questions) ? raw.questions : [])
     .flatMap((question) => {
       const clean = sanitizeExamQuestion(question);
       return clean ? [clean] : [];
     })
     .slice(0, EXAM_QUESTIONS_MAX);
-  if (questions.length === 0) return null;
   const minutes =
     typeof raw.minutes === 'number' && Number.isFinite(raw.minutes)
       ? Math.max(1, Math.min(600, Math.round(raw.minutes)))
       : null;
   const dueAt = raw.dueAt === null || raw.dueAt === undefined || raw.dueAt === '' ? null : timestamp(raw.dueAt);
   if (raw.dueAt && !dueAt) return null;
+  const variants = (Array.isArray(raw.variants) ? raw.variants : [])
+    .flatMap((variant) => {
+      const clean = sanitizeExamVariant(variant);
+      return clean ? [clean] : [];
+    })
+    .slice(0, EXAM_VARIANTS_MAX);
+  const paperFile = raw.paperFile === null || raw.paperFile === undefined ? null : sanitizeExamFile(raw.paperFile);
+  const uploadMinutes =
+    typeof raw.uploadMinutes === 'number' && Number.isFinite(raw.uploadMinutes)
+      ? Math.max(EXAM_UPLOAD_MIN_MIN, Math.min(EXAM_UPLOAD_MIN_MAX, Math.round(raw.uploadMinutes)))
+      : null;
+  // A new-style exam is valid through its variants (test) or its paper file;
+  // legacy exams remain valid through `questions` alone.
+  if (kind === 'test' && questions.length === 0 && variants.length === 0) return null;
+  if (kind === 'paper' && !paperFile) return null;
   return {
     id,
     linkId,
@@ -101,6 +197,10 @@ export function sanitizeExam(value: unknown): Exam | null {
     dueAt,
     questions,
     createdAt,
+    kind,
+    variants,
+    paperFile,
+    uploadMinutes,
   };
 }
 
@@ -130,6 +230,16 @@ export function sanitizeExamSubmission(value: unknown): ExamSubmission | null {
       if (clean) written[key.slice(0, ID_MAX)] = clean;
     }
   }
+  const files = (Array.isArray(raw.files) ? raw.files : [])
+    .flatMap((file) => {
+      const clean = sanitizeExamFile(file);
+      return clean ? [clean] : [];
+    })
+    .slice(0, EXAM_FILES_MAX);
+  const status =
+    typeof raw.status === 'string' && SITTING_STATUSES.includes(raw.status as ExamSittingStatus)
+      ? (raw.status as ExamSittingStatus)
+      : undefined;
   return {
     id,
     examId,
@@ -141,6 +251,77 @@ export function sanitizeExamSubmission(value: unknown): ExamSubmission | null {
     submittedAt,
     feedback: text(raw.feedback, EXAM_FEEDBACK_MAX),
     reviewedAt: raw.reviewedAt === null || raw.reviewedAt === undefined ? null : timestamp(raw.reviewedAt),
+    status,
+    kind: raw.kind === 'paper' ? 'paper' : raw.kind === 'test' ? 'test' : undefined,
+    variantId: typeof raw.variantId === 'string' ? raw.variantId.slice(0, ID_MAX) : null,
+    files,
+    startedAt: raw.startedAt === null || raw.startedAt === undefined ? null : timestamp(raw.startedAt),
+    uploadDeadline:
+      raw.uploadDeadline === null || raw.uploadDeadline === undefined ? null : timestamp(raw.uploadDeadline),
+    late: raw.late === true,
+    maxScore:
+      typeof raw.maxScore === 'number' && Number.isFinite(raw.maxScore)
+        ? Math.max(0, Math.min(10_000, Math.round(raw.maxScore)))
+        : null,
+    resubmitGrantedAt:
+      raw.resubmitGrantedAt === null || raw.resubmitGrantedAt === undefined ? null : timestamp(raw.resubmitGrantedAt),
+    keyReleasedAt:
+      raw.keyReleasedAt === null || raw.keyReleasedAt === undefined ? null : timestamp(raw.keyReleasedAt),
+    right: idList(raw.right),
+    wrong: idList(raw.wrong),
+    blank: idList(raw.blank),
+  };
+}
+
+/** A string-array field of question ids, bounded and stripped of junk. */
+function idList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.slice(0, ID_MAX))
+    .slice(0, EXAM_QUESTIONS_MAX);
+}
+
+/**
+ * A persisted in-progress sitting. Drafts never leave the device, but they do
+ * round-trip through local storage, so a reloaded app must get back exactly the
+ * clock, variant and uploads the student had — never a fresh start.
+ */
+export function sanitizeStudentExamDraft(value: unknown): StudentExamDraft | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const examId = text(raw.examId, ID_MAX);
+  const linkId = text(raw.linkId, LINK_MAX);
+  const startedAt = timestamp(raw.startedAt);
+  if (!examId || !linkId || !startedAt) return null;
+  const answers: Record<string, number> = {};
+  if (raw.answers && typeof raw.answers === 'object') {
+    for (const [key, choice] of Object.entries(raw.answers as Record<string, unknown>)) {
+      if (typeof choice === 'number' && Number.isInteger(choice) && choice >= 0 && choice < EXAM_CHOICES_MAX) {
+        answers[key.slice(0, ID_MAX)] = choice;
+      }
+    }
+  }
+  const pendingFiles = (Array.isArray(raw.pendingFiles) ? raw.pendingFiles : [])
+    .flatMap((file) => {
+      const clean = sanitizeExamFile(file);
+      return clean ? [clean] : [];
+    })
+    .slice(0, EXAM_FILES_MAX);
+  return {
+    examId,
+    linkId,
+    kind: raw.kind === 'paper' ? 'paper' : 'test',
+    startedAt,
+    answers,
+    variantId: typeof raw.variantId === 'string' ? raw.variantId.slice(0, ID_MAX) : null,
+    uploadDeadline:
+      raw.uploadDeadline === null || raw.uploadDeadline === undefined ? null : timestamp(raw.uploadDeadline),
+    phase:
+      typeof raw.phase === 'string' && SITTING_STATUSES.includes(raw.phase as ExamSittingStatus)
+        ? (raw.phase as ExamSittingStatus)
+        : 'sitting',
+    pendingFiles,
   };
 }
 
@@ -417,7 +598,11 @@ export function mergeExams(current: Exam[], incoming: Exam[]): Exam[] {
  * Sittings, newest first.
  *
  * A sitting happens once: an earlier one is never replaced by a later pull, and
- * the guardian's feedback lands on the sitting it answers rather than beside it.
+ * the guardian's feedback lands on the sitting it answers rather than beside
+ * it. Because the two sides now write the same sitting at different moments —
+ * the student uploads files, the guardian re-grants an attempt — the merge is
+ * field-level, not last-write-wins: files union, flags survive, and the later
+ * review/grant timestamp wins rather than an older copy blanking a newer one.
  */
 export function mergeExamSubmissions(current: ExamSubmission[], incoming: ExamSubmission[]): ExamSubmission[] {
   const byId = new Map<string, ExamSubmission>();
@@ -427,9 +612,34 @@ export function mergeExamSubmissions(current: ExamSubmission[], incoming: ExamSu
       byId.set(submission.id, submission);
       continue;
     }
-    // Feedback that has already arrived stays; an older copy of the same
-    // sitting must not take it back off.
-    byId.set(submission.id, previous.feedback ? { ...submission, feedback: previous.feedback, reviewedAt: previous.reviewedAt ?? submission.reviewedAt } : submission);
+    const files = new Map<string, ExamFile>();
+    for (const file of [...(previous.files ?? []), ...(submission.files ?? [])]) {
+      files.set(file.publicId, file);
+    }
+    const later = (a: string | null | undefined, b: string | null | undefined): string | null => {
+      if (!a) return b ?? null;
+      if (!b) return a;
+      return a.localeCompare(b) >= 0 ? a : b;
+    };
+    byId.set(submission.id, {
+      ...submission,
+      ...previous,
+      files: [...files.values()],
+      late: previous.late || submission.late,
+      feedback: previous.feedback || submission.feedback,
+      reviewedAt: later(previous.reviewedAt, submission.reviewedAt),
+      resubmitGrantedAt: later(previous.resubmitGrantedAt, submission.resubmitGrantedAt),
+      keyReleasedAt: later(previous.keyReleasedAt, submission.keyReleasedAt),
+      // Status moves forward through the sitting's life and never back:
+      // missed → submitted (a granted re-upload arriving) → reviewed. A copy
+      // arriving out of order must not walk a progressed sitting backwards.
+      status:
+        previous.status === 'reviewed' || submission.status === 'reviewed'
+          ? 'reviewed'
+          : previous.status === 'submitted' || submission.status === 'submitted'
+            ? 'submitted'
+            : (submission.status ?? previous.status),
+    });
   }
   return [...byId.values()]
     .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))
@@ -463,6 +673,38 @@ export function withStudentExamSubmission(panels: Panels, submission: ExamSubmis
       examSubmissions: mergeExamSubmissions(panels.student.examSubmissions ?? [], [submission]),
     },
   };
+}
+
+/** Student: persist an in-progress sitting so the clock and answers survive reloads. */
+export function withStudentExamDraft(panels: Panels, draft: NonNullable<Panels['student']['examDrafts']>[string]): Panels {
+  return {
+    ...panels,
+    student: {
+      ...panels.student,
+      examDrafts: { ...(panels.student.examDrafts ?? {}), [draft.examId]: draft },
+    },
+  };
+}
+
+/** Student: drop the local sitting draft once the submission has been made. */
+export function withoutStudentExamDraft(panels: Panels, examId: string): Panels {
+  if (!panels.student.examDrafts?.[examId]) return panels;
+  const drafts = { ...panels.student.examDrafts };
+  delete drafts[examId];
+  return { ...panels, student: { ...panels.student, examDrafts: drafts } };
+}
+
+/**
+ * The variant this student answers. Assigned at Start and then fixed in the
+ * persisted draft, so re-opening the exam can never roll them onto another
+ * paper. Random across variants — two students on the same guardian get
+ * different papers without the guardian hand-picking per student.
+ */
+export function drawVariantId(exam: Exam): string | null {
+  const variants = exam.variants ?? [];
+  if (variants.length === 0) return null;
+  const at = Math.floor(Math.random() * variants.length);
+  return variants[at]?.id ?? variants[0]!.id;
 }
 
 /** Guardian: fold a sitting in, and put the words back on the one it answers. */
@@ -504,4 +746,331 @@ export function withoutLinkExam(panels: Panels, linkId: string, examId: string):
       ),
     },
   };
+}
+
+/* ============================================================ file exams */
+
+/** One question while the guardian is still writing the answer key. */
+export interface KeyQuestionDraft {
+  id: string;
+  type: 'single' | 'boolean';
+  /** Two to five options for a single-choice question; ignored for boolean. */
+  options: string[];
+  /** Chosen correct index, or null while unset. */
+  answer: number | null;
+  points: string;
+}
+
+/** One variant while composing: its paper, its questions, its key. */
+export interface VariantDraft {
+  id: string;
+  label: string;
+  file: ExamFile | null;
+  questions: KeyQuestionDraft[];
+}
+
+/** A test exam: variants, each with a file and an answer key. */
+export interface TestExamDraft {
+  kind: 'test';
+  title: string;
+  subject: string;
+  note: string;
+  minutes: string;
+  dueAt: string;
+  variants: VariantDraft[];
+}
+
+/** A paper exam: one file, a clock, and an upload window afterwards. */
+export interface PaperExamDraft {
+  kind: 'paper';
+  title: string;
+  subject: string;
+  note: string;
+  minutes: string;
+  dueAt: string;
+  uploadMinutes: string;
+  paperFile: ExamFile | null;
+}
+
+export type ExamComposerDraft = TestExamDraft | PaperExamDraft;
+
+const BOOLEAN_OPTIONS = (): [string, string] => [t('True'), t('False')];
+
+export function emptyKeyQuestion(id: string): KeyQuestionDraft {
+  return { id, type: 'boolean', options: [...BOOLEAN_OPTIONS()], answer: null, points: '1' };
+}
+
+export function emptyVariant(id: string, label: string, questionCount: number): VariantDraft {
+  return {
+    id,
+    label,
+    file: null,
+    questions: Array.from({ length: Math.max(1, questionCount) }, (_, at) => emptyKeyQuestion(`q${at + 1}`)),
+  };
+}
+
+export function emptyTestDraft(): TestExamDraft {
+  return {
+    kind: 'test',
+    title: '',
+    subject: '',
+    note: '',
+    minutes: '',
+    dueAt: '',
+    variants: [emptyVariant('v1', t('Variant {0}', { 0: 'A' }), 1)],
+  };
+}
+
+export function emptyPaperDraft(): PaperExamDraft {
+  return {
+    kind: 'paper',
+    title: '',
+    subject: '',
+    note: '',
+    minutes: '',
+    dueAt: '',
+    uploadMinutes: String(EXAM_UPLOAD_WINDOW_MIN),
+    paperFile: null,
+  };
+}
+
+/**
+ * Grow or shrink a variant's question list to exactly `count`. Existing
+ * answers survive; new questions arrive as true/false, the lightest shape.
+ */
+export function withQuestionCount(variant: VariantDraft, count: number): VariantDraft {
+  const safe = Math.max(1, Math.min(EXAM_QUESTIONS_MAX, Math.round(count) || 1));
+  if (safe === variant.questions.length) return variant;
+  if (safe < variant.questions.length) return { ...variant, questions: variant.questions.slice(0, safe) };
+  const added = Array.from({ length: safe - variant.questions.length }, (_, at) =>
+    emptyKeyQuestion(`q${variant.questions.length + at + 1}`),
+  );
+  return { ...variant, questions: [...variant.questions, ...added] };
+}
+
+/** Bulk answer entry: one correct index per question, in question order. */
+export function applyBulkAnswers(variant: VariantDraft, answers: Array<number | null>): VariantDraft {
+  return {
+    ...variant,
+    questions: variant.questions.map((question, at) => {
+      const answer = answers[at];
+      return typeof answer === 'number' && answer >= 0 && answer < question.options.length
+        ? { ...question, answer }
+        : question;
+    }),
+  };
+}
+
+/** The student's copy of an exam: every answer key stripped before it travels. */
+export function keylessExam(exam: Exam): Exam {
+  if (examKind(exam) !== 'test' || !exam.variants?.length) return exam;
+  return {
+    ...exam,
+    variants: exam.variants.map((variant) => ({
+      ...variant,
+      questions: variant.questions.map((question) => ({ ...question, answer: null })),
+    })),
+  };
+}
+
+function buildKeyQuestion(draft: KeyQuestionDraft): ExamKeyQuestion | null {
+  const options = draft.type === 'boolean'
+    ? [...BOOLEAN_OPTIONS()]
+    : draft.options.map((option) => option.trim()).filter(Boolean).slice(0, EXAM_CHOICES_MAX);
+  if (options.length < 2) return null;
+  const points = Number(draft.points);
+  return {
+    id: draft.id,
+    type: draft.type,
+    options,
+    answer: draft.answer !== null && draft.answer < options.length ? draft.answer : null,
+    points: Number.isFinite(points) && points >= 1 ? Math.max(1, Math.min(EXAM_POINTS_MAX, Math.round(points))) : 1,
+  };
+}
+
+/** What stops this composer draft from being sent, worded for the guardian. */
+export function composerDraftError(draft: ExamComposerDraft): string | null {
+  if (!draft.title.trim()) return t('Give the exam a name.');
+  if (draft.dueAt && draft.dueAt < todayISO()) return t('The due day cannot be behind you.');
+  if (draft.minutes) {
+    const minutes = Number(draft.minutes);
+    if (!Number.isFinite(minutes) || minutes < 1 || minutes > 600) return t('Allow between 1 and 600 minutes.');
+  }
+  if (draft.kind === 'paper') {
+    if (!draft.paperFile) return t('Add the question paper file.');
+    if (!draft.minutes.trim()) return t('Set how long the exam lasts. The clock starts when they begin.');
+    const upload = Number(draft.uploadMinutes);
+    if (!Number.isFinite(upload) || upload < EXAM_UPLOAD_MIN_MIN || upload > EXAM_UPLOAD_MIN_MAX) {
+      return t('The upload window must be between {0} and {1} minutes.', { 0: EXAM_UPLOAD_MIN_MIN, 1: EXAM_UPLOAD_MIN_MAX });
+    }
+    return null;
+  }
+  if (draft.variants.length === 0) return t('Add at least one variant.');
+  const labels = draft.variants.map((variant) => variant.label.trim());
+  if (labels.some((label) => !label)) return t('Name every variant.');
+  if (new Set(labels).size !== labels.length) return t('Variant names must be different.');
+  for (const variant of draft.variants) {
+    if (!variant.file) return t('Add the question paper for variant {0}.', { 0: variant.label || '—' });
+    if (variant.questions.length === 0) return t('Set the number of questions on {0}.', { 0: variant.label });
+    for (const question of variant.questions) {
+      if (question.type === 'single' && question.options.map((option) => option.trim()).filter(Boolean).length < 2) {
+        return t('Every multiple-choice question needs two options or more.');
+      }
+      if (question.answer === null) return t('Mark the right answer on every question.');
+      const points = Number(question.points);
+      if (question.points && (!Number.isFinite(points) || points < 1 || points > EXAM_POINTS_MAX)) {
+        return t('Give each question between 1 and {0} points.', { 0: EXAM_POINTS_MAX });
+      }
+    }
+  }
+  return null;
+}
+
+/** The full exam object, key included — this copy stays with the guardian. */
+export function buildComposedExam(draft: ExamComposerDraft, meta: { id: string; linkId: string; author: string; now: Date }): Exam {
+  const minutes = draft.minutes.trim() ? Math.max(1, Math.min(600, Math.round(Number(draft.minutes)))) : null;
+  const base: Exam = {
+    id: meta.id,
+    linkId: meta.linkId,
+    author: meta.author,
+    title: draft.title.trim().slice(0, EXAM_TITLE_MAX),
+    subject: draft.subject.trim().slice(0, 60),
+    note: draft.note.trim().slice(0, EXAM_NOTE_MAX),
+    minutes,
+    dueAt: draft.dueAt || null,
+    questions: [],
+    createdAt: meta.now.toISOString(),
+  };
+  if (draft.kind === 'paper') {
+    return {
+      ...base,
+      kind: 'paper',
+      paperFile: draft.paperFile,
+      uploadMinutes: Math.max(
+        EXAM_UPLOAD_MIN_MIN,
+        Math.min(EXAM_UPLOAD_MIN_MAX, Math.round(Number(draft.uploadMinutes) || EXAM_UPLOAD_WINDOW_MIN)),
+      ),
+    };
+  }
+  return {
+    ...base,
+    kind: 'test',
+    variants: draft.variants
+      .map((variant): ExamVariant => ({
+        id: variant.id,
+        label: variant.label.trim().slice(0, EXAM_VARIANT_LABEL_MAX),
+        file: variant.file,
+        questions: variant.questions
+          .map(buildKeyQuestion)
+          .filter((question): question is ExamKeyQuestion => question !== null),
+      }))
+      .filter((variant) => variant.questions.length > 0)
+      .slice(0, EXAM_VARIANTS_MAX),
+  };
+}
+
+/** Total points of one variant, and how many questions it holds. */
+export function variantSummary(variant: { questions: Array<{ points: number | string }> }): { questions: number; points: number } {
+  return {
+    questions: variant.questions.length,
+    points: variant.questions.reduce((sum, question) => sum + Math.max(0, Number(question.points) || 0), 0),
+  };
+}
+
+/* ------------------------------------------------------------------ marking */
+
+export interface KeyScore {
+  score: number;
+  total: number;
+  right: string[];
+  wrong: string[];
+  blank: string[];
+}
+
+/**
+ * Grade a test variant against the guardian's key.
+ *
+ * Unlike the legacy mixed exam, every question here is machine-markable, so
+ * `total` covers the whole paper and a blank answer is reported as blank
+ * rather than silently counted as wrong.
+ */
+export function scoreKeyQuestions(questions: ExamKeyQuestion[], answers: Record<string, number>): KeyScore {
+  let score = 0;
+  let total = 0;
+  const right: string[] = [];
+  const wrong: string[] = [];
+  const blank: string[] = [];
+  for (const question of questions) {
+    total += question.points;
+    const chosen = answers[question.id];
+    if (chosen === undefined) {
+      blank.push(question.id);
+      continue;
+    }
+    if (chosen === question.answer) {
+      score += question.points;
+      right.push(question.id);
+    } else {
+      wrong.push(question.id);
+    }
+  }
+  return { score, total, right, wrong, blank };
+}
+
+/* ------------------------------------------------------------- paper timing */
+
+/** When the answer-paper upload window shuts, or null when there is no clock. */
+export function uploadDeadline(exam: Exam, startedAt: string): string | null {
+  if (!exam.minutes) return null;
+  const start = Date.parse(startedAt);
+  if (!Number.isFinite(start)) return null;
+  const windowMin = exam.uploadMinutes ?? EXAM_UPLOAD_WINDOW_MIN;
+  return new Date(start + (exam.minutes + windowMin) * 60_000).toISOString();
+}
+
+/** The answer window length in ms (zero when the exam has no clock). */
+export function uploadWindowMs(exam: Exam): number {
+  return (exam.uploadMinutes ?? EXAM_UPLOAD_WINDOW_MIN) * 60_000;
+}
+
+export type PaperPhase = 'sitting' | 'upload' | 'submitted' | 'missed' | 'reviewed';
+
+/**
+ * Where a paper exam currently is, from wall-clock times that survive the
+ * device sleeping and the tab being killed.
+ */
+export function paperPhase(
+  exam: Exam,
+  sitting: { startedAt?: string | null; uploadDeadline?: string | null; status?: ExamSittingStatus; files?: ExamFile[]; reviewedAt?: string | null } | undefined,
+  now = Date.now(),
+): PaperPhase | null {
+  if (examKind(exam) !== 'paper') return null;
+  if (!sitting?.startedAt) return null;
+  if (sitting.status === 'reviewed' || sitting.reviewedAt) return 'reviewed';
+  const hasFiles = (sitting.files?.length ?? 0) > 0;
+  if (sitting.status === 'submitted' && hasFiles) return 'submitted';
+  const deadline = sitting.uploadDeadline ? Date.parse(sitting.uploadDeadline) : NaN;
+  if (!Number.isFinite(deadline)) return hasFiles ? 'submitted' : 'sitting';
+  if (now > deadline) return hasFiles ? 'submitted' : 'missed';
+  const endOfExam = deadline - uploadWindowMs(exam);
+  return now < endOfExam ? 'sitting' : 'upload';
+}
+
+/** Whether the student may upload answer files right now. */
+export function canUploadPapers(
+  sitting: { status?: ExamSittingStatus; uploadDeadline?: string | null; files?: ExamFile[]; resubmitGrantedAt?: string | null } | undefined,
+  now = Date.now(),
+): boolean {
+  if (!sitting) return false;
+  if ((sitting.files?.length ?? 0) > 0 && !sitting.resubmitGrantedAt) return false;
+  const deadline = sitting.uploadDeadline ? Date.parse(sitting.uploadDeadline) : NaN;
+  if (Number.isFinite(deadline) && now > deadline && !sitting.resubmitGrantedAt) return false;
+  return true;
+}
+
+/** One attempt, ever: a finished sitting of either kind locks the exam. */
+export function examHasAttempt(submission: ExamSubmission | undefined): boolean {
+  if (!submission) return false;
+  if (submission.status === 'missed' && (submission.files?.length ?? 0) === 0) return true;
+  return Boolean(submission.status === 'submitted' || submission.status === 'reviewed' || submission.submittedAt);
 }

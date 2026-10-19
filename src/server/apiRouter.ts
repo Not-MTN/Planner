@@ -24,11 +24,17 @@ import {
   handleAuthStatus,
   handleHomeworkPhotoDelete,
   handleHomeworkUploadSign,
+  handleLinkFileDelete,
+  handleLinkFileSign,
+  handleExamCommit,
+  handleExamSealGet,
+  handleExamSealPut,
   handleLinkAccept,
   handleLinks,
   handleLogin,
   handleLogout,
   handleNote,
+  handleLinkActivity,
   handlePasskeyDelete,
   handlePasskeyList,
   handlePasskeyLoginOptions,
@@ -159,6 +165,16 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
       return (request) => authStore(env.DATABASE_URL).then((store) => handleHomeworkUploadSign(request, store, env));
     case '/api/auth/homework-photos/delete':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleHomeworkPhotoDelete(request, store, env));
+    case '/api/auth/link-files/sign':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleLinkFileSign(request, store, env));
+    case '/api/auth/link-files/delete':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleLinkFileDelete(request, store, env));
+    case '/api/auth/exam-seal':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleExamSealPut(request, store));
+    case '/api/auth/exam-commit':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleExamCommit(request, store));
+    case '/api/auth/exam-key':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleExamSealGet(request, store));
     case '/api/auth/link-accept':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleLinkAccept(request, store));
     case '/api/auth/links':
@@ -181,6 +197,8 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
       return (request) => authStore(env.DATABASE_URL).then((store) => handlePasskeyList(request, store));
     case '/api/auth/note':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleNote(request, store));
+    case '/api/auth/link-activity':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleLinkActivity(request, store));
     case '/api/auth/recovery/start':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleRecoveryStart(request, store));
     case '/api/auth/recovery/complete':

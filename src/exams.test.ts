@@ -171,6 +171,24 @@ describe('what stays and what goes', () => {
     expect(merged[0]?.feedback).toBe('Look at the second step.');
   });
 
+  it('moves a missed sitting to submitted when the granted re-upload arrives, in either merge order', () => {
+    const missed: ExamSubmission = {
+      id: 'sitting-1', examId: 'exam-1', linkId: 'link-1', answers: {}, written: {},
+      score: 0, marked: 0, submittedAt: at, status: 'missed', kind: 'paper', files: [], late: true,
+      resubmitGrantedAt: at,
+    };
+    const reupload: ExamSubmission = {
+      ...missed,
+      status: 'submitted',
+      files: [{ url: 'u', publicId: 'p', name: 'a.pdf', mime: 'application/pdf', bytes: 9 }],
+    };
+    expect(mergeExamSubmissions([missed], [reupload])[0]?.status).toBe('submitted');
+    expect(mergeExamSubmissions([reupload], [missed])[0]?.status).toBe('submitted');
+    // And a later review still wins over both.
+    const reviewed: ExamSubmission = { ...reupload, status: 'reviewed', reviewedAt: at };
+    expect(mergeExamSubmissions([missed], [reviewed])[0]?.status).toBe('reviewed');
+  });
+
   it('finds the sitting for one exam', () => {
     const sitting = submitExam(exam(), { answers: {}, written: {} }, new Date(at));
     expect(submissionFor([sitting], 'exam-1')?.id).toBe(sitting.id);

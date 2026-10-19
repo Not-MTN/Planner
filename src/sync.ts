@@ -8,8 +8,9 @@
  * The server stores { id, version, ciphertext } and can't read anything.
  */
 import { sanitizeState, serialize } from './storage';
-import { AI_DECLINED_LIMIT, AI_PLAN_LIMIT, DAY_REPORTS_KEPT, GOAL_ANSWERS_KEPT, HOMEWORK_ITEMS_KEPT, PRAISE_KEPT } from './types';
-import type { ClassAssignment, ClassProgress, DayReport, FixedCommitment, Goal, GoalAnswer, GuardianLink, GuardianPlan, Habit, HomeworkAssignment, HomeworkReview, HomeworkSubmission, Note, Panels, PlannerEvent, PlannerState, PlanRequest, ReportAck, Task } from './types';
+import { mergeExamSubmissions } from './exams';
+import { AI_DECLINED_LIMIT, AI_PLAN_LIMIT, DAY_REPORTS_KEPT, EXAM_RESULTS_KEPT, GOAL_ANSWERS_KEPT, HOMEWORK_ITEMS_KEPT, PRAISE_KEPT } from './types';
+import type { ClassAssignment, ClassProgress, DayReport, FixedCommitment, Goal, GoalAnswer, GuardianLink, GuardianPlan, Habit, HomeworkAssignment, HomeworkReview, HomeworkSubmission, Note, Panels, PlannerEvent, PlannerState, PlanRequest, ReportAck, StudentExamDraft, Task } from './types';
 
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O/1/I/L
 const SETTINGS_KEY = 'planner-sync';
@@ -133,6 +134,40 @@ function mergeById<T extends Stamped>(local: T[], remote: T[]): T[] {
     if (!other || (item.updatedAt ?? '') >= (other.updatedAt ?? '')) map.set(item.id, item);
   }
   return [...map.values()];
+}
+
+/**
+ * Merge in-progress sittings keyed by exam. The earliest startedAt wins, since
+ * the first Start is the only sitting; a later clock would be a second attempt.
+ * Pending answer files union so an upload made on either device survives.
+ */
+function mergeExamDrafts(
+  local: Record<string, StudentExamDraft>,
+  remote: Record<string, StudentExamDraft>,
+): Record<string, StudentExamDraft> {
+  const out: Record<string, StudentExamDraft> = {};
+  for (const key of new Set([...Object.keys(local), ...Object.keys(remote)])) {
+    const a = local[key];
+    const b = remote[key];
+    if (!a) {
+      if (b) out[key] = b;
+      continue;
+    }
+    if (!b) {
+      out[key] = a;
+      continue;
+    }
+    const oldest = a.startedAt <= b.startedAt ? a : b;
+    const newest = oldest === a ? b : a;
+    const seen = new Set<string>();
+    const pendingFiles = [...oldest.pendingFiles ?? [], ...newest.pendingFiles ?? []].filter((file) => {
+      if (seen.has(file.publicId)) return false;
+      seen.add(file.publicId);
+      return true;
+    });
+    out[key] = { ...newest, ...oldest, pendingFiles };
+  }
+  return out;
 }
 
 /**
@@ -360,6 +395,15 @@ export function mergePanels(local: Panels, remote: Panels): Panels {
       praise: byId(local.student.praise ?? [], remote.student.praise ?? [])
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         .slice(0, PRAISE_KEPT),
+      // Sittings must agree across devices so a second device cannot offer a
+      // second attempt; the field-level merge keeps grants, reviews and files.
+      examSubmissions: mergeExamSubmissions(
+        local.student.examSubmissions ?? [],
+        remote.student.examSubmissions ?? [],
+      ).slice(0, EXAM_RESULTS_KEPT),
+      // A sitting in progress on either device survives; the earlier clock
+      // wins so a merge can never reset the guardian's time limit.
+      examDrafts: mergeExamDrafts(local.student.examDrafts ?? {}, remote.student.examDrafts ?? {}),
     },
     guardian: {
       enabled: local.guardian.enabled || remote.guardian.enabled,
