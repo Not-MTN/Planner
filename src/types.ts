@@ -350,6 +350,12 @@ export interface StudentPanel {
   requests?: PlanRequest[];
   /** Changes this student asked for on a plan, newest first — with the answers. */
   changeRequests?: PlanChangeRequest[];
+  /** The chat threads with their guardians, oldest first. */
+  chat?: ChatMessage[];
+  /** How far each thread has been read, by link, so the count goes quiet. */
+  chatSeen?: Record<string, string>;
+  /** Exams this student sat, newest first. */
+  examSubmissions?: ExamSubmission[];
   /**
    * Kind words, kept. Praise is the one thing worth re-reading, so it does not
    * fall out of the inbox when more notes arrive.
@@ -364,11 +370,20 @@ export interface StudentPanel {
 }
 
 /** Curated so a guardian can read it at a glance; 'other' keeps everyone included. */
+/**
+ * Where a student is.
+ *
+ * 'konkur' is not a year of school: it is the entrance-exam year, when a
+ * twelfth-year student — or one who has finished — is studying for کنکور
+ * instead. It gets its own entry because it plans differently: the built-in
+ * lessons for it span three years (see `curriculum.ts`).
+ */
 export const GRADE_LEVELS = [
   'school-9',
   'school-10',
   'school-11',
   'school-12',
+  'konkur',
   'university',
   'postgrad',
   'other',
@@ -413,6 +428,10 @@ export interface GuardianPanel {
   notices: GuardianNotice[];
   /** Plans that could not be sent yet — the wire picks them up when it can. */
   queuedPlans?: QueuedPlan[];
+  /** The chat threads with their students, oldest first. */
+  chat?: ChatMessage[];
+  /** How far each thread has been read, by link, so the count goes quiet. */
+  chatSeen?: Record<string, string>;
 }
 
 /** A plan waiting for a signal: the whole draft, exactly as the guardian left it. */
@@ -726,6 +745,104 @@ export const PLAN_CHANGE_TITLE_MAX = 120;
 /** An unanswered change request stops travelling after two weeks. */
 export const PLAN_CHANGE_DAYS = 14;
 
+/* ------------------------------------------------------------------- chat */
+
+/**
+ * One message between a guardian and one student.
+ *
+ * A notice is a one-way note that lands in an inbox and is read once. This is
+ * the other thing: a thread, where either side can answer. It travels on the
+ * same encrypted link as everything else, is capped on both sides so nothing
+ * accumulates forever, and carries nothing but words.
+ */
+export interface ChatMessage {
+  id: string;
+  /** The link the thread belongs to. */
+  linkId: string;
+  /** Who wrote it, as the panel names them. */
+  author: string;
+  /** Which side of the link wrote it. */
+  from: ChatSide;
+  text: string;
+  createdAt: string;
+}
+
+export type ChatSide = 'guardian' | 'student';
+
+/** A message is a paragraph, not an essay. */
+export const CHAT_TEXT_MAX = 600;
+/** Messages kept on each side, and how many ride one outbox write. */
+export const CHAT_KEPT = 80;
+export const CHAT_WIRE = 40;
+
+/* ------------------------------------------------------------------ exams */
+
+/**
+ * One question on an exam a guardian set.
+ *
+ * A question with options is marked on submission, against the option the
+ * guardian marked right. A question with none is a written answer: it is never
+ * marked here, only read — the score the student sees leaves it out and says
+ * so, because a number that quietly counts an unread answer as wrong is a
+ * number nobody should trust.
+ */
+export interface ExamQuestion {
+  id: string;
+  prompt: string;
+  /** Two to five options. Empty makes this a written answer. */
+  choices: string[];
+  /** The right option, by index. Null on a written answer. */
+  answer: number | null;
+  points: number;
+}
+
+/** An exam a guardian set for one student. */
+export interface Exam {
+  id: string;
+  linkId: string;
+  author: string;
+  title: string;
+  subject: string;
+  note: string;
+  /** Minutes allowed. Null for no clock. */
+  minutes: number | null;
+  /** When it stops being open (ISO). Null for whenever. */
+  dueAt: string | null;
+  questions: ExamQuestion[];
+  createdAt: string;
+}
+
+/** One student's sitting of one exam. */
+export interface ExamSubmission {
+  id: string;
+  examId: string;
+  linkId: string;
+  /** The option chosen per question, by question id. */
+  answers: Record<string, number>;
+  /** What was written for the written questions, by question id. */
+  written: Record<string, string>;
+  /** Marked points, and the points that could be marked. */
+  score: number;
+  marked: number;
+  submittedAt: string;
+  /** The guardian's words back, once they have read it. */
+  feedback?: string;
+  reviewedAt?: string | null;
+}
+
+export const EXAMS_KEPT = 12;
+export const EXAMS_WIRE = 8;
+export const EXAM_QUESTIONS_MAX = 25;
+export const EXAM_CHOICES_MAX = 5;
+export const EXAM_PROMPT_MAX = 400;
+export const EXAM_CHOICE_MAX = 200;
+export const EXAM_TITLE_MAX = 120;
+export const EXAM_NOTE_MAX = 280;
+export const EXAM_WRITTEN_MAX = 600;
+export const EXAM_FEEDBACK_MAX = 280;
+export const EXAM_RESULTS_KEPT = 30;
+export const EXAM_RESULTS_WIRE = 12;
+
 /** What a guardian has sent this student: brief notices and full plans. */
 export interface StudentInbox {
   /** Newest first. */
@@ -738,6 +855,13 @@ export interface StudentInbox {
   homework?: HomeworkAssignment[];
   /** Goals a guardian would like them to take on, newest first. */
   goals?: GoalSuggestion[];
+  /** Exams a guardian set for this student, newest first. */
+  exams?: Exam[];
+  /**
+   * Plans from more than a month ago, rolled up. The lessons are gone; this is
+   * the week they added up to. See `src/planRetention.ts`.
+   */
+  planReviews?: PlanReview[];
 }
 
 /** One week of results: all a guardian ever sees of a student's planner. */
@@ -774,6 +898,11 @@ export interface GuardianLink {
   wrappedShareKey: string | null;
   /** Latest weekly results. Replaced every week — never accumulated. */
   results: WeekResults | null;
+  /**
+   * Plans older than a month, rolled up: the week in numbers rather than the
+   * lessons themselves. See `PlanReview` and `src/planRetention.ts`.
+   */
+  planReviews?: PlanReview[];
   /** Plans sent to this student, newest first. Ticks come back and land on items. */
   plans: GuardianPlan[];
   /** Daily reports this student sent back, newest first. */
@@ -795,6 +924,12 @@ export interface GuardianLink {
   goalAnswers?: GoalAnswer[];
   /** Changes this student asked for on a sent plan, newest first. */
   changeRequests?: PlanChangeRequest[];
+  /** The thread with this student, oldest first. */
+  chat?: ChatMessage[];
+  /** Exams set for this student, newest first. */
+  exams?: Exam[];
+  /** How this student answered them, newest first. */
+  examResults?: ExamSubmission[];
   /** When a pending code stops working. Null once accepted, or if unknown. */
   expiresAt?: string | null;
 }
@@ -841,6 +976,48 @@ export interface WeekArchive {
   focusSessions: number;
   moodAverage: number | null;
   goals: ArchivedGoal[];
+}
+
+/**
+ * A finished plan, after its month at full detail.
+ *
+ * A week that is done and signed off is not a thing anyone opens lesson by
+ * lesson again — what they come back for is "how did that week go". So the plan
+ * keeps its full item list for a month (long enough to re-read it while it is
+ * still recent, and to answer a question about a specific lesson), and after
+ * that the items are dropped and this stays: the shape of the week in numbers,
+ * not the week itself.
+ *
+ * Deterministic and idempotent like `WeekArchive`: two devices rolling up the
+ * same plan write the same review.
+ */
+export interface PlanReview {
+  /** The plan's own id, so a review is never mistaken for a plan that exists. */
+  id: string;
+  linkId: string;
+  /** Monday of the week the plan covered. */
+  weekOf: string;
+  title: string;
+  author: string;
+  /** The guardian's sign-off, when there was one. */
+  approvedAt: string | null;
+  /** When the detail was let go. */
+  reviewedAt: string;
+  lessons: number;
+  /** Lessons the student actually ticked. */
+  done: number;
+  minutes: number;
+  /** Subjects that ran that week, heaviest first. */
+  subjects: PlanReviewSubject[];
+  /** The guardian's note, trimmed — the one line of prose worth keeping. */
+  note: string;
+}
+
+export interface PlanReviewSubject {
+  name: string;
+  lessons: number;
+  done: number;
+  minutes: number;
 }
 
 export interface PlannerState {

@@ -524,3 +524,24 @@ export function HabitGlyph({ name, size = 18 }: { name: string; size?: number })
       return <LeafIcon size={size} />;
   }
 }
+
+/** Two speech bubbles: a thread, where either side can answer. */
+export function ChatIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h7A2.5 2.5 0 0 1 16 6.5v4a2.5 2.5 0 0 1-2.5 2.5H9l-4 3v-3H6.5A2.5 2.5 0 0 1 4 10.5Z" />
+      <path d="M18 8h.5A2.5 2.5 0 0 1 21 10.5v5a2.5 2.5 0 0 1-2.5 2.5H18v2.5l-3.2-2.5h-2.3" />
+    </Svg>
+  );
+}
+
+/** A clipboard with a tick on it: an exam that has been set. */
+export function ExamIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M9 4.5h6M8 4.5h-.5A1.5 1.5 0 0 0 6 6v13.5A1.5 1.5 0 0 0 7.5 21h9a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H15" />
+      <rect x="9" y="2.8" width="6" height="3.4" rx="1.2" />
+      <path d="m9.5 13.5 2 2 3.5-4" />
+    </Svg>
+  );
+}

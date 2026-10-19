@@ -25,11 +25,12 @@ import {
   itemsForDay,
   lessonDurationLabel,
   lessonTimeLabel,
-  normalizeLessonEnd,
   planDays,
+  readLessonTimePair,
   WEEK_LESSON_LIMIT,
   type PlanLessonInput,
 } from '../weekPlans';
+import { LessonTimePicker, TimeSlots } from './LessonTime';
 import { Modal } from './ui';
 
 function toInput(item: { id: string; title: string; time?: string | null; end?: string | null; minutes: number | null; subject: string | null; url?: string | null; done: boolean }): PlanLessonInput {
@@ -101,17 +102,14 @@ export function WeekPlanEditor({
       setError(t('Choose a valid time.'));
       return;
     }
-    if (endTime && !normalizeLessonEnd(time, endTime)) {
-      setError(t('A lesson has to end after it starts.'));
-      return;
-    }
     if (total + 1 > WEEK_LESSON_LIMIT) {
       setError(t('A week plan can hold up to 60 lessons.'));
       return;
     }
+    const pair = readLessonTimePair(time, endTime);
     patch([
       ...lessons,
-      { title: clean, time: time || null, end: normalizeLessonEnd(time, endTime), minutes: null, subject: null, url: null },
+      { title: clean, time: pair.time || null, end: pair.end || null, minutes: null, subject: null, url: null },
     ]);
     setName('');
     setTime('');
@@ -127,7 +125,15 @@ export function WeekPlanEditor({
         panels,
         link.linkId,
         plan.id,
-        changedDays.map((date) => ({ date, lessons: drafts[date] ?? [] })),
+        changedDays.map((date) => ({
+          date,
+          // Read every pair the way it was typed, so an end with no start and
+          // an end before the start both still save — as the start they meant.
+          lessons: (drafts[date] ?? []).map((lesson) => {
+            const pair = readLessonTimePair(lesson.time, lesson.end);
+            return { ...lesson, time: pair.time || null, end: pair.end || null };
+          }),
+        })),
         today,
       );
       const updated = next.guardian.links.find((item) => item.linkId === link.linkId)?.plans.find((item) => item.id === plan.id);
@@ -221,34 +227,16 @@ export function WeekPlanEditor({
                           patch(lessons.map((item, at) => (at === index ? { ...item, title: event.target.value } : item)))
                         }
                       />
-                      <span className="week-time-pair">
-                        <input
-                          className="input week-time-input"
-                          type="time"
-                          aria-label={t('From')}
-                          value={lesson.time ?? ''}
-                          disabled={saving}
-                          onChange={(event) =>
-                            patch(
-                              lessons.map((item, at) =>
-                                at === index ? { ...item, time: event.target.value || null } : item,
-                              ),
-                            )
-                          }
-                        />
-                        <span aria-hidden="true">–</span>
-                        <input
-                          className="input week-time-input"
-                          type="time"
-                          aria-label={t('To')}
-                          min={lesson.time ?? undefined}
-                          value={lesson.end ?? ''}
-                          disabled={saving}
-                          onChange={(event) =>
-                            patch(lessons.map((item, at) => (at === index ? { ...item, end: event.target.value || null } : item)))
-                          }
-                        />
-                      </span>
+                      <LessonTimePicker
+                        time={lesson.time}
+                        end={lesson.end}
+                        subject={lesson.title}
+                        disabled={saving}
+                        quiet
+                        onChange={(next) =>
+                          patch(lessons.map((item, at) => (at === index ? { ...item, ...next } : item)))
+                        }
+                      />
                       {lesson.time ? (
                         <span className="week-editor-span">
                           <ClockIcon size={13} />
@@ -288,26 +276,27 @@ export function WeekPlanEditor({
                   }
                 }}
               />
-              <span className="week-time-pair">
-                <input
-                  className="input week-time-input"
-                  type="time"
-                  aria-label={t('From')}
-                  value={time}
-                  disabled={saving}
-                  onChange={(event) => setTime(event.target.value)}
-                />
-                <span aria-hidden="true">–</span>
-                <input
-                  className="input week-time-input"
-                  type="time"
-                  aria-label={t('To')}
-                  min={time || undefined}
-                  value={endTime}
-                  disabled={saving}
-                  onChange={(event) => setEndTime(event.target.value)}
-                />
-              </span>
+              <LessonTimePicker
+                time={time}
+                end={endTime}
+                subject={name.trim() || undefined}
+                disabled={saving}
+                onChange={(next) => {
+                  setTime(next.time);
+                  setEndTime(next.end);
+                }}
+              />
+              <TimeSlots
+                time={time}
+                end={endTime}
+                label={t('Common lesson times')}
+                disabled={saving}
+                onPick={(slot) => {
+                  setTime(slot?.time ?? '');
+                  setEndTime(slot?.end ?? '');
+                  setError(null);
+                }}
+              />
               <button
                 type="button"
                 className="btn btn-ghost btn-small"

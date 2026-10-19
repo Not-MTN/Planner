@@ -20,10 +20,11 @@ import {
   editablePlanDays,
   itemsForDay,
   lessonTimeLabel,
-  normalizeLessonEnd,
   planDays,
+  readLessonTimePair,
   withStudentChangeRequest,
 } from '../weekPlans';
+import { LessonTimePicker, TimeSlots } from './LessonTime';
 import { Modal } from './ui';
 
 export function PlanChangeForm({
@@ -77,10 +78,6 @@ export function PlanChangeForm({
       setError(t('Choose a valid time.'));
       return;
     }
-    if (endTime && !normalizeLessonEnd(time, endTime)) {
-      setError(t('A lesson has to end after it starts.'));
-      return;
-    }
     const request = buildChangeRequest(
       plan,
       plan.linkId,
@@ -92,7 +89,13 @@ export function PlanChangeForm({
             date: chosen?.item.date ?? null,
             note,
           }
-        : { kind, title, date: date || null, time: time || null, end: endTime || null, note },
+        : (() => {
+            // One box filled is the start; an end before the start is dropped.
+            // Either way the ask goes — a time the form cannot use never costs
+            // the student the question they were asking.
+            const pair = readLessonTimePair(time, endTime);
+            return { kind, title, date: date || null, time: pair.time || null, end: pair.end || null, note };
+          })(),
       today,
     );
     if (!request) {
@@ -208,38 +211,32 @@ export function PlanChangeForm({
                   ))}
                 </select>
               </label>
-              <label className="field">
-                <span>{t('From')}</span>
-                <input
-                  className="input"
-                  type="time"
-                  value={time}
-                  onChange={(event) => {
-                    setTime(event.target.value);
+              <div className="field">
+                <span>{t('When')}</span>
+                <LessonTimePicker
+                  time={time}
+                  end={endTime}
+                  subject={title.trim() || undefined}
+                  disabled={sending}
+                  onChange={(next) => {
+                    setTime(next.time);
+                    setEndTime(next.end);
                     setError(null);
                   }}
                 />
-              </label>
-              <label className="field">
-                <span>{t('To')}</span>
-                <input
-                  className="input"
-                  type="time"
-                  min={time || undefined}
-                  value={endTime}
-                  onChange={(event) => {
-                    setEndTime(event.target.value);
-                    setError(null);
-                  }}
-                />
-              </label>
+              </div>
             </div>
-            {time ? (
-              <p className="hint">
-                <ClockIcon size={13} />
-                {lessonTimeLabel({ time, end: endTime })}
-              </p>
-            ) : null}
+            <TimeSlots
+              time={time}
+              end={endTime}
+              label={t('Common lesson times')}
+              disabled={sending}
+              onPick={(slot) => {
+                setTime(slot?.time ?? '');
+                setEndTime(slot?.end ?? '');
+                setError(null);
+              }}
+            />
           </>
         )}
 

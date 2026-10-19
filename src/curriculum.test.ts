@@ -6,11 +6,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   CURRICULUM_FIELDS,
+  CURRICULUM_GRADES,
+  curriculumGradeLabel,
   curriculumLessons,
   curriculumSuggestions,
+  isCurriculumGrade,
   isCurriculumLesson,
+  konkurLessons,
   matchCurriculumField,
 } from './curriculum';
+import { gradeLabel } from './panels';
 
 describe('the national curriculum lists', () => {
   it('covers three fields and grades ten to twelve', () => {
@@ -99,5 +104,97 @@ describe('matching a field of study to the curriculum', () => {
     expect(matchCurriculumField(null)).toBeNull();
     expect(matchCurriculumField('')).toBeNull();
     expect(matchCurriculumField('Carpentry')).toBeNull();
+  });
+});
+
+describe('the entrance-exam year (کنکور)', () => {
+  it('is a grade the picker offers, alongside the years of school', () => {
+    expect(CURRICULUM_GRADES).toEqual(['school-10', 'school-11', 'school-12', 'konkur']);
+    expect(isCurriculumGrade('konkur')).toBe(true);
+    expect(curriculumGradeLabel('konkur')).toBeTruthy();
+    // The years of school keep the labels the app already had for them.
+    for (const grade of ['school-10', 'school-11', 'school-12'] as const) {
+      expect(curriculumGradeLabel(grade)).toBe(gradeLabel(grade));
+    }
+  });
+
+  it('holds the twelfth year whole, for every field', () => {
+    for (const field of CURRICULUM_FIELDS) {
+      const lessons = curriculumLessons(field.id, 'konkur');
+      expect(lessons).not.toBeNull();
+      // General lessons: exactly the twelfth year's, and nothing else.
+      expect(lessons!.general).toEqual(field.lessons['school-12'].general);
+      // And the twelfth year's own lessons lead the list.
+      for (const name of field.lessons['school-12'].specialized) {
+        expect(lessons!.specialized).toContain(name);
+      }
+    }
+  });
+
+  it('adds the field’s own lessons from the tenth and eleventh, and only those', () => {
+    for (const field of CURRICULUM_FIELDS) {
+      const lessons = curriculumLessons(field.id, 'konkur')!;
+      const fromSchool = [
+        ...field.lessons['school-10'].specialized,
+        ...field.lessons['school-11'].specialized,
+      ];
+      for (const name of fromSchool) expect(lessons.specialized).toContain(name);
+      // Nothing general from the earlier years sneaks in: the exam year is the
+      // twelfth year plus the field's own subjects, not three years of school.
+      for (const name of [...field.lessons['school-10'].general, ...field.lessons['school-11'].general]) {
+        if (!field.lessons['school-12'].general.includes(name)) {
+          expect(lessons.general).not.toContain(name);
+        }
+      }
+      // And no lesson is listed twice, however many years taught it.
+      expect(new Set(lessons.specialized).size).toBe(lessons.specialized.length);
+      expect(new Set([...lessons.specialized, ...lessons.general]).size).toBe(
+        lessons.specialized.length + lessons.general.length,
+      );
+    }
+  });
+
+  it('reads the exam year in the order a revision plan works: newest first', () => {
+    const math = curriculumLessons('math', 'konkur')!;
+    const at = (name: string) => math.specialized.indexOf(name);
+    expect(at('حسابان (۲)')).toBeLessThan(at('حسابان (۱)'));
+    expect(at('حسابان (۱)')).toBeLessThan(at('ریاضی (۱)'));
+    // The twelfth year's geometry is not the tenth year's, and both are there.
+    expect(math.specialized).toContain('هندسه (۳)');
+    expect(math.specialized).toContain('هندسه (۱)');
+  });
+
+  it('taps in like any other grade', () => {
+    const science = curriculumSuggestions('science', 'konkur');
+    expect(science).toContain('زیست‌شناسی (۳)');
+    expect(science).toContain('زیست‌شناسی (۲)');
+    expect(science).toContain('زیست‌شناسی (۱)');
+    expect(science).toContain('فارسی (۳)');
+    // Specialized lessons come first, the way the picker reads.
+    expect(science.indexOf('زیست‌شناسی (۳)')).toBeLessThan(science.indexOf('فارسی (۳)'));
+    expect(isCurriculumLesson('زیست‌شناسی (۱)', 'science', 'konkur')).toBe(true);
+    // A lesson from another field's tenth year is still not this field's.
+    expect(isCurriculumLesson('منطق', 'science', 'konkur')).toBe(false);
+    expect(curriculumLessons(null, 'konkur')).toBeNull();
+    expect(curriculumLessons('science', 'konkuri')).toBeNull();
+  });
+
+  it('follows the years of school when they change', () => {
+    // Built from the field's data rather than copied, so a subject added to a
+    // year shows up in the exam year without anyone remembering to add it twice.
+    const field = {
+      id: 'math' as const,
+      nameFa: 'رشته ریاضی و فیزیک',
+      nameEn: 'Mathematics & Physics',
+      lessons: {
+        'school-10': { general: ['g10'], specialized: ['s10'] },
+        'school-11': { general: ['g11'], specialized: ['s11'] },
+        'school-12': { general: ['g12'], specialized: ['s12'] },
+      },
+    };
+    expect(konkurLessons(field)).toEqual({
+      general: ['g12'],
+      specialized: ['s12', 's11', 's10'],
+    });
   });
 });

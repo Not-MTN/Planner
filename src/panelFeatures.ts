@@ -2,7 +2,6 @@
 import { addDays, isValidISODate, isValidTime, todayISO } from './dates';
 import { t } from './i18n';
 import { daysUntil, newId, planEnd, weekOf, withSubject } from './panels';
-import { normalizeLessonEnd } from './weekPlans';
 import type { GuardianLink, GuardianNotice, PlanCadence, PlannerState, StudentSubject, Task } from './types';
 
 export const SUBJECT_LIMIT = 40;
@@ -221,8 +220,8 @@ export function planDraftError(draft: PanelPlanDraft): string | null {
   )
     return t('Choose between 1 and 1440 minutes per step, or leave it empty.');
   if (items.some((item) => item.time && !isValidTime(item.time))) return t('Choose a valid time.');
-  if (items.some((item) => item.end && !normalizeLessonEnd(item.time, item.end)))
-    return t('A lesson has to end after it starts.');
+  // A backwards or dangling end is read on send (see `readLessonTimePair`)
+  // rather than refused here, so one careless time never holds the plan back.
   if (draft.items.some((item) => !item.title.trim() && (item.date || item.minutes || item.subject.trim())))
     return t('Give each filled-in step a title.');
   if (items.length > PLAN_STEP_LIMIT) return t('A plan can have up to 40 steps.');

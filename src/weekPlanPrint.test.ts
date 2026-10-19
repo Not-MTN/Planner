@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { GuardianPlan } from './types';
-import { timetableHtml, weekPlanHtml } from './weekPlanPrint';
+import { planPrintFit, timetableHtml, weekPlanHtml } from './weekPlanPrint';
 
 const TODAY = '2026-10-12';
 
@@ -314,5 +314,81 @@ describe('a repaired day on paper', () => {
     expect(html).toContain('Streak kept');
     expect(html).toContain('Fever all day.');
     expect(html).not.toContain('>Reported<');
+  });
+});
+
+describe('one page, whichever way round', () => {
+  /** A week with this many lessons on every one of its seven days. */
+  function busyWeek(perDay: number): GuardianPlan {
+    const days = ['2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17', '2026-10-18'];
+    return plan({
+      items: days.flatMap((date, day) =>
+        Array.from({ length: perDay }, (_, index) => ({
+          id: `${day}-${index}`,
+          title: `Lesson ${day}.${index}`,
+          date,
+          time: `${String(8 + (index % 10)).padStart(2, '0')}:00`,
+          end: `${String(9 + (index % 10)).padStart(2, '0')}:00`,
+          minutes: null,
+          subject: null,
+          done: false,
+        })),
+      ),
+    });
+  }
+
+  it('carries the orientation the reader chose on the page itself', () => {
+    const portrait = weekPlanHtml(busyWeek(2), [], [], { student: 'Sara', madeOn: TODAY, orientation: 'portrait' });
+    const landscape = weekPlanHtml(busyWeek(2), [], [], { student: 'Sara', madeOn: TODAY, orientation: 'landscape' });
+    expect(portrait).toContain('--page-orientation: portrait');
+    expect(portrait).toContain('@page { size: A4 var(--page-orientation, portrait); margin: 8mm; }');
+    expect(landscape).toContain('--page-orientation: landscape');
+    // The wall grid follows the same choice.
+    expect(timetableHtml(busyWeek(2), [], { student: 'Sara', madeOn: TODAY, orientation: 'landscape' })).toContain(
+      '--page-orientation: landscape',
+    );
+    expect(timetableHtml(busyWeek(2), [], { student: 'Sara', madeOn: TODAY, orientation: 'portrait' })).toContain(
+      '--page-orientation: portrait',
+    );
+  });
+
+  it('keeps a short week roomy and a full one dense, instead of running to a second sheet', () => {
+    const short = planPrintFit({ lessons: 6, days: 7 }, { orientation: 'portrait' });
+    const full = planPrintFit({ lessons: 60, days: 7 }, { orientation: 'portrait' });
+    expect(short).toMatchObject({ density: 'roomy', columns: 1, maxRows: null });
+    expect(full.columns).toBeGreaterThan(short.columns);
+    expect(full).toMatchObject({ maxRows: null });
+
+    // Even a week nobody would plan still comes out on one page — the days say
+    // "+N more" rather than the plan spilling over.
+    const absurd = planPrintFit({ lessons: 400, days: 7 }, { orientation: 'portrait' });
+    expect(absurd.density).toBe('micro');
+    expect(absurd.maxRows).toBeGreaterThanOrEqual(1);
+    const html = weekPlanHtml(busyWeek(60), [], [], { student: 'Sara', madeOn: TODAY, orientation: 'portrait' });
+    expect(html).toContain('more');
+  });
+
+  it('uses the width a landscape sheet has', () => {
+    const landscape = planPrintFit({ lessons: 60, days: 7 }, { orientation: 'landscape' });
+    const portrait = planPrintFit({ lessons: 60, days: 7 }, { orientation: 'portrait' });
+    expect(landscape.columns).toBeGreaterThanOrEqual(portrait.columns);
+    expect(landscape.orientation).toBe('landscape');
+  });
+
+  it('follows the screen when nobody chose', () => {
+    expect(planPrintFit({ lessons: 4, days: 7 }, { wide: false }).orientation).toBe('portrait');
+    expect(planPrintFit({ lessons: 4, days: 7 }, { wide: true }).orientation).toBe('landscape');
+    // A choice beats the screen.
+    expect(planPrintFit({ lessons: 4, days: 7 }, { orientation: 'portrait', wide: true }).orientation).toBe('portrait');
+  });
+
+  it('prints the days in as many columns as the fit chose', () => {
+    const html = weekPlanHtml(busyWeek(8), [], [], { student: 'Sara', madeOn: TODAY, orientation: 'portrait' });
+    const columns = html.match(/--fit-columns: (\d)/)?.[1];
+    expect(Number(columns)).toBeGreaterThan(1);
+    expect(html).toContain('column-count: var(--fit-columns)');
+    // The header is a slim band: the title is sized off the fit, not in pixels.
+    expect(html).toContain('font-size: calc(var(--fit-font) * 1.5)');
+    expect(html).not.toContain('fonts.googleapis.com');
   });
 });

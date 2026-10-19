@@ -259,8 +259,9 @@ export function weekPlanDraftError(draft: WeekPlanDraft): string | null {
   if (!draft.title.trim() || named.length === 0) return t('Give the plan a name and at least one thing to do.');
   if (!isValidISODate(draft.start)) return t('Choose a valid start date.');
   if (named.some((lesson) => lesson.time && !isValidTime(lesson.time))) return t('Choose a valid time.');
-  if (named.some((lesson) => lesson.end && !normalizeLessonEnd(lesson.time, lesson.end)))
-    return t('A lesson has to end after it starts.');
+  // An end that does not come after the start is read on send (see
+  // `readLessonTimePair`) rather than refused here: one careless time pair must
+  // not hold back a week the guardian has just built.
   if (named.some((lesson) => lesson.url.trim() && !normalizeLessonUrl(lesson.url)))
     return t('One of the links is not a valid web address.');
   if (named.length > WEEK_LESSON_LIMIT) return t('A week plan can hold up to 60 lessons.');
@@ -626,6 +627,46 @@ export function normalizeLessonEnd(
   if (!end || !isValidTime(end)) return null;
   if (!time || !isValidTime(time)) return null;
   return timeToMinutes(end) > timeToMinutes(time) ? end : null;
+}
+
+/** What a typed time pair had to be read as, so the composer can say so. */
+export type LessonTimeFix = 'none' | 'start-from-end' | 'end-dropped';
+
+export interface LessonTimePair {
+  /** Start, HH:MM or empty for "any time that day". */
+  time: string;
+  /** End, HH:MM or empty when there is no span to give. */
+  end: string;
+  fix: LessonTimeFix;
+}
+
+/**
+ * Read a typed time pair the way it was meant.
+ *
+ * Two boxes are an offer, not a form to be rejected. Filling only "to" says
+ * when the lesson starts, and an end that comes before the start is dropped
+ * rather than sent — either way the lesson survives, so a week with one
+ * careless time still reaches the student instead of failing at the bottom of
+ * a long form. `fix` says which reading was used and the composer shows it,
+ * because a quiet correction nobody saw is the same as a mistake.
+ */
+export function readLessonTimePair(
+  time: string | null | undefined,
+  end: string | null | undefined,
+): LessonTimePair {
+  const start = time && isValidTime(time) ? time : '';
+  const finish = end && isValidTime(end) ? end : '';
+  if (!start && finish) return { time: finish, end: '', fix: 'start-from-end' };
+  if (start && finish && timeToMinutes(finish) <= timeToMinutes(start))
+    return { time: start, end: '', fix: 'end-dropped' };
+  return { time: start, end: finish, fix: 'none' };
+}
+
+/** The one line a time pair reads back as, with the fix spelled out when there was one. */
+export function lessonTimePairHint(pair: LessonTimePair): string | null {
+  if (pair.fix === 'start-from-end') return t('Read as the start time.');
+  if (pair.fix === 'end-dropped') return t('The end has to come after the start, so only the start is kept.');
+  return null;
 }
 
 /** How long a lesson runs, in minutes. Null when it has no span to measure. */
