@@ -52,7 +52,7 @@ jobs:
       # On a pull request the default checkout is the merge commit, and baselines
       # committed on top of that would be wrong to push back. Check out the
       # branch tip instead, from whichever repository owns it.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
