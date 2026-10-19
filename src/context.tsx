@@ -4,7 +4,9 @@ import { addBreadcrumb, reportCaught } from './reporting';
 import { parseHash, toHash, type Route } from './route';
 import { downloadState, loadFrom, parseBackup, sanitizeState, saveTo, serialize, storageFullMessage, STORAGE_KEY } from './storage';
 import { flushVaultPush, scheduleVaultPush } from './auth/vault';
-import { flushPlanQueue, readNotices, refreshResults, shareWeeklyResults, syncLinks, syncStudentInbox } from './auth/links';
+import { fetchLinkActivity, flushPlanQueue, readNotices, refreshResults, shareWeeklyResults, syncLinks, syncStudentInbox } from './auth/links';
+import { activityChanged, pollDelayMs, type LinkSyncStatus, type SyncPriority } from './syncScheduler';
+import { currentSyncPriority, subscribeSyncPriority } from './syncPriority';
 import { idbRead, idbWrite, savedAt } from './idb';
 import { withFlushedPlans } from './panels';
 import {
@@ -206,6 +208,12 @@ interface PlannerContextValue {
   panels: Panels;
   /** Replaces the panels block. Panels are optional extras on top of the planner. */
   updatePanels: (next: Panels | ((current: Panels) => Panels)) => void;
+  /** Health of the live guardian/student link connection, for the chat status line. */
+  linkSyncStatus: LinkSyncStatus;
+  /** Run the encrypted link pipeline now, serialized with every other sync. */
+  runPanelSync: () => Promise<void>;
+  /** Force an immediate live poll (a send, a focus, a reconnect). */
+  kickPanelSync: () => void;
   /** Saves a subject and preserves its task/focus attribution when renamed. */
   saveStudentSubject: (subject: StudentSubject) => void;
   /** Adds or removes a panel. The personal planner is never affected. */
@@ -630,53 +638,100 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
    *
    * All of it is best effort: a phone with no signal simply catches up later.
    */
+  /**
+   * The encrypted link pipeline itself: pull + push everything for both panel
+   * kinds, against one snapshot handed in by the runner. It never starts
+   * itself — `runPanelSync` is the only entry point, and it lets one pipeline
+   * run at a time, so two syncs can no longer race and silently lose a result.
+   */
   const syncPanelLinks = useCallback(
     async (current: PlannerState) => {
       if (!current.panels.student.enabled && !current.panels.guardian.enabled) return;
       let panels = current.panels;
-      try {
-        if (current.panels.student.enabled && panels.student.guardians.length > 0) {
-          // Goals go along so a goal taken on from a suggestion can report how
-          // far it has got — counts only, never the steps the guardian wrote.
-          const inbox = await syncStudentInbox(panels, current.goals);
-          panels = inbox.panels;
-          // Anything new from a guardian is an in-app notification: it lands in
-          // the bell whether or not the panel page is open.
-          for (const notice of inbox.added.notices) {
-            appendNotifications([
-              { key: `inbox|${notice.id}`, title: notice.summary, body: t("{0} sent you a note.", { 0: notice.author }) },
-            ]);
-          }
-          for (const plan of inbox.added.plans) {
-            appendNotifications([
-              { key: `inbox|${plan.id}`, title: plan.title, body: t("A new plan from {0}.", { 0: plan.author }) },
-            ]);
-          }
-          const firstPlan = inbox.added.plans[0];
-          const firstNotice = inbox.added.notices[0];
-          if (firstPlan) flash(`🔔 ${firstPlan.title}`);
-          else if (firstNotice) flash(`🔔 ${firstNotice.summary}`);
-          const shared = await shareWeeklyResults(current, panels);
-          panels = shared.panels;
+      if (current.panels.student.enabled && panels.student.guardians.length > 0) {
+        // Goals go along so a goal taken on from a suggestion can report how
+        // far it has got — counts only, never the steps the guardian wrote.
+        const inbox = await syncStudentInbox(panels, current.goals);
+        panels = inbox.panels;
+        // Anything new from a guardian is an in-app notification: it lands in
+        // the bell whether or not the panel page is open.
+        for (const notice of inbox.added.notices) {
+          appendNotifications([
+            { key: `inbox|${notice.id}`, title: notice.summary, body: t("{0} sent you a note.", { 0: notice.author }) },
+          ]);
         }
-        if (current.panels.guardian.enabled) {
-          panels = (await syncLinks(panels)).panels;
-          panels = (await refreshResults(panels)).panels;
-          panels = (await readNotices(panels)).panels;
+        for (const plan of inbox.added.plans) {
+          appendNotifications([
+            { key: `inbox|${plan.id}`, title: plan.title, body: t("A new plan from {0}.", { 0: plan.author }) },
+          ]);
         }
-        // These helpers always build new objects; only a real change is saved,
-        // otherwise this would quietly loop forever.
-        if (JSON.stringify(panels) !== JSON.stringify(current.panels)) {
-          // A slow link request must never roll back work done while it was in flight.
-          // If panels changed too, the next scheduled sync will pick up the result.
-          commit((latest) => latest.panels === current.panels ? { ...latest, panels } : latest);
+        const firstPlan = inbox.added.plans[0];
+        const firstNotice = inbox.added.notices[0];
+        if (firstPlan) flash(`🔔 ${firstPlan.title}`);
+        else if (firstNotice) flash(`🔔 ${firstNotice.summary}`);
+        const shared = await shareWeeklyResults(current, panels);
+        panels = shared.panels;
+      }
+      if (current.panels.guardian.enabled) {
+        panels = (await syncLinks(panels)).panels;
+        panels = (await refreshResults(panels)).panels;
+        panels = (await readNotices(panels)).panels;
+      }
+      // These helpers always build new objects; only a real change is saved,
+      // otherwise this would quietly loop forever.
+      if (JSON.stringify(panels) !== JSON.stringify(current.panels)) {
+        const applied = commit((latest) =>
+          // A slow request must never roll back work done while it was in flight.
+          latest.panels === current.panels ? { ...latest, panels } : latest,
+        );
+        if (!applied) {
+          // Panels moved locally mid-flight. The old code dropped the result
+          // here and hoped "the next sync" happened — it often did not. Queue
+          // another run against the newest snapshot instead, so it converges.
+          runPanelSyncRef.current();
         }
-      } catch {
-        /* sharing is best effort; the next save tries again */
       }
     },
     [commit, flash],
   );
+
+  // ── Live link sync: one pipeline at a time, driven by adaptive polling ────
+  const syncChainRef = useRef<Promise<void>>(Promise.resolve());
+  const syncFailuresRef = useRef(0);
+  /** Server timestamps from the last cheap probe, per link. */
+  const activityRef = useRef<Record<string, string> | null>(null);
+  const [linkSyncStatus, setLinkSyncStatus] = useState<LinkSyncStatus>('live');
+  const runPanelSyncRef = useRef<() => void>(() => undefined);
+
+  /**
+   * Run the pipeline serialized: every call chains behind whatever is already
+   * in flight, so a send, a debounced save, and a poll tick can never overlap.
+   * Reads the freshest snapshot at run time, never a captured one.
+   */
+  const runPanelSync = useCallback((): Promise<void> => {
+    syncChainRef.current = syncChainRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        const current = stateRef.current;
+        if (!current.panels.student.enabled && !current.panels.guardian.enabled) return;
+        try {
+          await syncPanelLinks(current);
+          syncFailuresRef.current = 0;
+          setLinkSyncStatus(navigator.onLine === false ? 'offline' : 'live');
+        } catch {
+          syncFailuresRef.current += 1;
+          setLinkSyncStatus(navigator.onLine === false ? 'offline' : 'reconnecting');
+        }
+      });
+    return syncChainRef.current;
+  }, [syncPanelLinks]);
+  runPanelSyncRef.current = runPanelSync;
+
+  /** Ask for a fresh tick right now (after a send, a focus, a reconnect). */
+  const kickPanelSync = useCallback(() => {
+    activityRef.current = null;
+    void runPanelSyncRef.current();
+  }, []);
 
   /**
    * Whatever the guardian parked without a signal goes out on its own — on
@@ -714,20 +769,106 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     };
   }, [state.panels.guardian.enabled, state.panels.guardian.queuedPlans, flushQueuedPlans]);
 
-  // Runs shortly after the planner changes, and once when it opens.
+  // Local changes still go out shortly after they happen, through the same
+  // serialized runner as the polls — never as a competing request.
   const panelTimer = useRef<number | null>(null);
   useEffect(() => {
     const wantsStudent = state.panels.student.enabled && state.panels.student.guardians.length > 0;
     const wantsGuardian = state.panels.guardian.enabled && state.panels.guardian.links.length > 0;
     if (!wantsStudent && !wantsGuardian) return;
     if (panelTimer.current !== null) window.clearTimeout(panelTimer.current);
-    panelTimer.current = window.setTimeout(() => {
-      void syncPanelLinks(stateRef.current);
-    }, 4000);
+    panelTimer.current = window.setTimeout(() => runPanelSyncRef.current(), 4000);
     return () => {
       if (panelTimer.current !== null) window.clearTimeout(panelTimer.current);
     };
-  }, [state, syncPanelLinks]);
+  }, [state]);
+
+  /**
+   * Adaptive live polling.
+   *
+   * Each tick first asks the cheap timestamp endpoint: has any link moved?
+   * Only then does it pay for the full encrypted sync. The rhythm follows how
+   * hard the user is watching — a chat thread ticks in seconds, an open panel
+   * in breaths, the rest slowly — and a hidden tab does not tick at all;
+   * coming back, focusing, or reconnecting kicks an immediate probe. Failures
+   * back off through `pollDelayMs`, so a dead line retries gently.
+   */
+  const [priority, setPriority] = useState<SyncPriority>(() => currentSyncPriority());
+  const priorityRef = useRef(priority);
+  priorityRef.current = priority;
+  useEffect(() => subscribeSyncPriority(setPriority), []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | null = null;
+
+    const hasLinks = (snapshot: PlannerState) =>
+      (snapshot.panels.student.enabled && snapshot.panels.student.guardians.length > 0) ||
+      (snapshot.panels.guardian.enabled && snapshot.panels.guardian.links.length > 0);
+
+    const schedule = () => {
+      if (cancelled || timer !== null) return;
+      const delay = pollDelayMs(
+        priorityRef.current,
+        typeof document === 'undefined' ? true : document.visibilityState === 'visible',
+        syncFailuresRef.current,
+      );
+      if (delay === null) return; // hidden: the visibility listener restarts the loop
+      timer = window.setTimeout(() => {
+        timer = null;
+        void tick(false);
+      }, delay);
+    };
+
+    const tick = async (force: boolean) => {
+      try {
+        const visible = typeof document === 'undefined' || document.visibilityState === 'visible';
+        if (visible && hasLinks(stateRef.current)) {
+          try {
+            const activity = await fetchLinkActivity();
+            const moved = force || activityChanged(activityRef.current, activity);
+            activityRef.current = activity;
+            // A successful probe means the line itself is alive.
+            syncFailuresRef.current = 0;
+            setLinkSyncStatus(navigator.onLine === false ? 'offline' : 'live');
+            if (moved) runPanelSyncRef.current();
+          } catch {
+            syncFailuresRef.current += 1;
+            setLinkSyncStatus(navigator.onLine === false ? 'offline' : 'reconnecting');
+          }
+        }
+      } finally {
+        schedule();
+      }
+    };
+
+    const kick = () => {
+      if (cancelled) return;
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      if (timer !== null) {
+        window.clearTimeout(timer);
+        timer = null;
+      }
+      void tick(true);
+    };
+    const onVisible = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') kick();
+    };
+    const onOnline = () => kick();
+    const onFocus = () => kick();
+
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('focus', onFocus);
+    void tick(true);
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, []);
 
   useEffect(() => {
     const flush = () => void flushVaultPush();
@@ -1543,6 +1684,9 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     state,
     panels: state.panels,
     updatePanels,
+    linkSyncStatus,
+    runPanelSync,
+    kickPanelSync,
     saveStudentSubject: (subject) => commit((current) => saveStudentSubjectIn(current, subject)),
     setPanelEnabled,
     ready,
@@ -1789,7 +1933,7 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     },
     setIntention: (date, text) => commit((current) => setIntentionIn(current, date, text)),
     logMood: (date, value, taskId) => commit((current) => setMoodIn(current, date, value, taskId)),
-  }), [state, ready, error, notice, saveBlocked, route, navigate, composer, confirm, startFresh, exportData, retentionWeeks, importText, loadSample, flash, dismissNotice, praise, undo, redo, canUndo, canRedo, themeMode, accent, paletteOpen, settingsOpen, settingsTab, focus, confettiSeed, celebrate, clearCompletedTasks, commit, reminders, setReminders, weekStart, setWeekStart, display, setDisplay, sync, syncStatus, syncMessage, syncConflicts, conflictChanges, keepConflictVersion, dismissConflict, dismissAllConflicts, syncAvailable, startSync, stopSync, runSync, deleteCloudCopy, shared, sharedStatus, sharedMessage, startShared, stopShared, runSharedSync, feeds, addFeed, removeFeed, refreshFeeds, calendars, calendarsSyncing, discoverCalendars, addCalendar, removeCalendar, setCalendarPush, syncCalendars, syncCalendarNow, weather, setWeather, recordTombstone, updatePanels, setPanelEnabled, runRollUp]);
+  }), [state, ready, error, notice, saveBlocked, route, navigate, composer, confirm, startFresh, exportData, retentionWeeks, importText, loadSample, flash, dismissNotice, praise, undo, redo, canUndo, canRedo, themeMode, accent, paletteOpen, settingsOpen, settingsTab, focus, confettiSeed, celebrate, clearCompletedTasks, commit, reminders, setReminders, weekStart, setWeekStart, display, setDisplay, sync, syncStatus, syncMessage, syncConflicts, conflictChanges, keepConflictVersion, dismissConflict, dismissAllConflicts, syncAvailable, startSync, stopSync, runSync, deleteCloudCopy, shared, sharedStatus, sharedMessage, startShared, stopShared, runSharedSync, feeds, addFeed, removeFeed, refreshFeeds, calendars, calendarsSyncing, discoverCalendars, addCalendar, removeCalendar, setCalendarPush, syncCalendars, syncCalendarNow, weather, setWeather, recordTombstone, updatePanels, linkSyncStatus, runPanelSync, kickPanelSync, setPanelEnabled, runRollUp]);
 
   return <PlannerContext.Provider value={value}>{children}</PlannerContext.Provider>;
 }
