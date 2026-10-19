@@ -120,6 +120,7 @@ export const GRADE_LABELS: Array<{ id: string; label: string }> = [
   { id: 'school-10', get label() { return t('Grade 10'); } },
   { id: 'school-11', get label() { return t('Grade 11'); } },
   { id: 'school-12', get label() { return t('Grade 12'); } },
+  { id: 'konkur', get label() { return t('Konkur year'); } },
   { id: 'university', get label() { return t('University'); } },
   { id: 'postgrad', get label() { return t('Masters or PhD'); } },
   { id: 'other', get label() { return t('Something else'); } },

@@ -5,7 +5,10 @@ import { normalizeLessonEnd, normalizeLessonUrl } from './weekPlans';
 import { sanitizeClassAssignment, sanitizeClassProgress, sanitizeHomeworkAssignment, sanitizeHomeworkReview, sanitizeHomeworkSubmission } from './learning';
 import { REPEAT_SET } from './recurrence';
 import { MAX_PLAN_DAYS } from './duration';
-import { ACK_REACTIONS, ACK_TEXT_MAX, AI_PLAN_LIMIT, DAY_REPORT_NOTE_MAX, DAY_REPORTS_KEPT, GOAL_STEPS_MAX, HOMEWORK_ITEMS_KEPT, PLAN_CHANGES_KEPT, PLAN_CHANGE_NOTE_MAX, PLAN_CHANGE_TITLE_MAX, PLAN_REQUESTS_KEPT, PRAISE_KEPT, QUEUED_PLANS_KEPT, createEmptyPanels, createEmptyState, isGradeLevel, type AIDeclined, type AIDeclinedKind, type AIMemory, type AttachmentRef, type AIMemoryCategory, type ChangeNote, type DayReport, type EventInput, type FixedCommitment, type FocusLog, type GoalAnswer, type GoalSuggestion, type GuardianKind, type GuardianLink, type GuardianNotice, type GuardianPlan, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Panels, type PlanCadence, type PlanChangeRequest, type PlanDraft, type PlanItem, type PlanRequest, type QueuedPlan, type ReportAck, type StudentGuardian, type StudentInbox, type StudentSubject, type Subtask, type TaskInput, type TaskRepeat, type WeekResults, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task, type WeekArchive } from './types';
+import { mergeChat, sanitizeChatMessage } from './chat';
+import { mergeExams, mergeExamSubmissions, sanitizeExam, sanitizeExamSubmission } from './exams';
+import { PLAN_REVIEWS_KEPT } from './planRetention';
+import { ACK_REACTIONS, ACK_TEXT_MAX, AI_PLAN_LIMIT, CHAT_KEPT, DAY_REPORT_NOTE_MAX, DAY_REPORTS_KEPT, EXAMS_KEPT, EXAM_RESULTS_KEPT, GOAL_STEPS_MAX, HOMEWORK_ITEMS_KEPT, PLAN_CHANGES_KEPT, PLAN_CHANGE_NOTE_MAX, PLAN_CHANGE_TITLE_MAX, PLAN_REQUESTS_KEPT, PRAISE_KEPT, QUEUED_PLANS_KEPT, createEmptyPanels, createEmptyState, isGradeLevel, type AIDeclined, type AIDeclinedKind, type AIMemory, type AttachmentRef, type AIMemoryCategory, type ChangeNote, type DayReport, type EventInput, type FixedCommitment, type FocusLog, type GoalAnswer, type GoalSuggestion, type GuardianKind, type GuardianLink, type GuardianNotice, type GuardianPlan, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Panels, type PlanCadence, type PlanChangeRequest, type PlanDraft, type PlanItem, type PlanRequest, type PlanReview, type QueuedPlan, type ReportAck, type StudentGuardian, type StudentInbox, type StudentSubject, type Subtask, type TaskInput, type TaskRepeat, type WeekResults, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task, type WeekArchive } from './types';
 import { t } from './i18n';
 import { downloadBlob } from './download';
 
@@ -940,6 +943,62 @@ function sanitizeGoalAnswer(value: unknown): GoalAnswer | null {
   };
 }
 
+/**
+ * A rolled-up week. Validated like everything else that comes off disk: a
+ * review with nonsense in it is dropped rather than shown as a week that never
+ * happened.
+ */
+function sanitizePlanReview(value: unknown): PlanReview | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const id = asString(raw.id, 80);
+  const weekOf = asString(raw.weekOf, 10);
+  if (!id || !weekOf || !isValidISODate(weekOf)) return null;
+  const subjects = (Array.isArray(raw.subjects) ? raw.subjects : [])
+    .flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') return [];
+      const item = entry as Record<string, unknown>;
+      const name = (asString(item.name, 60) ?? '').trim();
+      const lessons = typeof item.lessons === 'number' ? Math.max(0, Math.round(item.lessons)) : 0;
+      if (!name && lessons === 0) return [];
+      return [
+        {
+          name,
+          lessons,
+          done: typeof item.done === 'number' ? Math.max(0, Math.round(item.done)) : 0,
+          minutes: typeof item.minutes === 'number' ? Math.max(0, Math.round(item.minutes)) : 0,
+        },
+      ];
+    })
+    .slice(0, 40);
+  return {
+    id,
+    linkId: asString(raw.linkId, 64) ?? '',
+    weekOf,
+    title: asString(raw.title, 120) ?? '',
+    author: asString(raw.author, 60) ?? '',
+    approvedAt: asString(raw.approvedAt, 40),
+    reviewedAt: asString(raw.reviewedAt, 10) ?? weekOf,
+    lessons: typeof raw.lessons === 'number' ? Math.max(0, Math.round(raw.lessons)) : 0,
+    done: typeof raw.done === 'number' ? Math.max(0, Math.round(raw.done)) : 0,
+    minutes: typeof raw.minutes === 'number' ? Math.max(0, Math.round(raw.minutes)) : 0,
+    subjects,
+    note: asString(raw.note, 400) ?? '',
+  };
+}
+
+function uniquePlanReviews(value: unknown, linkId?: string | null): PlanReview[] {
+  return uniqueBy(
+    (Array.isArray(value) ? value : []).flatMap((item) => {
+      const review = sanitizePlanReview(item);
+      return review && (!linkId || review.linkId === linkId) ? [review] : [];
+    }),
+    (item) => item.id,
+  )
+    .sort((a, b) => b.weekOf.localeCompare(a.weekOf))
+    .slice(0, PLAN_REVIEWS_KEPT);
+}
+
 function sanitizeStudentInbox(value: unknown): StudentInbox {
   const raw = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
   const notices = uniqueBy(
@@ -983,7 +1042,22 @@ function sanitizeStudentInbox(value: unknown): StudentInbox {
     }),
     (item) => item.id,
   ).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 30);
-  return { notices, plans, goals, classes, homework };
+  const exams = mergeExams(
+    [],
+    (Array.isArray(raw.exams) ? raw.exams : []).flatMap((item) => {
+      const exam = sanitizeExam(item);
+      return exam ? [exam] : [];
+    }),
+  ).slice(0, EXAMS_KEPT);
+  return {
+    notices,
+    plans,
+    goals,
+    classes,
+    homework,
+    exams,
+    planReviews: uniquePlanReviews(raw.planReviews),
+  };
 }
 
 function sanitizeGuardianLink(value: unknown): GuardianLink | null {
@@ -1096,7 +1170,46 @@ function sanitizeGuardianLink(value: unknown): GuardianLink | null {
     )
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .slice(0, PLAN_CHANGES_KEPT),
+    chat: mergeChat(
+      [],
+      (Array.isArray(raw.chat) ? raw.chat : []).flatMap((item) => {
+        const message = sanitizeChatMessage(item);
+        return message && (!linkId || message.linkId === linkId) ? [message] : [];
+      }),
+    ).slice(-CHAT_KEPT),
+    exams: mergeExams(
+      [],
+      (Array.isArray(raw.exams) ? raw.exams : []).flatMap((item) => {
+        const exam = sanitizeExam(item);
+        return exam && (!linkId || exam.linkId === linkId) ? [exam] : [];
+      }),
+    ).slice(0, EXAMS_KEPT),
+    planReviews: uniquePlanReviews(raw.planReviews, linkId),
+    examResults: mergeExamSubmissions(
+      [],
+      (Array.isArray(raw.examResults) ? raw.examResults : []).flatMap((item) => {
+        const sitting = sanitizeExamSubmission(item);
+        return sitting && (!linkId || sitting.linkId === linkId) ? [sitting] : [];
+      }),
+    ).slice(0, EXAM_RESULTS_KEPT),
   };
+}
+
+/**
+ * How far each thread has been read, kept only for links that are still here.
+ * A timestamp, not a flag: it survives a reload and needs no agreement from the
+ * other device to be true.
+ */
+function seenMap(value: unknown, linkIds: string[]): Record<string, string> {
+  const allowed = new Set(linkIds);
+  const out: Record<string, string> = {};
+  if (!value || typeof value !== 'object') return out;
+  for (const [key, at] of Object.entries(value as Record<string, unknown>)) {
+    if (!allowed.has(key)) continue;
+    if (typeof at !== 'string' || at.length > 40 || !Number.isFinite(Date.parse(at))) continue;
+    out[key.slice(0, 64)] = at;
+  }
+  return out;
 }
 
 function sanitizeStudentGuardian(value: unknown): StudentGuardian | null {
@@ -1247,6 +1360,21 @@ export function sanitizePanels(value: unknown): Panels {
       )
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         .slice(0, PLAN_CHANGES_KEPT),
+      chat: mergeChat(
+        [],
+        (Array.isArray(student.chat) ? student.chat : []).flatMap((item) => {
+          const message = sanitizeChatMessage(item);
+          return message && guardians.some((guardian) => guardian.linkId === message.linkId) ? [message] : [];
+        }),
+      ).slice(-CHAT_KEPT),
+      chatSeen: seenMap(student.chatSeen, guardians.map((guardian) => guardian.linkId)),
+      examSubmissions: mergeExamSubmissions(
+        [],
+        (Array.isArray(student.examSubmissions) ? student.examSubmissions : []).flatMap((item) => {
+          const sitting = sanitizeExamSubmission(item);
+          return sitting && guardians.some((guardian) => guardian.linkId === sitting.linkId) ? [sitting] : [];
+        }),
+      ).slice(0, EXAM_RESULTS_KEPT),
     },
     guardian: {
       enabled: guardian.enabled === true && kind !== null,
@@ -1263,6 +1391,14 @@ export function sanitizePanels(value: unknown): Panels {
       )
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
         .slice(0, QUEUED_PLANS_KEPT),
+      chat: mergeChat(
+        [],
+        (Array.isArray(guardian.chat) ? guardian.chat : []).flatMap((item) => {
+          const message = sanitizeChatMessage(item);
+          return message && links.some((link) => link.linkId === message.linkId) ? [message] : [];
+        }),
+      ).slice(-CHAT_KEPT),
+      chatSeen: seenMap(guardian.chatSeen, links.flatMap((link) => (link.linkId ? [link.linkId] : []))),
     },
   };
 }

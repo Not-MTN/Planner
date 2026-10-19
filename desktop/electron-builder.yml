@@ -22,6 +22,11 @@ files:
   - build/icon.png
   - dist/**/*
   - package.json
+  # Production dependencies ship inside the app. electron-updater is what lets
+  # an in-app update download only the blocks that changed instead of the whole
+  # installer, so it has to be in the package, not just in package.json.
+  # Development dependencies are never packaged whatever is listed here.
+  - node_modules/**/*
   # Source maps belong in a debug build, not in something people download.
   - '!**/*.map'
 

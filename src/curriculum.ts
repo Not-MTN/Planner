@@ -12,11 +12,24 @@
  * guardian picks from are translated, and those live beside the data so the
  * whole list reads in one place.
  */
+import { t } from './i18n';
+import { gradeLabel } from './panels';
 
 export type CurriculumFieldId = 'math' | 'science' | 'humanities';
 
-/** The grades the national curriculum covers: tenth, eleventh, twelfth. */
-export type CurriculumGrade = 'school-10' | 'school-11' | 'school-12';
+/** The years of school the curriculum is written in, oldest first. */
+export type SchoolGrade = 'school-10' | 'school-11' | 'school-12';
+
+/**
+ * The grades the built-in lessons cover.
+ *
+ * Three of them are years of school. The fourth is the entrance-exam year
+ * (کنکور), which is not a year of school at all — it is built from the other
+ * three, so see `konkurLessons`.
+ */
+export type CurriculumGrade = SchoolGrade | 'konkur';
+
+const SCHOOL_GRADES: readonly SchoolGrade[] = ['school-10', 'school-11', 'school-12'];
 
 export interface CurriculumGradeLessons {
   /** Shared lessons every student of the grade takes. */
@@ -30,7 +43,8 @@ export interface CurriculumField {
   /** Shown in the planner's field picker. Persian first: these are its names. */
   nameFa: string;
   nameEn: string;
-  lessons: Record<CurriculumGrade, CurriculumGradeLessons>;
+  /** A year of school at a time. The exam year is derived from these. */
+  lessons: Record<SchoolGrade, CurriculumGradeLessons>;
 }
 
 const GENERAL_MATH_10 = [
@@ -195,8 +209,42 @@ export function curriculumField(id: string | null | undefined): CurriculumField 
   return CURRICULUM_FIELDS.find((field) => field.id === id) ?? null;
 }
 
-/** Grades the built-in lessons cover. Display them with `gradeLabel` from panels.ts, which translates. */
-export const CURRICULUM_GRADES: CurriculumGrade[] = ['school-10', 'school-11', 'school-12'];
+/**
+ * The entrance-exam year (کنکور) for one field.
+ *
+ * A student sitting کنکور is not studying one grade. The exam covers the
+ * twelfth year whole — its general lessons and its own — and the field's
+ * specialized lessons from the two years before it. So this grade is built
+ * from the field's data instead of being listed a fourth time: the twelfth
+ * year's general lessons, then its specialized ones, then eleventh's, then
+ * tenth's — the order a revision plan works in, most recent first.
+ *
+ * Built, not copied, so a lesson added to a year of school is in the exam year
+ * too, the next time anyone opens the picker.
+ */
+export function konkurLessons(field: CurriculumField): CurriculumGradeLessons {
+  const keep = new Set<string>();
+  const collect = (names: Iterable<string>): string[] => {
+    const out: string[] = [];
+    for (const name of names) {
+      if (keep.has(name)) continue;
+      keep.add(name);
+      out.push(name);
+    }
+    return out;
+  };
+  return {
+    general: collect(field.lessons['school-12'].general),
+    specialized: collect([
+      ...field.lessons['school-12'].specialized,
+      ...field.lessons['school-11'].specialized,
+      ...field.lessons['school-10'].specialized,
+    ]),
+  };
+}
+
+/** Grades the built-in lessons cover. Display them with `curriculumGradeLabel`, which translates. */
+export const CURRICULUM_GRADES: CurriculumGrade[] = [...SCHOOL_GRADES, 'konkur'];
 
 export function isCurriculumGrade(grade: string | null | undefined): grade is CurriculumGrade {
   return (CURRICULUM_GRADES as readonly string[]).includes(grade ?? '');
@@ -209,7 +257,18 @@ export function curriculumLessons(
 ): CurriculumGradeLessons | null {
   const field = curriculumField(fieldId);
   if (!field || !isCurriculumGrade(grade)) return null;
-  return field.lessons[grade];
+  return grade === 'konkur' ? konkurLessons(field) : field.lessons[grade];
+}
+
+/**
+ * The label a planner shows for a curriculum grade.
+ *
+ * Separate from `gradeLabel` in panels.ts on purpose: the entrance-exam year is
+ * a way of planning, not a year of school a student is in, so it belongs to the
+ * curriculum picker rather than to the list of grade levels the app stores.
+ */
+export function curriculumGradeLabel(grade: CurriculumGrade): string {
+  return grade === 'konkur' ? t('Konkur year') : (gradeLabel(grade) ?? grade);
 }
 
 /** The one flat suggestion list the planner offers: specialized first, then general. */

@@ -66,8 +66,22 @@ import {
   withPlanDaysRewritten,
   type PlanDayEdit,
 } from '../weekPlans';
-import { ACK_REACTIONS, ACK_TEXT_MAX, DAY_REPORT_NOTE_MAX, DAY_REPORTS_WIRE, GOAL_ANSWERS_KEPT, GOAL_STEPS_MAX, HOMEWORK_ITEMS_KEPT, HOMEWORK_NOTE_MAX, PANEL_GOALS_KEPT, PLAN_CHANGES_KEPT, PLAN_CHANGES_WIRE, PLAN_CHANGE_NOTE_MAX, PLAN_CHANGE_TITLE_MAX, PLAN_REQUESTS_WIRE, PRAISE_KEPT } from '../types';
-import type { ClassAssignment, ClassProgress, DayReport, Goal, GoalAnswer, GoalSuggestion, GuardianLink, GuardianNotice, GuardianPlan, HomeworkAssignment, HomeworkPhoto, HomeworkReview, HomeworkSubmission, Panels, PlanChangeRequest, PlanDraft, PlanItem, PlanRequest, PlannerState, ReportAck, StudentGuardian, WeekResults, WeekSubjectMinutes } from '../types';
+import { ACK_REACTIONS, ACK_TEXT_MAX, CHAT_TEXT_MAX, CHAT_WIRE, DAY_REPORT_NOTE_MAX, DAY_REPORTS_WIRE, EXAMS_WIRE, EXAM_FEEDBACK_MAX, EXAM_RESULTS_WIRE, GOAL_ANSWERS_KEPT, GOAL_STEPS_MAX, HOMEWORK_ITEMS_KEPT, HOMEWORK_NOTE_MAX, PANEL_GOALS_KEPT, PLAN_CHANGES_KEPT, PLAN_CHANGES_WIRE, PLAN_CHANGE_NOTE_MAX, PLAN_CHANGE_TITLE_MAX, PLAN_REQUESTS_WIRE, PRAISE_KEPT } from '../types';
+import type { ChatMessage, ClassAssignment, ClassProgress, DayReport, Exam, ExamSubmission, Goal, GoalAnswer, GoalSuggestion, GuardianLink, GuardianNotice, GuardianPlan, HomeworkAssignment, HomeworkPhoto, HomeworkReview, HomeworkSubmission, Panels, PlanChangeRequest, PlanDraft, PlanItem, PlanRequest, PlannerState, ReportAck, StudentGuardian, WeekResults, WeekSubjectMinutes } from '../types';
+import { mergeChat, sanitizeChatMessage, withChatMessage } from '../chat';
+import {
+  mergeExams,
+  mergeExamSubmissions,
+  sanitizeExam,
+  sanitizeExamSubmission,
+  submitExam,
+  withGuardianExamResult,
+  withLinkExam,
+  withoutLinkExam,
+  withStudentExamSubmission,
+  type ExamDraft,
+  buildExamQuestions,
+} from '../exams';
 /** Matches the cap in storage.ts, so the vault and the view agree. */
 const WEEKS_KEPT = 12;
 import type { AcceptLinkResponse, LinksResponse, OutgoingLink, ShareResponse } from '../shared/authContract';
@@ -247,6 +261,12 @@ interface GuardianOutbox {
    * as the answers to daily reports do.
    */
   changeAnswers: PlanChangeRequest[];
+  /** The guardian's half of the thread, oldest first. */
+  chat: ChatMessage[];
+  /** Exams set for this student, newest first. */
+  exams: Exam[];
+  /** Words back on a sitting, newest first. */
+  examFeedback: ExamSubmission[];
 }
 
 interface StudentOutbox {
@@ -265,6 +285,10 @@ interface StudentOutbox {
   requests: PlanRequest[];
   /** Asks for one change to a plan that has already been sent. */
   changes: PlanChangeRequest[];
+  /** The student's half of the thread, oldest first. */
+  chat: ChatMessage[];
+  /** Exams this student sat, newest first. */
+  examResults: ExamSubmission[];
 }
 
 const OUTBOX_PLANS = 5;
@@ -550,7 +574,25 @@ function asGuardianOutbox(payload: unknown): Omit<GuardianOutbox, 'v'> {
   const changeAnswers = (Array.isArray(raw.changeAnswers) ? raw.changeAnswers : [])
     .flatMap((item) => (wirePlanChangeRequest(item) ? [wirePlanChangeRequest(item)!] : []))
     .slice(0, PLAN_CHANGES_WIRE);
-  return { notices, plans, goals, acks, classes, homework, homeworkReviews, changeAnswers };
+  const chat = (Array.isArray(raw.chat) ? raw.chat : [])
+    .flatMap((item) => {
+      const clean = sanitizeChatMessage(item);
+      return clean ? [clean] : [];
+    })
+    .slice(-CHAT_WIRE);
+  const exams = (Array.isArray(raw.exams) ? raw.exams : [])
+    .flatMap((item) => {
+      const clean = sanitizeExam(item);
+      return clean ? [clean] : [];
+    })
+    .slice(0, EXAMS_WIRE);
+  const examFeedback = (Array.isArray(raw.examFeedback) ? raw.examFeedback : [])
+    .flatMap((item) => {
+      const clean = sanitizeExamSubmission(item);
+      return clean ? [clean] : [];
+    })
+    .slice(0, EXAM_RESULTS_WIRE);
+  return { notices, plans, goals, acks, classes, homework, homeworkReviews, changeAnswers, chat, exams, examFeedback };
 }
 
 /** The student's outbox for one link; a legacy relayed note folds in too. */
@@ -597,7 +639,19 @@ function asStudentOutbox(payload: unknown): Omit<StudentOutbox, 'v'> {
   const changes = (Array.isArray(raw.changes) ? raw.changes : [])
     .flatMap((item) => (wirePlanChangeRequest(item) ? [wirePlanChangeRequest(item)!] : []))
     .slice(0, PLAN_CHANGES_WIRE);
-  return { relayed, progress, answers, reports, classProgress, homeworkSubmissions, requests, changes };
+  const chat = (Array.isArray(raw.chat) ? raw.chat : [])
+    .flatMap((item) => {
+      const clean = sanitizeChatMessage(item);
+      return clean ? [clean] : [];
+    })
+    .slice(-CHAT_WIRE);
+  const examResults = (Array.isArray(raw.examResults) ? raw.examResults : [])
+    .flatMap((item) => {
+      const clean = sanitizeExamSubmission(item);
+      return clean ? [clean] : [];
+    })
+    .slice(0, EXAM_RESULTS_WIRE);
+  return { relayed, progress, answers, reports, classProgress, homeworkSubmissions, requests, changes, chat, examResults };
 }
 
 /**
@@ -656,7 +710,7 @@ async function postToStudent(
     kind,
   };
   // Full-state write: whatever plans and goals are already out there must survive.
-  let outbox: GuardianOutbox = { v: 3, notices: [note], plans: [], goals: [], acks: [], classes: [], homework: [], homeworkReviews: [], changeAnswers: [] };
+  let outbox: GuardianOutbox = { v: 3, notices: [note], plans: [], goals: [], acks: [], classes: [], homework: [], homeworkReviews: [], changeAnswers: [], chat: [], exams: [], examFeedback: [] };
   try {
     const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
     outbox = {
@@ -669,6 +723,9 @@ async function postToStudent(
       homework: current.homework,
       homeworkReviews: current.homeworkReviews,
       changeAnswers: current.changeAnswers,
+      chat: current.chat,
+      exams: current.exams,
+      examFeedback: current.examFeedback,
     };
   } catch {
     /* first write, or the slot is empty */
@@ -718,7 +775,7 @@ export async function sendPlan(panels: Panels, linkId: string, draft: PlanDraft)
     updatedAt: now,
   };
 
-  let outbox: GuardianOutbox = { v: 3, notices: [], plans: [plan], goals: [], acks: [], classes: [], homework: [], homeworkReviews: [], changeAnswers: [] };
+  let outbox: GuardianOutbox = { v: 3, notices: [], plans: [plan], goals: [], acks: [], classes: [], homework: [], homeworkReviews: [], changeAnswers: [], chat: [], exams: [], examFeedback: [] };
   try {
     const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
     outbox = {
@@ -731,6 +788,9 @@ export async function sendPlan(panels: Panels, linkId: string, draft: PlanDraft)
       homework: current.homework,
       homeworkReviews: current.homeworkReviews,
       changeAnswers: current.changeAnswers,
+      chat: current.chat,
+      exams: current.exams,
+      examFeedback: current.examFeedback,
     };
   } catch {
     /* first write */
@@ -771,6 +831,9 @@ export async function updatePlanDays(
     homework: [],
     homeworkReviews: [],
     changeAnswers: [],
+    chat: [],
+    exams: [],
+    examFeedback: [],
   };
   let plan = local;
   try {
@@ -1055,6 +1118,147 @@ export async function approveHomeworkSubmission(
   return withGuardianHomeworkReview(panels, cleanReview);
 }
 
+/* --------------------------------------------------------------- chat (17) */
+
+/**
+ * Guardian: say something in the thread with one student.
+ *
+ * Not a notice: it lands in the thread, keeps its place in the conversation,
+ * and the student can answer it. It rides the same slot everything else does,
+ * so whatever plans, exams and answers are already out there survive the write.
+ */
+export async function sendChatMessage(panels: Panels, linkId: string, text: string): Promise<Panels> {
+  const session = await requireSession();
+  const link = panels.guardian.links.find((item) => item.linkId === linkId);
+  if (!link?.wrappedShareKey || link.status !== 'linked') throw new LinkError('That student link is not ready yet.');
+  const clean = text.trim().slice(0, CHAT_TEXT_MAX);
+  if (!clean) return panels;
+  const message = sanitizeChatMessage({
+    id: newId('msg'),
+    linkId,
+    author: session.user.displayName || session.user.username,
+    from: 'guardian',
+    text: clean,
+    createdAt: new Date().toISOString(),
+  });
+  if (!message) throw new LinkError('That message could not be sent.');
+  const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
+  const outbox: GuardianOutbox = {
+    v: 3,
+    ...current,
+    chat: [...current.chat.filter((entry) => entry.id !== message.id), message].slice(-CHAT_WIRE),
+  };
+  await writeSlot(linkId, link.wrappedShareKey, session.dek, outbox);
+  return withChatMessage(panels, message, 'guardian');
+}
+
+/* -------------------------------------------------------------- exams (18) */
+
+/**
+ * Guardian: set an exam for one student.
+ *
+ * The questions travel as words and options with the right one marked, so the
+ * student is marked the moment they hand it in — the score is theirs to see
+ * straight away, and the guardian reads the written answers afterwards.
+ */
+export async function sendExam(panels: Panels, linkId: string, draft: ExamDraft): Promise<Panels> {
+  const session = await requireSession();
+  const link = panels.guardian.links.find((item) => item.linkId === linkId);
+  if (!link?.wrappedShareKey || link.status !== 'linked') throw new LinkError('That student link is not ready yet.');
+  const questions = buildExamQuestions(draft);
+  const exam = sanitizeExam({
+    id: newId('exam'),
+    linkId,
+    author: session.user.displayName || session.user.username,
+    title: draft.title,
+    subject: draft.subject,
+    note: draft.note,
+    minutes: draft.minutes ? Math.round(Number(draft.minutes)) : null,
+    dueAt: draft.dueAt || null,
+    questions,
+    createdAt: new Date().toISOString(),
+  });
+  if (!exam) throw new LinkError('That exam could not be saved. Check its name and questions.');
+  const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
+  const outbox: GuardianOutbox = {
+    v: 3,
+    ...current,
+    exams: [exam, ...current.exams.filter((item) => item.id !== exam.id)].slice(0, EXAMS_WIRE),
+  };
+  await writeSlot(linkId, link.wrappedShareKey, session.dek, outbox);
+  return withLinkExam(panels, linkId, exam);
+}
+
+/** Guardian: take an exam back. A sitting already handed in stays on record. */
+export async function dropExam(panels: Panels, linkId: string, examId: string): Promise<Panels> {
+  const session = await requireSession();
+  const link = panels.guardian.links.find((item) => item.linkId === linkId);
+  if (!link?.wrappedShareKey) throw new LinkError('That student link is not ready yet.');
+  const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
+  await writeSlot(linkId, link.wrappedShareKey, session.dek, {
+    v: 3,
+    ...current,
+    exams: current.exams.filter((exam) => exam.id !== examId),
+  } satisfies GuardianOutbox);
+  return withoutLinkExam(panels, linkId, examId);
+}
+
+/**
+ * Guardian: answer a sitting in words.
+ *
+ * The score was already the student's to see; this is the part a number cannot
+ * do — what to look at next. It rides home on the guardian's own slot, and
+ * lands on the sitting it answers.
+ */
+export async function reviewExamSubmission(
+  panels: Panels,
+  linkId: string,
+  submissionId: string,
+  feedback: string,
+): Promise<Panels> {
+  const session = await requireSession();
+  const link = panels.guardian.links.find((item) => item.linkId === linkId);
+  if (!link?.wrappedShareKey) throw new LinkError('That student link is not ready yet.');
+  const sitting = (link.examResults ?? []).find((item) => item.id === submissionId);
+  if (!sitting) throw new LinkError('That exam is no longer waiting.');
+  const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
+  const reviewed: ExamSubmission = {
+    ...sitting,
+    feedback: feedback.trim().slice(0, EXAM_FEEDBACK_MAX),
+    reviewedAt: new Date().toISOString(),
+  };
+  await writeSlot(linkId, link.wrappedShareKey, session.dek, {
+    v: 3,
+    ...current,
+    examFeedback: [reviewed, ...current.examFeedback.filter((item) => item.id !== submissionId)].slice(
+      0,
+      EXAM_RESULTS_WIRE,
+    ),
+  } satisfies GuardianOutbox);
+  return withGuardianExamResult(panels, reviewed);
+}
+
+/**
+ * Student: hand in an exam.
+ *
+ * Marked here, in the panel, before anything travels — so the score the student
+ * reads is the score the guardian will read, and neither side is waiting on a
+ * signal to find out how it went.
+ */
+export function sitExam(
+  panels: Panels,
+  examId: string,
+  answers: { answers: Record<string, number>; written: Record<string, string> },
+  now = new Date(),
+): Panels {
+  const exam = (panels.student.inbox.exams ?? []).find((item) => item.id === examId);
+  if (!exam) throw new LinkError('That exam is no longer available.');
+  if ((panels.student.examSubmissions ?? []).some((item) => item.examId === examId)) {
+    throw new LinkError('That exam has already been handed in.');
+  }
+  return withStudentExamSubmission(panels, submitExam(exam, answers, now));
+}
+
 let planQueueFlushing = false;
 
 /**
@@ -1117,7 +1321,7 @@ export async function sendGoal(panels: Panels, linkId: string, draft: GoalDraft)
     createdAt: new Date().toISOString(),
   };
 
-  let outbox: GuardianOutbox = { v: 3, notices: [], plans: [], goals: [goal], acks: [], classes: [], homework: [], homeworkReviews: [], changeAnswers: [] };
+  let outbox: GuardianOutbox = { v: 3, notices: [], plans: [], goals: [goal], acks: [], classes: [], homework: [], homeworkReviews: [], changeAnswers: [], chat: [], exams: [], examFeedback: [] };
   try {
     const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
     outbox = {
@@ -1130,6 +1334,9 @@ export async function sendGoal(panels: Panels, linkId: string, draft: GoalDraft)
       homework: current.homework,
       homeworkReviews: current.homeworkReviews,
       changeAnswers: current.changeAnswers,
+      chat: current.chat,
+      exams: current.exams,
+      examFeedback: current.examFeedback,
     };
   } catch {
     /* first write */
@@ -1159,6 +1366,9 @@ export async function dropGoal(panels: Panels, linkId: string, goalId: string): 
       homework: current.homework,
       homeworkReviews: current.homeworkReviews,
       changeAnswers: current.changeAnswers,
+      chat: current.chat,
+      exams: current.exams,
+      examFeedback: current.examFeedback,
     } satisfies GuardianOutbox);
   } catch {
     /* dropping locally is still the right outcome */
@@ -1183,6 +1393,9 @@ export async function dropPlan(panels: Panels, linkId: string, planId: string): 
       homework: current.homework,
       homeworkReviews: current.homeworkReviews,
       changeAnswers: [],
+      chat: [],
+      exams: [],
+      examFeedback: [],
     } satisfies GuardianOutbox);
   } catch {
     /* dropping locally is still the right outcome */
@@ -1267,6 +1480,11 @@ export async function syncStudentInbox(
   let homeworkSubmissions = panels.student.homeworkSubmissions ?? [];
   let praise = panels.student.praise ?? [];
   let changeRequests = panels.student.changeRequests ?? [];
+  // One thread holds every guardian's messages, so the student reads them in
+  // the order they were written rather than per adult.
+  let chat = panels.student.chat ?? [];
+  let exams = panels.student.inbox.exams ?? [];
+  let examSubmissions = panels.student.examSubmissions ?? [];
   let changed = plans.length !== panels.student.inbox.plans.length;
   const added: { notices: GuardianNotice[]; plans: GuardianPlan[]; goals: GoalSuggestion[] } = { notices: [], plans: [], goals: [] };
 
@@ -1401,6 +1619,33 @@ export async function syncStudentInbox(
         changed = true;
       }
     }
+    // The guardian's half of the thread. Merged by id, so a message that has
+    // already arrived is not read twice, and one that has not is not lost.
+    const incomingChat = outbox.chat.filter((entry) => entry.linkId === source.linkId);
+    if (incomingChat.length > 0) {
+      const merged = mergeChat(chat, incomingChat);
+      if (JSON.stringify(merged) !== JSON.stringify(chat)) {
+        chat = merged;
+        changed = true;
+      }
+    }
+    // Exams arrive like plans do: what the guardian is still offering, and a
+    // withdrawn one disappears rather than staying on the list to be sat.
+    const offeredExams = outbox.exams.filter((entry) => entry.linkId === source.linkId);
+    const keptExams = mergeExams(exams.filter((exam) => exam.linkId !== source.linkId), offeredExams);
+    if (JSON.stringify(keptExams) !== JSON.stringify(exams)) {
+      exams = keptExams;
+      changed = true;
+    }
+    // Words back on a sitting land on the sitting they answer.
+    const feedback = outbox.examFeedback.filter((entry) => entry.linkId === source.linkId);
+    if (feedback.length > 0) {
+      const merged = mergeExamSubmissions(examSubmissions, feedback);
+      if (JSON.stringify(merged) !== JSON.stringify(examSubmissions)) {
+        examSubmissions = merged;
+        changed = true;
+      }
+    }
   }
 
   notices = notices.slice(0, 20);
@@ -1463,6 +1708,14 @@ export async function syncStudentInbox(
     const changes = openChangeRequests(changeRequests)
       .filter((entry) => entry.linkId === target.linkId)
       .slice(-PLAN_CHANGES_WIRE);
+    // The thread keeps travelling whole: a message that fell off the last
+    // write would be gone for good, and a conversation is not a notice.
+    const chatForLink = chat
+      .filter((entry) => entry.linkId === target.linkId)
+      .slice(-CHAT_WIRE);
+    const examResultsForLink = examSubmissions
+      .filter((entry) => entry.linkId === target.linkId)
+      .slice(0, EXAM_RESULTS_WIRE);
     const outbox: StudentOutbox = {
       v: 3,
       relayed: passed,
@@ -1473,6 +1726,8 @@ export async function syncStudentInbox(
       homeworkSubmissions: homeworkSubmissionsForLink,
       requests,
       changes,
+      chat: chatForLink,
+      examResults: examResultsForLink,
     };
     try {
       await writeSlot(target.linkId, target.wrappedShareKey, session.dek, outbox);
@@ -1487,12 +1742,14 @@ export async function syncStudentInbox(
       ...panels,
       student: {
         ...panels.student,
-        inbox: { notices, plans, goals: suggestions, classes, homework },
+        inbox: { notices, plans, goals: suggestions, classes, homework, exams },
         praise,
         acks,
         classProgress,
         homeworkSubmissions,
         changeRequests: changeRequests.slice(0, PLAN_CHANGES_KEPT),
+        chat,
+        examSubmissions,
       },
     },
     added,
@@ -1614,6 +1871,45 @@ export async function readNotices(panels: Panels): Promise<{ panels: Panels; cha
       if (JSON.stringify(classProgress) !== JSON.stringify(link.classProgress ?? [])) {
         changed = true;
         links[index] = { ...link, classProgress };
+        link = links[index]!;
+      }
+    }
+    // The student's half of the thread. The guardian's own words are already
+    // held locally, so this only ever adds to the conversation.
+    if (outbox.chat.length > 0) {
+      const merged = mergeChat(link.chat ?? [], outbox.chat.filter((entry) => entry.linkId === link.linkId));
+      if (JSON.stringify(merged) !== JSON.stringify(link.chat ?? [])) {
+        changed = true;
+        links[index] = { ...link, chat: merged };
+        link = links[index]!;
+      }
+    }
+    // A handed-in exam is worth a line in the roster: it is waiting to be read.
+    for (const sitting of outbox.examResults) {
+      if (sitting.linkId !== link.linkId) continue;
+      const notice: GuardianNotice = {
+        id: `exam-${sitting.id}`,
+        student: link.username,
+        author: link.displayName,
+        summary: t('{0} handed in {1}', {
+          0: link.displayName,
+          1: (link.exams ?? []).find((exam) => exam.id === sitting.examId)?.title ?? t('an exam'),
+        }).slice(0, 160),
+        weekOf: '',
+        createdAt: sitting.submittedAt,
+        read: false,
+        kind: 'request',
+      };
+      if (!known.has(notice.id)) found.push(notice);
+    }
+    if (outbox.examResults.length > 0) {
+      const merged = mergeExamSubmissions(
+        link.examResults ?? [],
+        outbox.examResults.filter((entry) => entry.linkId === link.linkId),
+      );
+      if (JSON.stringify(merged) !== JSON.stringify(link.examResults ?? [])) {
+        changed = true;
+        links[index] = { ...link, examResults: merged };
         link = links[index]!;
       }
     }

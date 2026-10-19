@@ -25,7 +25,8 @@
 import { addDays, startOfWeek, timeToMinutes, todayISO } from './dates';
 import { dayScore, habitStats, isDone } from './logic';
 import { weekDates } from './dates';
-import type { PlannerState, WeekArchive } from './types';
+import { rollUpPlans } from './planRetention';
+import type { GuardianPlan, GuardianLink, PlannerState, WeekArchive } from './types';
 
 export const RETENTION_KEY = 'planner-retention-weeks';
 /** 1 / 2 / 4 / 12 weeks, or 0 for "keep everything". */
@@ -195,6 +196,8 @@ export interface RetentionCounts {
   taskDetails: number;
   eventDetails: number;
   planBodies: number;
+  /** Finished plans whose month was up and whose lessons were let go. */
+  planReviews: number;
 }
 
 const EMPTY_COUNTS: RetentionCounts = {
@@ -206,6 +209,7 @@ const EMPTY_COUNTS: RetentionCounts = {
   taskDetails: 0,
   eventDetails: 0,
   planBodies: 0,
+  planReviews: 0,
 };
 
 export interface RetentionResult {
@@ -227,9 +231,62 @@ export function retentionIdle(result: RetentionResult): boolean {
  *
  * `weeks = 0` means keep everything: no archive is written and no detail dropped.
  */
+/**
+ * Plans are on their own clock: a month, whatever the reader chose for their
+ * own weeks. "Keep everything" is about the planner's detail, and a signed-off
+ * week from March is not detail anyone is still reading — it is a record.
+ */
+function rollUpPanelPlans(state: PlannerState, today: string): {
+  state: PlannerState;
+  rolled: number;
+} {
+  let rolled = 0;
+
+  const links: GuardianLink[] = state.panels.guardian.links.map((link) => {
+    const result = rollUpPlans(link.plans ?? [], link.planReviews, today);
+    if (result.rolled === 0 && (link.planReviews?.length ?? 0) === result.reviews.length) return link;
+    rolled += result.rolled;
+    return { ...link, plans: result.plans as GuardianPlan[], planReviews: result.reviews };
+  });
+
+  const inboxResult = rollUpPlans(
+    state.panels.student.inbox.plans,
+    state.panels.student.inbox.planReviews,
+    today,
+  );
+  rolled += inboxResult.rolled;
+
+  if (rolled === 0 && (state.panels.student.inbox.planReviews?.length ?? 0) === inboxResult.reviews.length) {
+    return { state, rolled: 0 };
+  }
+
+  return {
+    state: {
+      ...state,
+      panels: {
+        ...state.panels,
+        guardian: { ...state.panels.guardian, links },
+        student: {
+          ...state.panels.student,
+          inbox: { ...state.panels.student.inbox, plans: inboxResult.plans, planReviews: inboxResult.reviews },
+        },
+      },
+    },
+    rolled,
+  };
+}
+
 export function rollUp(state: PlannerState, weeks: number, today = todayISO()): RetentionResult {
   const keepEverything = weeks === KEEP_EVERYTHING || !Number.isFinite(weeks);
-  if (keepEverything) return { state, archived: [], dropped: { ...EMPTY_COUNTS } };
+  if (keepEverything) {
+    const plans = rollUpPanelPlans(state, today);
+    if (plans.rolled === 0) return { state, archived: [], dropped: { ...EMPTY_COUNTS } };
+    return {
+      state: plans.state,
+      archived: [],
+      dropped: { ...EMPTY_COUNTS, planReviews: plans.rolled },
+    };
+  }
 
   const windowStart = hotWindowStart(weeks, today);
   const already = new Set((state.archives ?? []).map((archive) => archive.weekStart));
@@ -291,6 +348,8 @@ export function rollUp(state: PlannerState, weeks: number, today = todayISO()): 
     return { ...plan, tasks: [], events: [], habits: [], suggestions: [] };
   });
 
+  const rolledPlans = rollUpPanelPlans(state, today);
+  dropped.planReviews = rolledPlans.rolled;
   dropped.explanations = state.panels.student.explanations.length - explanations.length;
   dropped.focusSessions = state.focusLog.length - focusLog.length;
   dropped.moods = state.moods.length - moods.length;
@@ -300,7 +359,7 @@ export function rollUp(state: PlannerState, weeks: number, today = todayISO()): 
 
   return {
     state: {
-      ...state,
+      ...rolledPlans.state,
       tasks,
       events,
       focusLog,
@@ -309,8 +368,8 @@ export function rollUp(state: PlannerState, weeks: number, today = todayISO()): 
       aiPlans,
       archives: [...(state.archives ?? []), ...archived],
       panels: {
-        ...state.panels,
-        student: { ...state.panels.student, explanations },
+        ...rolledPlans.state.panels,
+        student: { ...rolledPlans.state.panels.student, explanations },
       },
     },
     archived,

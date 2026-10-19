@@ -532,6 +532,7 @@ function SignUp({ lang, navigate }: { lang: Lang; navigate: Nav }) {
     { id: 'school-10', label: c.authGrade10 },
     { id: 'school-11', label: c.authGrade11 },
     { id: 'school-12', label: c.authGrade12 },
+    { id: 'konkur', label: c.authGradeKonkur },
     { id: 'university', label: c.authGradeUniversity },
     { id: 'postgrad', label: c.authGradePostgrad },
     { id: 'other', label: c.authGradeOther },

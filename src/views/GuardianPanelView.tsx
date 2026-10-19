@@ -23,7 +23,9 @@ import {
   BellIcon,
   BookIcon,
   CalendarIcon,
+  ChatIcon,
   CheckIcon,
+  ExamIcon,
   EyeIcon,
   HeartIcon,
   HorizonIcon,
@@ -46,6 +48,11 @@ import { todayISO } from '../dates';
 import { faNum, t } from '../i18n';
 import { Field, Empty } from '../components/ui';
 import { PanelTabPanel, PanelTabs, type PanelTab } from '../components/PanelTabs';
+import { ChatThread } from '../components/ChatThread';
+import { PanelNotifications } from '../components/PanelNotifications';
+import { PlanReviews } from '../components/PlanReviews';
+import { GuardianExams } from '../components/GuardianExams';
+import { unreadChatCount } from '../chat';
 import { CompletionRing, FocusTrend, SubjectSplit, SubjectTrend, WeekBars, minutesLabel } from '../components/charts';
 import { GuardianGoalForm } from '../components/GuardianGoalForm';
 import { InviteQr } from '../components/InviteQr';
@@ -54,7 +61,7 @@ import { GuardianPlanComposer } from '../components/GuardianPlanComposer';
 import { WeekPlanCard } from '../components/WeekPlanCard';
 import { WeekPlanComposer } from '../components/WeekPlanComposer';
 import { WeekPlanEditor } from '../components/WeekPlanEditor';
-import { PrintPreview, type PrintableDocument } from '../components/PrintPreview';
+import { PrintPreview, type PrintLayout, type PrintableDocument } from '../components/PrintPreview';
 import { GuardianChangeRequests } from '../components/PlanChangeRequests';
 import { GuardianAssignments } from '../components/GuardianAssignments';
 import {
@@ -96,7 +103,7 @@ import {
 import type { DayReport, GuardianLink, GuardianNotice, GuardianPlan, QueuedPlan, ReportAck } from '../types';
 import '../panels.css';
 
-type GuardianTab = 'week' | 'plan' | 'assignments' | 'support';
+type GuardianTab = 'week' | 'plan' | 'assignments' | 'exams' | 'support' | 'chat' | 'notices';
 type PlanMode = 'steps' | 'lessons';
 
 const TAB_ID = 'guardian-student';
@@ -312,7 +319,7 @@ export function GuardianPanelView() {
    * Nothing is opened in a new window until the guardian has seen the page and
    * chosen to print or keep it.
    */
-  const planDocuments = (link: GuardianLink, plan: GuardianPlan): PrintableDocument[] => [
+  const planDocuments = (link: GuardianLink, plan: GuardianPlan, layout: PrintLayout): PrintableDocument[] => [
     {
       id: 'week',
       label: t('Week plan'),
@@ -322,6 +329,8 @@ export function GuardianPanelView() {
         madeOn: todayISO(),
         dir: document.documentElement.dir || 'ltr',
         lang: document.documentElement.lang || 'en',
+        orientation: layout.orientation,
+        wide: layout.wide,
       }),
     },
     {
@@ -333,6 +342,8 @@ export function GuardianPanelView() {
         madeOn: todayISO(),
         dir: document.documentElement.dir || 'ltr',
         lang: document.documentElement.lang || 'en',
+        orientation: layout.orientation,
+        wide: layout.wide,
       }),
     },
   ];
@@ -546,11 +557,30 @@ export function GuardianPanelView() {
   const ready = !!open && open.status === 'linked' && !!open.linkId && !!open.wrappedShareKey;
   const queued = open ? (guardian.queuedPlans ?? []).filter((entry) => entry.linkId === open.linkId) : [];
 
+  const unreadChat = open
+    ? unreadChatCount(
+        guardian.chat,
+        open.linkId ?? '',
+        'guardian',
+        guardian.chatSeen?.[open.linkId ?? ''],
+      )
+    : 0;
+  const waitingExams = open
+    ? (open.examResults ?? []).filter((sitting) => !sitting.reviewedAt).length
+    : 0;
+
   const studentTabs: Array<PanelTab<GuardianTab>> = [
     { id: 'week', label: t('This week'), icon: CalendarIcon },
     { id: 'plan', label: t('Plan'), icon: WeekIcon, dot: queued.length > 0 },
     { id: 'assignments', label: t('Classes'), icon: BookIcon },
+    // Counted, not badged: a handed-in exam is waiting to be read, and a
+    // message is waiting to be answered. Both are things to do, not noise.
+    { id: 'exams', label: t('Exams'), icon: ExamIcon, count: waitingExams },
     { id: 'support', label: t('Support'), icon: HeartIcon },
+    { id: 'chat', label: t('Messages'), icon: ChatIcon, count: unreadChat },
+    // Everything that arrived, in one place rather than wedged into whichever
+    // tab had room. Counted, so a notice nobody has read is not missed.
+    { id: 'notices', label: t('Notifications'), icon: BellIcon, count: unread },
   ];
 
   return (
@@ -906,42 +936,18 @@ export function GuardianPanelView() {
             </div>
           </section>
 
-          {guardian.notices.length > 0 ? (
-            <section className="card notice-card" aria-label={t('Shared updates')}>
-              <header className="card-head">
-                <div>
-                  <p className="kicker">{t('From your shared circle')}</p>
-                  <h2 className="card-title">
-                    {t('Shared updates')}
-                    {unread > 0 ? <span className="badge-count"> {faNum(unread)}</span> : null}
-                  </h2>
-                </div>
-                {unread > 0 ? (
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-tiny"
-                    onClick={() => updatePanels((latest) => markNoticesRead(latest))}
-                  >
-                    {t('Mark all read')}
-                  </button>
-                ) : null}
-              </header>
-              <ul className="notice-list">
-                {guardian.notices.slice(0, 8).map((notice) => (
-                  <li key={notice.id} className={cx('notice', !notice.read && 'unread')}>
-                    <div className="notice-body">
-                      <p className="notice-text">{notice.summary}</p>
-                      <p className="notice-meta">
-                        {notice.author} · <bdi>@{notice.student}</bdi>
-                        {notice.weekOf ? ` · ${notice.weekOf}` : ''}
-                      </p>
-                    </div>
-                    {notice.kind === 'request' ? planAskButton(notice) : null}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
+          {/* The list of record. The panel above still leads with the one thing
+              that needs answering; this is where every notice lives. */}
+          <PanelNotifications
+            notices={guardian.notices}
+            othersLabel={t('your students')}
+            action={(notice) => (notice.kind === 'request' ? planAskButton(notice) : null)}
+            onMarkAllRead={() => updatePanels((latest) => markNoticesRead(latest))}
+            onOpen={(username) => {
+              const link = guardian.links.find((item) => item.username === username);
+              if (link) openStudent(link);
+            }}
+          />
         </>
       ) : (
         <>
@@ -1262,7 +1268,32 @@ export function GuardianPanelView() {
 
             {tab === 'assignments' ? <GuardianAssignments key={`${open.id}-assignments`} link={open} /> : null}
 
+            {/* Weeks whose month of detail is up: the plan is gone, the shape of
+                the week stays. See src/planRetention.ts. */}
+            {tab === 'week' && (open.planReviews ?? []).length > 0 ? (
+              <PlanReviews reviews={open.planReviews ?? []} />
+            ) : null}
+
             {/* -------------------------------------------------------- Support */}
+            {tab === 'exams' ? <GuardianExams key={`${open.id}-exams`} link={open} /> : null}
+
+            {tab === 'notices' ? (
+              <PanelTabPanel id={`${TAB_ID}-notices`} tab={t('Notifications')}>
+                <PanelNotifications
+                  notices={guardian.notices.filter((notice) => notice.student === open.username)}
+                  othersLabel={open.displayName}
+                  action={(notice) => (notice.kind === 'request' ? planAskButton(notice) : null)}
+                  onMarkAllRead={() => updatePanels((latest) => markNoticesRead(latest))}
+                />
+              </PanelTabPanel>
+            ) : null}
+
+            {tab === 'chat' ? (
+              <PanelTabPanel id={`${TAB_ID}-chat`} tab={t('Messages')}>
+                <ChatThread key={`${open.id}-chat`} linkId={open.linkId ?? ''} otherName={open.displayName} side="guardian" />
+              </PanelTabPanel>
+            ) : null}
+
             {tab === 'support' ? (
               <>
                 <section className="card support-card" aria-label={t('Support this student')}>
@@ -1449,7 +1480,7 @@ export function GuardianPanelView() {
         return (
           <PrintPreview
             title={plan.title}
-            documents={planDocuments(link, plan)}
+            build={(layout) => planDocuments(link, plan, layout)}
             onClose={() => setPreview(null)}
           />
         );

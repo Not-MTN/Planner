@@ -3,8 +3,8 @@ import { usePlanner } from '../context';
 import { sendPlan } from '../auth/links';
 import { draftGuardianProposal, friendlyGroqError } from '../ai';
 import { isValidISODate } from '../dates';
-import { lessonDurationLabel, lessonTimeLabel, normalizeLessonEnd } from '../weekPlans';
-import { ClockIcon, PlusIcon, TrashIcon } from '../icons';
+import { readLessonTimePair } from '../weekPlans';
+import { PlusIcon, TrashIcon } from '../icons';
 import { t } from '../i18n';
 import {
   emptyPlanStep,
@@ -16,6 +16,7 @@ import {
 } from '../panelFeatures';
 import { planEnd, planStartFor, withLinkPlan } from '../panels';
 import type { GuardianLink, PlanCadence } from '../types';
+import { LessonTimePicker, TimeSlots } from './LessonTime';
 import { Field } from './ui';
 import { minutesLabel } from './charts';
 
@@ -148,8 +149,10 @@ export function GuardianPlanComposer({
             title: item.title.trim(),
             subject: item.subject.trim() || null,
             date: item.date || null,
-            time: item.time || null,
-            end: normalizeLessonEnd(item.time, item.end),
+            // Read the pair the way it was typed, so a step whose end came
+            // before its start still travels — with the start it did have.
+            time: readLessonTimePair(item.time, item.end).time || null,
+            end: readLessonTimePair(item.time, item.end).end || null,
             minutes: item.minutes ? Math.round(Number(item.minutes)) : null,
             url: null,
           })),
@@ -324,40 +327,29 @@ export function GuardianPlanComposer({
                     onChange={(event) => patchStep(item.id, { date: event.target.value })}
                   />
                 </Field>
-                <Field label={t('From')} hint={t('Optional')}>
-                  <input
-                    className="input"
-                    type="time"
-                    aria-label={t('Step {0} start time', { 0: index + 1 })}
-                    value={item.time}
-                    onChange={(event) => patchStep(item.id, { time: event.target.value })}
+                <div className="step-time-block">
+                  <p className="step-time-label">
+                    {t('When')} <span className="hint">{t('Optional')}</span>
+                  </p>
+                  <LessonTimePicker
+                    time={item.time}
+                    end={item.end}
+                    subject={item.title.trim() || t('Step {0}', { 0: index + 1 })}
+                    fromLabel={t('Step {0} start time', { 0: index + 1 })}
+                    toLabel={t('Step {0} end time', { 0: index + 1 })}
+                    disabled={sending}
+                    onChange={(next) => patchStep(item.id, { time: next.time, end: next.end })}
                   />
-                </Field>
-                <Field label={t('To')}>
-                  <input
-                    className="input"
-                    type="time"
-                    aria-label={t('Step {0} end time', { 0: index + 1 })}
-                    min={item.time || undefined}
-                    value={item.end}
-                    onChange={(event) => patchStep(item.id, { end: event.target.value })}
+                  <TimeSlots
+                    time={item.time}
+                    end={item.end}
+                    label={t('Common lesson times')}
+                    onPick={(slot) =>
+                      patchStep(item.id, { time: slot?.time ?? '', end: slot?.end ?? '' })
+                    }
                   />
-                </Field>
+                </div>
               </div>
-              {item.time && item.end && !normalizeLessonEnd(item.time, item.end) ? (
-                <p className="field-error" role="alert">
-                  {t('A lesson has to end after it starts.')}
-                </p>
-              ) : null}
-              {item.time ? (
-                <p className="hint week-step-time">
-                  <ClockIcon size={13} />
-                  {lessonTimeLabel({ time: item.time, end: item.end })}
-                  {lessonDurationLabel({ time: item.time, end: item.end })
-                    ? ` · ${lessonDurationLabel({ time: item.time, end: item.end })}`
-                    : ''}
-                </p>
-              ) : null}
             </li>
           ))}
         </ol>

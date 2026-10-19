@@ -16,9 +16,12 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
 import {
+  BellIcon,
   BookIcon,
   CalendarIcon,
+  ChatIcon,
   CheckIcon,
+  ExamIcon,
   FlagIcon,
   FlameIcon,
   HeartIcon,
@@ -66,6 +69,12 @@ import { PLAN_REQUESTS_KEPT } from '../types';
 import type { ChangeNote, DayReport, GoalSuggestion, GuardianPlan, StudentSubject } from '../types';
 import { Field, Empty } from '../components/ui';
 import { PanelTabPanel, PanelTabs, type PanelTab } from '../components/PanelTabs';
+import { ChatThread } from '../components/ChatThread';
+import { PanelNotifications } from '../components/PanelNotifications';
+import { PlanReviews } from '../components/PlanReviews';
+import { StudentExams } from '../components/StudentExams';
+import { openExamCount } from '../exams';
+import { unreadChatCount } from '../chat';
 import { StudentWorkspace, SubjectTracker } from '../components/StudentWorkspace';
 import { StudentLearningHub } from '../components/StudentLearningHub';
 import { upcomingExams } from '../panelFeatures';
@@ -86,12 +95,12 @@ import { formatFullDate, formatWeekRange, todayISO } from '../dates';
 import { DayReportForm } from '../components/DayReportForm';
 import { StreakRepairForm } from '../components/StreakRepairForm';
 import { WeekPlanCard } from '../components/WeekPlanCard';
-import { PrintPreview, type PrintableDocument } from '../components/PrintPreview';
+import { PrintPreview, type PrintLayout, type PrintableDocument } from '../components/PrintPreview';
 import { PlanChangeForm } from '../components/PlanChangeForm';
 import { StudentChangeRequests } from '../components/PlanChangeRequests';
 import '../panels.css';
 
-type StudentTab = 'today' | 'week' | 'subjects' | 'classes' | 'sharing';
+type StudentTab = 'today' | 'week' | 'subjects' | 'classes' | 'exams' | 'sharing' | 'chat' | 'notices';
 
 const TAB_ID = 'student-panel';
 
@@ -290,7 +299,7 @@ export function StudentPanelView() {
    * the times, the ticks and the reports they filed, exactly as paper would
    * show them, with print and download beside it.
    */
-  const planDocuments = (plan: GuardianPlan): PrintableDocument[] => [
+  const planDocuments = (plan: GuardianPlan, layout: PrintLayout): PrintableDocument[] => [
     {
       id: 'week',
       label: t('Week plan'),
@@ -301,6 +310,8 @@ export function StudentPanelView() {
         dir: document.documentElement.dir || 'ltr',
         lang: document.documentElement.lang || 'en',
         side: 'student',
+        orientation: layout.orientation,
+        wide: layout.wide,
       }),
     },
     {
@@ -313,6 +324,8 @@ export function StudentPanelView() {
         madeOn: todayISO(),
         dir: document.documentElement.dir || 'ltr',
         lang: document.documentElement.lang || 'en',
+        orientation: layout.orientation,
+        wide: layout.wide,
       }),
     },
   ];
@@ -433,6 +446,13 @@ export function StudentPanelView() {
     flash(t("Saved. Only the headline is included in shared results."));
   };
 
+  // One thread per guardian, counted together: the badge is about messages
+  // that have not been read, not about which adult wrote them.
+  const studentUnread = panels.student.guardians.reduce(
+    (total, entry) => total + unreadChatCount(panels.student.chat, entry.linkId, 'student', panels.student.chatSeen?.[entry.linkId]),
+    0,
+  );
+
   const tabs: Array<PanelTab<StudentTab>> = [
     { id: 'today', label: t('Today'), icon: SunIcon },
     {
@@ -443,7 +463,14 @@ export function StudentPanelView() {
     },
     { id: 'subjects', label: t('Subjects'), icon: BookIcon },
     { id: 'classes', label: t('Classes'), icon: StudyIcon, count: (panels.student.inbox.classes ?? []).length + (panels.student.inbox.homework ?? []).length },
+    { id: 'exams', label: t('Exams'), icon: ExamIcon, count: openExamCount(panels.student.inbox.exams, panels.student.examSubmissions) },
     { id: 'sharing', label: t('Sharing'), icon: HeartIcon },
+    // Counted, not badged: a message that has not been read is a thing to read,
+    // and the number falls away on its own the moment the thread is opened.
+    { id: 'chat', label: t('Messages'), icon: ChatIcon, count: studentUnread },
+    // One place for everything that arrived, rather than three notices at the
+    // top of the week and the rest forgotten further down.
+    { id: 'notices', label: t('Notifications'), icon: BellIcon, count: unreadInbox },
   ];
 
   // Someone bookmarked the panel, or turned it off on another device.
@@ -1163,6 +1190,46 @@ export function StudentPanelView() {
         ) : null}
 
         {/* --------------------------------------------------------- Sharing */}
+        {tab === 'notices' ? (
+          <PanelTabPanel id={`${TAB_ID}-notices`} tab={t('Notifications')}>
+            <PanelNotifications
+              notices={inbox.notices}
+              othersLabel={t('your guardians')}
+              onMarkAllRead={() => updatePanels((latest) => markInboxRead(latest))}
+            />
+          </PanelTabPanel>
+        ) : null}
+
+        {tab === 'week' && (inbox.planReviews ?? []).length > 0 ? (
+          <PlanReviews reviews={inbox.planReviews ?? []} />
+        ) : null}
+
+        {tab === 'exams' ? (
+          <PanelTabPanel id={`${TAB_ID}-exams`} tab={t('Exams')}>
+            <StudentExams />
+          </PanelTabPanel>
+        ) : null}
+
+        {tab === 'chat' ? (
+          <PanelTabPanel id={`${TAB_ID}-chat`} tab={t('Messages')}>
+            {panels.student.guardians.length === 0 ? (
+              <p className="hint">{t('Link a guardian and the thread opens here.')}</p>
+            ) : (
+              panels.student.guardians.map((entry) => (
+                <div key={entry.linkId} className="card">
+                  <div className="card-head">
+                    <h2 className="card-title">
+                      <ChatIcon size={15} />
+                      {entry.guardianDisplayName}
+                    </h2>
+                  </div>
+                  <ChatThread linkId={entry.linkId} otherName={entry.guardianDisplayName} side="student" />
+                </div>
+              ))
+            )}
+          </PanelTabPanel>
+        ) : null}
+
         {tab === 'sharing' ? (
           <section className="card">
             <header className="card-head">
@@ -1266,7 +1333,11 @@ export function StudentPanelView() {
         const plan = inbox.plans.find((item) => item.id === previewPlan) ?? null;
         if (!plan) return null;
         return (
-          <PrintPreview title={plan.title} documents={planDocuments(plan)} onClose={() => setPreviewPlan(null)} />
+          <PrintPreview
+            title={plan.title}
+            build={(layout) => planDocuments(plan, layout)}
+            onClose={() => setPreviewPlan(null)}
+          />
         );
       })()}
 

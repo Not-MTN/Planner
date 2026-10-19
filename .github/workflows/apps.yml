@@ -183,6 +183,12 @@ jobs:
             desktop/release/*.AppImage
             desktop/release/*.deb
             desktop/release/*.rpm
+            # The blockmap beside an installer is what lets an in-app update
+            # download only the blocks that changed instead of the whole ~90 MB
+            # package. `latest.yml` is the feed electron-updater reads to find
+            # both. Neither is large: a blockmap is a few tens of kilobytes.
+            desktop/release/*.blockmap
+            desktop/release/*.yml
           if-no-files-found: error
           retention-days: 14
 

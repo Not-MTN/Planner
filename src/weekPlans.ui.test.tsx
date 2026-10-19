@@ -321,6 +321,9 @@ beforeEach(() => {
   setWeekStart(1);
   setLang('en');
   (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
+  // jsdom has no layout, so the composer's "bring the message into view" is
+  // stubbed the way the other suites stub it.
+  Element.prototype.scrollIntoView = () => undefined;
   window.matchMedia = ((media: string) => ({
     media,
     matches: false,
@@ -369,6 +372,125 @@ describe('planning a week of lessons', () => {
     expect(document.querySelector('.week-plan-composer')).toBeNull();
     expect(document.querySelector('.week-plan-card')).not.toBeNull();
     expect(saved().panels.guardian.links[0]?.plans[0]?.title).toBe('Nina’s week');
+  });
+
+  it('taps a built-in lesson into the time already chosen — chemistry from four to six', async () => {
+    await mount(guardianState(), 'guardian');
+    await click('View student', query('.student-card'));
+    await openLessonsPlan();
+    setComposerSelect(0, 'science');
+    setComposerSelect(1, 'school-11');
+
+    // The time first, then the lesson: the chip lands in the slot that is
+    // showing, which is what "chemistry from four to six" means at the desk.
+    setValue('input[aria-label="From"]', '16:00');
+    setValue('input[aria-label="To"]', '18:00');
+    expect(query('.week-add-bar').textContent).toContain('16:00 – 18:00');
+    await click('شیمی (۲)');
+
+    const row = query('.week-draft-day .week-lesson');
+    expect(row.querySelector('.week-lesson-title')?.textContent).toBe('شیمی (۲)');
+    expect(row.textContent).toContain('16:00 – 18:00');
+    expect(row.textContent).toContain('2 h');
+
+    setValue('.week-plan-composer input', 'Nina’s week');
+    await click('Send the plan');
+    const draft = vi.mocked(sendPlan).mock.calls[0]?.[2];
+    expect(draft?.items).toEqual([
+      expect.objectContaining({ title: 'شیمی (۲)', time: '16:00', end: '18:00', date: todayISO() }),
+    ]);
+  });
+
+  it('gives a lesson that is already in the draft its time', async () => {
+    await mount(guardianState(), 'guardian');
+    await click('View student', query('.student-card'));
+    await openLessonsPlan();
+    setComposerSelect(0, 'science');
+    setComposerSelect(1, 'school-11');
+    // Added first with no time at all, the way a tap with empty boxes does.
+    await click('زیست‌شناسی (۲)');
+    let row = query('.week-draft-day .week-lesson');
+    expect(row.textContent).toContain('Any time');
+
+    // The row holds its own pair of boxes, named after the lesson, so the four
+    // to six can come after the tap that added it.
+    const inRow = (label: string) => `.week-draft-day [aria-label="Time for زیست‌شناسی (۲)"] input[aria-label="${label}"]`;
+    setValue(inRow('From'), '16:00');
+    setValue(inRow('To'), '18:00');
+    row = query('.week-draft-day .week-lesson');
+    expect(row.textContent).toContain('16:00 – 18:00');
+    expect(row.textContent).toContain('2 h');
+
+    setValue('.week-plan-composer input', 'Nina’s week');
+    await click('Send the plan');
+    expect(vi.mocked(sendPlan).mock.calls[0]?.[2]?.items[0]).toMatchObject({
+      title: 'زیست‌شناسی (۲)',
+      time: '16:00',
+      end: '18:00',
+    });
+  });
+
+  it('reads a time typed into one box as the start, and sends the week anyway', async () => {
+    await mount(guardianState(), 'guardian');
+    await click('View student', query('.student-card'));
+    await openLessonsPlan();
+    setValue('input[aria-label="Lesson name"]', 'Evening review');
+    setValue('input[aria-label="To"]', '19:30');
+    expect(query('.week-add-bar').textContent).toContain('Read as the start time.');
+    setValue('.week-plan-composer input', 'Nina’s week');
+    await click('Send the plan');
+
+    // One careless time used to stop the whole week at the foot of the form.
+    expect(sendPlan).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(sendPlan).mock.calls[0]?.[2]?.items[0]).toMatchObject({
+      title: 'Evening review',
+      time: '19:30',
+      end: null,
+    });
+  });
+
+  it('drops an end that comes before the start and says so, without losing the lesson', async () => {
+    await mount(guardianState(), 'guardian');
+    await click('View student', query('.student-card'));
+    await openLessonsPlan();
+    setValue('input[aria-label="Lesson name"]', 'Early start');
+    setValue('input[aria-label="From"]', '19:00');
+    setValue('input[aria-label="To"]', '08:00');
+    expect(query('.week-add-bar').textContent).toContain('only the start is kept');
+    await click('Add a lesson');
+    setValue('.week-plan-composer input', 'Nina’s week');
+    await click('Send the plan');
+    expect(vi.mocked(sendPlan).mock.calls[0]?.[2]?.items[0]).toMatchObject({
+      title: 'Early start',
+      time: '19:00',
+      end: null,
+    });
+  });
+
+  it('fills the pair from a common lesson time, and clears it again', async () => {
+    await mount(guardianState(), 'guardian');
+    await click('View student', query('.student-card'));
+    await openLessonsPlan();
+    await click('16:00 – 18:00', query('.lesson-slots'));
+    expect(query<HTMLInputElement>('input[aria-label="From"]').value).toBe('16:00');
+    expect(query<HTMLInputElement>('input[aria-label="To"]').value).toBe('18:00');
+    await click('16:00 – 18:00', query('.lesson-slots'));
+    expect(query<HTMLInputElement>('input[aria-label="From"]').value).toBe('');
+    expect(query<HTMLInputElement>('input[aria-label="To"]').value).toBe('');
+  });
+
+  it('sends a lesson that was typed but never tapped into the week', async () => {
+    await mount(guardianState(), 'guardian');
+    await click('View student', query('.student-card'));
+    await openLessonsPlan();
+    setValue('input[aria-label="Lesson name"]', 'Left in the box');
+    setValue('input[aria-label="From"]', '17:00');
+    setValue('.week-plan-composer input', 'Nina’s week');
+    await click('Send the plan');
+    expect(sendPlan).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(sendPlan).mock.calls[0]?.[2]?.items).toEqual([
+      expect.objectContaining({ title: 'Left in the box', time: '17:00', end: null }),
+    ]);
   });
 
   it('sorts a day by time and refuses to send an empty week', async () => {
@@ -634,8 +756,11 @@ describe('asking for a plan', () => {
       },
     ];
     await mount(state, 'guardian');
-    const notices = query('.notice-list');
+    // Notices live in their own section now, rather than a strip at the top of
+    // the roster — the ask is still there, and still answers the same way.
+    const notices = query('.notifications-list');
     expect(notices.textContent).toContain('asked for a week plan');
+    expect(notices.textContent).toContain('A request');
     await click('Plan lessons', notices);
     expect(document.querySelector('.week-plan-composer')).not.toBeNull();
   });

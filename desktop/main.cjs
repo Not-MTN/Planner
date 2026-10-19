@@ -167,6 +167,101 @@ async function sha256File(filePath) {
   return digest.digest('hex');
 }
 
+/**
+ * Pull down only what changed.
+ *
+ * An in-app update has always cost the whole installer again — around 90 MB of
+ * Electron that did not move, to deliver the few hundred kilobytes that did.
+ * Every NSIS installer electron-builder produces carries a blockmap: the file
+ * cut into blocks with a checksum on each. The one already installed is sitting
+ * on this machine, so the new installer can be assembled locally out of the
+ * blocks it shares with it plus the handful that differ, fetched as HTTP ranges.
+ *
+ * The division of responsibility is deliberate. The verified release manifest
+ * still decides *whether* there is an update and *which* bytes are trustworthy;
+ * electron-updater only decides *how* they arrive. The assembled file is checked
+ * against the SHA-256 from that manifest before anything is offered to the
+ * installer, so a differential that produced the wrong bytes is caught and the
+ * caller falls back to downloading the whole file. Slower, never wrong.
+ *
+ * Returns null when a differential download is not possible here — no packaged
+ * install to diff against, no blockmap published, no network support for ranges
+ * — which is a reason to fall back, not an error to surface.
+ */
+async function downloadWindowsInstallerDifferentially(event, offer) {
+  if (!app.isPackaged) return null;
+  let NsisUpdater = null;
+  try {
+    ({ NsisUpdater } = require('electron-updater'));
+  } catch {
+    // Not bundled into this build: the full download still works.
+    return null;
+  }
+
+  const updater = new NsisUpdater({
+    provider: 'github',
+    owner: 'Not-MTN',
+    repo: 'Planner',
+  });
+  updater.autoDownload = false;
+  updater.autoInstallOnAppQuit = false;
+  // Planner runs its own NSIS invocation so the install path and relaunch stay
+  // as they are; electron-updater only owes us the bytes.
+  updater.disableWebInstaller = true;
+  updater.logger = null;
+
+  updater.on('download-progress', (progress) => {
+    if (event.sender.isDestroyed() || !progress) return;
+    event.sender.send('planner:update-progress', {
+      bytesReceived: Math.round(progress.transferred ?? 0),
+      totalBytes: Math.round(progress.total ?? offer.sizeBytes),
+      speedBps: Number.isFinite(progress.bytesPerSecond) ? Math.round(progress.bytesPerSecond) : null,
+    });
+  });
+
+  let files;
+  try {
+    files = await updater.downloadUpdate();
+  } catch (error) {
+    // Range requests refused, blockmap missing, cache gone: fall back quietly.
+    console.warn('[planner] differential update unavailable, falling back:', error && error.message);
+    return null;
+  }
+
+  const file = Array.isArray(files) ? files[0] : null;
+  if (!file) return null;
+  const stat = await fs.promises.stat(file).catch(() => null);
+  if (!stat?.isFile()) return null;
+  // The assembled installer must be byte-for-byte what the verified feed named.
+  const digest = await sha256File(file);
+  if (digest !== offer.sha256) {
+    await fs.promises.rm(file, { force: true }).catch(() => {});
+    return null;
+  }
+
+  // Keep the file where the rest of the updater expects it.
+  const directory = path.join(app.getPath('temp'), 'Planner-update');
+  const finalPath = path.join(directory, `${offer.version}-${offer.sha256}.exe`);
+  await fs.promises.mkdir(directory, { recursive: true });
+  if (path.resolve(file) !== path.resolve(finalPath)) {
+    await fs.promises.rm(finalPath, { force: true }).catch(() => {});
+    await fs.promises.rename(file, finalPath).catch(async () => {
+      await fs.promises.copyFile(file, finalPath);
+      await fs.promises.rm(file, { force: true }).catch(() => {});
+    });
+  }
+
+  downloadedWindowsInstaller = { ...offer, path: finalPath };
+  if (!event.sender.isDestroyed()) {
+    event.sender.send('planner:update-progress', {
+      bytesReceived: offer.sizeBytes,
+      totalBytes: offer.sizeBytes,
+      speedBps: null,
+    });
+  }
+  return { ready: true, differential: true };
+}
+
 async function downloadWindowsInstaller(event, untrustedOffer) {
   assertUpdateSender(event);
   const offer = validateWindowsOffer(untrustedOffer);
@@ -200,6 +295,17 @@ async function downloadWindowsInstaller(event, untrustedOffer) {
       }
     }
   } catch {}
+
+  // Only the blocks that changed, if this machine can supply the rest.
+  try {
+    const differential = await downloadWindowsInstallerDifferentially(event, offer);
+    if (differential) {
+      windowsDownloadInProgress = false;
+      return { ready: true, differential: true };
+    }
+  } catch (error) {
+    console.warn('[planner] differential update failed, downloading in full:', error && error.message);
+  }
 
   // Determine resume offset from any existing partial.
   let startBytes = 0;

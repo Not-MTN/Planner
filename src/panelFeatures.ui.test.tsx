@@ -601,9 +601,10 @@ describe('guardian roster and planning', () => {
     await click('Send note');
     expect(postNotice).toHaveBeenCalledWith(expect.anything(), aliceLinkId, 'What would help with revision?');
     expect(query<HTMLTextAreaElement>('.notice-form textarea').value).toBe('');
-    // The sent note lands where the whole circle reads it: the students page.
+    // The sent note lands where the whole circle reads it: the notifications
+    // section on the students page.
     await click('All students');
-    expect(query('.notice-card').textContent).toContain('What would help with revision?');
+    expect(query('.notifications').textContent).toContain('What would help with revision?');
   });
 });
 
