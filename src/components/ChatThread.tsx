@@ -18,7 +18,7 @@ import { cx } from '../cx';
 import { displayTime, formatFullDate } from '../dates';
 import { faNum, t } from '../i18n';
 import { ChatIcon } from '../icons';
-import { sendChatMessage, syncStudentInbox } from '../auth/links';
+import { sendChatMessage } from '../auth/links';
 import {
   chatDays,
   chatFor,
@@ -28,6 +28,7 @@ import {
   withChatMessage,
   withChatSeen,
 } from '../chat';
+import { acquireSyncPriority } from '../syncPriority';
 import { newId } from '../panels';
 import { CHAT_TEXT_MAX } from '../types';
 import type { ChatSide } from '../types';
@@ -47,13 +48,17 @@ export function ChatThread({
   otherName: string;
   side: ChatSide;
 }) {
-  const { panels, state, updatePanels, flash } = usePlanner();
+  const { panels, updatePanels, flash, linkSyncStatus, runPanelSync, kickPanelSync } = usePlanner();
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [waiting, setWaiting] = useState<string[]>([]);
   const [atEnd, setAtEnd] = useState(true);
   const logRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
+
+  // While this thread is on screen the poller ticks at its fastest rhythm, so
+  // an answer lands in seconds rather than on the next background sync.
+  useEffect(() => acquireSyncPriority('chat'), []);
 
   const held = side === 'student' ? panels.student.chat : panels.guardian.chat;
   const thread = chatFor(held, linkId);
@@ -112,12 +117,15 @@ export function ChatThread({
     updatePanels(() => local);
     setAtEnd(true);
     try {
-      // The guardian writes to their own slot; the student's half rides the
-      // next inbox sync, the way everything else they send does.
+      // The guardian writes straight to their own outbox slot; a student's
+      // half rides the shared pipeline. Both then kick a poll so the thread
+      // stays in step, and every request goes through the one serialized
+      // runner so a send and a background tick can never overwrite each other.
       if (side === 'guardian') {
         await sendChatMessage(panels, linkId, text);
+        kickPanelSync();
       } else {
-        await syncStudentInbox(local, state.goals);
+        await runPanelSync();
       }
       setWaiting((current) => current.filter((id) => id !== message.id));
     } catch {
@@ -133,8 +141,9 @@ export function ChatThread({
     try {
       if (side === 'guardian') {
         await sendChatMessage(panels, linkId, text);
+        kickPanelSync();
       } else {
-        await syncStudentInbox(panels, state.goals);
+        await runPanelSync();
       }
       setWaiting((current) => current.filter((entry) => entry !== id));
     } catch {
@@ -199,6 +208,14 @@ export function ChatThread({
         <div ref={endRef} />
       </div>
       <div className="chat-foot">
+        <p className={cx('chat-connection', `is-${linkSyncStatus}`)} role="status">
+          <span className="chat-connection-dot" aria-hidden="true" />
+          {linkSyncStatus === 'live'
+            ? t('Live')
+            : linkSyncStatus === 'offline'
+              ? t('Offline — messages send when you reconnect')
+              : t('Reconnecting…')}
+        </p>
         {!atEnd ? (
           <button type="button" className="btn btn-ghost btn-tiny chat-jump" onClick={() => jumpToEnd(true)}>
             {t('Newest')}

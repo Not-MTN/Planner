@@ -6,9 +6,15 @@ import { sanitizeClassAssignment, sanitizeClassProgress, sanitizeHomeworkAssignm
 import { REPEAT_SET } from './recurrence';
 import { MAX_PLAN_DAYS } from './duration';
 import { mergeChat, sanitizeChatMessage } from './chat';
-import { mergeExams, mergeExamSubmissions, sanitizeExam, sanitizeExamSubmission } from './exams';
+import {
+  mergeExams,
+  mergeExamSubmissions,
+  sanitizeExam,
+  sanitizeExamSubmission,
+  sanitizeStudentExamDraft,
+} from './exams';
 import { PLAN_REVIEWS_KEPT } from './planRetention';
-import { ACK_REACTIONS, ACK_TEXT_MAX, AI_PLAN_LIMIT, CHAT_KEPT, DAY_REPORT_NOTE_MAX, DAY_REPORTS_KEPT, EXAMS_KEPT, EXAM_RESULTS_KEPT, GOAL_STEPS_MAX, HOMEWORK_ITEMS_KEPT, PLAN_CHANGES_KEPT, PLAN_CHANGE_NOTE_MAX, PLAN_CHANGE_TITLE_MAX, PLAN_REQUESTS_KEPT, PRAISE_KEPT, QUEUED_PLANS_KEPT, createEmptyPanels, createEmptyState, isGradeLevel, type AIDeclined, type AIDeclinedKind, type AIMemory, type AttachmentRef, type AIMemoryCategory, type ChangeNote, type DayReport, type EventInput, type FixedCommitment, type FocusLog, type GoalAnswer, type GoalSuggestion, type GuardianKind, type GuardianLink, type GuardianNotice, type GuardianPlan, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Panels, type PlanCadence, type PlanChangeRequest, type PlanDraft, type PlanItem, type PlanRequest, type PlanReview, type QueuedPlan, type ReportAck, type StudentGuardian, type StudentInbox, type StudentSubject, type Subtask, type TaskInput, type TaskRepeat, type WeekResults, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task, type WeekArchive } from './types';
+import { ACK_REACTIONS, ACK_TEXT_MAX, AI_PLAN_LIMIT, CHAT_KEPT, DAY_REPORT_NOTE_MAX, DAY_REPORTS_KEPT, EXAMS_KEPT, EXAM_RESULTS_KEPT, GOAL_STEPS_MAX, HOMEWORK_ITEMS_KEPT, PLAN_CHANGES_KEPT, PLAN_CHANGE_NOTE_MAX, PLAN_CHANGE_TITLE_MAX, PLAN_REQUESTS_KEPT, PRAISE_KEPT, QUEUED_PLANS_KEPT, createEmptyPanels, createEmptyState, isGradeLevel, type AIDeclined, type AIDeclinedKind, type AIMemory, type AttachmentRef, type AIMemoryCategory, type ChangeNote, type DayReport, type EventInput, type FixedCommitment, type FocusLog, type GoalAnswer, type GoalSuggestion, type GuardianKind, type GuardianLink, type GuardianNotice, type GuardianPlan, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Panels, type PlanCadence, type PlanChangeRequest, type PlanDraft, type PlanItem, type PlanRequest, type PlanReview, type QueuedPlan, type ReportAck, type StudentExamDraft, type StudentGuardian, type StudentInbox, type StudentSubject, type Subtask, type TaskInput, type TaskRepeat, type WeekResults, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task, type WeekArchive } from './types';
 import { t } from './i18n';
 import { downloadBlob } from './download';
 
@@ -1375,6 +1381,25 @@ export function sanitizePanels(value: unknown): Panels {
           return sitting && guardians.some((guardian) => guardian.linkId === sitting.linkId) ? [sitting] : [];
         }),
       ).slice(0, EXAM_RESULTS_KEPT),
+      examDrafts: (() => {
+        // Keep only drafts for a live link and exam, so a stale timer can
+        // never outlive the exam it belongs to.
+        const inbox = sanitizeStudentInbox(student.inbox);
+        const kept: Array<readonly [string, StudentExamDraft]> = [];
+        for (const raw of Object.values(
+          student.examDrafts && typeof student.examDrafts === 'object' ? student.examDrafts : {},
+        )) {
+          const draft = sanitizeStudentExamDraft(raw);
+          if (
+            draft &&
+            guardians.some((guardian) => guardian.linkId === draft.linkId) &&
+            (inbox.exams ?? []).some((exam) => exam.id === draft.examId)
+          ) {
+            kept.push([draft.examId, draft] as const);
+          }
+        }
+        return Object.fromEntries(kept);
+      })(),
     },
     guardian: {
       enabled: guardian.enabled === true && kind !== null,

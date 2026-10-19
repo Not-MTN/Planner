@@ -472,6 +472,31 @@ export interface AuthStore {
     userId: string,
     outgoing?: boolean,
   ): Promise<{ ciphertext: string | null; weekOf: string | null } | null>;
+  /**
+   * Cheap change signal for live polling: the last-write timestamp of every
+   * link the user belongs to, with no ciphertext and no decryption. A client
+   * polls this to decide whether a full note pull is worth it, so a conversation
+   * can update in seconds without paying for an encrypted sync on every tick.
+   */
+  listLinkActivity(userId: string): Promise<Array<{ linkId: string; updatedAt: string }>>;
+
+  /* Exam answer-key seals: the server enforces commit-before-reveal and one
+     attempt, without ever being able to read either ciphertext. */
+  /** Guardian seals an answer key for an exam they set. */
+  putExamSeal(input: { linkId: string; guardianId: string; examId: string; ciphertext: string }): Promise<boolean>;
+  /** Student commits their one attempt. A second commit for the same exam fails. */
+  commitExamSeal(input: {
+    linkId: string;
+    studentId: string;
+    examId: string;
+    ciphertext: string;
+  }): Promise<'committed' | 'already'>;
+  /** Guardian reads their own key; a student only after their commit exists. */
+  getExamSeal(
+    linkId: string,
+    userId: string,
+    examId: string,
+  ): Promise<{ keyCiphertext: string | null; commitCiphertext: string | null; committedAt: string | null; released: boolean } | null>;
 
   /* WebAuthn passkeys: one row per credential, keyed by its id. */
   createPasskey(input: NewPasskey): Promise<PasskeyRow | null>;
@@ -650,6 +675,16 @@ export function createMemoryAuthStore(): AuthStore {
   >();
   const links: LinkRow[] = [];
   const passkeys: PasskeyRow[] = [];
+  const examSeals: Array<{
+    link_id: string;
+    exam_id: string;
+    guardian_id: string;
+    student_id: string | null;
+    key_ciphertext: string | null;
+    commit_ciphertext: string | null;
+    created_at: string;
+    committed_at: string | null;
+  }> = [];
 
   return {
     async createAccount(input) {
@@ -949,6 +984,10 @@ export function createMemoryAuthStore(): AuthStore {
       for (let index = passkeys.length - 1; index >= 0; index -= 1) {
         if (passkeys[index]?.user_id === userId) passkeys.splice(index, 1);
       }
+      for (let index = examSeals.length - 1; index >= 0; index -= 1) {
+        const seal = examSeals[index];
+        if (seal && (seal.guardian_id === userId || seal.student_id === userId)) examSeals.splice(index, 1);
+      }
       return true;
     },
     async createLink(input) {
@@ -1059,6 +1098,59 @@ export function createMemoryAuthStore(): AuthStore {
             : null;
       if (mine === null && link.guardian_id !== userId && link.student_id !== userId) return null;
       return { ciphertext: mine, weekOf: link.note_week };
+    },
+    async listLinkActivity(userId) {
+      return links
+        .filter(
+          (link) =>
+            link.status === 'linked' && (link.guardian_id === userId || link.student_id === userId),
+        )
+        .map((link) => ({ linkId: link.id, updatedAt: link.updated_at }));
+    },
+    async putExamSeal({ linkId, guardianId, examId, ciphertext }) {
+      const link = links.find((item) => item.id === linkId && item.guardian_id === guardianId);
+      if (!link) return false;
+      const existing = examSeals.find((seal) => seal.link_id === linkId && seal.exam_id === examId);
+      if (existing) {
+        existing.key_ciphertext = ciphertext;
+      } else {
+        examSeals.push({
+          link_id: linkId,
+          exam_id: examId,
+          guardian_id: guardianId,
+          student_id: link.student_id,
+          key_ciphertext: ciphertext,
+          commit_ciphertext: null,
+          created_at: new Date().toISOString(),
+          committed_at: null,
+        });
+      }
+      return true;
+    },
+    async commitExamSeal({ linkId, studentId, examId, ciphertext }) {
+      const link = links.find((item) => item.id === linkId && item.student_id === studentId && item.status === 'linked');
+      if (!link) throw new Error('not a link member');
+      const seal = examSeals.find((item) => item.link_id === linkId && item.exam_id === examId);
+      if (!seal) throw new Error('no such exam seal');
+      if (seal.commit_ciphertext !== null) return 'already';
+      seal.commit_ciphertext = ciphertext;
+      seal.committed_at = new Date().toISOString();
+      return 'committed';
+    },
+    async getExamSeal(linkId, userId, examId) {
+      const link = links.find((item) => item.id === linkId);
+      if (!link || (link.guardian_id !== userId && link.student_id !== userId)) return null;
+      const seal = examSeals.find((item) => item.link_id === linkId && item.exam_id === examId);
+      if (!seal) return null;
+      const asGuardian = link.guardian_id === userId;
+      const committed = seal.commit_ciphertext !== null;
+      return {
+        // The key leaves the server for a student only once a commit exists.
+        keyCiphertext: asGuardian || committed ? seal.key_ciphertext : null,
+        commitCiphertext: asGuardian ? seal.commit_ciphertext : null,
+        committedAt: seal.committed_at,
+        released: committed,
+      };
     },
     async deleteLink(linkId, userId) {
       const index = links.findIndex(
@@ -1225,6 +1317,16 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
           last_used_at    timestamptz
         )`,
         sql`CREATE INDEX IF NOT EXISTS planner_passkeys_user_idx ON planner_passkeys (user_id)`,
+        sql`CREATE TABLE IF NOT EXISTS planner_exam_seals (
+          link_id           text NOT NULL REFERENCES planner_links(id) ON DELETE CASCADE,
+          exam_id           text NOT NULL,
+          key_ciphertext    text,
+          commit_ciphertext text,
+          created_at        timestamptz NOT NULL DEFAULT now(),
+          committed_at      timestamptz,
+          PRIMARY KEY (link_id, exam_id)
+        )`,
+        sql`CREATE INDEX IF NOT EXISTS planner_exam_seals_link_idx ON planner_exam_seals (link_id)`,
       ]);
     })().catch((error: unknown) => {
       ready = null;
@@ -1737,6 +1839,81 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
           ? row.note_to_guardian
           : row.note_to_student;
       return { ciphertext, weekOf: row.note_week };
+    },
+
+    async listLinkActivity(userId) {
+      await ensure();
+      const rows = (await sql`
+        SELECT id AS "linkId", updated_at AS "updatedAt"
+        FROM planner_links
+        WHERE status = 'linked' AND (guardian_id = ${userId} OR student_id = ${userId})
+      `) as Array<{ linkId: string; updatedAt: string | Date }>;
+      return rows.map((row) => ({
+        linkId: row.linkId,
+        updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : new Date(row.updatedAt).toISOString(),
+      }));
+    },
+
+    async putExamSeal({ linkId, guardianId, examId, ciphertext }) {
+      await ensure();
+      const rows = (await sql`
+        INSERT INTO planner_exam_seals (link_id, exam_id, key_ciphertext)
+        SELECT ${linkId}, ${examId}, ${ciphertext}
+        FROM planner_links
+        WHERE id = ${linkId} AND guardian_id = ${guardianId} AND status = 'linked'
+        ON CONFLICT (link_id, exam_id)
+        DO UPDATE SET key_ciphertext = EXCLUDED.key_ciphertext
+        RETURNING link_id
+      `) as Array<{ link_id: string }>;
+      return rows.length > 0;
+    },
+
+    async commitExamSeal({ linkId, studentId, examId, ciphertext }) {
+      await ensure();
+      const link = (await sql`
+        SELECT id FROM planner_links
+        WHERE id = ${linkId} AND student_id = ${studentId} AND status = 'linked'
+      `) as Array<{ id: string }>;
+      if (link.length === 0) throw new Error('not a link member');
+      const seal = (await sql`
+        SELECT link_id FROM planner_exam_seals WHERE link_id = ${linkId} AND exam_id = ${examId}
+      `) as Array<{ link_id: string }>;
+      if (seal.length === 0) throw new Error('no such exam seal');
+      // The unique partial guard makes a second commit a no-op: one attempt.
+      const updated = (await sql`
+        UPDATE planner_exam_seals
+        SET commit_ciphertext = ${ciphertext}, committed_at = now()
+        WHERE link_id = ${linkId} AND exam_id = ${examId} AND commit_ciphertext IS NULL
+        RETURNING link_id
+      `) as Array<{ link_id: string }>;
+      return updated.length > 0 ? 'committed' : 'already';
+    },
+
+    async getExamSeal(linkId, userId, examId) {
+      await ensure();
+      const link = (await sql`
+        SELECT guardian_id, student_id FROM planner_links WHERE id = ${linkId}
+      `) as Array<{ guardian_id: string; student_id: string | null }>;
+      const row = link[0];
+      if (!row || (row.guardian_id !== userId && row.student_id !== userId)) return null;
+      const seals = (await sql`
+        SELECT key_ciphertext, commit_ciphertext, committed_at
+        FROM planner_exam_seals WHERE link_id = ${linkId} AND exam_id = ${examId}
+      `) as Array<{ key_ciphertext: string | null; commit_ciphertext: string | null; committed_at: string | Date | null }>;
+      const seal = seals[0];
+      if (!seal) return null;
+      const asGuardian = row.guardian_id === userId;
+      const committed = seal.commit_ciphertext !== null;
+      return {
+        keyCiphertext: asGuardian || committed ? seal.key_ciphertext : null,
+        commitCiphertext: asGuardian ? seal.commit_ciphertext : null,
+        committedAt: seal.committed_at
+          ? seal.committed_at instanceof Date
+            ? seal.committed_at.toISOString()
+            : new Date(seal.committed_at).toISOString()
+          : null,
+        released: committed,
+      };
     },
 
     async deleteLink(linkId, userId) {

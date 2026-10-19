@@ -3,7 +3,10 @@ import {
   handleAccountDelete,
   handleAccountVault,
   handleAuthEvents,
+  handleLinkActivity,
+  handleLinks,
   handleLogin,
+  handleNote,
   handleLogout,
   handleRecoveryComplete,
   handleRecoveryStart,
@@ -769,5 +772,92 @@ describe('account API', () => {
     const response = await handleSignup(post('/api/auth/signup', ACCOUNT), null);
     expect(response.status).toBe(503);
     expect((await response.json() as { error: { code: string } }).error.code).toBe('not_configured');
+  });
+});
+
+describe('link activity probe', () => {
+  const HASH = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=';
+
+  it('refuses anonymous probes and reports a missing database', async () => {
+    resetRateLimits();
+    const store = STORE();
+    expect((await handleLinkActivity(get('/api/auth/link-activity'), store)).status).toBe(401);
+    resetRateLimits();
+    expect((await handleLinkActivity(get('/api/auth/link-activity'), null)).status).toBe(503);
+  });
+
+  it('returns nothing without links, then timestamps that bump on every note write', async () => {
+    resetRateLimits();
+    const store = STORE();
+    const guardianCookie = cookieFrom(
+      await handleSignup(post('/api/auth/signup', { ...ACCOUNT, role: 'guardian' }), store),
+    );
+
+    resetRateLimits();
+    let response = await handleLinkActivity(get('/api/auth/link-activity', guardianCookie), store);
+    expect(response.status).toBe(200);
+    expect((await response.json()).links).toEqual([]);
+
+    // Invite a student, then accept the link from the student's side.
+    resetRateLimits();
+    const invite = await handleLinks(
+      post('/api/auth/links', { username: 'thestudent', codeHash: HASH, wrappedShare: HASH }, guardianCookie),
+      store,
+    );
+    expect(invite.status).toBe(201);
+    const linkId = ((await invite.json()) as { link: { id: string } }).link.id;
+    const studentCookie = cookieFrom(
+      await handleSignup(
+        post('/api/auth/signup', { ...ACCOUNT, username: 'thestudent', email: 'student@example.com' }),
+        store,
+      ),
+    );
+    const studentId = await userOf(store, 'thestudent');
+    await store.acceptLink(HASH, { id: studentId, usernameLower: 'thestudent' });
+
+    resetRateLimits();
+    response = await handleLinkActivity(get('/api/auth/link-activity', guardianCookie), store);
+    let body = (await response.json()) as { links: Array<{ linkId: string; updatedAt: string }> };
+    expect(body.links).toHaveLength(1);
+    expect(body.links[0]!.linkId).toBe(linkId);
+    const first = body.links[0]!.updatedAt;
+    expect(Number.isFinite(Date.parse(first))).toBe(true);
+
+    // A note write bumps the timestamp — exactly the event a waiting poller wants.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    resetRateLimits();
+    await handleNote(put('/api/auth/note', { linkId, ciphertext: HASH, weekOf: '2026-10-19' }, guardianCookie), store);
+    resetRateLimits();
+    response = await handleLinkActivity(get('/api/auth/link-activity', guardianCookie), store);
+    body = (await response.json()) as { links: Array<{ linkId: string; updatedAt: string }> };
+    expect(new Date(body.links[0]!.updatedAt).getTime()).toBeGreaterThanOrEqual(new Date(first).getTime());
+
+    // The student reads the same link from the other chair.
+    resetRateLimits();
+    const studentResponse = await handleLinkActivity(get('/api/auth/link-activity', studentCookie), store);
+    const studentBody = (await studentResponse.json()) as { links: Array<{ linkId: string }> };
+    expect(studentBody.links.map((entry) => entry.linkId)).toContain(linkId);
+
+    // Nobody else on the server can see it.
+    resetRateLimits();
+    const otherStore = STORE();
+    const otherCookie = cookieFrom(
+      await handleSignup(post('/api/auth/signup', { ...ACCOUNT, username: 'ali', email: 'ali@example.com' }), otherStore),
+    );
+    resetRateLimits();
+    const otherResponse = await handleLinkActivity(get('/api/auth/link-activity', otherCookie), otherStore);
+    expect((await otherResponse.json()).links).toEqual([]);
+  });
+
+  it('rejects non-GET methods', async () => {
+    resetRateLimits();
+    const store = STORE();
+    const cookie = cookieFrom(await handleSignup(post('/api/auth/signup', ACCOUNT), store));
+    resetRateLimits();
+    const response = await handleLinkActivity(
+      new Request('https://planner.test/api/auth/link-activity', { method: 'POST', headers: { Cookie: cookie } }),
+      store,
+    );
+    expect(response.status).toBe(405);
   });
 });

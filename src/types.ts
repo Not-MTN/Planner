@@ -357,6 +357,12 @@ export interface StudentPanel {
   /** Exams this student sat, newest first. */
   examSubmissions?: ExamSubmission[];
   /**
+   * Exams in progress, by exam id. Persisted (not just component state) so a
+   * reload, a killed tab or a sleeping phone cannot reset the clock or the
+   * answers the guardian's time limit is protecting.
+   */
+  examDrafts?: Record<string, StudentExamDraft>;
+  /**
    * Kind words, kept. Praise is the one thing worth re-reading, so it does not
    * fall out of the inbox when more notes arrive.
    */
@@ -796,6 +802,43 @@ export interface ExamQuestion {
   points: number;
 }
 
+/** Which way an exam works: instant-graded test, or uploaded answer paper. */
+export type ExamKind = 'test' | 'paper';
+/** Multiple choice, or a true/false question. */
+export type ExamQuestionType = 'single' | 'boolean';
+
+/**
+ * An encrypted file that travels over a link — a question paper or a scanned
+ * answer sheet. The bytes are encrypted on the sender's device; only this
+ * pointer ever enters the outbox.
+ */
+export interface ExamFile {
+  url: string;
+  publicId: string;
+  name: string;
+  mime: string;
+  bytes: number;
+}
+
+/** One graded question on a test variant, with its answer key. */
+export interface ExamKeyQuestion {
+  id: string;
+  type: ExamQuestionType;
+  /** Single choice: 2–5 options. Boolean: the two True/False labels. */
+  options: string[];
+  /** Correct option index. Boolean uses 0 for True, 1 for False. */
+  answer: number | null;
+  points: number;
+}
+
+/** One paper of a test exam: its own file, questions and answer key. */
+export interface ExamVariant {
+  id: string;
+  label: string;
+  file: ExamFile | null;
+  questions: ExamKeyQuestion[];
+}
+
 /** An exam a guardian set for one student. */
 export interface Exam {
   id: string;
@@ -808,8 +851,57 @@ export interface Exam {
   minutes: number | null;
   /** When it stops being open (ISO). Null for whenever. */
   dueAt: string | null;
+  /**
+   * Legacy in-app questions. New exams use `kind` + `variants` (test) or
+   * `paperFile` (paper); this stays so exams sent before the change keep
+   * working untouched.
+   */
   questions: ExamQuestion[];
   createdAt: string;
+  /** Missing means a legacy test built on `questions`. */
+  kind?: ExamKind;
+  /** Test exams: one or more variants. The student answers one of them. */
+  variants?: ExamVariant[];
+  /** Paper exams: the question file the student downloads. */
+  paperFile?: ExamFile | null;
+  /** Minutes allowed for uploading the answer paper after time is up. */
+  uploadMinutes?: number | null;
+}
+
+/** Where a sitting is in its one allowed life. */
+export type ExamSittingStatus =
+  | 'sitting'
+  | 'uploading'
+  | 'submitted'
+  | 'missed'
+  | 'reviewed';
+
+/**
+ * A student's in-progress exam, persisted on their device.
+ *
+ * For a test it holds the answers being chosen; for a paper exam the clock and
+ * upload-window bookkeeping. It never syncs — only the finished submission
+ * does — but it must survive a reload because the timer it carries is the
+ * guardian's limit, not the tab's.
+ */
+export interface StudentExamDraft {
+  examId: string;
+  linkId: string;
+  kind: ExamKind;
+  startedAt: string;
+  /** Chosen option index per question id (test exams). */
+  answers: Record<string, number>;
+  /** Which variant was assigned, once the exam is opened. */
+  variantId: string | null;
+  /** Paper exams: when the answer upload window closes. */
+  uploadDeadline: string | null;
+  /** The last phase derived on this device, for quick rendering. */
+  phase: ExamSittingStatus;
+  /**
+   * Paper exams: answer files already encrypted and uploaded, but not yet
+   * handed in. Persisted so closing the modal never loses an upload.
+   */
+  pendingFiles?: ExamFile[];
 }
 
 /** One student's sitting of one exam. */
@@ -828,6 +920,29 @@ export interface ExamSubmission {
   /** The guardian's words back, once they have read it. */
   feedback?: string;
   reviewedAt?: string | null;
+  /** New lifecycle fields; absent on sittings from before the file exams. */
+  status?: ExamSittingStatus;
+  kind?: ExamKind;
+  /** Which variant the student answered. */
+  variantId?: string | null;
+  /** Uploaded answer papers (paper exams), newest last. */
+  files?: ExamFile[];
+  /** When the student pressed Start (ISO). */
+  startedAt?: string | null;
+  /** When the upload window shuts (ISO). */
+  uploadDeadline?: string | null;
+  /** The answer paper missed its window and had to be re-granted. */
+  late?: boolean;
+  /** Guardian-entered total for a manually marked paper. */
+  maxScore?: number | null;
+  /** When the guardian re-opened an upload window. */
+  resubmitGrantedAt?: string | null;
+  /** When the sealed answer key was released to this device (audit). */
+  keyReleasedAt?: string | null;
+  /** Question ids by verdict, recorded at the instant a sealed key graded it. */
+  right?: string[];
+  wrong?: string[];
+  blank?: string[];
 }
 
 export const EXAMS_KEPT = 12;
@@ -842,6 +957,15 @@ export const EXAM_WRITTEN_MAX = 600;
 export const EXAM_FEEDBACK_MAX = 280;
 export const EXAM_RESULTS_KEPT = 30;
 export const EXAM_RESULTS_WIRE = 12;
+export const EXAM_VARIANTS_MAX = 6;
+export const EXAM_FILES_MAX = 12;
+/** The fixed answer-paper upload window after the exam clock ends. */
+export const EXAM_UPLOAD_WINDOW_MIN = 10;
+export const EXAM_UPLOAD_MIN_MIN = 1;
+export const EXAM_UPLOAD_MIN_MAX = 60;
+export const EXAM_FILE_BYTES_MAX = 20 * 1024 * 1024;
+export const EXAM_VARIANT_LABEL_MAX = 40;
+export const EXAM_POINTS_MAX = 100;
 
 /** What a guardian has sent this student: brief notices and full plans. */
 export interface StudentInbox {

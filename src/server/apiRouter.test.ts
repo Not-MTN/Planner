@@ -43,6 +43,12 @@ describe('apiRoute table', () => {
   it('maps every production API path and nothing else', () => {
     const paths = [
       '/api/auth/link-accept',
+      '/api/auth/link-activity',
+      '/api/auth/link-files/sign',
+      '/api/auth/link-files/delete',
+      '/api/auth/exam-seal',
+      '/api/auth/exam-commit',
+      '/api/auth/exam-key',
       '/api/auth/links',
       '/api/auth/login',
       '/api/auth/logout',

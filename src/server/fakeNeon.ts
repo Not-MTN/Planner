@@ -43,6 +43,7 @@ export function createFakeNeon(): FakeDb {
     planner_sync: [],
     planner_login_challenges: [],
     planner_auth_events: [],
+    planner_exam_seals: [],
   };
 
   const now = () => new Date().toISOString();
@@ -400,6 +401,82 @@ export function createFakeNeon(): FakeDb {
     if (/^SELECT \* FROM planner_links WHERE id = /i.test(q)) {
       const [id, guardian_id] = values;
       return tables.planner_links.filter((row) => row.id === id && row.guardian_id === guardian_id).map((row) => ({ ...row }));
+    }
+
+    // The live-poll change signal: timestamps only, never the ciphertext.
+    if (/^SELECT id AS "linkId", updated_at AS "updatedAt" FROM planner_links/i.test(q)) {
+      const [userId] = values;
+      return tables.planner_links
+        .filter((row) => row.status === 'linked' && (row.guardian_id === userId || row.student_id === userId))
+        .map((row) => ({ linkId: row.id, updatedAt: row.updated_at }));
+    }
+
+    // Membership check used by the exam seal protocol.
+    if (/^SELECT id FROM planner_links WHERE id = /i.test(q) && q.includes('student_id')) {
+      const [id, studentId] = values;
+      return tables.planner_links
+        .filter((row) => row.id === id && row.student_id === studentId && row.status === 'linked')
+        .map((row) => ({ id: row.id }));
+    }
+    if (/^SELECT guardian_id, student_id FROM planner_links WHERE id = /i.test(q)) {
+      const [id] = values;
+      return tables.planner_links
+        .filter((row) => row.id === id)
+        .map((row) => ({ guardian_id: row.guardian_id, student_id: row.student_id }));
+    }
+
+    // Guardian seals an answer key (insert, or replace the key on conflict).
+    if (/^INSERT INTO planner_exam_seals /i.test(q)) {
+      const [linkId, examId, ciphertext, guardianId] = values;
+      const link = tables.planner_links.find(
+        (row) => row.id === linkId && row.guardian_id === guardianId && row.status === 'linked',
+      );
+      if (!link) return [];
+      const existing = tables.planner_exam_seals.find((row) => row.link_id === linkId && row.exam_id === examId);
+      if (existing) {
+        existing.key_ciphertext = ciphertext;
+        return [{ link_id: existing.link_id }];
+      }
+      const row: Row = {
+        link_id: linkId,
+        exam_id: examId,
+        key_ciphertext: ciphertext,
+        commit_ciphertext: null,
+        created_at: now(),
+        committed_at: null,
+      };
+      tables.planner_exam_seals.push(row);
+      return [{ link_id: linkId }];
+    }
+
+    if (/^SELECT link_id FROM planner_exam_seals WHERE /i.test(q)) {
+      const [linkId, examId] = values;
+      return tables.planner_exam_seals
+        .filter((row) => row.link_id === linkId && row.exam_id === examId)
+        .map((row) => ({ link_id: row.link_id }));
+    }
+
+    // Student commits: the IS NULL guard is what makes a second attempt a no-op.
+    if (/^UPDATE planner_exam_seals SET commit_ciphertext = /i.test(q)) {
+      const [ciphertext, linkId, examId] = values;
+      const seal = tables.planner_exam_seals.find(
+        (row) => row.link_id === linkId && row.exam_id === examId && row.commit_ciphertext === null,
+      );
+      if (!seal) return [];
+      seal.commit_ciphertext = ciphertext;
+      seal.committed_at = now();
+      return [{ link_id: seal.link_id }];
+    }
+
+    if (/^SELECT key_ciphertext, commit_ciphertext, committed_at FROM planner_exam_seals WHERE /i.test(q)) {
+      const [linkId, examId] = values;
+      return tables.planner_exam_seals
+        .filter((row) => row.link_id === linkId && row.exam_id === examId)
+        .map((row) => ({
+          key_ciphertext: row.key_ciphertext,
+          commit_ciphertext: row.commit_ciphertext,
+          committed_at: row.committed_at,
+        }));
     }
 
     if (/SET note_to_student = /i.test(q)) {

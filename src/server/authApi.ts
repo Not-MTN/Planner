@@ -1419,6 +1419,219 @@ export async function handleHomeworkPhotoDelete(
   }
 }
 
+const LINK_FILE_PURPOSES = ['exam-question', 'exam-answer'] as const;
+type LinkFilePurpose = (typeof LINK_FILE_PURPOSES)[number];
+const LINK_FILE_ID_RE = /^planner-files\/(exam-question|exam-answer)\/[A-Za-z0-9_-]{1,80}\/[a-f0-9]{24}$/;
+const LINK_FILE_MAX_DELETE = 12;
+
+/** Whether the caller belongs to this link, and from which chair. */
+async function linkMembership(
+  session: { user: { id: string; username_lower: string }; store: AuthStore },
+  linkId: string,
+): Promise<{ guardian: boolean; student: boolean }> {
+  const outgoing = await session.store.listOutgoingLinks(session.user.id);
+  if (outgoing.some((row) => row.id === linkId && row.status === 'linked')) return { guardian: true, student: false };
+  const incoming = await session.store.listIncomingLinks({ id: session.user.id, usernameLower: session.user.username_lower });
+  if (incoming.some((row) => row.id === linkId && row.status === 'linked' && row.student_id === session.user.id)) {
+    return { guardian: false, student: true };
+  }
+  return { guardian: false, student: false };
+}
+
+/**
+ * A signed Cloudinary upload ticket for an exam paper or an answer paper.
+ *
+ * The bytes themselves never pass through this API: the client encrypts the
+ * file with the link key and uploads the ciphertext directly. The signature
+ * only proves the caller belongs to the link, and the purpose folder keeps
+ * question papers (guardian) apart from answer papers (student).
+ */
+export async function handleLinkFileSign(
+  request: Request,
+  store: AuthStore | null,
+  config: CloudinaryConfig,
+): Promise<Response> {
+  const blocked = guard(request, 'link-file-sign', 30) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'POST') return error(405, 'Method not allowed.', undefined);
+  const credentials = cloudinaryCredentials(config);
+  if (!credentials) return error(503, 'Encrypted file uploads are not configured yet.', 'media_not_configured');
+  const session = await linkUser(request, store);
+  if (!session) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+  const body = await readJsonBody(request);
+  const linkId = cleanLinkId(body?.linkId);
+  const purpose = typeof body?.purpose === 'string' ? body.purpose : '';
+  if (!linkId || !LINK_FILE_PURPOSES.includes(purpose as LinkFilePurpose)) {
+    return error(400, 'Expected a link and a valid file purpose.');
+  }
+
+  try {
+    const membership = await linkMembership(session, linkId);
+    if (!membership.guardian && !membership.student) return error(404, 'That link is not active.', 'not_found');
+    // Only a guardian uploads question papers, only a student answer papers.
+    if (purpose === 'exam-question' && !membership.guardian) return error(403, 'Only the guardian can set a question paper.');
+    if (purpose === 'exam-answer' && !membership.student) return error(403, 'Only the student can hand in an answer paper.');
+    const timestamp = Math.floor(Date.now() / 1000);
+    const publicId = `planner-files/${purpose}/${linkId}/${newStoreId().replaceAll('-', '').slice(0, 24)}`;
+    return json(200, {
+      cloudName: credentials.cloudName,
+      apiKey: credentials.apiKey,
+      publicId,
+      timestamp,
+      signature: cloudinarySignature({ public_id: publicId, timestamp }, credentials.apiSecret),
+    });
+  } catch {
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
+}
+
+/** Remove encrypted exam files the caller's link owns (e.g. replacing a paper). */
+export async function handleLinkFileDelete(
+  request: Request,
+  store: AuthStore | null,
+  config: CloudinaryConfig,
+): Promise<Response> {
+  const blocked = guard(request, 'link-file-delete', 30) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'POST') return error(405, 'Method not allowed.', undefined);
+  const credentials = cloudinaryCredentials(config);
+  if (!credentials) return error(503, 'Encrypted file uploads are not configured yet.', 'media_not_configured');
+  const session = await linkUser(request, store);
+  if (!session) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+  const body = await readJsonBody(request);
+  const linkId = cleanLinkId(body?.linkId);
+  const ids: unknown[] = Array.isArray(body?.publicIds) ? body.publicIds : [];
+  if (
+    !linkId ||
+    ids.length < 1 ||
+    ids.length > LINK_FILE_MAX_DELETE ||
+    !ids.every((id) => typeof id === 'string' && LINK_FILE_ID_RE.test(id) && id.includes(`/${linkId}/`))
+  ) {
+    return error(400, 'Expected valid file ids for this link.');
+  }
+
+  try {
+    const membership = await linkMembership(session, linkId);
+    if (!membership.guardian && !membership.student) return error(404, 'That link is not active.', 'not_found');
+    for (const publicId of ids as string[]) {
+      const timestamp = Math.floor(Date.now() / 1000);
+      const signature = cloudinarySignature({ invalidate: true, public_id: publicId, timestamp }, credentials.apiSecret);
+      const form = new URLSearchParams({
+        api_key: credentials.apiKey,
+        invalidate: 'true',
+        public_id: publicId,
+        signature,
+        timestamp: String(timestamp),
+      });
+      const response = await fetch(`https://api.cloudinary.com/v1_1/${credentials.cloudName}/raw/destroy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: form,
+      });
+      const result = await response.json().catch(() => null) as { result?: unknown; error?: { message?: unknown } } | null;
+      if (!response.ok || (result?.result !== 'ok' && result?.result !== 'not found')) {
+        return error(502, 'A file could not be deleted yet.', 'file_delete_failed');
+      }
+    }
+    return json(200, { ok: true, deleted: ids.length });
+  } catch {
+    return error(502, 'The file service could not be reached. Try again.');
+  }
+}
+
+/**
+ * Exam ids are minted on the client (`exam-<base36>-<base36>`), so unlike the
+ * hex-only link id they can carry any lowercase letter. They never identify a
+ * row on their own — the link id scopes every seal query — so a loose charset
+ * is safe, but the shape is still pinned to stop arbitrary strings reaching
+ * the database.
+ */
+function cleanExamId(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return /^[a-z0-9][a-z0-9-]{6,79}$/.test(trimmed) ? trimmed : null;
+}
+
+/**
+ * Exam answer-key seals — the commit-then-reveal protocol.
+ *
+ * The guardian seals the encrypted answer key when an exam is sent. The
+ * student's answers must be committed before the key can be read: the server
+ * gates the release on an existing commit and refuses a second commit for the
+ * same exam, which is the hard, server-side one-attempt rule. Both columns
+ * are ciphertext — the server enforces ordering without ever reading content.
+ */
+export async function handleExamSealPut(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'exam-seal-put', 60) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'POST') return error(405, 'Method not allowed.', undefined);
+  const session = await linkUser(request, store);
+  if (!session) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+  const body = await readJsonBody(request);
+  const linkId = cleanLinkId(body?.linkId);
+  const examId = cleanExamId(body?.examId);
+  const ciphertext = cleanShareCiphertext(body?.ciphertext);
+  if (!linkId || !examId || !ciphertext) return error(400, 'Expected { linkId, examId, ciphertext }.');
+  try {
+    const ok = await session.store.putExamSeal({ linkId, guardianId: session.user.id, examId, ciphertext });
+    if (!ok) return error(404, 'That link is not active.', 'not_found');
+    return json(200, { ok: true });
+  } catch {
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
+}
+
+export async function handleExamCommit(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'exam-commit', 60) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'POST') return error(405, 'Method not allowed.', undefined);
+  const session = await linkUser(request, store);
+  if (!session) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+  const body = await readJsonBody(request);
+  const linkId = cleanLinkId(body?.linkId);
+  const examId = cleanExamId(body?.examId);
+  const ciphertext = cleanShareCiphertext(body?.ciphertext);
+  if (!linkId || !examId || !ciphertext) return error(400, 'Expected { linkId, examId, ciphertext }.');
+  try {
+    const result = await session.store.commitExamSeal({ linkId, studentId: session.user.id, examId, ciphertext });
+    if (result === 'already') return error(409, 'This exam has already been handed in. Only one attempt is allowed.', 'already_committed');
+    return json(200, { ok: true });
+  } catch (error_) {
+    if ((error_ as { message?: string })?.message === 'not a link member' || (error_ as { message?: string })?.message === 'no such exam seal') {
+      return error(404, 'That exam is not available to you.', 'not_found');
+    }
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
+}
+
+export async function handleExamSealGet(request: Request, store: AuthStore | null): Promise<Response> {
+  const blocked = guard(request, 'exam-seal-get', 120) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'GET' && request.method !== 'HEAD') return error(405, 'Method not allowed.', undefined);
+  const session = await linkUser(request, store);
+  if (!session) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+  const params = new URL(request.url).searchParams;
+  const linkId = cleanLinkId(params.get('linkId'));
+  const examId = cleanExamId(params.get("examId"));
+  if (!linkId || !examId) return error(400, 'Expected ?linkId&examId.');
+  try {
+    const seal = await session.store.getExamSeal(linkId, session.user.id, examId);
+    if (!seal) return error(404, 'That exam is not available to you.', 'not_found');
+    if (seal.keyCiphertext === null) {
+      // The answers are not committed yet: the key stays sealed.
+      return error(409, 'Hand in your answers before the answer key is released.', 'not_released');
+    }
+    return json(200, {
+      linkId,
+      examId,
+      ciphertext: seal.keyCiphertext,
+      committedAt: seal.committedAt,
+    });
+  } catch {
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
+}
+
 function outgoingView(row: LinkRow): OutgoingLink {
   return {
     id: row.id,
@@ -1623,6 +1836,35 @@ export async function handleNote(request: Request, store: AuthStore | null): Pro
   }
 
   return error(405, 'Method not allowed.', undefined);
+}
+
+/**
+ * The live-poll change signal.
+ *
+ * A full note pull means a round trip plus a decryption for every link. A
+ * conversation that updates in seconds cannot afford that on every tick, so
+ * this answers the only question the tick asks — "has anything moved?" — with
+ * the links' last-write timestamps and nothing else. No ciphertext leaves the
+ * database, so the response stays cheap and the server still cannot read a
+ * word of what moved. Timestamps bump on every note write, which is exactly
+ * the event a waiting device is interested in.
+ */
+export async function handleLinkActivity(request: Request, store: AuthStore | null): Promise<Response> {
+  // Its own bucket: this endpoint is deliberately polled far more often than
+  // the heavy note endpoint, so sharing that bucket would throttle real time.
+  const blocked = guard(request, 'auth-link-activity', 150) ?? (store ? null : error(503, MISSING_DB_AUTH_MESSAGE, 'not_configured'));
+  if (blocked) return blocked;
+  if (request.method !== 'GET' && request.method !== 'HEAD') return error(405, 'Method not allowed.', undefined);
+
+  const session = await linkUser(request, store);
+  if (!session) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
+
+  try {
+    const links = await session.store.listLinkActivity(session.user.id);
+    return json(200, { links });
+  } catch {
+    return error(502, 'The accounts database could not be reached. Try again shortly.');
+  }
 }
 
 /* ------------------------------------------------------------------- share */
