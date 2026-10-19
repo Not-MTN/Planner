@@ -99,7 +99,7 @@ jobs:
       # images can be looked at even when the push could not happen.
       - name: Upload baselines
         if: always() && (inputs.update_baselines || steps.baselines.outputs.missing == 'true')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: visual-baselines
           path: e2e/visual.spec.ts-snapshots/
@@ -131,7 +131,7 @@ jobs:
       # On a mismatch: the diff images and the HTML report say which pixel moved.
       - name: Upload the failure report
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: visual-report
           path: |
