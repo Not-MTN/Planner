@@ -40,6 +40,21 @@ function planWithLesson(minutes: number | null): PlannerState {
     ...state.panels.student,
     enabled: true,
     inbox: { notices: [], plans: [plan], goals: [] },
+    // Today is already reported: without this, the evening report reminder
+    // (hour >= 21 local) leaks into these timer-only assertions, making the
+    // suite depend on the wall clock it runs under.
+    reports: [
+      {
+        id: 'report-today',
+        planId: 'week-1',
+        linkId: 'link-1',
+        date: today,
+        doneIds: [],
+        note: '',
+        createdAt: `${today}T20:00:00.000Z`,
+        updatedAt: `${today}T20:00:00.000Z`,
+      },
+    ],
   };
   return state;
 }
