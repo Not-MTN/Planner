@@ -33,6 +33,7 @@
  * without a server; the impure half is the thin `remote*` wrappers over
  * `/api/caldav` plus `applyCalendarPull`.
  */
+import { localDateFromTimestamp } from './dates';
 import { eventToICS, icsStampOf, icsUids, parseICS, type ICSEventInput } from './ics';
 import { addEvent, deleteEvent, updateEvent } from './mutate';
 import type { PlannerEvent, PlannerState } from './types';
@@ -266,8 +267,10 @@ export function planCalendarSync(
   now = new Date(),
 ): CalendarPlan {
   const { start, end } = pullWindow(now);
-  const windowStart = start.slice(0, 10);
-  const windowEnd = end.slice(0, 10);
+  // The window is compared with event dates, which are device-local days —
+  // so its edges are local days too, not the UTC dates inside the stamps.
+  const windowStart = localDateFromTimestamp(start);
+  const windowEnd = localDateFromTimestamp(end);
   const plan: CalendarPlan = { pull: [], push: [], removeLocal: [], removeRemote: [], seen: [] };
   const dropped = new Set(subscription.dropped);
   const eventsById = new Map(state.events.map((event) => [event.id, event]));

@@ -414,17 +414,44 @@ body {
 @media (max-width: 640px) {
   .chat-bubble { max-width: 84%; padding: 10px 12px; }
 }
-.chat-bubble.is-mine {
+/* Your own words sit on the solid accent, the other side's on paper.
+   The selector must out-rank panels.css `.chat-row.is-mine .chat-bubble`
+   (accent-soft background): when this rule was `.chat-bubble.is-mine` it
+   lost the background but won the colour, leaving near-white text on a
+   near-white tint — 1.1:1, your own messages all but invisible in both
+   themes. Background and colour are a pair (contrast.test holds every
+   accent/accent-contrast pair to AA); never ship one without the other. */
+.chat-row.is-mine .chat-bubble.is-mine {
   background: var(--accent);
   color: var(--accent-contrast);
-  border-bottom-right-radius: 6px;
+  border-color: transparent;
+  /* Logical corner, so the tail mirrors with the row in RTL. */
+  border-end-end-radius: 6px;
+}
+/* The timestamp inside your bubble tones the contrast colour 10% toward the
+   accent — the strongest step down that still clears AA on the lightest
+   accent (peach, 4.71:1). `opacity` would blend it further, so it is off. */
+.chat-row.is-mine .chat-bubble .chat-meta {
+  color: color-mix(in srgb, var(--accent-contrast) 90%, var(--accent));
+  opacity: 1;
+}
+/* "Waiting — send again" inherits the bubble's pair; the default text-btn
+   colour (--accent-deep) is a sibling of the background and vanishes on it. */
+.chat-bubble.is-mine .text-btn {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .chat-bubble:not(.is-mine) {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-bottom-left-radius: 6px;
+  /* Logical corner, so the tail mirrors with the row in RTL. */
+  border-end-start-radius: 6px;
 }
-.chat-bubble.is-waiting { opacity: 0.72; }
+/* Dashed edge, full-strength text — never an opacity fade (see panels.css). */
+.chat-bubble.is-waiting {
+  border: 1.5px dashed color-mix(in srgb, currentColor 55%, transparent);
+}
 .chat-text { margin: 0; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .chat-meta { margin: 6px 0 0; font-size: 11px; opacity: 0.8; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .chat-author { margin: 0 0 4px; font-size: 11.5px; font-weight: 700; opacity: 0.9; }

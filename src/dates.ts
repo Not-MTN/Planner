@@ -315,6 +315,22 @@ export function formatStamp(iso: string): string {
   return `${stamp.format(date)} · ${displayTime(`${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`)}`;
 }
 
+/**
+ * The device's own wall-clock time for an ISO instant — "14:05".
+ *
+ * Instants travel as UTC (`toISOString()`), but a person reads them in the
+ * time zone they are standing in. Slicing the "HH:MM" out of the ISO string
+ * shows UTC on every device, which is how chat messages came to disagree
+ * with the clock on the wall. Parse the instant, then read the local hours
+ * off it — never slice an instant to display it. The same rule is why days
+ * come from `localDateFromTimestamp`, never from `iso.slice(0, 10)`.
+ */
+export function formatInstantTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  return displayTime(`${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`);
+}
+
 /** Day of month for display: Persian digits in fa, a plain number in English. */
 export function dayNumber(iso: string): number | string {
   return faNum(parseISODate(iso).getDate());

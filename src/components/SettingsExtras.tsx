@@ -5,7 +5,7 @@ import { UploadIcon } from '../icons';
 import { parseTaskCSV } from '../importers';
 import { parseSyllabus, syllabusToTasks, type SyllabusParse } from '../syllabus';
 import { KEEP_EVERYTHING, RETENTION_CHOICES } from '../retention';
-import { displayTime, formatEdited, formatFullDate, formatStamp, todayISO } from '../dates';
+import { formatEdited, formatFullDate, formatInstantTime, formatStamp, todayISO } from '../dates';
 import { geocode } from '../weather';
 import { loadTemplates, removeTemplate, saveTemplates, type PlannerTemplate } from '../templates';
 import { PasskeyError, listPasskeys, passkeysSupported, registerPasskey, removePasskey, type ListedPasskey } from '../auth/passkey';
@@ -236,7 +236,7 @@ export function FeedsSection() {
                   {feed.lastError
                     ? feed.lastError
                     : `${tn(feed.count, "{count} event", "{count} events")}${
-                        feed.lastFetchedAt ? ` · ${displayTime(feed.lastFetchedAt.slice(11, 16))}` : ''
+                        feed.lastFetchedAt ? ` · ${formatInstantTime(feed.lastFetchedAt)}` : ''
                       }`}
                 </small>
               </div>

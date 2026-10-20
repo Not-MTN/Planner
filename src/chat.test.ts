@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   chatDays,
   chatFor,
@@ -155,6 +155,22 @@ describe('a thread cut into days', () => {
       message('b', '2026-05-05T01:00:00.000Z', 'guardian'),
     ];
     expect(chatDays(sameWriter)).toHaveLength(2);
+  });
+
+  it("cuts the day at the reader's midnight, not at UTC's", () => {
+    vi.stubEnv('TZ', 'Asia/Tehran'); // UTC+3:30
+    try {
+      // Both instants carry 4 May in UTC; where the reader is standing
+      // they are 00:15 and 00:45 on 5 May, so the heading must say so.
+      const afterMidnight = [
+        message('a', '2026-05-04T20:45:00.000Z', 'guardian'),
+        message('b', '2026-05-04T21:15:00.000Z', 'student'),
+      ];
+      expect(chatDays(afterMidnight).map((group) => group.day)).toEqual(['2026-05-05']);
+      expect(chatDays(afterMidnight)[0]?.messages.map((entry) => entry.id)).toEqual(['a', 'b']);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('is nothing at all for an empty thread', () => {

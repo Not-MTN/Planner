@@ -2,6 +2,7 @@ import { noteKindById } from './constants';
 import {
   addDays,
   isValidISODate,
+  localDateFromTimestamp,
   startOfWeek,
   timeToMinutes,
   weekDates,
@@ -611,7 +612,7 @@ export function planVsFocus(state: PlannerState, today: string, days = 7): Plann
       .filter(
         (task) =>
           task.estimatedMinutes &&
-          (task.dueDate === date || (task.completed && task.completedAt && task.completedAt.slice(0, 10) === date)),
+          (task.dueDate === date || (task.completed && task.completedAt && localDateFromTimestamp(task.completedAt) === date)),
       )
       .reduce((sum, task) => sum + (task.estimatedMinutes ?? 0), 0);
     const focused = state.focusLog.filter((item) => item.date === date).reduce((sum, item) => sum + item.minutes, 0);

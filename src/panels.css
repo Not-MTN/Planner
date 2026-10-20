@@ -1256,7 +1256,13 @@
   background: var(--accent-soft, color-mix(in srgb, var(--accent) 14%, var(--surface)));
   border-color: color-mix(in srgb, var(--accent) 26%, transparent);
 }
-.chat-bubble.is-waiting { opacity: 0.66; }
+/* A waiting bubble keeps its full-strength text and says "not sent yet"
+   with a dashed edge instead of an opacity fade — the fade blended the
+   words into the log behind them (as low as 4.0:1) while they were the
+   one thing still worth reading. Mirrored in responsive-beauty.css. */
+.chat-bubble.is-waiting {
+  border: 1.5px dashed color-mix(in srgb, currentColor 55%, transparent);
+}
 .chat-author {
   margin: 0 0 2px;
   color: var(--muted);

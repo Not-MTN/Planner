@@ -22,7 +22,7 @@
  * A week is only rolled up once it ended at least `GRACE_DAYS` ago, so a
  * Sunday-night check-in still counts while it is still Sunday somewhere.
  */
-import { addDays, startOfWeek, timeToMinutes, todayISO } from './dates';
+import { addDays, localDateFromTimestamp, startOfWeek, timeToMinutes, todayISO } from './dates';
 import { dayScore, habitStats, isDone } from './logic';
 import { weekDates } from './dates';
 import { rollUpPlans } from './planRetention';
@@ -77,7 +77,7 @@ export function weekIsRollable(week: string, today = todayISO()): boolean {
 function oldestDate(state: PlannerState): string | null {
   const dates: string[] = [];
   for (const task of state.tasks) if (task.dueDate) dates.push(task.dueDate);
-  for (const task of state.tasks) if (task.completedAt) dates.push(task.completedAt.slice(0, 10));
+  for (const task of state.tasks) if (task.completedAt) dates.push(localDateFromTimestamp(task.completedAt));
   for (const event of state.events) dates.push(event.date);
   for (const entry of state.focusLog) dates.push(entry.date);
   for (const entry of state.moods) dates.push(entry.date);
@@ -97,7 +97,7 @@ export function weekHasData(state: PlannerState, week: string): boolean {
   const days = new Set(weekDates(week));
   const inWeek = (iso: string | null | undefined): boolean => !!iso && days.has(iso);
   return (
-    state.tasks.some((task) => inWeek(task.dueDate) || inWeek(task.completedAt?.slice(0, 10))) ||
+    state.tasks.some((task) => inWeek(task.dueDate) || inWeek(task.completedAt ? localDateFromTimestamp(task.completedAt) : undefined)) ||
     state.events.some((event) => inWeek(event.date)) ||
     state.focusLog.some((entry) => inWeek(entry.date)) ||
     state.moods.some((entry) => inWeek(entry.date)) ||
@@ -322,13 +322,14 @@ export function rollUp(state: PlannerState, weeks: number, today = todayISO()): 
    * alone would strip the topics out of the plan that was just paid for. The
    * rule is about age, not about how old the date on the item is.
    */
-  const aged = (createdAt: string | null | undefined): boolean => beforeWindow(createdAt?.slice(0, 10));
+  const aged = (createdAt: string | null | undefined): boolean =>
+    beforeWindow(createdAt ? localDateFromTimestamp(createdAt) : undefined);
 
   // Keep the notes still inside the window — `beforeWindow` is the *dropping*
   // predicate, and inverting it here silently ate the current week's headline.
   const explanations = state.panels.student.explanations.filter((note) => !beforeWindow(note.weekOf));
   const tasks = state.tasks.map((task) => {
-    if (!task.completed || !aged(task.createdAt) || !beforeWindow(task.completedAt?.slice(0, 10) ?? task.dueDate)) return task;
+    if (!task.completed || !aged(task.createdAt) || !beforeWindow(task.completedAt ? localDateFromTimestamp(task.completedAt) : task.dueDate)) return task;
     if (!task.note && task.subtasks.length === 0) return task;
     dropped.taskDetails += 1;
     return { ...task, note: '', subtasks: [] };
