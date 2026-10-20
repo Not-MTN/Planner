@@ -22,6 +22,7 @@ vi.mock('../shared/nativeShell', async (importOriginal) => {
     isNativeShell: () => true,
     hasConfiguredApi: () => true,
     configuredApiOrigin: () => API,
+    effectiveApiOrigin: () => API,
   };
 });
 
