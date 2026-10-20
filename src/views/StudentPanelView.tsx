@@ -1082,7 +1082,7 @@ export function StudentPanelView() {
               </section>
             ) : null}
               </>) : null}
-            {weekSub === 'ai' ? (
+            {weekSub !== 'inbox' ? (
               <>
 
             <section className="card" aria-label={t("AI")}>

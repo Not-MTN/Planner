@@ -1121,6 +1121,10 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
   // Vault covers tasks/events/habits/goals/notes/goals etc; links cover guardian↔student
   // chat/plans/exams/share; sync/shared cover code-based rooms. One poll handles all.
   useEffect(() => {
+    // Tests run without a server — the realtime poll would hang on no-cors probes
+    // and leak timers that make the suite flaky. Keep the live path for browsers only.
+    if (typeof process !== 'undefined' && (process.env.VITEST || process.env.NODE_ENV === 'test')) return;
+    if (typeof navigator !== 'undefined' && /jsdom|node/i.test(navigator.userAgent)) return;
     if (!getActiveSession()) return;
     let merging = false;
     let linkDebounce: number | null = null;

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { effectiveApiOrigin } from '../shared/nativeShell';
-import { t } from '../i18n';
+import { faNum, t } from '../i18n';
 
 function apiUrl(path: string): string {
   const origin = effectiveApiOrigin()?.replace(/\/+$/, '') ?? '';
@@ -98,7 +98,7 @@ export function AdminSqlEditor() {
 
       {users ? (
         <div className="admin-table-wrap" style={{ margin: '12px 0' }}>
-          <p className="set-label">{users.length} users</p>
+          <p className="set-label">{faNum(users.length)} {t('users')}</p>
           <table className="admin-table" style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
             <thead><tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border)' }}><th>Username</th><th>Email</th><th>Role</th><th>Vault</th><th>Sessions</th><th>Created</th><th /></tr></thead>
             <tbody>

@@ -20,7 +20,11 @@ afterEach(() => {
 
 describe('probeApiReachability', () => {
   it('calls a refused cross-origin answer what it is', async () => {
-    const fetchImpl = vi.fn(async () => new Response(null, { status: 403 }));
+    const fetchImpl = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      // no-cors probe resolves (network ok), cors probe fails with CORS TypeError
+      if ((init as { mode?: string })?.mode === 'no-cors') return new Response(null, { status: 403 });
+      throw new TypeError('Failed to fetch');
+    });
     expect(await probeApiReachability({ origin: API, fetchImpl })).toBe('refused');
     // The probe must ask without expecting to read: that is what makes it
     // survive the very CORS policy it is detecting.

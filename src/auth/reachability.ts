@@ -51,10 +51,10 @@ export interface ReachabilityOptions {
  * `offline`, the answer that blames nothing but the connection.
  */
 export async function probeApiReachability(options: ReachabilityOptions = {}): Promise<Reachability> {
-  const origin = options.origin ?? effectiveApiOrigin();
+  const origin = options.origin !== undefined ? options.origin : (effectiveApiOrigin() ?? '');
   const target = options.fetchImpl ?? (typeof fetch === 'function' ? fetch : null);
   if (!target) return 'offline';
-  if (!origin) return 'offline';
+  if (origin === undefined || origin === null) return 'offline';
   const withTimeout = async (ms: number, fn: (signal: AbortSignal | undefined) => Promise<unknown>) => {
     const c = typeof AbortController !== 'undefined' ? new AbortController() : null;
     const t = c ? setTimeout(() => c.abort(), ms) : null;
