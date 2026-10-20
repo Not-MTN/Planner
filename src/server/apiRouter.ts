@@ -59,6 +59,7 @@ import {
 import { authStore, hashToken } from './authStore.js';
 import {
   handleRealtimeEvents,
+  handleRealtimeLinkEvent,
   handleRealtimeStream,
   handleRealtimeToken,
   publishRealtimeEvent,
@@ -354,6 +355,8 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
       return (request) => handleRealtimeEvents(request, authStore(env.DATABASE_URL), env as Record<string, string | undefined>);
     case '/api/realtime/stream':
       return (request) => handleRealtimeStream(request, authStore(env.DATABASE_URL), env as Record<string, string | undefined>);
+    case '/api/realtime/link-event':
+      return (request) => handleRealtimeLinkEvent(request, authStore(env.DATABASE_URL), env as Record<string, string | undefined>);
     case '/api/admin/users':
       // Covers GET /api/admin/users?id=… (delete) as DELETE, and GET list
       return (request) => {

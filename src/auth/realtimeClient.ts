@@ -10,8 +10,9 @@
  * On any vault:updated → pullVault → mergeStates → commit
  * On any link:*       → kickPanelSync (guardian/student pipeline)
  * On sync/shared:*    → runSync / runSharedSync
+ * Ephemeral link events: typing, presence, read receipts → UI only, no DB heavy sync
  *
- * Plus BroadcastChannel for instant same-browser multi-tab (no server hop).
+ * Plus BroadcastChannel for instant same-device multi-tab (no server hop).
  * Works on web + Capacitor (effectiveApiOrigin()).
  */
 
@@ -63,13 +64,43 @@ export async function fetchRealtimeEvents(since: string | null, token: string | 
   return body.events ?? [];
 }
 
+export function getCurrentUserId(): string | null {
+  return getActiveSession()?.user.id ?? null;
+}
+
 /** True if this event should trigger a vault pull (entire planner state). */
 export function isVaultEvent(e: RealtimeEvent): boolean {
   return e.kind === 'vault:updated' || e.kind === 'sync:updated' || e.kind === 'vault:*';
 }
-/** True if this event is a guardian↔student link change. */
+/** True if this event is a guardian↔student link change that needs panel sync. */
 export function isLinkEvent(e: RealtimeEvent): boolean {
-  return e.kind.startsWith('link:');
+  return e.kind === 'link:updated' || e.kind === 'link:note' || e.kind === 'link:share' || e.kind === 'link:linked' || e.kind === 'link:invited' || e.kind === 'link:removed' || e.kind === 'link:share-read';
+}
+export function isTypingEvent(e: RealtimeEvent): boolean { return e.kind === 'link:typing'; }
+export function isPresenceEvent(e: RealtimeEvent): boolean { return e.kind === 'link:presence'; }
+export function isReadEvent(e: RealtimeEvent): boolean { return e.kind === 'link:read'; }
+
+/** Send ephemeral link event (typing/presence/read) to other side via server */
+export async function sendLinkEvent(linkId: string, kind: 'typing' | 'presence' | 'read' | 'heartbeat', payload: Record<string, unknown> = {}): Promise<void> {
+  if (!linkId || !getActiveSession()) return;
+  const tok = await getRealtimeToken().catch(() => null);
+  try {
+    await authFetch('/api/realtime/link-event', {
+      method: 'POST',
+      token: tok ?? undefined,
+      body: JSON.stringify({ linkId, kind, payload }),
+    });
+  } catch { /* best-effort */ }
+}
+
+export async function sendTyping(linkId: string, typing: boolean): Promise<void> {
+  await sendLinkEvent(linkId, 'typing', { typing });
+}
+export async function sendPresence(linkId: string): Promise<void> {
+  await sendLinkEvent(linkId, 'presence', { online: true });
+}
+export async function sendReadReceipt(linkId: string, messageId: string, messageCreatedAt?: string): Promise<void> {
+  await sendLinkEvent(linkId, 'read', { messageId, messageCreatedAt: messageCreatedAt ?? null, at: new Date().toISOString() });
 }
 
 /**
@@ -149,7 +180,7 @@ export function subscribeRealtime(
       }
     });
     // Listen to all event kinds the server may send
-    const kinds = ['vault:updated', 'sync:updated', 'link:updated', 'link:note', 'link:share', 'link:linked', 'link:invited', 'link:removed', 'link:share-read', 'heartbeat', 'hello'] as const;
+    const kinds = ['vault:updated', 'sync:updated', 'link:updated', 'link:note', 'link:share', 'link:linked', 'link:invited', 'link:removed', 'link:share-read', 'link:typing', 'link:presence', 'link:read', 'link:heartbeat', 'heartbeat', 'hello'] as const;
     const handle = (e: MessageEvent) => {
       try {
         const data = JSON.parse((e as MessageEvent).data as string) as { id?: string; created_at?: string } & Record<string, unknown>;
@@ -187,6 +218,25 @@ export function subscribeRealtime(
     if (pollTimer !== null) window.clearTimeout(pollTimer);
     try { es?.close(); } catch {}
   };
+}
+
+/** Subscribe only to ephemeral link events for a specific linkId */
+export function subscribeLinkEphemeral(
+  linkId: string,
+  onEvent: (event: RealtimeEvent) => void,
+): () => void {
+  if (!linkId) return () => {};
+  // Reuse the global poll but filter; cheap to create a second poller with longer interval for ephemeral only?
+  // Instead, we hook into the main realtime via a lightweight poll that only cares about ephemeral kinds.
+  // For simplicity, create a dedicated poller at 800ms for ephemeral.
+  return subscribeRealtime(800, async (events) => {
+    for (const e of events) {
+      const p = e.payload as Record<string, unknown> | null;
+      if (p && typeof p.linkId === 'string' && p.linkId === linkId && (isTypingEvent(e) || isPresenceEvent(e) || isReadEvent(e))) {
+        onEvent(e);
+      }
+    }
+  });
 }
 
 // --- BroadcastChannel: instant same-device multi-tab sync (no server) ---

@@ -185,6 +185,34 @@ export async function handleRealtimeToken(request: Request, store: AuthStore | n
   return json(200, { realtime: true, token: jwt, userId: found.user.id, expiresIn: 120 });
 }
 
+export async function handleRealtimeLinkEvent(request: Request, storePromise: Promise<AuthStore | null>, env: Record<string, string | undefined>): Promise<Response> {
+  if (request.method !== 'POST') return json(405, { error: { message: 'Method not allowed' } });
+  const secret = getRealtimeSecret(env);
+  const userId = await resolveUserId(request, storePromise, secret);
+  if (!userId) return json(401, { error: { message: 'Unauthenticated for realtime' } });
+  const dbUrl = env.DATABASE_URL || env.POSTGRES_URL || env.NEON_DATABASE_URL;
+  if (!dbUrl) return json(503, { error: { message: 'No database' } });
+  let body: { linkId?: string; kind?: string; payload?: Record<string, unknown> };
+  try { body = (await request.json()) as typeof body; } catch { return json(400, { error: { message: 'Expected JSON { linkId, kind, payload }' } }); }
+  const linkId = String(body.linkId ?? '').trim();
+  const kind = String(body.kind ?? '').trim().toLowerCase();
+  const allowed = new Set(['typing', 'presence', 'read', 'heartbeat']);
+  if (!linkId || !allowed.has(kind)) return json(400, { error: { message: 'Expected linkId and kind typing|presence|read|heartbeat' } });
+  // Verify actor is participant of this link
+  try {
+    const { Pool } = await import('@neondatabase/serverless');
+    const pool = new Pool({ connectionString: dbUrl });
+    try {
+      const r = await pool.query('SELECT 1 FROM planner_links WHERE id = $1 AND (guardian_id = $2 OR student_id = $2)', [linkId, userId]);
+      if (r.rowCount === 0) return json(403, { error: { message: 'Not a participant of that link' } });
+    } finally { await pool.end().catch(() => {}); }
+  } catch { return json(502, { error: { message: 'Database unavailable' } }); }
+  const payload = { ...(body.payload ?? {}), from: userId, at: new Date().toISOString() };
+  const eventKind = `link:${kind}` as const;
+  await publishRealtimeForLink(dbUrl, linkId, eventKind, payload);
+  return json(200, { ok: true });
+}
+
 export async function handleRealtimeEvents(request: Request, storePromise: Promise<AuthStore | null>, env: Record<string, string | undefined>): Promise<Response> {
   if (request.method !== 'GET') return json(405, { error: { message: 'Method not allowed' } });
   const url = new URL(request.url, 'https://planner.invalid');
