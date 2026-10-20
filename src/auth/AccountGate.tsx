@@ -428,7 +428,7 @@ export function AccountGate() {
       cancelled = true;
       clearTimeout(stuckTimer);
     };
-  }, [updatesEnabled]);
+  }, [updatesEnabled, BOOT_TIMEOUT_MS]);
 
   // The planner is for people who are signed in.
   useEffect(() => {

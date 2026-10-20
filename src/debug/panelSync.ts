@@ -20,12 +20,10 @@ export function debugEnabled(): boolean {
 
 export function logSync(tag: string, details: Record<string, unknown>) {
   if (!debugEnabled()) return;
-  // eslint-disable-next-line no-console
   console.debug(`[panel-sync] ${tag}`, { at: new Date().toISOString().slice(11, 19), ...details });
 }
 
 export function syncInvariant(panels: unknown, message: string) {
   if (!debugEnabled()) return;
-  // eslint-disable-next-line no-console
   console.warn(`[panel-sync-invariant] ${message}`, panels);
 }

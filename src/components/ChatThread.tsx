@@ -152,7 +152,7 @@ export function ChatThread({
       if (typingTimeout.current !== null) window.clearTimeout(typingTimeout.current);
       if (presenceTimeout.current !== null) window.clearTimeout(presenceTimeout.current);
     };
-  }, [linkId]);
+  }, [linkId, side]);
 
   // Typing emitter: throttle to 1.5s, send typing:false when draft cleared
   const emitTyping = useCallback((text: string) => {

@@ -251,7 +251,6 @@ export async function handleRealtimeStream(request: Request, storePromise: Promi
           send('heartbeat', { t: new Date().toISOString() });
         }
       }, 2000);
-      // @ts-ignore — allow abort
       request.signal?.addEventListener?.('abort', () => { clearInterval(iv); try { controller.close(); } catch {} });
     },
   });
