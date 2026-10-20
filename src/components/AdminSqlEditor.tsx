@@ -97,7 +97,7 @@ export function AdminSqlEditor() {
       {error ? <div role="alert" className="notice notice-error" style={{ margin: '8px 0', color: '#b91c1c' }}>{error}</div> : null}
 
       {users ? (
-        <div style={{ overflowX: 'auto', margin: '12px 0' }}>
+        <div className="admin-table-wrap" style={{ margin: '12px 0' }}>
           <p className="set-label">{users.length} users</p>
           <table className="admin-table" style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
             <thead><tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border)' }}><th>Username</th><th>Email</th><th>Role</th><th>Vault</th><th>Sessions</th><th>Created</th><th /></tr></thead>

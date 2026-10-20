@@ -37,6 +37,7 @@ import {
 // after styles.css so its rules carry the day on every device class.
 import '../styles.css';
 import '../app-polish.css';
+import '../responsive-beauty.css';
 import './gate.css';
 
 type Boot = AccountBoot | { status: 'offline' } | { status: 'blocked'; error: AuthError } | null;
