@@ -195,7 +195,20 @@ async function openLessonsPlan(): Promise<void> {
   if (!tab) throw new Error('No tab Plan');
   await act(async () => tab.click());
   await settle();
-  await click('Plan lessons');
+  // The plan tab used to have a single "Plan lessons" button; now it has a
+  // Checklist / Timetable switch and the composer is mounted directly.
+  const candidates = ['Plan lessons', 'Timetable', 'Lessons'] as const;
+  for (const label of candidates) {
+    const exists = [...document.querySelectorAll<HTMLButtonElement>('button')].some(
+      (item) => (item.textContent?.trim() === label || item.getAttribute('aria-label') === label) && !(item as HTMLButtonElement).disabled,
+    );
+    if (exists) {
+      await click(label);
+      return;
+    }
+  }
+  if (document.querySelector('.week-plan-composer')) return;
+  throw new Error('No button Plan lessons / Timetable');
 }
 
 function setValue(selector: string, value: string): void {

@@ -73,10 +73,12 @@ import { ChatThread } from '../components/ChatThread';
 import { PanelNotifications } from '../components/PanelNotifications';
 import { PlanReviews } from '../components/PlanReviews';
 import { StudentExams } from '../components/StudentExams';
+import { PanelDebugInspector } from '../components/PanelDebugInspector';
 import { openExamCount } from '../exams';
 import { unreadChatCount } from '../chat';
 import { StudentWorkspace, SubjectTracker } from '../components/StudentWorkspace';
 import { StudentLearningHub } from '../components/StudentLearningHub';
+import { StudentNextLesson } from '../components/StudentNextLesson';
 import { upcomingExams } from '../panelFeatures';
 import {
   canSubmitDayReport,
@@ -122,6 +124,7 @@ export function StudentPanelView() {
   const [repairingLock, setRepairingLock] = useState<string | null>(null);
   const [reportsOpen, setReportsOpen] = useState(false);
   const [studyPrefill, setStudyPrefill] = useState<StudentSubject | null>(null);
+  const [weekSub, setWeekSub] = useState<'charts' | 'inbox' | 'ai'>('charts');
   // The plan being read before it goes to paper, and the ask being written.
   const [previewPlan, setPreviewPlan] = useState<string | null>(null);
   const [changeAsk, setChangeAsk] = useState<{ planId: string; itemId?: string | null } | null>(null);
@@ -623,6 +626,7 @@ export function StudentPanelView() {
         </section>
       ) : null}
 
+      <PanelDebugInspector side="student" />
       <PanelTabs id={TAB_ID} label={t('Student panel')} tabs={tabs} active={tab} onChange={setTab} />
 
       <PanelTabPanel id={TAB_ID} tab={tab}>
@@ -723,6 +727,8 @@ export function StudentPanelView() {
                 </ul>
               </section>
             ) : null}
+
+            <StudentNextLesson onRoll={rollLessonOn} canRoll={missingDays.length === 0} />
 
             <section className="panel-overview" aria-label={t("This week")}>
               <div className="panel-stat"><span className="panel-stat-icon"><CheckIcon size={18} /></span><p>{t("Done")}</p><strong>{faNum(results.done)}<small> / {faNum(results.planned)}</small></strong><span>{t("Whole planner this week")}</span></div>
@@ -920,7 +926,12 @@ export function StudentPanelView() {
         {/* -------------------------------------------------------- This week */}
         {tab === 'week' ? (
           <>
-            <section className="card" aria-label={t("Tracking")}>
+            <div className="segmented week-subtabs" role="group" aria-label={t('This week sections')}>
+              <button type="button" className={cx('segment', weekSub === 'charts' && 'on')} aria-pressed={weekSub === 'charts'} onClick={() => setWeekSub('charts')}>{t('Charts')}</button>
+              <button type="button" className={cx('segment', weekSub === 'inbox' && 'on')} aria-pressed={weekSub === 'inbox'} onClick={() => setWeekSub('inbox')}>{t('Inbox')} {unreadInbox + openGoals.length > 0 ? `· ${faNum(unreadInbox + openGoals.length)}` : ''}</button>
+              <button type="button" className={cx('segment', weekSub === 'ai' && 'on')} aria-pressed={weekSub === 'ai'} onClick={() => setWeekSub('ai')}>{t('AI Review')}</button>
+            </div>
+            {weekSub === 'charts' ? <section className="card" aria-label={t("Tracking")}>
               <header className="card-head">
                 <div>
                   <p className="kicker">{t("Tracking")}</p>
@@ -983,8 +994,9 @@ export function StudentPanelView() {
                   </section>
                 ) : null}
               </div>
-            </section>
-
+            </section> : null}
+            {weekSub === 'inbox' ? (
+              <>
             {panels.student.guardians.length > 0 ? (
               <section className="card inbox-card" aria-label={t("From your guardians")}>
                 <header className="card-head">
@@ -1069,6 +1081,9 @@ export function StudentPanelView() {
                 ) : null}
               </section>
             ) : null}
+              </>) : null}
+            {weekSub !== 'inbox' ? (
+              <>
 
             <section className="card" aria-label={t("AI")}>
               <header className="card-head">
@@ -1176,6 +1191,8 @@ export function StudentPanelView() {
                 </details>
               ) : null}
             </section>
+              </>
+            ) : null}
           </>
         ) : null}
 
@@ -1248,10 +1265,20 @@ export function StudentPanelView() {
               {t("They receive your weekly results — how much was planned, how much got done, how long you focused, and the headline you write. Nothing else leaves this planner.")}
             </p>
 
-            <details className="panel-sharing-preview">
+            <div className="sharing-privacy-ledger" role="note" aria-label={t('What guardians see')}>
+              <div className="sharing-ledger-col is-shared">
+                <p className="kicker"><EyeIcon size={12} /> {t('They see')}</p>
+                <ul><li>{t('Week totals: Planned / Done / Focused')}</li><li>{t('Subject split (totals only)')}</li><li>{t('Your headline for the week')}</li><li>{t('Week of {0}', { 0: results.weekOf })}</li></ul>
+              </div>
+              <div className="sharing-ledger-col is-private">
+                <p className="kicker">{t('Stays private')}</p>
+                <ul><li>{t('Task titles, notes, reasons')}</li><li>{t('Exam dates, targets, daily reports')}</li><li>{t('Private categories & personal details')}</li></ul>
+              </div>
+            </div>
+            <details className="panel-sharing-preview" open>
               <summary>{t("Preview shared results")}</summary>
               <div className="sharing-preview-body">
-                <p className="hint">{t("This is the weekly snapshot guardians receive. Task details, exam dates, targets, reasons, and personal notes are not sent automatically.")}</p>
+                <p className="hint">{t("Exactly what leaves this device — no hidden fields.")}</p>
                 <p className="student-week">{t("Week of {0}", { 0: results.weekOf })}</p>
                 <dl className="sharing-preview-values">
                   <div><dt>{t("Planned")}</dt><dd>{faNum(results.planned)}</dd></div>
@@ -1260,6 +1287,7 @@ export function StudentPanelView() {
                 </dl>
                 {results.subjects.length > 0 ? <SubjectSplit subjects={results.subjects} /> : null}
                 <p className="student-headline">{results.headline || t("No headline shared this week.")}</p>
+                <p className="hint">{t('Updated {0}', { 0: new Date().toLocaleTimeString() })}</p>
               </div>
             </details>
 
@@ -1274,14 +1302,12 @@ export function StudentPanelView() {
                       <p className="guardian-state">
                         {guardian.sharedWeek ? t("Shared for the week of {0}", { 0: guardian.sharedWeek }) : t("Not shared yet")}
                       </p>
+                      {guardian.sharedWeek ? <p className="hint">{t('Last shared — will resend on next sync if updated')}</p> : null}
                     </div>
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-tiny"
-                      onClick={() => stopSharing(guardian)}
-                    >
-                      {t("Stop sharing")}
-                    </button>
+                    <div className="guardian-list-actions">
+                      <button type="button" className="btn btn-outline btn-tiny" disabled={sharing} onClick={() => void shareNow()}>{t('Share now')}</button>
+                      <button type="button" className="btn btn-ghost btn-tiny" onClick={() => stopSharing(guardian)}>{t("Stop sharing")}</button>
+                    </div>
                   </li>
                 ))}
               </ul>

@@ -19,7 +19,7 @@ import {
   type BiometricKind,
 } from './biometric';
 import { AuthError, getLastUserId } from './session';
-import { isNativeShell } from '../shared/nativeShell';
+import { isNativeShell, effectiveApiOrigin, setRuntimeApiOrigin, runtimeApiOrigin } from '../shared/nativeShell';
 import { currentVersion, type PackagedUpdateCheckResult } from '../shared/updates';
 import { checkPackagedUpdate, supportsPackagedUpdates } from '../shared/updateRuntime';
 import type { PlannerState } from '../types';
@@ -37,6 +37,7 @@ import {
 // after styles.css so its rules carry the day on every device class.
 import '../styles.css';
 import '../app-polish.css';
+import '../responsive-beauty.css';
 import './gate.css';
 
 type Boot = AccountBoot | { status: 'offline' } | { status: 'blocked'; error: AuthError } | null;
@@ -256,19 +257,18 @@ function StartupCheckRow({
   );
 }
 
-function StartupScreen({ state }: { state: StartupState }) {
+function StartupScreen({ state, onContinueOffline, onRetry }: { state: StartupState; onContinueOffline?: () => void; onRetry?: () => void }) {
+  const isStuck = state.account === 'checking' || state.connection === 'checking' || state.update.phase === 'checking';
   return (
     <GateFrame>
       <section
         className="gate-startup"
-        aria-busy={state.account === 'checking' || state.connection === 'checking' || state.update.phase === 'checking'}
+        aria-busy={isStuck}
         aria-live="polite"
         aria-labelledby="startup-title"
       >
         <img className="gate-logo" src="/logo.svg" alt="" width="56" height="56" />
-        <h1 id="startup-title" className="gate-title">
-          {t('Opening your planner…')}
-        </h1>
+        <h1 id="startup-title" className="gate-title">{t('Opening your planner…')}</h1>
         <p className="gate-sub">{t('Your planner is getting things ready.')}</p>
         <ul className="gate-startup-list">
           <StartupCheckRow
@@ -297,6 +297,25 @@ function StartupScreen({ state }: { state: StartupState }) {
             />
           ) : null}
         </ul>
+        {onContinueOffline || onRetry ? (
+          <div className="gate-actions" style={{ marginTop: 16 }}>
+            {onRetry ? (
+              <button className="btn btn-soft" type="button" onClick={onRetry}>
+                {t('Retry')}
+              </button>
+            ) : null}
+            {onContinueOffline ? (
+              <button className="btn btn-ghost" type="button" onClick={onContinueOffline}>
+                {t('Use Planner offline')}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        {isStuck ? (
+          <p className="gate-sub" style={{ marginTop: 12, fontSize: '0.9em', opacity: 0.7 }}>
+            {t('Taking longer than usual? Check your internet, or continue offline — your work is saved on this device.')}
+          </p>
+        ) : null}
       </section>
     </GateFrame>
   );
@@ -322,16 +341,37 @@ export function AccountGate() {
   // account API is unavailable would punish the wrong thing.
   const [offlineChoice, setOfflineChoice] = useState(false);
 
+  // How long to wait before assuming the network is stuck — Android WebView can hang on a dead preflight.
+  // Native needs longer: 12s fetch + 5s probe = 17s worst, so give 18s before forcing offline.
+  const BOOT_TIMEOUT_MS = isNativeShell() ? 18_000 : 12_000;
+  const [stuck, setStuck] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
-    void bootAccount().then(
+
+    // Show “continue offline” after a few seconds if still checking — prevents the “stuck on checking” report.
+    const stuckTimer = window.setTimeout(() => {
+      if (!cancelled) setStuck(true);
+    }, 8000);
+
+    // Safety timeout: never block boot longer than BOOT_TIMEOUT_MS. A hanging fetch (25s + retries) must not outlive the gate.
+    const bootWithTimeout = Promise.race([
+      bootAccount(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new AuthError('network', 'Boot timed out — opening offline copy.')), BOOT_TIMEOUT_MS),
+      ),
+    ]);
+
+    void bootWithTimeout.then(
       (result) => {
         if (cancelled) return;
+        clearTimeout(stuckTimer);
         setStartup((current) => withAccountCheck(current, accountStatusForBoot(result), connectionStatusForBoot(result)));
         setBoot(result);
       },
       (err: unknown) => {
         if (cancelled) return;
+        clearTimeout(stuckTimer);
         // Without a network we cannot read the vault, so keep working locally.
         if (err instanceof AuthError && err.code === 'network') {
           setStartup((current) => withAccountCheck(current, 'offline', 'offline'));
@@ -358,8 +398,16 @@ export function AccountGate() {
     if (updatesEnabled) {
       // The ref also deduplicates React Strict Mode's development-only effect
       // replay. The result remains useful after AccountGate hands off to App.
-      updateCheck.current ??= checkPackagedUpdate();
-      void updateCheck.current.then(
+      // Give the update check its own timeout — it already has 10s inside updateRuntime, but gate also guards.
+      const updateWithTimeout = updateCheck.current ?? checkPackagedUpdate();
+      updateCheck.current = updateWithTimeout;
+      const updatePromise = Promise.race([
+        updateWithTimeout,
+        new Promise<PackagedUpdateCheckResult>((resolve) =>
+          setTimeout(() => resolve({ status: 'unavailable', version: null, offer: null }), 10_000),
+        ),
+      ]) as Promise<PackagedUpdateCheckResult>;
+      void updatePromise.then(
         (result) => {
           if (!cancelled) setStartup((current) => withUpdateCheck(current, result));
         },
@@ -367,12 +415,20 @@ export function AccountGate() {
           if (!cancelled) setStartup((current) => withUpdateCheck(current, { status: 'unavailable', version: null, offer: null }));
         },
       );
+    } else {
+      // Ensure update row shows not-applicable immediately for non-packaged builds
+      setStartup((current) =>
+        current.update.phase === 'checking'
+          ? withUpdateCheck(current, { status: 'not-applicable', version: null, offer: null, reason: 'unsupported-platform' } as unknown as PackagedUpdateCheckResult)
+          : current,
+      );
     }
 
     return () => {
       cancelled = true;
+      clearTimeout(stuckTimer);
     };
-  }, [updatesEnabled]);
+  }, [updatesEnabled, BOOT_TIMEOUT_MS]);
 
   // The planner is for people who are signed in.
   useEffect(() => {
@@ -439,6 +495,56 @@ export function AccountGate() {
             <code className="gate-detail" dir="ltr">
               {error.detail}
             </code>
+          ) : null}
+          {error.code === 'local_only_build' && isNativeShell() ? (
+            <div className="gate-form" style={{ marginTop: 14 }}>
+              <p className="gate-note" style={{ textAlign: 'start' }}>
+                {t('Fix on this device: paste your server address (https://your-app.vercel.app) to go online without reinstalling.')}
+              </p>
+              <label className="gate-label">
+                {t('Server address')}
+                <input
+                  className="gate-input"
+                  type="url"
+                  inputMode="url"
+                  placeholder="https://your-app.vercel.app"
+                  defaultValue={(() => { try { return effectiveApiOrigin() || runtimeApiOrigin() || ''; } catch { return ''; } })()}
+                  id="planner-runtime-origin"
+                />
+              </label>
+              <div className="gate-actions">
+                <button
+                  className="btn btn-soft"
+                  type="button"
+                  onClick={() => {
+                    const el = document.getElementById('planner-runtime-origin') as HTMLInputElement | null;
+                    const v = el?.value?.trim() ?? '';
+                    if (!v) { setRuntimeApiOrigin(null); window.location.reload(); return; }
+                    try {
+                      const u = new URL(v);
+                      if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new Error('bad');
+                      setRuntimeApiOrigin(u.origin);
+                      window.location.reload();
+                    } catch { alert(t('Enter a valid https:// address.')); }
+                  }}
+                >
+                  {t('Save & retry')}
+                </button>
+                <button className="btn btn-ghost" type="button" onClick={() => { setRuntimeApiOrigin(null); window.location.reload(); }}>
+                  {t('Clear')}
+                </button>
+              </div>
+              <p className="gate-note">{t('Tip: build next time with PLANNER_API_ORIGIN or PLANNER_APP_URL so this step is not needed.')}</p>
+            </div>
+          ) : null}
+          {error.code === 'origin_refused' && isNativeShell() ? (
+            <div className="gate-form" style={{ marginTop: 14 }}>
+              <p className="gate-note" style={{ textAlign: 'start' }}>{t('Server reached, but refused this app’s origin. Add https://localhost and capacitor://localhost to PLANNER_APP_ORIGINS on the server (docs/APPS.md §2). Retries automatically when online.')}</p>
+              <div className="gate-actions">
+                <button className="btn btn-soft" type="button" onClick={() => window.location.reload()}>{t('Check again')}</button>
+              </div>
+              <p className="gate-note">{t('Current server: {0}', { 0: (() => { try { return effectiveApiOrigin() || '—'; } catch { return '—'; } })() })}</p>
+            </div>
           ) : null}
           <div className="gate-actions">
             <button className="btn btn-primary" type="button" onClick={() => window.location.reload()}>
@@ -541,7 +647,13 @@ export function AccountGate() {
     );
   };
 
-  if (!locked) return <StartupScreen state={startup} />;
+  if (!locked) {
+    const handleRetry = () => window.location.reload();
+    const handleOffline = () => setOfflineChoice(true);
+    // After 8s show fallback; after 12s the boot timeout will have fired, but keep button visible anyway
+    const showFallback = stuck;
+    return <StartupScreen state={startup} onContinueOffline={showFallback ? handleOffline : undefined} onRetry={showFallback ? handleRetry : undefined} />;
+  }
 
   return (
     <GateFrame leaving={leaving}>

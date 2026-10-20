@@ -4,7 +4,7 @@
  * trusted-device flow (phase 2) is built.
  */
 import type { AuthEvent, AuthEventsResponse, LoginResponse, PublicUser, SessionResponse, VaultResponse } from '../shared/authContract';
-import { configuredApiOrigin, hasConfiguredApi, isNativeShell } from '../shared/nativeShell';
+import { effectiveApiOrigin, hasConfiguredApi, isNativeShell } from '../shared/nativeShell';
 import { probeApiReachability } from './reachability';
 import {
   createVaultKeys,
@@ -252,7 +252,7 @@ export function adoptSession(
   active = { user, dek, dekRaw, vault };
 }
 
-const REQUEST_TIMEOUT_MS = 25_000;
+const REQUEST_TIMEOUT_MS = isNativeShell() ? 12_000 : 25_000;
 
 /**
  * A `fetch` that rejected. In a browser tab that means the connection; in a
@@ -269,7 +269,7 @@ async function unreachable(method: string, path: string): Promise<AuthError> {
       return new AuthError(
         'origin_refused',
         ORIGIN_REFUSED_MESSAGE,
-        `${method} ${path} → ${configuredApiOrigin()} answered, but refused the app's origin (https://localhost, capacitor://localhost or app://planner).`,
+        `${method} ${path} → ${effectiveApiOrigin()} answered, but refused the app's origin (https://localhost, capacitor://localhost or app://planner).`,
       );
     }
   }

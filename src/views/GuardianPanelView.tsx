@@ -52,10 +52,12 @@ import { ChatThread } from '../components/ChatThread';
 import { PanelNotifications } from '../components/PanelNotifications';
 import { PlanReviews } from '../components/PlanReviews';
 import { GuardianExams } from '../components/GuardianExams';
-import { unreadChatCount } from '../chat';
+import { unreadChatCount, chatFor } from '../chat';
+import { InviteExpiryCountdown, LastMessagePreview } from '../components/GuardianRosterExcerpt';
 import { CompletionRing, FocusTrend, SubjectSplit, SubjectTrend, WeekBars, minutesLabel } from '../components/charts';
 import { GuardianGoalForm } from '../components/GuardianGoalForm';
 import { InviteQr } from '../components/InviteQr';
+import { PanelDebugInspector } from '../components/PanelDebugInspector';
 import { PraiseComposer } from '../components/PraiseComposer';
 import { GuardianPlanComposer } from '../components/GuardianPlanComposer';
 import { WeekPlanCard } from '../components/WeekPlanCard';
@@ -619,6 +621,7 @@ export function GuardianPanelView() {
           </details>
         </div>
       </header>
+      <PanelDebugInspector side="guardian" />
       <p className="panel-identity">
         <strong>{guardian.kind === 'parent' ? t('Parent') : t('Advisor')}</strong>
         {guardian.field ? <span>{guardian.field}</span> : null}
@@ -867,6 +870,14 @@ export function GuardianPanelView() {
                           {t('Sent plan progress: {0} of {1} steps done', { 0: ticks.done, 1: ticks.total })}
                         </p>
                       ) : null}
+                      {link.status !== 'pending' ? <LastMessagePreview link={link} panels={panels} /> : null}
+                      {link.status === 'pending' ? <InviteExpiryCountdown expiresAt={link.expiresAt ?? null} /> : null}
+                      {(() => {
+                        if (!link.linkId) return null;
+                        const seen = panels.guardian.chatSeen?.[link.linkId] ?? '';
+                        const snippetUnreads = chatFor(panels.guardian.chat, link.linkId).filter(m => m.from !== 'guardian' && m.createdAt > seen).length;
+                        return snippetUnreads > 0 ? <span className="roster-unread-dot" aria-label={t('{0} unread', { 0: snippetUnreads })}>{faNum(snippetUnreads)} {t('new')}</span> : null;
+                      })()}
                       <div className="student-card-actions">
                         {link.status === 'pending' ? (
                           <button
@@ -951,6 +962,12 @@ export function GuardianPanelView() {
         </>
       ) : (
         <>
+          {queued.length > 0 ? (
+            <div className="queued-banner" role="status">
+              <span><strong>{faNum(queued.length)}</strong> {t('plan(s) waiting to send — offline queue')}</span>
+              <button type="button" className="btn btn-primary btn-small" onClick={() => setTab('week')}>{t('View queue')}</button>
+            </div>
+          ) : null}
           <section className="card guardian-student-brief" aria-label={t('Shared weekly summary')}>
             <div className="guardian-brief-top">
               <div>
@@ -961,6 +978,7 @@ export function GuardianPanelView() {
                   <p className="hint">
                     {t('Week of {0}', { 0: open.results.weekOf })}
                     {formatEdited(open.results.updatedAt) ? ` · ${t('Updated {0}', { 0: formatEdited(open.results.updatedAt) })}` : null}
+                    {status === 'older' ? ` · ${t('Stale — ask for a fresh share')}` : ''}
                   </p>
                 ) : <p className="hint">{status === 'pending' ? t('Waiting for them to accept — no results yet.') : t('Linked. Their first results will appear after they share.')}</p>}
               </div>
@@ -975,10 +993,14 @@ export function GuardianPanelView() {
             {open.results && open.status === 'linked' ? (
               <>
                 <p className="guardian-brief-headline">{open.results.headline ? `“${open.results.headline}”` : t('No headline shared this week.')}</p>
-                <div className="student-summary-values">
-                  <CompletionRing done={open.results.done} planned={open.results.planned} />
-                  <div><p>{t('Done')}</p><strong>{faNum(open.results.done)}<small> / {faNum(open.results.planned)}</small></strong></div>
-                  <div><p>{t('Focused')}</p><strong>{minutesLabel(open.results.focusMinutes)}</strong></div>
+                <div className="guardian-brief-grid">
+                  <div className="student-summary-values">
+                    <CompletionRing done={open.results.done} planned={open.results.planned} />
+                    <div><p>{t('Done')}</p><strong>{faNum(open.results.done)}<small> / {faNum(open.results.planned)}</small></strong></div>
+                    <div><p>{t('Focused')}</p><strong>{minutesLabel(open.results.focusMinutes)}</strong></div>
+                  </div>
+                  <div className="panel-stat"><p>{t('Snapshot')}</p><strong>{status === 'current' ? t('Fresh') : status === 'older' ? t('Stale') : '—'}</strong><span>{formatEdited(open.results.updatedAt) ?? t('No timestamp')}</span></div>
+                  <div className="panel-stat"><p>{t('Headline')}</p><strong>{open.results.headline ? t('Shared') : t('Missing')}</strong><span>{open.results.headline ?? t('Encourage a headline')}</span></div>
                 </div>
               </>
             ) : null}
@@ -1239,7 +1261,7 @@ export function GuardianPanelView() {
                       aria-pressed={planMode === 'steps'}
                       onClick={() => setPlanMode('steps')}
                     >
-                      {t('Steps')}
+                      {t('Checklist')}
                     </button>
                     <button
                       type="button"
@@ -1247,14 +1269,14 @@ export function GuardianPanelView() {
                       aria-pressed={planMode === 'lessons'}
                       onClick={() => setPlanMode('lessons')}
                     >
-                      {t('Plan lessons')}
+                      {t('Timetable')}
                     </button>
                   </div>
                 </header>
                 <p className="view-sub">
                   {planMode === 'lessons'
-                    ? t('They can share daily reports when ready. A missing report never blocks their panel.')
-                    : t('Sent as a suggestion in their panel. It does not change their personal tasks or calendar.')}
+                    ? t('Drag to reorder, tap a day pill to mark rest — they can share daily reports when ready. Missing reports never block their panel.')
+                    : t('Checklist steps — sent as a suggestion. Does not change their personal tasks or calendar.')}
                 </p>
                 {!ready ? (
                   <p className="hint">{t('This link needs to sync before you can send notes or plans.')}</p>

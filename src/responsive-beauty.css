@@ -1,0 +1,689 @@
+/* ============================================================
+   RESPONSIVE BEAUTY — Planner on every device
+   Loaded last in AccountGate so it has final say.
+   One promise: nothing spills, nothing hides behind a notch,
+   every tap is 44px, every sheet respects a home indicator,
+   and the app feels native on iPhone, iPad and Android —
+   without losing its calm on desktop.
+
+   Structure:
+   1. Viewport & safe-area foundation
+   2. Touch & typography hygiene
+   3. Shell: sidebar → rail → bottom dock
+   4. Content & cards: fluid grids
+   5. Forms & controls
+   6. Chat thread
+   7. Admin SQL: table → cards
+   8. Sheets, modals & toasts
+   9. Tablet (768–1023) & small phone (<380) tweaks
+   10. Motion, contrast, print
+   ============================================================ */
+
+/* ---------- 1. Viewport & safe-area foundation ---------- */
+html {
+  /* Prevent iOS from inflating text after rotation */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* Smooth anchor jumps, but respect reduced motion below */
+  scroll-behavior: smooth;
+  /* Rubber-band scroll stays on the page, not the chrome */
+  overscroll-behavior-y: none;
+}
+body {
+  /* No tap flash, no sideways scroll, ever */
+  -webkit-tap-highlight-color: transparent;
+  overflow-x: hidden;
+  /* Use the app background so the overscroll and notch blend */
+  background: var(--bg);
+}
+/* Every container that might scroll does so with momentum on iOS */
+:where(.content, .side-nav, .sheet, .chat-log, .panel-page-head, .card) {
+  -webkit-overflow-scrolling: touch;
+}
+/* The app never creates a horizontal scrollbar */
+.app-shell,
+.workspace,
+.content,
+.view,
+.card,
+.sheet,
+.modal-overlay {
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* dvh with vh fallback is already in app-polish.css; add the same for the
+   marketing gate so an old iOS WebView never gets a half-height page. */
+@supports not (height: 100dvh) {
+  html { height: 100%; }
+  body { min-height: 100%; }
+}
+
+/* ---------- 2. Touch & typography hygiene ---------- */
+:where(button, a, [role="button"], .seg, .tab, .nav-link, .filter, .chip, .icon-btn) {
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
+}
+/* iOS zoom: any editable field under 16px zooms the page on focus */
+@media (pointer: coarse) {
+  :where(input, select, textarea, .input, .set-input, .field input, .field select, .field textarea) {
+    font-size: 16px !important;
+    line-height: 1.45;
+  }
+}
+/* Thumb-friendly targets: every interactive element a thumb actually hits.
+   Desktop keeps its compact density; touch gets 44px. */
+@media (pointer: coarse) {
+  :where(.btn, .btn-small, .btn-soft, .btn-ghost, .btn-danger, .text-btn) {
+    min-height: 44px;
+    padding-block: 9px;
+  }
+  :where(.icon-btn) {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+  :where(.tab) {
+    min-height: 46px;
+  }
+  :where(.nav-link, .side-tool, .more-tile, .filter, .seg) {
+    min-height: 44px;
+  }
+  :where(.field input, .field select, .field textarea, .set-input, .input) {
+    min-height: 46px;
+  }
+}
+/* Fluid, readable type that never overflows a 320px phone */
+:where(h1, h2, h3, .view-title, .brand-text strong, .page-head h1) {
+  overflow-wrap: anywhere;
+  hyphens: auto;
+  text-wrap: balance;
+}
+:where(p, .lede, .set-hint, .hint, .card p, .toast span) {
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+/* ---------- 3. Shell: sidebar → rail → bottom dock ---------- */
+/* Mobile bar: translucent, notched, and out of the way of Dynamic Island */
+.mobile-bar {
+  position: sticky;
+  top: 0;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px 10px;
+  padding-top: calc(10px + env(safe-area-inset-top, 0px));
+  padding-inline: max(12px, env(safe-area-inset-left, 0px)) max(12px, env(safe-area-inset-right, 0px));
+  background: color-mix(in srgb, var(--bg) 84%, transparent);
+  backdrop-filter: blur(18px) saturate(1.2);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+}
+.mobile-bar .brand { flex: 1; min-width: 0; padding: 2px 6px; }
+.mobile-bar-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.mobile-bar .icon-btn {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-soft);
+}
+
+/* Floating bottom dock: centered pill, clear of home indicator */
+.tabbar {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  width: min(calc(100% - 20px), 420px);
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--surface) 92%, var(--bg) 8%);
+  backdrop-filter: blur(20px) saturate(1.15);
+  -webkit-backdrop-filter: blur(20px) saturate(1.15);
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.08),
+    0 1px 0 color-mix(in srgb, var(--bg) 80%, transparent) inset;
+}
+[data-theme="dark"] .tabbar {
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.42), 0 1px 0 rgba(255, 255, 255, 0.06) inset;
+}
+.tab {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 6px 10px;
+  border-radius: 16px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.1;
+  transition: background 0.18s var(--ease), color 0.18s var(--ease), transform 0.18s var(--ease);
+}
+.tab.active {
+  background: var(--ink);
+  color: var(--bg);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+}
+[data-theme="dark"] .tab.active { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4); }
+.tab-icon { display: grid; place-items: center; flex: none; }
+.tab-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 360px) {
+  .tab-label { display: none; }
+  .tab { padding: 6px 8px; }
+}
+/* The centred add puck rises out of the bar — thumb-first, never covering text */
+.tab-add {
+  flex: 0 0 auto;
+  width: 56px;
+  padding: 0 0 0 4px;
+  justify-content: flex-end;
+}
+.tab-add-puck {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  margin-top: -18px;
+  border-radius: 17px;
+  color: var(--accent-contrast);
+  background: linear-gradient(150deg, var(--accent), var(--accent-deep));
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--accent) 36%, transparent);
+  transition: transform 0.18s var(--ease), filter 0.18s var(--ease);
+}
+.tab-add:active .tab-add-puck { transform: scale(0.92); }
+.tab-add:hover .tab-add-puck { filter: brightness(1.06); }
+/* When a sheet or palette owns the screen, park the dock underneath */
+.app-shell:has(.modal-overlay) .tabbar,
+.app-shell:has(.palette-open) .tabbar {
+  transform: translateX(-50%) translateY(calc(100% + 24px));
+  transition: transform 0.26s var(--ease);
+}
+/* Content never hides under the dock */
+.content {
+  padding-bottom: calc(132px + env(safe-area-inset-bottom, 0px));
+  padding-inline: max(0px, env(safe-area-inset-left, 0px)) max(0px, env(safe-area-inset-right, 0px));
+}
+@media (min-width: 768px) {
+  .content { padding-bottom: calc(40px + env(safe-area-inset-bottom, 0px)); }
+}
+/* Sticky date chip sits exactly under the real mobile bar, with a fade */
+.mobile-date {
+  position: sticky;
+  top: calc(60px + env(safe-area-inset-top, 0px));
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px 10px;
+  margin: 0 -12px;
+  background: linear-gradient(var(--bg) 58%, color-mix(in srgb, var(--bg) 0%, transparent));
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+/* Desktop & tablet rail keep full height even when on-screen keyboard shows (iOS) */
+@media (min-width: 768px) {
+  .sidebar {
+    height: 100dvh;
+    height: 100vh; /* fallback */
+    max-height: 100dvh;
+  }
+}
+
+/* ---------- 4. Content & cards: fluid grids ---------- */
+.content {
+  width: min(100% - 24px, var(--content, 1120px));
+  margin: 0 auto;
+}
+@media (min-width: 640px) { .content { width: min(100% - 32px, var(--content, 1120px)); } }
+@media (min-width: 1024px) { .content { width: min(100% - 36px, var(--content, 1120px)); } }
+
+/* View rhythm: same gap on every page, tighter on phone */
+.view { gap: 18px; }
+@media (max-width: 640px) { .view { gap: 14px; } }
+
+/* Cards: one padding, soft shadow, no sideways spill */
+.card {
+  padding: clamp(14px, 3.8vw, 24px);
+  border-radius: clamp(14px, 2.2vw, 18px);
+  box-shadow: var(--shadow-soft);
+  overflow: hidden;
+}
+@media (max-width: 640px) {
+  .card-head { flex-wrap: wrap; gap: 10px; }
+  .card-head > div:first-child { min-width: 0; flex: 1; }
+  .card-head .btn { flex: 0 0 auto; }
+}
+
+/* Stats & tiles: 4 → 2 → 1 without a gap */
+.panel-overview { gap: 12px; }
+@media (max-width: 820px) { .panel-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 380px) { .panel-overview { grid-template-columns: minmax(0, 1fr); } }
+
+.subject-tracker-grid,
+.guardian-student-grid,
+.exam-agenda-list {
+  gap: 12px;
+}
+@media (max-width: 700px) {
+  .subject-tracker-grid,
+  .guardian-student-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Page heads stack instead of colliding */
+@media (max-width: 620px) {
+  .page-head { flex-direction: column; align-items: stretch; gap: 12px; }
+  .page-head-actions { align-self: stretch; }
+  .page-head-actions .btn { flex: 1; min-width: 0; }
+  .page-head .lede { max-width: none; }
+}
+
+/* Day hero & stats: calm on desktop, compact on phone */
+@media (max-width: 640px) {
+  .hero { gap: 12px; }
+  .hero-panel { padding: 14px; gap: 10px; }
+  .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+}
+
+/* Task / event rows: never hide the title behind a handle on touch */
+.task, .event, .habit-row { min-height: 56px; border-radius: 14px; }
+@media (pointer: coarse) {
+  .task .grip, .event .grip { display: none !important; }
+  .task, .event, .habit-row { gap: 10px; padding: 10px 12px; }
+  .task .icon-btn, .event .icon-btn, .habit-row .icon-btn {
+    width: 44px; height: 44px; min-width: 44px;
+  }
+}
+
+/* ---------- 5. Forms & controls ---------- */
+.field { gap: 7px; }
+.field label, .set-label, .field-label {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--ink-soft);
+  letter-spacing: 0.01em;
+}
+.field input, .field select, .field textarea,
+.set-input, .input {
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  transition: border-color 0.16s, box-shadow 0.16s, background 0.16s;
+}
+.field input:focus, .field select:focus, .field textarea:focus,
+.set-input:focus, .input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+/* Stacking: 3-col forms become 1-col on phone without a sideways scroll */
+.panel-form-grid { gap: 12px; }
+@media (max-width: 560px) {
+  .panel-form-grid { grid-template-columns: minmax(0, 1fr) !important; }
+}
+@media (max-width: 900px) and (min-width: 561px) {
+  .panel-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+/* Segmented & filters: wrap, never force a horizontal scroll */
+.segmented, .roster-toolbar, .chip-row, .page-head-actions {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.seg { border-radius: 999px; font-weight: 620; }
+@media (max-width: 480px) {
+  .segmented { width: 100%; }
+  .segmented .seg { flex: 1; justify-content: center; }
+}
+
+/* Buttons: full-width on very narrow phones when they are the primary action */
+@media (max-width: 420px) {
+  .hero-panel .btn,
+  .page-head .btn-primary,
+  .panel-page-actions .btn { flex: 1 1 0; min-width: 0; }
+}
+
+/* ---------- 6. Chat thread: thumb-friendly, keyboard-aware ---------- */
+.chat {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: min(520px, 72dvh);
+}
+.chat-log {
+  flex: 1;
+  min-height: 260px;
+  max-height: min(62dvh, 560px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  padding: 12px;
+  border-radius: 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  scroll-behavior: smooth;
+  /* iOS momentum + no scroll chaining to the page */
+  -webkit-overflow-scrolling: touch;
+}
+@media (max-width: 640px) {
+  .chat-log {
+    max-height: min(58dvh, 480px);
+    padding: 10px 8px;
+    border-radius: 14px;
+  }
+}
+.chat-day-group { margin: 14px 0; }
+.chat-day {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  align-self: center;
+  margin: 10px auto;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--muted);
+  box-shadow: var(--shadow-soft);
+}
+.chat-row { display: flex; margin: 8px 0; }
+.chat-row.is-mine { justify-content: flex-end; }
+.chat-bubble {
+  max-width: min(78%, 420px);
+  padding: 10px 14px;
+  border-radius: 18px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  box-shadow: var(--shadow-soft);
+  transition: transform 0.16s var(--ease), box-shadow 0.16s var(--ease);
+}
+@media (max-width: 640px) {
+  .chat-bubble { max-width: 84%; padding: 10px 12px; }
+}
+.chat-bubble.is-mine {
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border-bottom-right-radius: 6px;
+}
+.chat-bubble:not(.is-mine) {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-bottom-left-radius: 6px;
+}
+.chat-bubble.is-waiting { opacity: 0.72; }
+.chat-text { margin: 0; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-meta { margin: 6px 0 0; font-size: 11px; opacity: 0.8; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.chat-author { margin: 0 0 4px; font-size: 11.5px; font-weight: 700; opacity: 0.9; }
+
+.chat-composer {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  padding: 10px;
+  padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+  /* Keep composer above iOS keyboard when visual viewport shrinks */
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+}
+@media (max-width: 640px) {
+  .chat-composer { border-radius: 18px; padding: 8px; gap: 8px; }
+}
+.chat-composer-field { flex: 1; min-width: 0; position: relative; }
+.chat-composer .input {
+  min-height: 44px;
+  max-height: 120px;
+  resize: none;
+  border-radius: 14px;
+  padding: 10px 44px 10px 14px;
+  line-height: 1.5;
+  /* Prevent iOS from zooming when the composer is focused */
+  font-size: 16px;
+}
+.chat-count {
+  position: absolute;
+  inset-inline-end: 8px;
+  bottom: 8px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  background: var(--surface);
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+}
+.chat-count.is-out { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 30%, var(--line)); }
+
+.typing-dots { display: inline-flex; gap: 3px; align-items: center; }
+.typing-dots span {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: currentColor; opacity: 0.35;
+  animation: typing 1.2s infinite;
+}
+.typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes typing { 0%, 60%, 100% { opacity: 0.25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-2px); } }
+
+/* ---------- 7. Admin SQL: table → cards on phone ---------- */
+.admin-sql .set-row { min-width: 0; }
+.admin-sql .set-row > div { min-width: 0; }
+.admin-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  margin: 12px -4px;
+  padding: 0 4px 4px;
+  border-radius: 12px;
+  /* Fade at the scrolling edge so the table never looks clipped */
+  mask-image: linear-gradient(to right, transparent 0, black 12px, black calc(100% - 12px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, transparent 0, black 12px, black calc(100% - 12px), transparent 100%);
+}
+.admin-table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  font-size: 13px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.admin-table th {
+  text-align: start;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.admin-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+.admin-table tbody tr:last-child td { border-bottom: 0; }
+.admin-table tbody tr:hover { background: color-mix(in srgb, var(--surface-2) 80%, transparent); }
+@media (max-width: 640px) {
+  .admin-table-wrap { mask-image: none; -webkit-mask-image: none; }
+  .admin-table { min-width: 520px; font-size: 12px; }
+  .admin-table th, .admin-table td { padding: 8px 10px; }
+}
+/* Phone card fallback: when the table would still be tight, each row is a card
+   (applied by JS adding .admin-cards on <420px via container query below).  */
+@container (max-width: 420px) {
+  .admin-table thead { display: none; }
+  .admin-table, .admin-table tbody, .admin-table tr, .admin-table td { display: block; width: 100%; min-width: 0; }
+  .admin-table tr {
+    margin: 10px 0;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+    background: var(--surface);
+  }
+  .admin-table td {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .admin-table td::before {
+    content: attr(data-label);
+    font-weight: 700;
+    color: var(--muted);
+    flex: none;
+  }
+  .admin-table td:last-child { border-bottom: 0; justify-content: flex-end; }
+}
+
+/* The generic inline table wrapper the SQL result uses */
+.admin-sql pre {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--line);
+}
+
+/* ---------- 8. Sheets, modals & toasts ---------- */
+.modal-overlay {
+  padding: max(12px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) max(12px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+  background: color-mix(in srgb, var(--ink) 32%, transparent);
+  backdrop-filter: blur(12px) saturate(1.1);
+  -webkit-backdrop-filter: blur(12px) saturate(1.1);
+}
+.sheet {
+  width: min(100% - 24px, 560px);
+  margin: 0 auto;
+  max-height: min(86dvh, 820px);
+  max-height: min(86vh, 820px); /* fallback */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 24px 24px 0 0;
+  padding-inline: var(--sheet-pad-x, 22px);
+  padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  box-shadow: var(--shadow-lift);
+}
+@media (max-width: 699px) {
+  .modal-overlay { align-items: flex-end; padding: 0; }
+  .sheet {
+    width: 100%;
+    max-width: 100%;
+    max-height: 86dvh;
+    max-height: 86vh;
+    border-radius: 22px 22px 0 0;
+    --sheet-pad-x: 16px;
+    padding-top: 8px;
+  }
+  /* Drag handle: thumb can dismiss, no extra tap target needed */
+  .sheet::before {
+    content: "";
+    display: block;
+    width: 36px;
+    height: 4px;
+    margin: 6px auto 12px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--ink) 16%, var(--line));
+  }
+}
+.sheet-top {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: 0 calc(-1 * var(--sheet-pad-x, 22px));
+  padding: 10px var(--sheet-pad-x, 22px) 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  /* Keep the header above scrolled content, not transparent */
+}
+.toast {
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  width: min(calc(100vw - 24px), 520px);
+  max-width: calc(100vw - 24px);
+  border-radius: 16px;
+  padding: 12px 14px;
+  gap: 10px;
+  background: var(--ink);
+  color: var(--bg);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.18);
+  backdrop-filter: blur(12px);
+}
+@media (max-width: 640px) {
+  .toast { bottom: calc(92px + env(safe-area-inset-bottom, 0px)); }
+  .update-toast + .toast { bottom: calc(172px + env(safe-area-inset-bottom, 0px)); }
+}
+.toast-action { min-height: 36px; border-radius: 10px; }
+
+/* Palette: full-width on phone, centered on tablet+ */
+.palette { width: min(100% - 24px, 560px); }
+@media (max-width: 480px) {
+  .palette { width: 100%; margin: 0 12px; }
+}
+
+/* ---------- 9. Tablet (768–1023) & small phone (<380) ---------- */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .tabbar, .mobile-bar, .mobile-date, .fab { display: none !important; }
+  .content { padding-top: 22px; }
+  /* Cards get a little more air on tablet */
+  .card { padding: 20px 22px; }
+  .panel-workspace-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .panel-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 380px) {
+  .content { width: min(100% - 16px, var(--content, 1120px)); }
+  .card { padding: 14px; border-radius: 14px; }
+  .kicker { font-size: 10.5px; letter-spacing: 0.08em; }
+  .view-title, .page-head h1 { font-size: 22px; }
+  .admin-sql .set-row > div { flex-direction: column; align-items: stretch; }
+  .admin-sql pre { font-size: 11px; padding: 10px; }
+  /* More sheet tiles stack taller so long labels don't clip */
+  .more-list .more-tile { min-height: 48px; line-height: 1.25; }
+  .tabbar { width: calc(100% - 16px); padding: 5px; gap: 2px; }
+}
+
+/* ---------- 10. Motion, contrast, print ---------- */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .view-enter, .sheet, .modal-overlay, .toast, .tabbar, .typing-dots span {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+@media (prefers-contrast: more) {
+  .card, .sheet, .tabbar, .chat-log, .admin-table { border-width: 1.5px; }
+}
+@media (forced-colors: active) {
+  .card, .sheet, .tabbar, .chat-bubble, .admin-table { border-color: CanvasText; }
+  .tab.active { outline: 2px solid Highlight; outline-offset: -2px; }
+}
+@media print {
+  .tabbar, .mobile-bar, .fab, .mobile-date, .toast, .update-toast, .sheet, .modal-overlay { display: none !important; }
+  .content { width: 100%; max-width: none; padding: 0; }
+  .card { break-inside: avoid; box-shadow: none; border: 1px solid #ccc; }
+}
+

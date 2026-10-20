@@ -66,6 +66,7 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Unlock with a fingerprint or face. Android 9+ uses USE_BIOMETRIC;
          the older fingerprint API is what androidx.biometric falls back to on
          Android 7 and 8, which this app still supports. Neither is a runtime

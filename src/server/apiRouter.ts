@@ -57,6 +57,15 @@ import {
   readSessionToken,
 } from './authApi.js';
 import { authStore, hashToken } from './authStore.js';
+import {
+  handleRealtimeEvents,
+  handleRealtimeLinkEvent,
+  handleRealtimeStream,
+  handleRealtimeToken,
+  publishRealtimeEvent,
+  publishRealtimeForLink,
+} from './realtime.js';
+import { handleAdminSql, handleAdminUserDelete, handleAdminUsers } from './adminSql.js';
 import { handleReport, handleReportOverview } from './reportApi.js';
 import { resolveProviders } from './aiProviders.js';
 import { handleICS } from './icsProxy.js';
@@ -92,6 +101,11 @@ export interface ApiEnv {
   VAPID_PUBLIC_KEY?: string;
   VAPID_PRIVATE_KEY?: string;
   VAPID_SUBJECT?: string;
+  /** Neon Realtime: HS256 secret that signs short-lived realtime JWTs. */
+  NEON_REALTIME_SECRET?: string;
+  REALTIME_SECRET?: string;
+  /** Admin SQL editor: set one of these to enable `X-Admin-Token`. */
+  ADMIN_SQL_SECRET?: string;
   CRON_SECRET?: string;
   /** Android push: the FCM service-account JSON, verbatim. */
   FCM_SERVICE_ACCOUNT?: string;
@@ -175,10 +189,38 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
       return (request) => authStore(env.DATABASE_URL).then((store) => handleExamCommit(request, store));
     case '/api/auth/exam-key':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleExamSealGet(request, store));
-    case '/api/auth/link-accept':
-      return (request) => authStore(env.DATABASE_URL).then((store) => handleLinkAccept(request, store));
-    case '/api/auth/links':
-      return (request) => authStore(env.DATABASE_URL).then((store) => handleLinks(request, store));
+    case '/api/auth/link-accept': {
+      return async (request) => {
+        const store = await authStore(env.DATABASE_URL);
+        const res = await handleLinkAccept(request, store);
+        if (res.ok) {
+          try {
+            const data = (await res.clone().json()) as { linkId?: string };
+            if (data.linkId) void publishRealtimeForLink(env.DATABASE_URL, data.linkId, 'link:linked', {});
+          } catch {}
+        }
+        return res;
+      };
+    }
+    case '/api/auth/links': {
+      return async (request) => {
+        const reqClone = request.clone();
+        const store = await authStore(env.DATABASE_URL);
+        const res = await handleLinks(request, store);
+        if (res.ok) {
+          try {
+            if (request.method === 'DELETE') {
+              const b = (await reqClone.json().catch(() => ({}))) as { linkId?: string };
+              if (b.linkId) void publishRealtimeForLink(env.DATABASE_URL, b.linkId, 'link:removed', {});
+            } else if (request.method === 'POST') {
+              const data = (await res.clone().json().catch(() => ({}))) as { link?: { id?: string } };
+              if (data.link?.id) void publishRealtimeForLink(env.DATABASE_URL, data.link.id, 'link:invited', {});
+            }
+          } catch {}
+        }
+        return res;
+      };
+    }
     case '/api/auth/login':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleLogin(request, store));
     case '/api/auth/logout':
@@ -195,8 +237,20 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
       return (request) => authStore(env.DATABASE_URL).then((store) => handlePasskeyDelete(request, store));
     case '/api/auth/passkey/list':
       return (request) => authStore(env.DATABASE_URL).then((store) => handlePasskeyList(request, store));
-    case '/api/auth/note':
-      return (request) => authStore(env.DATABASE_URL).then((store) => handleNote(request, store));
+    case '/api/auth/note': {
+      return async (request) => {
+        const reqClone = request.clone();
+        const store = await authStore(env.DATABASE_URL);
+        const res = await handleNote(request, store);
+        if (res.ok && request.method === 'PUT') {
+          try {
+            const b = (await reqClone.json().catch(() => ({}))) as { linkId?: string };
+            if (b.linkId) void publishRealtimeForLink(env.DATABASE_URL, b.linkId, 'link:note', {});
+          } catch {}
+        }
+        return res;
+      };
+    }
     case '/api/auth/link-activity':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleLinkActivity(request, store));
     case '/api/auth/recovery/start':
@@ -213,8 +267,24 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
       return (request) => authStore(env.DATABASE_URL).then((store) => handleSessions(request, store));
     case '/api/auth/events':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleAuthEvents(request, store));
-    case '/api/auth/share':
-      return (request) => authStore(env.DATABASE_URL).then((store) => handleShare(request, store));
+    case '/api/auth/share': {
+      return async (request) => {
+        const reqClone = request.clone();
+        const store = await authStore(env.DATABASE_URL);
+        const res = await handleShare(request, store);
+        if (res.ok && request.method === 'PUT') {
+          try {
+            const b = (await reqClone.json().catch(() => ({}))) as { linkId?: string };
+            if (b.linkId) void publishRealtimeForLink(env.DATABASE_URL, b.linkId, 'link:share', {});
+          } catch {
+            // GET share reads via ?linkId= — also touch realtime for peer
+            const linkId = new URL(request.url, 'https://planner.invalid').searchParams.get('linkId');
+            if (linkId) void publishRealtimeForLink(env.DATABASE_URL, linkId, 'link:share-read', {});
+          }
+        }
+        return res;
+      };
+    }
     case '/api/auth/signup':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleSignup(request, store));
     case '/api/auth/totp/login':
@@ -227,14 +297,39 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
       return (request) => authStore(env.DATABASE_URL).then((store) => handleTotpDisable(request, store));
     case '/api/auth/status':
       return (request) => handleAuthStatus(request, env.DATABASE_URL);
-    case '/api/auth/vault':
-      return (request) => authStore(env.DATABASE_URL).then((store) => handleAccountVault(request, store));
+    case '/api/auth/vault': {
+      return async (request) => {
+        const store = await authStore(env.DATABASE_URL);
+        const res = await handleAccountVault(request, store);
+        if (res.status === 200 && request.method === 'PUT' && store) {
+          const tok = readSessionToken(request);
+          if (tok) {
+            store.findSession(hashToken(tok)).then((found) => {
+              if (found) publishRealtimeEvent(env.DATABASE_URL, found.user.id, 'vault:updated', { at: new Date().toISOString() }).catch(() => {});
+            }).catch(() => {});
+          }
+        }
+        return res;
+      };
+    }
     case '/api/ics':
       return (request) => handleICS(request);
     case '/api/caldav':
       return (request) => handleCalDav(request);
     case '/api/sync':
-      return (request) => neonStore(env.DATABASE_URL).then((store) => handleSync(request, store));
+      return async (request) => {
+        const store = await neonStore(env.DATABASE_URL);
+        const res = await handleSync(request, store);
+        if (res.status === 200 && request.method === 'PUT') {
+          const tok = readSessionToken(request);
+          if (tok && env.DATABASE_URL) {
+            authStore(env.DATABASE_URL).then((a) => a && tok ? a.findSession(hashToken(tok)).catch(() => null) : null).then((found) => {
+              if (found) publishRealtimeEvent(env.DATABASE_URL, found.user.id, 'sync:updated', { at: new Date().toISOString() }).catch(() => {});
+            }).catch(() => {});
+          }
+        }
+        return res;
+      };
     case '/api/sync/status':
       return (request) => handleSyncStatus(request, env.DATABASE_URL);
     case '/api/ai/chat/completions':
@@ -254,6 +349,22 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
       return (request) => handlePushDevice(request, env);
     case '/api/push/dispatch':
       return (request) => handlePushDispatch(request, env);
+    case '/api/realtime/token':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleRealtimeToken(request, store, env as Record<string, string | undefined>));
+    case '/api/realtime/events':
+      return (request) => handleRealtimeEvents(request, authStore(env.DATABASE_URL), env as Record<string, string | undefined>);
+    case '/api/realtime/stream':
+      return (request) => handleRealtimeStream(request, authStore(env.DATABASE_URL), env as Record<string, string | undefined>);
+    case '/api/realtime/link-event':
+      return (request) => handleRealtimeLinkEvent(request, authStore(env.DATABASE_URL), env as Record<string, string | undefined>);
+    case '/api/admin/users':
+      // Covers GET /api/admin/users?id=… (delete) as DELETE, and GET list
+      return (request) => {
+        if (request.method === 'DELETE') return handleAdminUserDelete(request, env, authStore(env.DATABASE_URL));
+        return handleAdminUsers(request, env, authStore(env.DATABASE_URL));
+      };
+    case '/api/admin/sql':
+      return (request) => handleAdminSql(request, env, authStore(env.DATABASE_URL));
     case '/api/report':
       return (request) => handleReport(request, env.ERROR_REPORT_WEBHOOK, env.DATABASE_URL);
     case '/api/report/recent':

@@ -2171,7 +2171,37 @@
 .exam-answer-file-row .exam-file-name { font-size: 12.5px; }
 .exam-answer-file-row .exam-file-size { margin: 1px 0 0; }
 .exam-reading-files { display: flex; flex-direction: column; gap: 8px; }
-.exam-reading-label { margin: 0; font-size: 11.5px; font-weight: 650; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+  .exam-reading-label { margin: 0; font-size: 11.5px; font-weight: 650; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+
+/* --- Student Next Lesson sticky + new roster/panels polish --- */
+.sticky-next-lesson { border-color: color-mix(in srgb, var(--accent) 28%, var(--line)); background: linear-gradient(135deg, color-mix(in srgb, var(--cat-sage) 9%, var(--surface)), var(--surface)); }
+.sticky-next-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; align-items: start; }
+.sticky-next-title { font-size: 18px; line-height: 1.35; margin: 6px 0 4px; }
+.sticky-next-meta { display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; color: var(--muted); margin: 0; }
+.sticky-next-meta span { padding: 2px 7px; border-radius: 999px; background: color-mix(in srgb, var(--line) 60%, transparent); }
+.sticky-next-badge { padding: 4px 10px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 700; }
+.sticky-next-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.sharing-privacy-ledger { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
+.sharing-ledger-col { padding: 12px; border-radius: 12px; border: 1px solid var(--line); }
+.sharing-ledger-col.is-shared { background: color-mix(in srgb, var(--cat-sage) 10%, transparent); border-color: color-mix(in srgb, var(--cat-sage) 22%, transparent); }
+.sharing-ledger-col.is-private { background: color-mix(in srgb, var(--cat-lav) 8%, transparent); }
+.sharing-ledger-col ul { margin: 6px 0 0; padding-inline-start: 16px; font-size: 12px; line-height: 1.6; color: var(--ink-soft); }
+.week-subtabs { margin-bottom: 4px; }
+.roster-chat-snippet { margin: 8px 0 0; font-size: 12px; line-height: 1.5; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.roster-chat-author { font-weight: 650; color: var(--ink); }
+.roster-chat-at { color: var(--muted); font-size: 11px; }
+.roster-expiry { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--cat-peach) 14%, transparent); color: var(--cat-peach-text); }
+.roster-expiry.is-expired { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); }
+.roster-expiry.is-soon { background: color-mix(in srgb, var(--cat-peach) 22%, transparent); }
+.roster-unread-dot { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 700; margin-top: 6px; }
+.guardian-list-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.guardian-brief-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 12px; }
+@media (max-width: 800px) { .sharing-privacy-ledger { grid-template-columns: 1fr; } .guardian-brief-grid { grid-template-columns: 1fr; } }
+.panel-debug { margin: 12px 0; padding: 10px 12px; border: 1px dashed var(--line-strong); border-radius: 12px; background: color-mix(in srgb, var(--cat-peach) 7%, var(--surface-2)); font-size: 11px; line-height: 1.6; color: var(--muted); }
+.panel-debug strong { color: var(--ink); }
+.queued-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-radius: 12px; background: color-mix(in srgb, var(--cat-peach) 12%, transparent); border: 1px solid color-mix(in srgb, var(--cat-peach) 22%, transparent); font-size: 12.5px; }
+.queued-banner .btn { flex: none; }
+.week-grid-wrap .week-grid { min-width: 0; }
 .exam-result-missed { display: flex; flex-direction: column; gap: 10px; }
 .exam-review-choice-readout { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
 .exam-choice-readout {
