@@ -20,7 +20,13 @@ export function debugEnabled(): boolean {
 
 export function logSync(tag: string, details: Record<string, unknown>) {
   if (!debugEnabled()) return;
-  console.debug(`[panel-sync] ${tag}`, { at: new Date().toISOString().slice(11, 19), ...details });
+  // Device wall-clock time: a debug line should agree with the clock of the
+  // person reading the console, not with UTC.
+  const now = new Date();
+  const at = [now.getHours(), now.getMinutes(), now.getSeconds()]
+    .map((part) => String(part).padStart(2, '0'))
+    .join(':');
+  console.debug(`[panel-sync] ${tag}`, { at, ...details });
 }
 
 export function syncInvariant(panels: unknown, message: string) {

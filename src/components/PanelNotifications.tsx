@@ -14,7 +14,7 @@
  */
 import { useState, type ReactNode } from 'react';
 import { cx } from '../cx';
-import { formatFullDate, formatStamp } from '../dates';
+import { formatFullDate, formatStamp, localDateFromTimestamp } from '../dates';
 import { faNum, t } from '../i18n';
 import { BellIcon, CheckIcon, HeartIcon, NoteIcon, SparkIcon } from '../icons';
 import type { GuardianNotice } from '../types';
@@ -125,12 +125,15 @@ export function PanelNotifications({
         <ul className="notifications-list">
           {shown.map((notice, index) => {
             const previous = shown[index - 1];
+            // Days turn over at this device's midnight: createdAt is an
+            // instant, and its UTC date is not the reader's date.
+            const day = localDateFromTimestamp(notice.createdAt);
             const newDay =
-              !previous || previous.createdAt.slice(0, 10) !== notice.createdAt.slice(0, 10);
+              !previous || localDateFromTimestamp(previous.createdAt) !== day;
             return (
               <li key={notice.id}>
                 {newDay ? (
-                  <p className="notifications-day">{formatFullDate(notice.createdAt.slice(0, 10))}</p>
+                  <p className="notifications-day">{formatFullDate(day)}</p>
                 ) : null}
                 <div className={cx('notification', !notice.read && 'is-unread', notice.kind === 'praise' && 'is-praise')}>
                   <span className="notification-icon" aria-hidden="true">

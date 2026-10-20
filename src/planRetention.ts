@@ -21,7 +21,7 @@
  * Everything here is pure, deterministic and idempotent — two devices looking at
  * the same plan write the same review, and running it twice changes nothing.
  */
-import { parseISODate, startOfWeek, todayISO } from './dates';
+import { localDateFromTimestamp, parseISODate, startOfWeek, todayISO } from './dates';
 import type { GuardianPlan, PlanReview, PlanReviewSubject } from './types';
 
 /** A finished plan keeps its lessons for this long before they are let go. */
@@ -57,7 +57,8 @@ export function planEndsOn(plan: GuardianPlan): string {
     .sort();
   const last = dated[dated.length - 1];
   if (last) return last;
-  return (plan.updatedAt || plan.createdAt || '').slice(0, 10) || todayISO();
+  const stampedAt = plan.updatedAt || plan.createdAt;
+  return stampedAt ? localDateFromTimestamp(stampedAt) : todayISO();
 }
 
 /** Days since the week this plan covered ended. Negative when still ahead. */

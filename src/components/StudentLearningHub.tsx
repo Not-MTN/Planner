@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { usePlanner } from '../context';
-import { formatFullDate } from '../dates';
+import { formatFullDate, localDateFromTimestamp } from '../dates';
 import { faNum, t } from '../i18n';
 import { CheckIcon, UploadIcon } from '../icons';
 import { withStudentClassProgress } from '../learning';
@@ -178,7 +178,7 @@ function HomeworkCard({ assignment }: { assignment: HomeworkAssignment }) {
       </p>
       {submission ? (
         <div className="homework-submission-summary">
-          <p>{t('Sent {0}', { 0: formatFullDate(submission.submittedAt.slice(0, 10)) })} · {t('{0} photos', { 0: faNum(submission.photos.length) })}</p>
+          <p>{t('Sent {0}', { 0: formatFullDate(localDateFromTimestamp(submission.submittedAt)) })} · {t('{0} photos', { 0: faNum(submission.photos.length) })}</p>
           {submission.status === 'approved' ? <p className="learning-privacy">{submission.guardianNote || t('Your guardian approved this work. The photo files were deleted.')}</p> : <p className="learning-privacy">{t('Waiting for your guardian to review. Photos are hidden from the submitted list.')}</p>}
         </div>
       ) : (

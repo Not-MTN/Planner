@@ -85,7 +85,17 @@ async function analyze(page: Page): Promise<string[]> {
   const results = await builder.analyze();
   return results.violations
     .filter((violation) => violation.impact === 'serious' || violation.impact === 'critical')
-    .map((violation) => `${violation.id} (${violation.impact}): ${violation.nodes.length} node(s) — ${violation.help}`);
+    // Name the offending elements, not just the rule: "color-contrast:
+    // 1 node" once cost a release an afternoon of guessing which of the
+    // shell's forty small texts had failed. The failing test output is
+    // the bug report — write it like one.
+    .map(
+      (violation) =>
+        `${violation.id} (${violation.impact}): ${violation.nodes.length} node(s) — ${violation.help} [${violation.nodes
+          .slice(0, 3)
+          .map((node) => node.target.join(' '))
+          .join('; ')}]`,
+    );
 }
 
 /**

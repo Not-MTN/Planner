@@ -11,6 +11,7 @@
  * Everything here is pure. What travels over the wire is decided in
  * `auth/links.ts`; these are the shapes both sides agree on first.
  */
+import { localDateFromTimestamp } from './dates';
 import { CHAT_KEPT, CHAT_TEXT_MAX } from './types';
 import type { ChatMessage, ChatSide, Panels } from './types';
 
@@ -60,7 +61,7 @@ export function chatFor(messages: ChatMessage[] | undefined, linkId: string): Ch
 
 /** One day of a thread, oldest first within the day. */
 export interface ChatDay {
-  /** The calendar day, as the wire holds it. */
+  /** The calendar day on the reading device, YYYY-MM-DD. */
   day: string;
   messages: ChatMessage[];
 }
@@ -71,11 +72,16 @@ export interface ChatDay {
  * A conversation is read in days, not as one flat list: "yesterday" is a real
  * boundary in a thread and pretending otherwise makes a long one unreadable.
  * Grouped here rather than in the view so both panels cut it the same way.
+ *
+ * The cut is the reader's own midnight, not UTC's: `createdAt` is an instant,
+ * so its day is whatever day that instant fell on where the device is. (The
+ * wire's slice(0, 10) is the UTC day, which put late-evening messages under
+ * the wrong date for anyone east of Greenwich.)
  */
 export function chatDays(messages: ChatMessage[]): ChatDay[] {
   const days: ChatDay[] = [];
   for (const message of messages) {
-    const day = message.createdAt.slice(0, 10);
+    const day = localDateFromTimestamp(message.createdAt);
     const last = days[days.length - 1];
     if (last && last.day === day) last.messages.push(message);
     else days.push({ day, messages: [message] });

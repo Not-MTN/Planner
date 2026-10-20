@@ -6,7 +6,7 @@
  * link is decided in `auth/links.ts`, and these are the shapes both sides
  * agree on before anything is sent.
  */
-import { addDays, displayTime, formatDuration, formatFullDate, isValidISODate, isValidTime, parseISODate, timeToMinutes, todayISO, toISODate, weekdayIndex } from './dates';
+import { addDays, displayTime, formatDuration, formatFullDate, isValidISODate, isValidTime, localDateFromTimestamp, parseISODate, timeToMinutes, todayISO, toISODate, weekdayIndex } from './dates';
 import { t } from './i18n';
 import type { Reminder } from './reminders';
 import { ACK_REACTIONS, DAY_REPORTS_KEPT, DAY_REPORT_NOTE_MAX, LESSON_URL_MAX, PLAN_CHANGE_DAYS, PLAN_CHANGES_KEPT, PLAN_CHANGE_NOTE_MAX, PLAN_CHANGE_TITLE_MAX, PLAN_REQUEST_DAYS, type DayReport, type FocusLog, type GuardianNotice, type GuardianPlan, type Panels, type PlanChangeKind, type PlanChangeRequest, type PlanItem, type PlanRequest, type ReportAck, type Task } from './types';
@@ -472,7 +472,7 @@ export function withLessonRolled(panels: Panels, planId: string, itemId: string,
 export function openRequests(requests: PlanRequest[], today = todayISO()): PlanRequest[] {
   const earliest = addDays(today, -PLAN_REQUEST_DAYS);
   return requests
-    .filter((request) => request.createdAt.slice(0, 10) >= earliest)
+    .filter((request) => localDateFromTimestamp(request.createdAt) >= earliest)
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
@@ -518,7 +518,7 @@ export function examWarningDates(days: WeekDayDraft[], start: string, exam: stri
 /** Whether this student was already nudged today — one gentle nudge a day is plenty. */
 export function nudgedToday(notices: GuardianNotice[], username: string, today = todayISO()): boolean {
   return notices.some(
-    (notice) => notice.kind === 'nudge' && notice.student === username && notice.createdAt.slice(0, 10) === today,
+    (notice) => notice.kind === 'nudge' && notice.student === username && localDateFromTimestamp(notice.createdAt) === today,
   );
 }
 
@@ -953,7 +953,7 @@ export function canRequestPlanChange(plan: GuardianPlan, date: string | null, to
 export function openChangeRequests(requests: PlanChangeRequest[], today = todayISO()): PlanChangeRequest[] {
   const earliest = addDays(today, -PLAN_CHANGE_DAYS);
   return requests
-    .filter((request) => request.createdAt.slice(0, 10) >= earliest)
+    .filter((request) => localDateFromTimestamp(request.createdAt) >= earliest)
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 

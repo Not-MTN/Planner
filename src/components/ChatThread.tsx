@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
-import { displayTime, formatFullDate } from '../dates';
+import { formatFullDate, formatInstantTime } from '../dates';
 import { faNum, t } from '../i18n';
 import { ChatIcon } from '../icons';
 import { sendChatMessage } from '../auth/links';
@@ -254,9 +254,9 @@ export function ChatThread({
         <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ width: 8, height: 8, borderRadius: 999, background: otherOnline ? '#16a34a' : '#9ca3af', boxShadow: otherOnline ? '0 0 0 3px rgba(22,163,74,.18)' : undefined }} aria-hidden />
           <strong>{otherName}</strong>
-          <span style={{ opacity: 0.65 }}>{otherOnline ? t('Online') : realtimeStatus === 'live' ? t('Live') : ''}</span>
+          <span style={{ color: 'var(--ink-soft)' }}>{otherOnline ? t('Online') : realtimeStatus === 'live' ? t('Live') : ''}</span>
         </span>
-        <span style={{ opacity: 0.6, fontSize: 12 }}>{otherTyping ? t('{0} is typing…', { 0: otherName }) : ''}</span>
+        <span style={{ color: 'var(--ink-soft)', fontSize: 12 }}>{otherTyping ? t('{0} is typing…', { 0: otherName }) : ''}</span>
       </div>
 
       <div
@@ -298,9 +298,9 @@ export function ChatThread({
                       {!mine ? <p className="chat-author">{message.author}</p> : null}
                       <p className="chat-text">{message.text}</p>
                       <p className="chat-meta">
-                        <span>{displayTime(message.createdAt.slice(11, 16))}</span>
+                        <span>{formatInstantTime(message.createdAt)}</span>
                         {mine ? (
-                          <span style={{ marginLeft: 6, opacity: 0.9, fontSize: 11 }}>
+                          <span style={{ marginInlineStart: 6, fontSize: 11 }}>
                             {isWaiting ? (
                               <button
                                 type="button"
@@ -311,7 +311,10 @@ export function ChatThread({
                                 {t('Waiting — send again')}
                               </button>
                             ) : isSeen ? (
-                              <span title={t('Seen')} style={{ color: '#0ea5e9' }}>✓✓ {t('Seen')}</span>
+                              // Weight, not a hard-coded sky blue: the check sits on
+                              // the solid-accent bubble, whose colour is the reader's
+                              // to choose — blue on the blue accent all but vanished.
+                              <span title={t('Seen')} style={{ fontWeight: 650 }}>✓✓ {t('Seen')}</span>
                             ) : (
                               <span title={t('Sent')}>✓✓ {t('Sent')}</span>
                             )}

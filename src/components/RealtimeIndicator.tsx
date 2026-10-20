@@ -19,7 +19,10 @@ export function RealtimeIndicator({ compact = false }: { compact?: boolean }) {
           alignItems: 'center',
           gap: 6,
           fontSize: 12,
-          opacity: 0.85,
+          // A token colour at full strength, never an opacity blend: muted
+          // text at 85% over the sidebar measured 4.42:1 in the light theme,
+          // just under AA — readable on paper here means --ink-soft or darker.
+          color: 'var(--ink-soft)',
         }}
       >
         <span
@@ -33,7 +36,13 @@ export function RealtimeIndicator({ compact = false }: { compact?: boolean }) {
             display: 'inline-block',
           }}
         />
-        {realtimeLive ? 'Live' : realtimeStatus === 'polling' ? 'Syncing' : realtimeStatus}
+        {realtimeLive
+          ? t('Live')
+          : realtimeStatus === 'polling'
+            ? t('Syncing…')
+            : realtimeStatus === 'offline'
+              ? t('Offline')
+              : t('Sync problem')}
       </span>
     );
   }
@@ -49,8 +58,10 @@ export function RealtimeIndicator({ compact = false }: { compact?: boolean }) {
         fontSize: 13,
         padding: '6px 10px',
         borderRadius: 8,
-        background: realtimeLive ? 'rgba(22,163,74,.08)' : 'rgba(0,0,0,.04)',
-        border: `1px solid ${realtimeLive ? 'rgba(22,163,74,.22)' : 'rgba(0,0,0,.08)'}`,
+        // Token surfaces, not black tints: rgba(0,0,0,…) all but disappears
+        // on the dark theme, and the chip has to read in both.
+        background: realtimeLive ? 'rgba(22,163,74,.08)' : 'var(--surface-2)',
+        border: `1px solid ${realtimeLive ? 'rgba(22,163,74,.35)' : 'var(--line-strong)'}`,
       }}
     >
       <span
@@ -65,7 +76,7 @@ export function RealtimeIndicator({ compact = false }: { compact?: boolean }) {
         }}
       />
       <span style={{ fontWeight: 600 }}>{realtimeLive ? 'Neon Realtime • Live' : 'Neon Realtime • ' + realtimeStatus}</span>
-      <span style={{ opacity: 0.7 }}>{label}</span>
+      <span style={{ color: 'var(--ink-soft)' }}>{label}</span>
       <style>{`@keyframes pulse-live{0%,100%{opacity:1}50%{opacity:.55}}`}</style>
     </div>
   );
