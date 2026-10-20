@@ -51,6 +51,7 @@ const config: CapacitorConfig = {
     : {
         androidScheme: 'https',
         iosScheme: 'capacitor',
+        allowNavigation: ['github.com', '*.githubusercontent.com', 'objects.githubusercontent.com', '*.notmtn.*', '*.vercel.app'],
       },
   plugins: {
     SplashScreen: {

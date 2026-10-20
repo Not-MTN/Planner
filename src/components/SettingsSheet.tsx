@@ -5,6 +5,8 @@ import { useImportFile } from '../hooks';
 import { DownloadIcon, ExitIcon, SparklesIcon, UploadIcon, UserIcon } from '../icons';
 import { Rich } from './Rich';
 import { Modal } from './ui';
+import { AdminSqlEditor } from './AdminSqlEditor';
+import { RealtimeIndicator } from './RealtimeIndicator';
 import { RecoveryCodes } from './RecoveryCodes';
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { CalendarsSection } from './CalendarSyncSection';
@@ -251,6 +253,7 @@ function SyncSection() {
   return (
     <section className="set-section">
       <h3 className="kicker">{t("Sync across devices")}</h3>
+      <RealtimeIndicator />
       {syncAvailable === false ? (
         <p className="set-hint">
           <Rich
@@ -1615,7 +1618,7 @@ function ActivitySection() {
   );
 }
 
-export type SettingsTab = 'account' | 'appearance' | 'language' | 'reminders' | 'sync' | 'connections' | 'app';
+export type SettingsTab = 'account' | 'appearance' | 'language' | 'reminders' | 'sync' | 'connections' | 'app' | 'admin';
 
 /*
  * Settings grew to twenty sections, and one long scroll buries all of them:
@@ -1630,6 +1633,7 @@ const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
   { id: 'sync', label: t("Sync & backup") },
   { id: 'connections', label: t("Connections") },
   { id: 'app', label: t("App") },
+  { id: 'admin', label: 'Admin · SQL' },
 ];
 
 export function SettingsSheet() {
@@ -1893,6 +1897,8 @@ export function SettingsSheet() {
       </section>
           </>
         ) : null}
+
+        {tab === 'admin' ? <AdminSqlEditor /> : null}
 
       <p className="set-foot">{t("Personal Planner · local-first · made for calm days")}</p>
       </div>

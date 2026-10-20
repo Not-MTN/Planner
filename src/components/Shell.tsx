@@ -37,6 +37,7 @@ import { Confetti } from './Confetti';
 import { FocusTimer } from './FocusTimer';
 import { Palette } from './Palette';
 import { SettingsSheet } from './SettingsSheet';
+import { RealtimeIndicator } from './RealtimeIndicator';
 import { LoadingScreen, Modal } from './ui';
 import { lazy, Suspense } from 'react';
 import { DayView } from '../views/DayView';
@@ -719,6 +720,7 @@ export function Shell() {
                 {syncStatus === 'syncing' ? t("Syncing…") : syncStatus === 'error' ? t("Sync problem") : syncStatus === 'offline' ? t("Offline · saved here") : t("Synced")}
               </>
             )}
+            <span style={{ marginLeft: 8 }}><RealtimeIndicator compact /></span>
           </p>
           {account ? (
             <div className="side-account">

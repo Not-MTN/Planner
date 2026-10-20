@@ -263,8 +263,10 @@ export async function unlockWithBiometrics(reason?: string): Promise<AccountBoot
 
 /* --------------------------------------------------------------- saving back */
 
-const DEBOUNCE_MS = 2_500;
-const MAX_WAIT_MS = 20_000;
+// Real-time tuned: 900ms debounce so edits feel instant across devices,
+// down from 2.5s. MAX_WAIT 6s keeps burst typing batched but still live.
+const DEBOUNCE_MS = 900;
+const MAX_WAIT_MS = 6_000;
 let timer: number | null = null;
 let pending: PlannerState | null = null;
 let queuedAt = 0;

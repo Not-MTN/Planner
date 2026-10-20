@@ -1159,19 +1159,27 @@ export async function approveHomeworkSubmission(
  * and the student can answer it. It rides the same slot everything else does,
  * so whatever plans, exams and answers are already out there survive the write.
  */
-export async function sendChatMessage(panels: Panels, linkId: string, text: string): Promise<Panels> {
+export async function sendChatMessage(
+  panels: Panels,
+  linkId: string,
+  text: string,
+  existing?: { id?: string; createdAt?: string },
+): Promise<Panels> {
   const session = await requireSession();
   const link = panels.guardian.links.find((item) => item.linkId === linkId);
   if (!link?.wrappedShareKey || link.status !== 'linked') throw new LinkError('That student link is not ready yet.');
   const clean = text.trim().slice(0, CHAT_TEXT_MAX);
   if (!clean) return panels;
   const message = sanitizeChatMessage({
-    id: newId('msg'),
+    id: existing?.id?.slice(0, 80) || newId('msg'),
     linkId,
     author: session.user.displayName || session.user.username,
     from: 'guardian',
     text: clean,
-    createdAt: new Date().toISOString(),
+    createdAt:
+      existing?.createdAt && existing.createdAt.length <= 40 && Number.isFinite(Date.parse(existing.createdAt))
+        ? existing.createdAt
+        : new Date().toISOString(),
   });
   if (!message) throw new LinkError('That message could not be sent.');
   const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
@@ -1702,10 +1710,10 @@ export async function dropPlan(panels: Panels, linkId: string, planId: string): 
       classes: current.classes,
       homework: current.homework,
       homeworkReviews: current.homeworkReviews,
-      changeAnswers: [],
-      chat: [],
-      exams: [],
-      examFeedback: [],
+      changeAnswers: current.changeAnswers,
+      chat: current.chat,
+      exams: current.exams,
+      examFeedback: current.examFeedback,
     } satisfies GuardianOutbox);
   } catch {
     /* dropping locally is still the right outcome */
@@ -2076,6 +2084,7 @@ export async function readNotices(panels: Panels): Promise<{ panels: Panels; cha
   let changed = false;
 
   const links = [...panels.guardian.links];
+  let globalChat = panels.guardian.chat ?? [];
 
   for (let index = 0; index < links.length; index += 1) {
     // Re-read each time: the loop updates the entry as answers land on it.
@@ -2187,11 +2196,17 @@ export async function readNotices(panels: Panels): Promise<{ panels: Panels; cha
     // The student's half of the thread. The guardian's own words are already
     // held locally, so this only ever adds to the conversation.
     if (outbox.chat.length > 0) {
-      const merged = mergeChat(link.chat ?? [], outbox.chat.filter((entry) => entry.linkId === link.linkId));
-      if (JSON.stringify(merged) !== JSON.stringify(link.chat ?? [])) {
+      const incomingForLink = outbox.chat.filter((entry) => entry.linkId === link.linkId);
+      const mergedLink = mergeChat(link.chat ?? [], incomingForLink);
+      if (JSON.stringify(mergedLink) !== JSON.stringify(link.chat ?? [])) {
         changed = true;
-        links[index] = { ...link, chat: merged };
+        links[index] = { ...link, chat: mergedLink };
         link = links[index]!;
+      }
+      const mergedGlobal = mergeChat(globalChat, incomingForLink);
+      if (JSON.stringify(mergedGlobal) !== JSON.stringify(globalChat)) {
+        changed = true;
+        globalChat = mergedGlobal;
       }
     }
     // A handed-in exam is worth a line in the roster: it is waiting to be read.
@@ -2256,6 +2271,8 @@ export async function readNotices(panels: Panels): Promise<{ panels: Panels; cha
     changed = true;
   }
   const notices = [...found, ...panels.guardian.notices].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 20);
+  const globalChatChanged = JSON.stringify(globalChat) !== JSON.stringify(panels.guardian.chat ?? []);
+  if (globalChatChanged) changed = true;
   return {
     panels: {
       ...panels,
@@ -2263,6 +2280,7 @@ export async function readNotices(panels: Panels): Promise<{ panels: Panels; cha
         ...panels.guardian,
         links: [...links],
         notices: found.length > 0 ? notices : panels.guardian.notices,
+        chat: globalChatChanged ? globalChat : panels.guardian.chat,
       },
     },
     changed,

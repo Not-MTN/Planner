@@ -75,25 +75,43 @@ export function supportsPackagedUpdates(): boolean {
   return false;
 }
 
+/** How long a packaged check may block boot — after this we are offline/unavailable and the planner opens. */
+const CHECK_TIMEOUT_MS = 10_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ]);
+}
+
 /**
  * Read the stable update feed through the platform's privileged network path,
  * then compare it with the actual installed package identity. Android and
  * Windows perform their own checks; no update service can block planner boot.
  */
 export async function checkPackagedUpdate(options: { ignoreDismissal?: boolean } = {}): Promise<PackagedUpdateCheckResult> {
+  const unavailable: PackagedUpdateCheckResult = { status: 'unavailable', version: null, offer: null };
   try {
     const platform = shellPlatform();
     if (platform === 'android') {
       const updater = await androidUpdater();
-      const [installedAndroid, response] = await Promise.all([
-        updater.getInstallInfo(),
-        updater.getUpdateManifest(),
-      ]);
+      // Race the manifest against a boot timeout — github offline must not hang the gate.
+      const installedPromise = updater.getInstallInfo();
+      const manifestPromise = updater.getUpdateManifest().then((r) => parseNativeManifest(r.manifest));
+      // Use timeout fallback to avoid hanging forever on a dead network.
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('check timeout')), CHECK_TIMEOUT_MS),
+      );
+      const [installedAndroid, manifest] = (await Promise.race([
+        Promise.all([installedPromise, manifestPromise]),
+        timeoutPromise,
+      ])) as [AndroidInstalledAppInfo, unknown];
       return checkUpdateFromManifest({
         platform: 'android',
         installedVersion: installedAndroid.versionName,
         installedAndroid,
-        manifest: parseNativeManifest(response.manifest),
+        manifest,
         ignoreDismissal: options.ignoreDismissal,
       });
     }
@@ -103,17 +121,16 @@ export async function checkPackagedUpdate(options: { ignoreDismissal?: boolean }
       if (!desktop || desktop.platform !== 'win32') {
         return { status: 'not-applicable', version: null, offer: null, reason: 'unsupported-platform' };
       }
-      const [installedVersion, manifest] = await Promise.all([
-        desktop.version(),
-        desktop.getUpdateManifest(),
-      ]);
-      return checkUpdateFromManifest({ platform: 'windows', installedVersion, manifest, ignoreDismissal: options.ignoreDismissal });
+      const installedVersion = await withTimeout(Promise.resolve(desktop.version()), CHECK_TIMEOUT_MS, '' as unknown as string);
+      const manifest = await withTimeout(Promise.resolve(desktop.getUpdateManifest()), CHECK_TIMEOUT_MS, null as unknown);
+      if (!installedVersion || !manifest) return unavailable;
+      return checkUpdateFromManifest({ platform: 'windows', installedVersion: installedVersion as string, manifest: manifest as unknown, ignoreDismissal: options.ignoreDismissal });
     }
 
     return { status: 'not-applicable', version: null, offer: null, reason: 'unsupported-platform' };
   } catch {
     // Offline, blocked or malformed feed: keep using the installed planner.
-    return { status: 'unavailable', version: null, offer: null };
+    return unavailable;
   }
 }
 

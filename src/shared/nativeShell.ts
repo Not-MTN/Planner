@@ -94,9 +94,33 @@ export function configuredApiOrigin(): string {
   }
 }
 
+/** Runtime override for packaged builds that shipped without an origin (local storage). */
+const RUNTIME_ORIGIN_KEY = 'planner-api-origin';
+export function runtimeApiOrigin(): string {
+  try {
+    const raw = localStorage.getItem(RUNTIME_ORIGIN_KEY);
+    if (!raw) return '';
+    const url = new URL(raw.trim());
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+    return url.origin;
+  } catch { return ''; }
+}
+export function setRuntimeApiOrigin(origin: string | null): void {
+  try {
+    if (!origin) localStorage.removeItem(RUNTIME_ORIGIN_KEY);
+    else localStorage.setItem(RUNTIME_ORIGIN_KEY, origin.trim());
+  } catch {}
+}
+/** Effective origin: runtime override wins over build-time, so a mis-built APK can be repaired without reinstall. */
+export function effectiveApiOrigin(): string {
+  return runtimeApiOrigin() || configuredApiOrigin();
+}
 /** True when this build was told where its API lives. */
 export function hasConfiguredApi(): boolean {
-  return configuredApiOrigin() !== '';
+  return effectiveApiOrigin() !== '';
+}
+export function isRuntimeOverridden(): boolean {
+  return runtimeApiOrigin() !== '';
 }
 
 /**
@@ -132,7 +156,7 @@ export function linkOrigin(): string {
 }
 
 /** `/api/sync` → `https://api.example.com/api/sync` (unchanged in the browser). */
-export function apiUrl(path: string, origin = configuredApiOrigin()): string {
+export function apiUrl(path: string, origin = effectiveApiOrigin()): string {
   if (!origin) return path;
   if (/^[a-z][a-z0-9+.-]*:/i.test(path) || path.startsWith('//')) return path;
   return path.startsWith('/') ? `${origin}${path}` : `${origin}/${path}`;
@@ -174,7 +198,7 @@ function rewriteApiUrl(value: string, origin: string): string | null {
  */
 export function installApiOriginShim(
   target: typeof globalThis = globalThis,
-  origin: string = configuredApiOrigin(),
+  origin: string = effectiveApiOrigin(),
 ): () => void {
   const shell = shellWindow();
   if (!shell) return () => undefined;

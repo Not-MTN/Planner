@@ -5,6 +5,15 @@ import { parseHash, toHash, type Route } from './route';
 import { downloadState, loadFrom, parseBackup, sanitizeState, saveTo, serialize, storageFullMessage, STORAGE_KEY } from './storage';
 import { flushVaultPush, scheduleVaultPush } from './auth/vault';
 import { fetchLinkActivity, flushPlanQueue, readNotices, refreshResults, shareWeeklyResults, syncLinks, syncStudentInbox } from './auth/links';
+import {
+  broadcastLocal,
+  isLinkEvent,
+  isVaultEvent,
+  pullAndMerge,
+  subscribeLocal,
+  subscribeRealtime,
+} from './auth/realtimeClient';
+import { getActiveSession } from './auth/session';
 import { activityChanged, pollDelayMs, type LinkSyncStatus, type SyncPriority } from './syncScheduler';
 import { currentSyncPriority, subscribeSyncPriority } from './syncPriority';
 import { idbRead, idbWrite, savedAt } from './idb';
@@ -210,6 +219,9 @@ interface PlannerContextValue {
   updatePanels: (next: Panels | ((current: Panels) => Panels)) => void;
   /** Health of the live guardian/student link connection, for the chat status line. */
   linkSyncStatus: LinkSyncStatus;
+  /** Neon Realtime is connected (SSE) or polling — every part of the app is live. */
+  realtimeLive: boolean;
+  realtimeStatus: 'live' | 'polling' | 'offline' | 'error';
   /** Run the encrypted link pipeline now, serialized with every other sync. */
   runPanelSync: () => Promise<void>;
   /** Force an immediate live poll (a send, a focus, a reconnect). */
@@ -587,6 +599,8 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
       futureRef.current = [];
       syncHistoryFlags();
       persistHistory();
+      // Instant same-browser multi-tab: other tabs apply from IDB (no server hop).
+      try { broadcastLocal('planner:commit', { at: Date.now() }); } catch {}
       return true;
     } catch {
       setError(t("Something went wrong with that change."));
@@ -701,6 +715,7 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
   /** Server timestamps from the last cheap probe, per link. */
   const activityRef = useRef<Record<string, string> | null>(null);
   const [linkSyncStatus, setLinkSyncStatus] = useState<LinkSyncStatus>('live');
+  const [realtimeStatus, setRealtimeStatus] = useState<'live' | 'polling' | 'offline' | 'error'>('polling');
   const runPanelSyncRef = useRef<() => void>(() => undefined);
 
   /**
@@ -1101,6 +1116,85 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     if (sharedTimer.current) window.clearTimeout(sharedTimer.current);
     sharedTimer.current = window.setTimeout(() => void runSharedSync(), delay);
   }, [runSharedSync]);
+
+  // ── Neon Realtime: every part live (vault + links + sync/shared) + local BroadcastChannel ──
+  // Vault covers tasks/events/habits/goals/notes/goals etc; links cover guardian↔student
+  // chat/plans/exams/share; sync/shared cover code-based rooms. One poll handles all.
+  useEffect(() => {
+    if (!getActiveSession()) return;
+    let merging = false;
+    let linkDebounce: number | null = null;
+
+    const handleVault = async () => {
+      if (merging) return;
+      merging = true;
+      try {
+        const before = stateRef.current;
+        const merged = await pullAndMerge(before);
+        if (!merged || merged === before) return;
+        const added = countNew(before, merged);
+        if (trySave(merged)) {
+          stateRef.current = merged;
+          setState(merged);
+          historyRef.current = [];
+          futureRef.current = [];
+          syncHistoryFlags();
+          if (added > 0) flash(t('{0} new {1} from your other device.', { 0: added, 1: added === 1 ? t('item') : t('items') }));
+          else flash(t('Synced from your other device.'));
+        }
+      } catch { /* best-effort */ } finally { merging = false; }
+    };
+
+    const handleLink = () => {
+      if (linkDebounce !== null) return;
+      linkDebounce = window.setTimeout(() => {
+        linkDebounce = null;
+        try { runPanelSyncRef.current(); } catch {}
+      }, 250) as unknown as number;
+    };
+
+    // Initial catch-up for sign-in from another device while this tab was already open
+    void handleVault();
+
+    const stopRealtime = subscribeRealtime(1400, async (events) => {
+      const vaultish = events.some(isVaultEvent);
+      const linkish = events.some(isLinkEvent);
+      const syncish = events.some((e) => e.kind === 'sync:updated');
+      const sharedish = events.some((e) => e.kind === 'shared:updated');
+      if (vaultish) await handleVault();
+      if (linkish) handleLink();
+      if (syncish && syncRef.current.code) void runSync();
+      if (sharedish && sharedRef.current.code) void runSharedSync();
+    }, (s) => setRealtimeStatus(s as typeof realtimeStatus));
+
+    const stopLocal = subscribeLocal(async (msg) => {
+      if (msg.kind !== 'planner:commit') return;
+      // Another tab just committed — pull its IDB copy if newer
+      try {
+        const raw = await idbRead();
+        if (!raw || savedAt(raw) <= savedAt(serialize(stateRef.current))) return;
+        const parsed = sanitizeState(JSON.parse(raw) as unknown);
+        if (!parsed || JSON.stringify(parsed) === JSON.stringify(stateRef.current)) return;
+        stateRef.current = parsed;
+        setState(parsed);
+        syncHistoryFlags();
+      } catch {}
+    });
+
+    const onFocus = () => { if (getActiveSession()) void handleVault(); };
+    window.addEventListener('focus', onFocus);
+    const onVis = () => { if (document.visibilityState === 'visible' && getActiveSession()) void handleVault(); };
+    document.addEventListener('visibilitychange', onVis);
+
+    return () => {
+      stopRealtime();
+      stopLocal();
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVis);
+      if (linkDebounce !== null) window.clearTimeout(linkDebounce);
+    };
+    // runSync/runSharedSync are stable (useCallback); stateRef is ref so not a dep
+  }, [trySave, syncHistoryFlags, flash, runSync, runSharedSync]);
 
   // Any local change marks the copy dirty and schedules an upload.
   const firstState = useRef(true);
@@ -1685,6 +1779,8 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     panels: state.panels,
     updatePanels,
     linkSyncStatus,
+    realtimeLive: realtimeStatus === 'live',
+    realtimeStatus,
     runPanelSync,
     kickPanelSync,
     saveStudentSubject: (subject) => commit((current) => saveStudentSubjectIn(current, subject)),
@@ -1933,7 +2029,7 @@ export function PlannerProvider({ children, initialState }: { children: ReactNod
     },
     setIntention: (date, text) => commit((current) => setIntentionIn(current, date, text)),
     logMood: (date, value, taskId) => commit((current) => setMoodIn(current, date, value, taskId)),
-  }), [state, ready, error, notice, saveBlocked, route, navigate, composer, confirm, startFresh, exportData, retentionWeeks, importText, loadSample, flash, dismissNotice, praise, undo, redo, canUndo, canRedo, themeMode, accent, paletteOpen, settingsOpen, settingsTab, focus, confettiSeed, celebrate, clearCompletedTasks, commit, reminders, setReminders, weekStart, setWeekStart, display, setDisplay, sync, syncStatus, syncMessage, syncConflicts, conflictChanges, keepConflictVersion, dismissConflict, dismissAllConflicts, syncAvailable, startSync, stopSync, runSync, deleteCloudCopy, shared, sharedStatus, sharedMessage, startShared, stopShared, runSharedSync, feeds, addFeed, removeFeed, refreshFeeds, calendars, calendarsSyncing, discoverCalendars, addCalendar, removeCalendar, setCalendarPush, syncCalendars, syncCalendarNow, weather, setWeather, recordTombstone, updatePanels, linkSyncStatus, runPanelSync, kickPanelSync, setPanelEnabled, runRollUp]);
+  }), [state, ready, error, notice, saveBlocked, route, navigate, composer, confirm, startFresh, exportData, retentionWeeks, importText, loadSample, flash, dismissNotice, praise, undo, redo, canUndo, canRedo, themeMode, accent, paletteOpen, settingsOpen, settingsTab, focus, confettiSeed, celebrate, clearCompletedTasks, commit, reminders, setReminders, weekStart, setWeekStart, display, setDisplay, sync, syncStatus, syncMessage, syncConflicts, conflictChanges, keepConflictVersion, dismissConflict, dismissAllConflicts, syncAvailable, startSync, stopSync, runSync, deleteCloudCopy, shared, sharedStatus, sharedMessage, startShared, stopShared, runSharedSync, feeds, addFeed, removeFeed, refreshFeeds, calendars, calendarsSyncing, discoverCalendars, addCalendar, removeCalendar, setCalendarPush, syncCalendars, syncCalendarNow, weather, setWeather, recordTombstone, updatePanels, linkSyncStatus, realtimeStatus, runPanelSync, kickPanelSync, setPanelEnabled, runRollUp]);
 
   return <PlannerContext.Provider value={value}>{children}</PlannerContext.Provider>;
 }

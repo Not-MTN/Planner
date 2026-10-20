@@ -24,7 +24,7 @@
  * It only ever runs to explain a failure that already happened, so the happy
  * path pays nothing for it.
  */
-import { apiUrl, configuredApiOrigin } from '../shared/nativeShell';
+import { apiUrl, effectiveApiOrigin } from '../shared/nativeShell';
 
 export type Reachability =
   /** The API is on this app's own origin — a browser tab, or local development. */
@@ -51,26 +51,49 @@ export interface ReachabilityOptions {
  * `offline`, the answer that blames nothing but the connection.
  */
 export async function probeApiReachability(options: ReachabilityOptions = {}): Promise<Reachability> {
-  const origin = options.origin ?? configuredApiOrigin();
+  const origin = options.origin ?? effectiveApiOrigin();
   const target = options.fetchImpl ?? (typeof fetch === 'function' ? fetch : null);
   if (!target) return 'offline';
-  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-  const timer = controller ? setTimeout(() => controller.abort(), options.timeoutMs ?? PROBE_TIMEOUT_MS) : null;
-  try {
-    await target(apiUrl('/api/auth/status', origin), {
+  if (!origin) return 'offline';
+  const withTimeout = async (ms: number, fn: (signal: AbortSignal | undefined) => Promise<unknown>) => {
+    const c = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const t = c ? setTimeout(() => c.abort(), ms) : null;
+    try {
+      await fn(c?.signal);
+      return true;
+    } catch { return false; } finally { if (t) clearTimeout(t); }
+  };
+  // Phase 1: is anything answering at all? no-cors bypasses CORS — offline vs online.
+  const online = await withTimeout(options.timeoutMs ?? PROBE_TIMEOUT_MS, (signal) =>
+    target(apiUrl('/api/auth/status', origin), {
       method: 'GET',
       mode: 'no-cors',
       cache: 'no-store',
       credentials: 'omit',
-      ...(controller ? { signal: controller.signal } : {}),
-    });
-  } catch {
-    return 'offline';
-  } finally {
-    if (timer !== null) clearTimeout(timer);
-  }
-  // An answer came back. In a cross-origin build the browser threw that answer
-  // away, which is exactly the shape of an origin the server has not allowed.
+      ...(signal ? { signal } : {}),
+    }),
+  );
+  if (!online) return 'offline';
+  // Phase 2: online — is it CORS? Try a real cors fetch; if it resolves with opaque CORS headers hidden, the server answered but refused our origin.
+  // For same-origin builds, cors will succeed (reachable). For cross-origin, cors fails when PLANNER_APP_ORIGINS missing.
   const ownOrigin = typeof window === 'undefined' ? '' : window.location.origin;
-  return origin && origin !== ownOrigin ? 'refused' : 'reachable';
+  const corsOk = await withTimeout(options.timeoutMs ?? PROBE_TIMEOUT_MS, (signal) =>
+    target(apiUrl('/api/auth/status', origin), {
+      method: 'GET',
+      mode: 'cors',
+      cache: 'no-store',
+      credentials: 'omit',
+      ...(signal ? { signal } : {}),
+    }).then((r) => {
+      // If we can read ok, CORS is allowed. If we got opaque, it still means no CORS (fetch would have rejected — so if we are here, CORS passed).
+      if (!(r instanceof Response)) throw new Error('no response');
+      if (!r.ok && r.type === 'opaque') throw new Error('opaque');
+    }),
+  );
+  if (!corsOk) {
+    // no-cors succeeded but cors failed → network fine, CORS blocked → server refused our origin.
+    // Only claim refused for cross-origin builds; same-origin failures are not CORS.
+    return origin && origin !== ownOrigin ? 'refused' : 'offline';
+  }
+  return 'reachable';
 }

@@ -122,7 +122,7 @@ export function ChatThread({
       // stays in step, and every request goes through the one serialized
       // runner so a send and a background tick can never overwrite each other.
       if (side === 'guardian') {
-        await sendChatMessage(panels, linkId, text);
+        await sendChatMessage(panels, linkId, text, { id: message.id, createdAt: message.createdAt });
         kickPanelSync();
       } else {
         await runPanelSync();
@@ -140,7 +140,11 @@ export function ChatThread({
     setSending(true);
     try {
       if (side === 'guardian') {
-        await sendChatMessage(panels, linkId, text);
+        // Reuse the same id so the optimistic message and the server copy are one message, not two.
+        // A new id would leave the “Waiting” copy and the delivered copy as duplicates.
+        const existing = (panels.guardian.chat ?? []).find((entry) => entry.id === id) ??
+          (panels.guardian.links.find((entry) => entry.linkId === linkId)?.chat ?? []).find((entry) => entry.id === id);
+        await sendChatMessage(panels, linkId, text, { id, createdAt: existing?.createdAt });
         kickPanelSync();
       } else {
         await runPanelSync();
