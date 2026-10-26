@@ -7,7 +7,7 @@
  */
 import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { answerChangeRequest, postNudge, sendAck, sendPlan, updatePlanDays } from './auth/links';
 import { addDays, formatFullDate, formatWeekdayShort, setWeekStart, todayISO } from './dates';
@@ -281,7 +281,11 @@ async function mount(state: PlannerState, route: 'student' | 'guardian' = 'stude
   const ready = route === 'student'
     ? '.student-panel-view'
     : '.guardian-roster .student-card, .guardian-roster .empty';
-  for (let index = 0; index < 6 && !document.querySelector(ready); index += 1) await settle();
+  // A deadline rather than a fixed attempt count: a loaded CI worker may need
+  // longer to flush the first render, and the wait exits as soon as content is
+  // there, so well-resolved runs pay nothing.
+  const readyDeadline = Date.now() + 10_000;
+  while (Date.now() < readyDeadline && !document.querySelector(ready)) await settle();
 }
 
 function weekPlan(partial: Partial<GuardianPlan> = {}): GuardianPlan {
@@ -354,6 +358,17 @@ function studentState(plans: GuardianPlan[] = [], reports: DayReport[] = []): Pl
   };
   return state;
 }
+
+beforeAll(async () => {
+  // These views load through React.lazy behind a Suspense fallback. On a busy
+  // CI runner the first dynamic import can outlast the mount wait, leaving the
+  // LoadingScreen in the DOM and failing the first test. Warm the modules once
+  // so every mount resolves synchronously, as it does after the first render.
+  await Promise.all([
+    import('./views/StudentPanelView'),
+    import('./views/GuardianPanelView'),
+  ]);
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
