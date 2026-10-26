@@ -275,7 +275,12 @@ async function mount(state: PlannerState, route: 'student' | 'guardian' = 'stude
       </StrictMode>,
     ),
   );
-  const ready = route === 'student' ? '.student-panel-view' : '.guardian-roster';
+  // The roster shell also renders around the empty state, so wait for real
+  // content rather than the section alone: on a busy CI runner the shell can
+  // commit a tick before the student rows have settled.
+  const ready = route === 'student'
+    ? '.student-panel-view'
+    : '.guardian-roster .student-card, .guardian-roster .empty';
   for (let index = 0; index < 6 && !document.querySelector(ready); index += 1) await settle();
 }
 
