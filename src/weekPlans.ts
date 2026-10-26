@@ -13,7 +13,7 @@ import { ACK_REACTIONS, DAY_REPORTS_KEPT, DAY_REPORT_NOTE_MAX, LESSON_URL_MAX, P
 
 /** A week plan holds seven days of lessons; sixty is eight a day with room to spare. */
 export const WEEK_LESSON_LIMIT = 60;
-function planPeriodEnd(plan: Pick<GuardianPlan, 'cadence' | 'start'>): string {
+export function planPeriodEnd(plan: Pick<GuardianPlan, 'cadence' | 'start'>): string {
   if (plan.cadence === 'day') return plan.start;
   if (plan.cadence === 'week') return addDays(plan.start, 6);
   const date = parseISODate(plan.start);
@@ -215,6 +215,10 @@ export interface WeekLessonDraft {
   end?: string;
   /** Prep link as typed — normalized on send, so drafts may hold anything. */
   url: string;
+  /** A study lesson by default; homework and tests mirror their own sections. */
+  kind?: 'lesson' | 'homework' | 'test';
+  /** Assignment/exam id this mirrored lesson points at. */
+  refId?: string;
 }
 
 export interface WeekDayDraft {

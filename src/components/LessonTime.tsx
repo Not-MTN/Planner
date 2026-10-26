@@ -15,6 +15,7 @@ import { displayTime } from '../dates';
 import { t } from '../i18n';
 import { ClockIcon } from '../icons';
 import { lessonDurationLabel, lessonTimeLabel, lessonTimePairHint, readLessonTimePair } from '../weekPlans';
+import { TimeField } from './TimeField';
 
 /** Slots worth one tap: the hours a lesson usually runs. */
 export const TIME_SLOTS: Array<{ time: string; end: string }> = [
@@ -111,24 +112,20 @@ export function LessonTimePicker({
       aria-label={subject ? t('Time for {0}', { 0: subject }) : t('Lesson time')}
     >
       <span className="week-time-pair">
-        <input
-          className="input week-time-input"
-          type="time"
-          aria-label={fromLabel ?? t('From')}
-          title={fromLabel ?? t('From')}
-          value={time ?? ''}
+        <TimeField
+          value={time}
+          label={fromLabel ?? t('From')}
           disabled={disabled}
-          onChange={(event) => onChange({ time: event.target.value, end: end ?? '' })}
+          placeholder={t('Start')}
+          onChange={(next) => onChange({ time: next, end: end ?? '' })}
         />
         <span aria-hidden="true">–</span>
-        <input
-          className="input week-time-input"
-          type="time"
-          aria-label={toLabel ?? t('To')}
-          title={toLabel ?? t('To')}
-          value={end ?? ''}
+        <TimeField
+          value={end}
+          label={toLabel ?? t('To')}
           disabled={disabled}
-          onChange={(event) => onChange({ time: time ?? '', end: event.target.value })}
+          placeholder={t('End')}
+          onChange={(next) => onChange({ time: time ?? '', end: next })}
         />
       </span>
       {!quiet && span ? (

@@ -1321,3 +1321,90 @@
 .draft-item-when {
   white-space: nowrap;
 }
+
+/* --- Developer API (Settings → Developer API) ------------------------- */
+.api-tokens-section { display: flex; flex-direction: column; gap: 16px; }
+.api-token-create,
+.api-vault-key {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+  background: var(--surface-2);
+}
+.api-token-fields {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr;
+  gap: 10px;
+  align-items: end;
+}
+.api-token-fields .segmented { width: 100%; }
+.api-token-fields .seg { flex: 1; padding-inline: 8px; }
+.api-token-reveal {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+  border-radius: var(--radius-small);
+  background: var(--accent-soft);
+}
+.api-secret-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.api-secret {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  user-select: all;
+  direction: ltr;
+  text-align: start;
+}
+.device-badge.is-write {
+  background: color-mix(in srgb, var(--cat-peach) 22%, transparent);
+  color: var(--cat-peach-text);
+}
+.api-docs summary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 13.5px;
+  color: var(--ink);
+  padding: 8px 0;
+}
+.api-docs-body { display: flex; flex-direction: column; gap: 8px; }
+.api-code {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+  background: var(--surface-2);
+  overflow-x: auto;
+  direction: ltr;
+  text-align: start;
+}
+.api-code code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre;
+  color: var(--ink-soft);
+}
+@media (max-width: 800px) {
+  .api-token-fields { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 560px) {
+  .api-token-fields { grid-template-columns: minmax(0, 1fr); }
+  .api-secret-row .btn { flex: 1; }
+}

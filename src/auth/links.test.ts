@@ -813,4 +813,59 @@ describe('linking a guardian and a student', () => {
       'That ask can no longer be made',
     );
   }, 180_000);
+
+  it('carries the student standing class timetable to the guardian as locked blocks', async () => {
+    await join('parent10', 'parent10@example.com', createEmptyState());
+    const { inviteStudent, readNotices, syncLinks } = await import('./links');
+    const invited = await inviteStudent(createEmptyState().panels, 'student10');
+
+    await join('student10', 'student10@example.com', createEmptyState());
+    const { acceptInvitation, syncStudentInbox } = await import('./links');
+    let studentPanels = await acceptInvitation(createEmptyState().panels, invited.invitation.code);
+
+    // The student owns the timetable; guardians only ever read it.
+    studentPanels = {
+      ...studentPanels,
+      student: {
+        ...studentPanels.student,
+        fixedClasses: [
+          {
+            id: 'fixed-maths',
+            title: 'Maths class',
+            weekday: 1,
+            startTime: '09:00',
+            endTime: '10:30',
+            createdAt: '2026-10-01T00:00:00.000Z',
+            updatedAt: '2026-10-01T00:00:00.000Z',
+          },
+        ],
+      },
+    };
+    studentPanels = (await syncStudentInbox(studentPanels, [])).panels;
+
+    await signInAs('parent10');
+    // Reconcile the accepted invitation first, the way the panel does before
+    // pulling notices: readNotices only opens slots on linked links.
+    const reconciled = await syncLinks(invited.panels);
+    expect(reconciled.panels.guardian.links[0]?.status).toBe('linked');
+    const first = await readNotices(reconciled.panels);
+    expect(first.changed).toBe(true);
+    expect(first.panels.guardian.links[0]?.fixedClasses).toEqual([
+      expect.objectContaining({ id: 'fixed-maths', title: 'Maths class', weekday: 1 }),
+    ]);
+
+    // An empty timetable is authoritative too: removing every class clears the
+    // guardian's copy rather than leaving a ghost block behind.
+    await signInAs('student10');
+    const emptied = {
+      ...studentPanels,
+      student: { ...studentPanels.student, fixedClasses: [] },
+    };
+    const afterRemoval = (await syncStudentInbox(emptied, [])).panels;
+    expect(afterRemoval.student.fixedClasses).toEqual([]);
+
+    await signInAs('parent10');
+    const second = await readNotices(first.panels);
+    expect(second.panels.guardian.links[0]?.fixedClasses).toEqual([]);
+  }, 180_000);
 });

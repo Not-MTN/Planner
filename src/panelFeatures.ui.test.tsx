@@ -131,6 +131,23 @@ function setValue(selector: string, value: string): void {
   );
 }
 
+/**
+ * Drive the tap-first TimeField the way a finger does: open its sheet, type
+ * the exact time in the sheet's native entry, confirm with Done.
+ */
+async function setTime(triggerLabel: string, value: string, scope: ParentNode = document): Promise<void> {
+  const trigger = scope.querySelector<HTMLButtonElement>(`button[aria-label="${triggerLabel}"]`);
+  if (!trigger) throw new Error(`Missing time field ${triggerLabel}`);
+  await act(async () => trigger.click());
+  await settle();
+  const sheet = query<HTMLElement>('.time-sheet');
+  const input = sheet.querySelector<HTMLInputElement>('input[type="time"]');
+  if (!input) throw new Error('Missing exact time input');
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, value);
+  await act(async () => input.dispatchEvent(new Event('input', { bubbles: true })));
+  await click('Done', sheet);
+}
+
 function saved(): PlannerState {
   return JSON.parse(localStorage.getItem('personal-planner.v1') ?? '{}') as PlannerState;
 }
@@ -480,8 +497,8 @@ describe('guardian roster and planning', () => {
     setValue('input[aria-label="Step 1 date"]', todayISO());
     // "From 9 to 11" is the part the plan used to lose on the way out: the
     // composer kept the fields but never carried the times into the draft.
-    setValue('input[aria-label="Step 1 start time"]', '09:00');
-    setValue('input[aria-label="Step 1 end time"]', '11:00');
+    await setTime('Step 1 start time', '09:00');
+    await setTime('Step 1 end time', '11:00');
     await click('Send the plan');
     expect(sendPlan).toHaveBeenCalledTimes(1);
     expect(vi.mocked(sendPlan).mock.calls[0][1]).toBe(ninaLinkId);

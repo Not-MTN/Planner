@@ -146,9 +146,77 @@ describe('panel storage', () => {
     expect(panels.student.explanations.length).toBe(200);
     expect(panels.guardian.links.length).toBe(20);
   });
+
+  it('keeps the student standing classes, drops malformed ones, and stays in day order', () => {
+    const panels = sanitizePanels({
+      student: {
+        enabled: true,
+        subjects: [],
+        explanations: [],
+        fixedClasses: [
+          { id: 'late', title: 'Evening club', weekday: 3, startTime: '18:00', endTime: '19:00', createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z' },
+          { id: 'early', title: 'Maths', weekday: 3, startTime: '08:00', endTime: '09:30', createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z' },
+          { id: 'bad-time', title: 'Backwards', weekday: 1, startTime: '10:00', endTime: '09:00', createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z' },
+          { id: 'bad-day', title: 'No weekday', weekday: 9, startTime: '10:00', endTime: '11:00', createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z' },
+          null,
+        ],
+      },
+    });
+    expect(panels.student.fixedClasses?.map((item) => item.id)).toEqual(['early', 'late']);
+  });
+
+  it('caps standing classes at sixty', () => {
+    const fixedClasses = Array.from({ length: 65 }, (_, index) => ({
+      id: `c${index}`,
+      title: `Class ${index}`,
+      weekday: index % 7,
+      startTime: '08:00',
+      endTime: '09:00',
+      createdAt: '2026-10-01T00:00:00.000Z',
+      updatedAt: '2026-10-01T00:00:00.000Z',
+    }));
+    const panels = sanitizePanels({
+      student: { enabled: true, subjects: [], explanations: [], fixedClasses },
+    });
+    expect(panels.student.fixedClasses).toHaveLength(60);
+  });
+
+  it('keeps the read-only class timetable on a guardian link', () => {
+    const panels = sanitizePanels({
+      guardian: {
+        enabled: true,
+        kind: 'parent',
+        links: [
+          {
+            id: 'l1',
+            username: 'u1',
+            displayName: 'Nina',
+            status: 'linked',
+            results: null,
+            fixedClasses: [
+              { id: 'f1', title: 'Physics lab', weekday: 2, startTime: '10:00', endTime: '12:00', createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z' },
+              { id: 'f-bad', title: 'Broken', weekday: 2, startTime: '12:00', endTime: '11:00', createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z' },
+            ],
+          },
+        ],
+      },
+    });
+    expect(panels.guardian.links[0]?.fixedClasses?.map((item) => item.id)).toEqual(['f1']);
+  });
 });
 
 describe('panel merge', () => {
+  it('unions standing classes from both devices instead of dropping one side', () => {
+    const base = createEmptyState().panels;
+    const mk = (id: string, weekday: number): Panels['student']['fixedClasses'] => [
+      { id, title: id, weekday, startTime: '08:00', endTime: '09:00', createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z' },
+    ];
+    const local: Panels = { ...base, student: { ...base.student, fixedClasses: mk('only-local', 1) } };
+    const remote: Panels = { ...base, student: { ...base.student, fixedClasses: mk('only-remote', 2) } };
+    const merged = mergePanels(local, remote);
+    expect(merged.student.fixedClasses?.map((item) => item.id).sort()).toEqual(['only-local', 'only-remote']);
+  });
+
   it('lets students delete plans from former guardians or plans ended at least a week ago', () => {
     const base = createEmptyState().panels;
     const linkId = '12345678-1234-1234-1234-123456789abc';

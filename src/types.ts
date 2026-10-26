@@ -125,6 +125,30 @@ export interface FixedCommitment {
   updatedAt: string;
 }
 
+/**
+ * A student's standing class time — a school lesson that happens every week.
+ *
+ * The student owns this schedule. Guardians see it while planning but cannot
+ * edit it: it travels over the link as a read-only timetable that plan
+ * lessons are checked against, so a study block can be placed beside a class,
+ * not silently on top of one.
+ */
+export interface FixedClass {
+  id: string;
+  title: string;
+  /** Day of week, 0 = Sunday … 6 = Saturday. */
+  weekday: number;
+  /** 24-hour HH:MM. */
+  startTime: string;
+  /** 24-hour HH:MM, always after startTime. */
+  endTime: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** How many standing classes one student keeps. A school week fits easily. */
+export const FIXED_CLASSES_LIMIT = 60;
+
 export interface FixedCommitmentInput {
   title: string;
   weekday: number;
@@ -334,6 +358,8 @@ export interface StudentPanel {
   deletedPlanIds?: string[];
   /** Subjects the student tracks, with an optional exam date. */
   subjects: StudentSubject[];
+  /** The student's standing weekly class times; read-only for guardians. */
+  fixedClasses?: FixedClass[];
   /** Why the student changed something significant. Detail kept for the active week only. */
   explanations: ChangeNote[];
   /** What guardians sent: short notices and day/week/month plans. */
@@ -457,7 +483,7 @@ export interface PlanDraft {
   start: string;
   title: string;
   note: string;
-  items: Array<Pick<PlanItem, 'title' | 'date' | 'time' | 'end' | 'minutes' | 'subject' | 'url'>>;
+  items: Array<Pick<PlanItem, 'title' | 'date' | 'time' | 'end' | 'minutes' | 'subject' | 'url' | 'kind' | 'refId'>>;
   /** Curriculum field id, when the week was planned from built-in lessons. */
   field?: string | null;
   /** Grade id the week was planned for. */
@@ -520,8 +546,18 @@ export interface PlanItem {
   subject: string | null;
   /** One prep link per lesson — a video, a worksheet — or null when there is none. */
   url?: string | null;
+  /**
+   * What the step is. A plain study lesson is the default; 'homework' and
+   * 'test' mirror something the guardian also set in the matching section, so
+   * it appears both in the weekly plan and in homework/exams.
+   */
+  kind?: PlanItemKind;
+  /** The homework or exam id this step points at, when kind is not a lesson. */
+  refId?: string | null;
   done: boolean;
 }
+
+export type PlanItemKind = 'lesson' | 'homework' | 'test';
 
 /** A prep link fits in a tap and a sync — longer is almost certainly a paste gone wrong. */
 export const LESSON_URL_MAX = 500;
@@ -1054,6 +1090,8 @@ export interface GuardianLink {
   exams?: Exam[];
   /** How this student answered them, newest first. */
   examResults?: ExamSubmission[];
+  /** The student's standing class times, shared read-only for planning. */
+  fixedClasses?: FixedClass[];
   /** When a pending code stops working. Null once accepted, or if unknown. */
   expiresAt?: string | null;
 }

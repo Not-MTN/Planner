@@ -37,6 +37,7 @@ import {
   sendTyping,
   subscribeRealtime,
 } from '../auth/realtimeClient';
+import { getActiveSession } from '../auth/session';
 
 /** How close to the cap the counter starts showing */
 const ROOM_WARNING = 80;
@@ -190,10 +191,14 @@ export function ChatThread({
   const send = async () => {
     const text = draft.trim();
     if (!text || sending) return;
+    // The author travels with the message: on the student side this exact
+    // object is what the outbox carries, so writing 'You' here would arrive on
+    // the guardian's thread as a message apparently written by them.
+    const authorName = getActiveSession()?.user.displayName || getActiveSession()?.user.username || otherName;
     const message = sanitizeChatMessage({
       id: newId('msg'),
       linkId,
-      author: t('You'),
+      author: authorName,
       from: side,
       text,
       createdAt: new Date().toISOString(),

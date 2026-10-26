@@ -545,3 +545,21 @@ export function ExamIcon(props: IconProps) {
     </Svg>
   );
 }
+
+export function CopyIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="9" y="9" width="11.5" height="11.5" rx="2.2" />
+      <path d="M5.5 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v.5" />
+    </Svg>
+  );
+}
+
+export function KeyIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="8" cy="8" r="4.5" />
+      <path d="m11.2 11.2 8 8M16 16l2.2-2.2M13.8 18.2l1.8-1.8" />
+    </Svg>
+  );
+}

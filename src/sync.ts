@@ -8,9 +8,47 @@
  * The server stores { id, version, ciphertext } and can't read anything.
  */
 import { sanitizeState, serialize } from './storage';
-import { mergeExamSubmissions } from './exams';
-import { AI_DECLINED_LIMIT, AI_PLAN_LIMIT, DAY_REPORTS_KEPT, EXAM_RESULTS_KEPT, GOAL_ANSWERS_KEPT, HOMEWORK_ITEMS_KEPT, PRAISE_KEPT } from './types';
-import type { ClassAssignment, ClassProgress, DayReport, FixedCommitment, Goal, GoalAnswer, GuardianLink, GuardianPlan, Habit, HomeworkAssignment, HomeworkReview, HomeworkSubmission, Note, Panels, PlannerEvent, PlannerState, PlanRequest, ReportAck, StudentExamDraft, Task } from './types';
+import { mergeExamSubmissions, mergeExams } from './exams';
+import { mergeChat } from './chat';
+import { mergeChangeRequests } from './weekPlans';
+import {
+  AI_DECLINED_LIMIT,
+  AI_PLAN_LIMIT,
+  CHAT_KEPT,
+  DAY_REPORTS_KEPT,
+  EXAM_RESULTS_KEPT,
+  FIXED_CLASSES_LIMIT,
+  GOAL_ANSWERS_KEPT,
+  HOMEWORK_ITEMS_KEPT,
+  PLAN_CHANGES_KEPT,
+  PRAISE_KEPT,
+  QUEUED_PLANS_KEPT,
+} from './types';
+import type {
+  ChatMessage,
+  ClassAssignment,
+  ClassProgress,
+  DayReport,
+  FixedCommitment,
+  Goal,
+  GoalAnswer,
+  GuardianLink,
+  GuardianPlan,
+  Habit,
+  HomeworkAssignment,
+  HomeworkReview,
+  HomeworkSubmission,
+  Note,
+  Panels,
+  PlanReview,
+  PlannerEvent,
+  PlannerState,
+  PlanRequest,
+  QueuedPlan,
+  ReportAck,
+  StudentExamDraft,
+  Task,
+} from './types';
 
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O/1/I/L
 const SETTINGS_KEY = 'planner-sync';
@@ -183,6 +221,22 @@ export function mergePanels(local: Panels, remote: Panels): Panels {
     for (const item of a) map.set(key(item), item);
     return [...map.values()];
   };
+  // Read receipts are a timestamp per thread. The furthest read wins, so a
+  // device that has read less can never quiet a thread another device read.
+  const mergeChatSeen = (
+    a: Record<string, string> | undefined,
+    b: Record<string, string> | undefined,
+  ): Record<string, string> => {
+    const out: Record<string, string> = { ...(a ?? {}) };
+    for (const [linkId, at] of Object.entries(b ?? {})) {
+      if (!out[linkId] || at > out[linkId]) out[linkId] = at;
+    }
+    return out;
+  };
+  const mergeThread = (a: ChatMessage[] | undefined, b: ChatMessage[] | undefined): ChatMessage[] =>
+    mergeChat(a ?? [], b ?? []).slice(-CHAT_KEPT);
+  const mergePlanReviews = (a: PlanReview[] | undefined, b: PlanReview[] | undefined): PlanReview[] =>
+    byIdKey(a ?? [], b ?? [], (item) => item.id).sort((x, y) => y.weekOf.localeCompare(x.weekOf));
   // Plans merge by id: the newer shape wins, but a tick on either device stays
   // ticked. Guardian approval is terminal, so a stale device cannot reopen or
   // rewrite a period after sign-off.
@@ -342,6 +396,18 @@ export function mergePanels(local: Panels, remote: Panels): Panels {
         homeworkSubmissions: submissions,
         homeworkReviews: reviews,
         goalAnswers: byIdKey(localLink.goalAnswers ?? [], previous.goalAnswers ?? [], (item) => item.suggestionId).slice(0, GOAL_ANSWERS_KEPT),
+        changeRequests: mergeChangeRequests(localLink.changeRequests ?? [], previous.changeRequests ?? []),
+        // The thread is a conversation, not a notice: union it by id so a word
+        // written on either device is never overwritten by the other's vault.
+        chat: mergeThread(localLink.chat, previous.chat),
+        exams: mergeExams(localLink.exams ?? [], previous.exams ?? []),
+        examResults: mergeExamSubmissions(localLink.examResults ?? [], previous.examResults ?? []).slice(0, EXAM_RESULTS_KEPT),
+        planReviews: mergePlanReviews(localLink.planReviews, previous.planReviews),
+        // The student owns this timetable; either device's copy is already
+        // sanitized, so union by id and keep the same day order everywhere.
+        fixedClasses: byId(localLink.fixedClasses ?? [], previous.fixedClasses ?? [])
+          .sort((a, b) => a.weekday - b.weekday || a.startTime.localeCompare(b.startTime))
+          .slice(0, FIXED_CLASSES_LIMIT),
       });
     }
     return [...map.values()];
@@ -367,20 +433,12 @@ export function mergePanels(local: Panels, remote: Panels): Panels {
       guardians: byIdKey(local.student.guardians ?? [], remote.student.guardians ?? [], (item) => item.linkId).slice(0, 20),
       deletedPlanIds,
       subjects: byId(local.student.subjects, remote.student.subjects).slice(0, 40),
+      fixedClasses: byId(local.student.fixedClasses ?? [], remote.student.fixedClasses ?? [])
+        .sort((a, b) => a.weekday - b.weekday || a.startTime.localeCompare(b.startTime))
+        .slice(0, FIXED_CLASSES_LIMIT),
       explanations: byId(local.student.explanations, remote.student.explanations)
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         .slice(0, 200),
-      inbox: {
-        notices: byId(local.student.inbox?.notices ?? [], remote.student.inbox?.notices ?? [])
-          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-          .slice(0, 20),
-        plans: studentPlans.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 10),
-        goals: byId(local.student.inbox?.goals ?? [], remote.student.inbox?.goals ?? [])
-          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-          .slice(0, 10),
-        classes: mergeClasses(local.student.inbox?.classes ?? [], remote.student.inbox?.classes ?? []),
-        homework: mergeHomework(local.student.inbox?.homework ?? [], remote.student.inbox?.homework ?? []),
-      },
       reports: studentReports,
       acks: studentAcks,
       classProgress: mergeClassProgress(local.student.classProgress ?? [], remote.student.classProgress ?? []),
@@ -404,6 +462,30 @@ export function mergePanels(local: Panels, remote: Panels): Panels {
       // A sitting in progress on either device survives; the earlier clock
       // wins so a merge can never reset the guardian's time limit.
       examDrafts: mergeExamDrafts(local.student.examDrafts ?? {}, remote.student.examDrafts ?? {}),
+      // Asks for a plan change are answered on the guardian's devices, so a
+      // vault merge must keep whichever side is further along rather than
+      // dropping the whole thread (the old behaviour).
+      changeRequests: mergeChangeRequests(
+        local.student.changeRequests ?? [],
+        remote.student.changeRequests ?? [],
+      ).slice(0, PLAN_CHANGES_KEPT),
+      chat: mergeThread(local.student.chat, remote.student.chat),
+      chatSeen: mergeChatSeen(local.student.chatSeen, remote.student.chatSeen),
+      inbox: {
+        notices: byId(local.student.inbox?.notices ?? [], remote.student.inbox?.notices ?? [])
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+          .slice(0, 20),
+        plans: studentPlans.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 10),
+        goals: byId(local.student.inbox?.goals ?? [], remote.student.inbox?.goals ?? [])
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+          .slice(0, 10),
+        classes: mergeClasses(local.student.inbox?.classes ?? [], remote.student.inbox?.classes ?? []),
+        homework: mergeHomework(local.student.inbox?.homework ?? [], remote.student.inbox?.homework ?? []),
+        // Exams set by a guardian used to vanish from the second device after a
+        // vault conflict; the merge now unions them like every other inbox item.
+        exams: mergeExams(local.student.inbox?.exams ?? [], remote.student.inbox?.exams ?? []),
+        planReviews: mergePlanReviews(local.student.inbox?.planReviews, remote.student.inbox?.planReviews),
+      },
     },
     guardian: {
       enabled: local.guardian.enabled || remote.guardian.enabled,
@@ -415,6 +497,12 @@ export function mergePanels(local: Panels, remote: Panels): Panels {
       notices: byId(local.guardian.notices ?? [], remote.guardian.notices ?? [])
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         .slice(0, 20),
+      // Unsent drafts wait for a signal; the newest copy of each one survives.
+      queuedPlans: byId(local.guardian.queuedPlans ?? [], remote.guardian.queuedPlans ?? [])
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, QUEUED_PLANS_KEPT) as QueuedPlan[],
+      chat: mergeThread(local.guardian.chat, remote.guardian.chat),
+      chatSeen: mergeChatSeen(local.guardian.chatSeen, remote.guardian.chatSeen),
     },
   };
 }

@@ -286,3 +286,44 @@ export interface NoteResponse {
   ciphertext: string | null;
   weekOf: string | null;
 }
+
+/* ------------------------------------------------------------- API tokens */
+
+/**
+ * Personal access tokens for the external API.
+ *
+ * A token authenticates a request as one account, the same way a session
+ * cookie does in the app. It never unlocks anything by itself: the planner
+ * vault stays end-to-end encrypted, so an external project also needs the
+ * account's vault key to read or change planner contents. The plaintext token
+ * is shown once, when it is created; only its SHA-256 hash is stored.
+ */
+export const API_TOKEN_PREFIX = 'plnr_at_';
+export const API_TOKEN_SCOPES = ['read', 'readwrite'] as const;
+export type ApiTokenScope = (typeof API_TOKEN_SCOPES)[number];
+export const API_TOKEN_LABEL_MAX = 80;
+export const API_TOKENS_PER_ACCOUNT = 20;
+/** Expiry choices in days; 0 means the token never expires. */
+export const API_TOKEN_EXPIRY_DAYS = [0, 30, 90, 365] as const;
+
+export interface ApiTokenInfo {
+  id: string;
+  label: string;
+  scope: ApiTokenScope;
+  createdAt: string;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+}
+
+export interface ApiTokenCreated extends ApiTokenInfo {
+  /** The only time the secret is ever available. Store it in the external project, not here. */
+  token: string;
+}
+
+export interface CreateApiTokenRequest {
+  label: string;
+  scope: ApiTokenScope;
+  /** One of API_TOKEN_EXPIRY_DAYS; 0 (or omitted) never expires. */
+  expiresInDays?: number;
+}

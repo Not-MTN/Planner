@@ -189,6 +189,10 @@ export interface PlanStepDraft {
   time: string;
   /** When it ends, so "maths from 9 to 11" is what the step says. */
   end: string;
+  /** A study lesson by default; homework and tests mirror their own sections. */
+  kind: 'lesson' | 'homework' | 'test';
+  /** Assignment/exam id this mirrored step points at. */
+  refId: string;
 }
 
 export interface PanelPlanDraft {
@@ -200,7 +204,7 @@ export interface PanelPlanDraft {
 }
 
 export function emptyPlanStep(): PlanStepDraft {
-  return { id: newId('step'), title: '', subject: '', minutes: '', date: '', time: '', end: '' };
+  return { id: newId('step'), title: '', subject: '', minutes: '', date: '', time: '', end: '', kind: 'lesson', refId: '' };
 }
 
 /** Reject impossible dates, out-of-period steps and non-finite effort before sending. */

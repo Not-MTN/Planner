@@ -60,6 +60,7 @@ import { InviteQr } from '../components/InviteQr';
 import { PanelDebugInspector } from '../components/PanelDebugInspector';
 import { PraiseComposer } from '../components/PraiseComposer';
 import { GuardianPlanComposer } from '../components/GuardianPlanComposer';
+import { GuardianReview } from '../components/GuardianReview';
 import { WeekPlanCard } from '../components/WeekPlanCard';
 import { WeekPlanComposer } from '../components/WeekPlanComposer';
 import { WeekPlanEditor } from '../components/WeekPlanEditor';
@@ -375,13 +376,13 @@ export function GuardianPanelView() {
 
   const approveReport = async (link: GuardianLink, report: DayReport) => ackReport(link, report, '', true);
 
-  const approvePeriod = async (link: GuardianLink, plan: GuardianPlan) => {
+  const approvePeriod = async (link: GuardianLink, plan: GuardianPlan, force = false) => {
     if (!link.linkId) return;
     try {
-      const next = await approvePlanPeriod(panels, link.linkId, plan.id);
+      const next = await approvePlanPeriod(panels, link.linkId, plan.id, force);
       const approved = next.guardian.links.find((item) => item.linkId === link.linkId)?.plans.find((item) => item.id === plan.id);
       if (approved) updatePanels((current) => withLinkPlan(current, link.linkId!, approved));
-      flash(t('Week approved and closed.'));
+      flash(force ? t('Week closed on the reports that were filed.') : t('Week approved and closed.'));
     } catch (caught) {
       flash(caught instanceof Error ? caught.message : t('The week could not be approved yet.'));
     }
@@ -1092,6 +1093,8 @@ export function GuardianPanelView() {
                   )}
                 </section>
 
+                <GuardianReview link={open} />
+
                 {queued.length > 0 ? (
                   <section className="gplan-sent" aria-label={t('Waiting to send')}>
                     <p className="chart-title">
@@ -1151,6 +1154,7 @@ export function GuardianPanelView() {
                               onAck={(report, text) => ackReport(open, report, text)}
                               onApproveReport={(report) => approveReport(open, report)}
                               onApprovePlanPeriod={(plan) => approvePeriod(open, plan)}
+                              onForceApprovePlanPeriod={(plan) => approvePeriod(open, plan, true)}
                               onReact={(report, ack, emoji) => reactReport(open, report, ack, emoji)}
                               onNudge={() => nudgeStudent(open)}
                               nudgeSent={nudgedToday(guardian.notices, open.username)}

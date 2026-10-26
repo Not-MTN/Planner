@@ -6,6 +6,7 @@ import { sanitizeClassAssignment, sanitizeClassProgress, sanitizeHomeworkAssignm
 import { REPEAT_SET } from './recurrence';
 import { MAX_PLAN_DAYS } from './duration';
 import { mergeChat, sanitizeChatMessage } from './chat';
+import { sanitizeFixedClass } from './fixedClasses';
 import {
   mergeExams,
   mergeExamSubmissions,
@@ -14,7 +15,7 @@ import {
   sanitizeStudentExamDraft,
 } from './exams';
 import { PLAN_REVIEWS_KEPT } from './planRetention';
-import { ACK_REACTIONS, ACK_TEXT_MAX, AI_PLAN_LIMIT, CHAT_KEPT, DAY_REPORT_NOTE_MAX, DAY_REPORTS_KEPT, EXAMS_KEPT, EXAM_RESULTS_KEPT, GOAL_STEPS_MAX, HOMEWORK_ITEMS_KEPT, PLAN_CHANGES_KEPT, PLAN_CHANGE_NOTE_MAX, PLAN_CHANGE_TITLE_MAX, PLAN_REQUESTS_KEPT, PRAISE_KEPT, QUEUED_PLANS_KEPT, createEmptyPanels, createEmptyState, isGradeLevel, type AIDeclined, type AIDeclinedKind, type AIMemory, type AttachmentRef, type AIMemoryCategory, type ChangeNote, type DayReport, type EventInput, type FixedCommitment, type FocusLog, type GoalAnswer, type GoalSuggestion, type GuardianKind, type GuardianLink, type GuardianNotice, type GuardianPlan, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Panels, type PlanCadence, type PlanChangeRequest, type PlanDraft, type PlanItem, type PlanRequest, type PlanReview, type QueuedPlan, type ReportAck, type StudentExamDraft, type StudentGuardian, type StudentInbox, type StudentSubject, type Subtask, type TaskInput, type TaskRepeat, type WeekResults, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task, type WeekArchive } from './types';
+import { ACK_REACTIONS, ACK_TEXT_MAX, AI_PLAN_LIMIT, CHAT_KEPT, DAY_REPORT_NOTE_MAX, DAY_REPORTS_KEPT, EXAMS_KEPT, EXAM_RESULTS_KEPT, FIXED_CLASSES_LIMIT, GOAL_STEPS_MAX, HOMEWORK_ITEMS_KEPT, PLAN_CHANGES_KEPT, PLAN_CHANGE_NOTE_MAX, PLAN_CHANGE_TITLE_MAX, PLAN_REQUESTS_KEPT, PRAISE_KEPT, QUEUED_PLANS_KEPT, createEmptyPanels, createEmptyState, isGradeLevel, type AIDeclined, type AIDeclinedKind, type AIMemory, type AttachmentRef, type AIMemoryCategory, type ChangeNote, type DayReport, type EventInput, type FixedCommitment, type FocusLog, type GoalAnswer, type GoalSuggestion, type GuardianKind, type GuardianLink, type GuardianNotice, type GuardianPlan, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Panels, type PlanCadence, type PlanChangeRequest, type PlanDraft, type PlanItem, type PlanRequest, type PlanReview, type QueuedPlan, type ReportAck, type StudentExamDraft, type StudentGuardian, type StudentInbox, type StudentSubject, type Subtask, type TaskInput, type TaskRepeat, type WeekResults, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task, type WeekArchive } from './types';
 import { t } from './i18n';
 import { downloadBlob } from './download';
 
@@ -1198,6 +1199,15 @@ function sanitizeGuardianLink(value: unknown): GuardianLink | null {
         return sitting && (!linkId || sitting.linkId === linkId) ? [sitting] : [];
       }),
     ).slice(0, EXAM_RESULTS_KEPT),
+    fixedClasses: uniqueBy(
+      (Array.isArray(raw.fixedClasses) ? raw.fixedClasses : []).flatMap((item) => {
+        const fixed = sanitizeFixedClass(item);
+        return fixed ? [fixed] : [];
+      }),
+      (item) => item.id,
+    )
+      .sort((a, b) => a.weekday - b.weekday || a.startTime.localeCompare(b.startTime))
+      .slice(0, FIXED_CLASSES_LIMIT),
   };
 }
 
@@ -1265,6 +1275,15 @@ export function sanitizePanels(value: unknown): Panels {
     }),
     (item) => item.id,
   ).slice(0, PANEL_LINK_LIMIT);
+  const studentFixedClasses = uniqueBy(
+    (Array.isArray(student.fixedClasses) ? student.fixedClasses : []).flatMap((item) => {
+      const fixed = sanitizeFixedClass(item);
+      return fixed ? [fixed] : [];
+    }),
+    (item) => item.id,
+  )
+    .sort((a, b) => a.weekday - b.weekday || a.startTime.localeCompare(b.startTime))
+    .slice(0, FIXED_CLASSES_LIMIT);
   const kind = guardian.kind === 'advisor' || guardian.kind === 'parent' ? (guardian.kind as GuardianKind) : null;
   const field = (value: unknown) => {
     const text = asString(value, 60)?.trim();
@@ -1298,6 +1317,7 @@ export function sanitizePanels(value: unknown): Panels {
         ? [...new Set(student.deletedPlanIds.filter((id): id is string => typeof id === 'string' && id.length <= 80))].slice(-200)
         : [],
       subjects,
+      fixedClasses: studentFixedClasses,
       explanations,
       inbox: sanitizeStudentInbox(student.inbox),
       goalAnswers: uniqueBy(
