@@ -128,4 +128,51 @@ describe('two devices', () => {
     expect(mergeStates(base, newer).tasks[0].title).toBe('New title');
     expect(mergeStates(newer, base).tasks[0].title).toBe('New title');
   });
+
+  it('never drops a chat thread when two devices merge their vaults', () => {
+    // Regression: mergePanels used to rebuild the panels without the chat
+    // arrays, so any vault conflict merge made whole threads disappear.
+    const linkId = 'link-1';
+    const studentMessage = {
+      id: 'msg-student', linkId, author: 'Sara', from: 'student' as const,
+      text: 'I finished the chemistry set', createdAt: '2026-10-01T10:00:00.000Z',
+    };
+    const guardianMessage = {
+      id: 'msg-guardian', linkId, author: 'Mum', from: 'guardian' as const,
+      text: 'Well done', createdAt: '2026-10-01T11:00:00.000Z',
+    };
+    const laptop = createEmptyState();
+    laptop.panels = {
+      ...laptop.panels,
+      student: { ...laptop.panels.student, enabled: true, chat: [studentMessage], chatSeen: { [linkId]: studentMessage.createdAt } },
+      guardian: {
+        ...laptop.panels.guardian,
+        enabled: true,
+        chat: [guardianMessage],
+        chatSeen: { [linkId]: guardianMessage.createdAt },
+        links: [{
+          id: 'row-1', username: 'sara', displayName: 'Sara', status: 'linked' as const,
+          linkId, code: null, wrappedShareKey: 'wrapped', history: [], results: null, plans: [],
+          chat: [guardianMessage],
+        }],
+      },
+    };
+    const phone = createEmptyState();
+    const merged = mergeStates(laptop, phone);
+    expect(merged.panels.student.chat).toEqual([studentMessage]);
+    expect(merged.panels.student.chatSeen?.[linkId]).toBe(studentMessage.createdAt);
+    expect(merged.panels.guardian.chat).toEqual([guardianMessage]);
+    expect(merged.panels.guardian.links[0]?.chat).toEqual([guardianMessage]);
+
+    // A message that exists only on the other device is unioned in.
+    const otherDevice = createEmptyState();
+    otherDevice.panels = {
+      ...otherDevice.panels,
+      student: { ...otherDevice.panels.student, enabled: true, chat: [guardianMessage] },
+      guardian: { ...otherDevice.panels.guardian, enabled: true, chat: [studentMessage] },
+    };
+    const bothWays = mergeStates(laptop, otherDevice);
+    expect(bothWays.panels.student.chat?.map((m) => m.id).sort()).toEqual(['msg-guardian', 'msg-student']);
+    expect(bothWays.panels.guardian.chat?.map((m) => m.id).sort()).toEqual(['msg-guardian', 'msg-student']);
+  });
 });

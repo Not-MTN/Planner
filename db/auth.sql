@@ -157,6 +157,23 @@ CREATE TABLE IF NOT EXISTS planner_exam_seals (
 
 CREATE INDEX IF NOT EXISTS planner_exam_seals_link_idx ON planner_exam_seals (link_id);
 
+-- Personal access tokens for the external API (e.g. a home automation project).
+-- The plaintext token is shown once in settings; only its SHA-256 hash is kept.
+-- A token authenticates the account but cannot decrypt the vault by itself.
+CREATE TABLE IF NOT EXISTS planner_api_tokens (
+  id           text PRIMARY KEY CHECK (id ~ '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'),
+  user_id      text NOT NULL REFERENCES planner_users(id) ON DELETE CASCADE,
+  label        text NOT NULL DEFAULT '',
+  token_hash   text NOT NULL UNIQUE,
+  scope        text NOT NULL CHECK (scope IN ('read','readwrite')),
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  last_used_at timestamptz,
+  expires_at   timestamptz,
+  revoked_at   timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS planner_api_tokens_user_idx ON planner_api_tokens (user_id, created_at DESC);
+
 -- ---------------------------------------------------------------------------
 -- Starting over (optional)
 -- ---------------------------------------------------------------------------

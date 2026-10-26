@@ -151,6 +151,22 @@ CREATE TABLE IF NOT EXISTS planner_passkeys (
 );
 
 CREATE INDEX IF NOT EXISTS planner_passkeys_user_idx ON planner_passkeys (user_id);
+
+-- Personal access tokens for the external API. Only a SHA-256 hash of the
+-- token is stored; the plaintext is shown once, when the token is created.
+CREATE TABLE IF NOT EXISTS planner_api_tokens (
+  id           text PRIMARY KEY CHECK (id ~ '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'),
+  user_id      text NOT NULL REFERENCES planner_users(id) ON DELETE CASCADE,
+  label        text NOT NULL DEFAULT '',
+  token_hash   text NOT NULL UNIQUE,
+  scope        text NOT NULL CHECK (scope IN ('read','readwrite')),
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  last_used_at timestamptz,
+  expires_at   timestamptz,
+  revoked_at   timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS planner_api_tokens_user_idx ON planner_api_tokens (user_id, created_at DESC);
 `.trim();
 
 export interface UserRow {
@@ -376,6 +392,29 @@ export interface NewPasskey {
   transports: string;
 }
 
+/** A personal access token for the external API. The plaintext never lands here. */
+export interface ApiTokenRow {
+  id: string;
+  user_id: string;
+  label: string;
+  /** SHA-256 hex of the plaintext token; unique so one secret opens one account. */
+  token_hash: string;
+  scope: 'read' | 'readwrite';
+  created_at: string | Date;
+  last_used_at: string | Date | null;
+  expires_at: string | Date | null;
+  revoked_at: string | Date | null;
+}
+
+export interface NewApiToken {
+  id: string;
+  userId: string;
+  label: string;
+  tokenHash: string;
+  scope: 'read' | 'readwrite';
+  expiresAt: Date | null;
+}
+
 export interface AuthStore {
   createAccount(input: NewAccount): Promise<CreateResult>;
   findAccount(login: string): Promise<AccountRow | null>;
@@ -505,6 +544,17 @@ export interface AuthStore {
   /** Records an assertion: the counter only ever moves forward. */
   touchPasskey(credentialId: string, signCount: number): Promise<void>;
   deletePasskey(userId: string, credentialId: string): Promise<boolean>;
+
+  /* Personal access tokens for the external API. The plaintext token is shown
+     once by the handler; the store only ever sees its SHA-256 hash. */
+  createApiToken(input: NewApiToken): Promise<ApiTokenRow | null>;
+  /** Live and historical tokens for one account, newest first, without hashes. */
+  listApiTokens(userId: string): Promise<ApiTokenRow[]>;
+  revokeApiToken(id: string, userId: string): Promise<boolean>;
+  /** A usable token (not revoked, not expired) and its account, or null. */
+  findApiToken(tokenHash: string): Promise<{ token: ApiTokenRow; user: UserRow } | null>;
+  /** Best-effort stamp of when the token was last presented. */
+  touchApiToken(id: string): Promise<void>;
 }
 
 /* ------------------------------------------------------------------ hashing */
@@ -685,6 +735,7 @@ export function createMemoryAuthStore(): AuthStore {
     created_at: string;
     committed_at: string | null;
   }> = [];
+  const apiTokens: ApiTokenRow[] = [];
 
   return {
     async createAccount(input) {
@@ -1199,6 +1250,44 @@ export function createMemoryAuthStore(): AuthStore {
       passkeys.splice(index, 1);
       return true;
     },
+    async createApiToken(input) {
+      if (apiTokens.some((item) => item.token_hash === input.tokenHash)) return null;
+      const row: ApiTokenRow = {
+        id: input.id,
+        user_id: input.userId,
+        label: input.label,
+        token_hash: input.tokenHash,
+        scope: input.scope,
+        created_at: new Date().toISOString(),
+        last_used_at: null,
+        expires_at: input.expiresAt ? input.expiresAt.toISOString() : null,
+        revoked_at: null,
+      };
+      apiTokens.push(row);
+      return row;
+    },
+    async listApiTokens(userId) {
+      return apiTokens
+        .filter((item) => item.user_id === userId)
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+    },
+    async revokeApiToken(id, userId) {
+      const row = apiTokens.find((item) => item.id === id && item.user_id === userId && !item.revoked_at);
+      if (!row) return false;
+      row.revoked_at = new Date().toISOString();
+      return true;
+    },
+    async findApiToken(tokenHash) {
+      const token = apiTokens.find((item) => item.token_hash === tokenHash);
+      if (!token || token.revoked_at) return null;
+      if (token.expires_at && new Date(token.expires_at).getTime() <= Date.now()) return null;
+      const user = users.get(token.user_id);
+      return user ? { token, user } : null;
+    },
+    async touchApiToken(id) {
+      const token = apiTokens.find((item) => item.id === id);
+      if (token) token.last_used_at = new Date().toISOString();
+    },
   };
 }
 
@@ -1327,6 +1416,18 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
           PRIMARY KEY (link_id, exam_id)
         )`,
         sql`CREATE INDEX IF NOT EXISTS planner_exam_seals_link_idx ON planner_exam_seals (link_id)`,
+        sql`CREATE TABLE IF NOT EXISTS planner_api_tokens (
+          id           text PRIMARY KEY CHECK (id ~ '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'),
+          user_id      text NOT NULL REFERENCES planner_users(id) ON DELETE CASCADE,
+          label        text NOT NULL DEFAULT '',
+          token_hash   text NOT NULL UNIQUE,
+          scope        text NOT NULL CHECK (scope IN ('read','readwrite')),
+          created_at   timestamptz NOT NULL DEFAULT now(),
+          last_used_at timestamptz,
+          expires_at   timestamptz,
+          revoked_at   timestamptz
+        )`,
+        sql`CREATE INDEX IF NOT EXISTS planner_api_tokens_user_idx ON planner_api_tokens (user_id, created_at DESC)`,
       ]);
     })().catch((error: unknown) => {
       ready = null;
@@ -1958,6 +2059,70 @@ export async function createNeonAuthStore(databaseUrl: string | undefined): Prom
         DELETE FROM planner_passkeys WHERE credential_id = ${credentialId} AND user_id = ${userId} RETURNING credential_id
       `) as { credential_id: string }[];
       return rows.length > 0;
+    },
+
+    async createApiToken(input) {
+      await ensure();
+      const rows = (await sql`
+        INSERT INTO planner_api_tokens (id, user_id, label, token_hash, scope, expires_at)
+        VALUES (${input.id}, ${input.userId}, ${input.label}, ${input.tokenHash}, ${input.scope}, ${input.expiresAt})
+        ON CONFLICT DO NOTHING
+        RETURNING id, user_id, label, token_hash, scope, created_at, last_used_at, expires_at, revoked_at
+      `) as ApiTokenRow[];
+      return rows[0] ?? null;
+    },
+
+    async listApiTokens(userId) {
+      await ensure();
+      return (await sql`
+        SELECT id, user_id, label, token_hash, scope, created_at, last_used_at, expires_at, revoked_at
+        FROM planner_api_tokens WHERE user_id = ${userId} ORDER BY created_at DESC
+      `) as ApiTokenRow[];
+    },
+
+    async revokeApiToken(id, userId) {
+      await ensure();
+      const rows = (await sql`
+        UPDATE planner_api_tokens SET revoked_at = now()
+        WHERE id = ${id} AND user_id = ${userId} AND revoked_at IS NULL RETURNING id
+      `) as { id: string }[];
+      return rows.length > 0;
+    },
+
+    async findApiToken(tokenHash) {
+      await ensure();
+      const rows = (await sql`
+        SELECT t.id, t.user_id, t.label, t.token_hash, t.scope, t.created_at, t.last_used_at, t.expires_at, t.revoked_at,
+               u.id AS u_id, u.username, u.username_lower, u.email_lower, u.display_name, u.role, u.created_at AS u_created_at
+        FROM planner_api_tokens t
+        JOIN planner_users u ON u.id = t.user_id
+        WHERE t.token_hash = ${tokenHash}
+          AND t.revoked_at IS NULL
+          AND (t.expires_at IS NULL OR t.expires_at > now())
+      `) as Array<ApiTokenRow & {
+        u_id: string; username: string; username_lower: string; email_lower: string | null;
+        display_name: string; role: UserRow['role']; u_created_at: string | Date;
+      }>;
+      const row = rows[0];
+      if (!row) return null;
+      const { u_id, username, username_lower, email_lower, display_name, role, u_created_at, ...token } = row;
+      return {
+        token: token as ApiTokenRow,
+        user: {
+          id: u_id,
+          username,
+          username_lower,
+          email_lower,
+          display_name,
+          role,
+          created_at: u_created_at,
+        } as UserRow,
+      };
+    },
+
+    async touchApiToken(id) {
+      await ensure();
+      await sql`UPDATE planner_api_tokens SET last_used_at = now() WHERE id = ${id}`;
     },
   });
 }

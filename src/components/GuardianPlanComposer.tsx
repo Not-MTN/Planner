@@ -19,6 +19,10 @@ import type { GuardianLink, PlanCadence } from '../types';
 import { LessonTimePicker, TimeSlots } from './LessonTime';
 import { Field } from './ui';
 import { minutesLabel } from './charts';
+import { PlanQuickAssign, type QuickAssignRef } from './PlanQuickAssign';
+import { FixedClassWarning, FixedClassChips, FixedClassWeek } from './FixedClasses';
+import { weekdayIndex } from '../dates';
+import type { FixedClass } from '../types';
 
 export function GuardianPlanComposer({
   link,
@@ -42,6 +46,7 @@ export function GuardianPlanComposer({
   const [drafting, setDrafting] = useState(false);
   const subjectListId = useId();
   const end = isValidISODate(draft.start) ? planEnd(draft) : '';
+  const fixedClasses: FixedClass[] = link.fixedClasses ?? [];
   const count = draft.items.filter((item) => item.title.trim()).length;
   const totalMinutes = draft.items.reduce(
     (sum, item) =>
@@ -53,6 +58,25 @@ export function GuardianPlanComposer({
     setDraft((current) => ({
       ...current,
       items: current.items.map((item) => (item.id === id ? { ...item, ...patch } : item)),
+    }));
+    setError(null);
+  };
+
+  /** A homework or test made from this composer becomes a plan step as well. */
+  const addMirroredStep = (ref: QuickAssignRef) => {
+    setDraft((current) => ({
+      ...current,
+      items: [
+        ...current.items,
+        {
+          ...emptyPlanStep(),
+          title: ref.title,
+          subject: ref.subject,
+          date: current.start,
+          kind: ref.kind,
+          refId: ref.refId,
+        },
+      ],
     }));
     setError(null);
   };
@@ -155,6 +179,11 @@ export function GuardianPlanComposer({
             end: readLessonTimePair(item.time, item.end).end || null,
             minutes: item.minutes ? Math.round(Number(item.minutes)) : null,
             url: null,
+            // Homework/tests carry their mirror reference; ordinary lessons
+            // keep the plain wire shape, with no extra keys at all.
+            ...(item.kind === 'homework' || item.kind === 'test'
+              ? { kind: item.kind, refId: item.refId || null }
+              : {}),
           })),
       });
       const previousIds = new Set(link.plans.map((plan) => plan.id));
@@ -250,6 +279,9 @@ export function GuardianPlanComposer({
             <strong>{end || '—'}</strong>
           </div>
         </div>
+        {fixedClasses.length > 0 ? (
+          <FixedClassWeek classes={fixedClasses} weekdays={[1, 2, 3, 4, 5, 6, 0]} />
+        ) : null}
         <Field label={t('A note to go with it')}>
           <textarea
             className="input"
@@ -260,6 +292,7 @@ export function GuardianPlanComposer({
             onChange={(event) => setDraft({ ...draft, note: event.target.value })}
           />
         </Field>
+        <PlanQuickAssign link={link} onCreated={addMirroredStep} />
         <datalist id={subjectListId}>
           {link.results?.subjects.map((subject) => (
             <option key={subject.name} value={subject.name} />
@@ -269,7 +302,11 @@ export function GuardianPlanComposer({
           {draft.items.map((item, index) => (
             <li key={item.id} className="plan-step-row">
               <div className="plan-step-top">
-                <span>{t('Step {0}', { 0: index + 1 })}</span>
+                <span className="plan-step-heading">
+                  {t('Step {0}', { 0: index + 1 })}
+                  {item.kind === 'homework' ? <em className="plan-kind-badge is-homework">{t('Homework')}</em> : null}
+                  {item.kind === 'test' ? <em className="plan-kind-badge is-test">{t('Test')}</em> : null}
+                </span>
                 <button
                   type="button"
                   className="icon-btn round"
@@ -347,6 +384,13 @@ export function GuardianPlanComposer({
                     onPick={(slot) =>
                       patchStep(item.id, { time: slot?.time ?? '', end: slot?.end ?? '' })
                     }
+                  />
+                  {item.date ? <FixedClassChips classes={fixedClasses} weekday={weekdayIndex(item.date)} /> : null}
+                  <FixedClassWarning
+                    classes={fixedClasses}
+                    isoDate={item.date || null}
+                    time={item.time}
+                    end={item.end}
                   />
                 </div>
               </div>

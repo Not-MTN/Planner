@@ -159,6 +159,41 @@ function AckRow({
   );
 }
 
+/**
+ * The contents of one filed day, the way the student lived it: which lessons
+ * were ticked, which were left, and the words they sent with it. Shown in both
+ * the live digest and the closed-period summary, so an "Approve day" button is
+ * never the only thing a guardian can read about the day.
+ */
+function ReportContents({ plan, report }: { plan: GuardianPlan; report: DayReport }) {
+  const lessons = itemsForDay(plan, report.date);
+  const done = new Set(report.doneIds);
+  return (
+    <div className="week-report-contents">
+      {report.repair ? (
+        <p className="week-report-repair">↺ {t('Streak repair — this day is kept, not marked done.')}</p>
+      ) : null}
+      {lessons.length > 0 ? (
+        <ul className="week-report-lessons">
+          {lessons.map((lesson) => {
+            const finished = done.has(lesson.id) || lesson.done;
+            return (
+              <li key={lesson.id} className={finished ? 'is-done' : 'is-open'}>
+                <span aria-hidden="true">{finished ? '✓' : '○'}</span>
+                <span className="week-lesson-title">{lesson.title}</span>
+                {lesson.time ? <span className="week-report-time">{lessonTimeLabel(lesson)}</span> : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="hint">{t('No planned lessons that day.')}</p>
+      )}
+      {report.note ? <blockquote className="week-report-quote">“{report.note}”</blockquote> : null}
+    </div>
+  );
+}
+
 function ApproveDayButton({ report, onApprove }: { report: DayReport; onApprove: (report: DayReport) => Promise<void> }) {
   const [sending, setSending] = useState(false);
   return (
@@ -194,6 +229,7 @@ export function WeekPlanCard({
   onAck,
   onApproveReport,
   onApprovePlanPeriod,
+  onForceApprovePlanPeriod,
   onReact,
   focusMinutes,
   onNudge,
@@ -228,6 +264,8 @@ export function WeekPlanCard({
   onApproveReport?: (report: DayReport) => Promise<void>;
   /** Guardian: closing a finished day, week, or month. */
   onApprovePlanPeriod?: (plan: GuardianPlan) => Promise<void>;
+  /** Guardian: closing an ended week even though some daily reports are missing. */
+  onForceApprovePlanPeriod?: (plan: GuardianPlan) => Promise<void>;
   /** Guardian: tapping a reaction on a report. Without it, no reactions are offered. */
   onReact?: (report: DayReport, ack: ReportAck | undefined, emoji: string) => Promise<void>;
   /** Student: focused minutes that belonged to this plan's lessons. Without it, the review stays quiet about focus. */
@@ -239,6 +277,8 @@ export function WeekPlanCard({
   today?: string;
 }) {
   const [nudging, setNudging] = useState(false);
+  const [confirmForce, setConfirmForce] = useState(false);
+  const [forcing, setForcing] = useState(false);
   const progress = planProgress(plan);
   const days = planWeekDays(plan);
   const floating = datelessItems(plan);
@@ -313,12 +353,20 @@ export function WeekPlanCard({
                       disabled={canToggleItem ? !canToggleItem(plan.id, item.id) : item.date !== today}
                       onChange={() => onToggleItem(plan.id, item.id)}
                     />
-                    <span className="week-lesson-title">{item.title}</span>
+                    <span className="week-lesson-title">
+                      {item.title}
+                      {item.kind === 'homework' ? <em className="plan-kind-badge is-homework">{t('Homework')}</em> : null}
+                      {item.kind === 'test' ? <em className="plan-kind-badge is-test">{t('Test')}</em> : null}
+                    </span>
                   </label>
                 ) : (
                   <span className="week-lesson-read">
                     {item.done ? <CheckIcon size={14} /> : <i className="week-tick-open" aria-hidden="true" />}
-                    <span className="week-lesson-title">{item.title}</span>
+                    <span className="week-lesson-title">
+                      {item.title}
+                      {item.kind === 'homework' ? <em className="plan-kind-badge is-homework">{t('Homework')}</em> : null}
+                      {item.kind === 'test' ? <em className="plan-kind-badge is-test">{t('Test')}</em> : null}
+                    </span>
                   </span>
                 )}
                 {item.time ? (
@@ -445,11 +493,12 @@ export function WeekPlanCard({
                 const ack = ackFor(acks, report.id);
                 const approved = !!ack?.approvedAt;
                 return (
-                  <li key={report.id}>
+                  <li key={report.id} className="week-digest-item">
                     <p className="week-digest-head">
                       <span>{formatFullDate(report.date)}</span>
                       <span>{t('{0} of {1} tasks done', { 0: faNum(report.doneIds.length), 1: faNum(total) })}</span>
                     </p>
+                    <ReportContents plan={plan} report={report} />
                     <p className={cx('week-report-status', approved ? 'is-complete' : 'is-incomplete')}>
                       {approved ? t('Day approved') : t('Awaiting guardian approval')}
                     </p>
@@ -472,11 +521,49 @@ export function WeekPlanCard({
             <button
               type="button"
               className="btn btn-primary btn-small"
-              disabled={!periodApprovable}
+              disabled={!periodApprovable || forcing}
               onClick={() => void onApprovePlanPeriod(plan)}
             >
               {t(isWeeklyPlan ? 'Approve and finish week' : 'Approve and close period')}
             </button>
+            {!periodApprovable && onForceApprovePlanPeriod ? (
+              confirmForce ? (
+                <div className="week-force-confirm" role="group" aria-label={t('Confirm closing the week')}>
+                  <p className="hint">{t('Missing reports stay missing — the week closes on what was filed. Close it anyway?')}</p>
+                  <div className="week-force-actions">
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-small"
+                      disabled={forcing}
+                      onClick={() => {
+                        setForcing(true);
+                        void onForceApprovePlanPeriod(plan)
+                          .catch(() => setForcing(false))
+                          .finally(() => setConfirmForce(false));
+                      }}
+                    >
+                      {forcing ? t('Closing…') : t('Yes, close the week')}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-small"
+                      disabled={forcing}
+                      onClick={() => setConfirmForce(false)}
+                    >
+                      {t('Keep waiting')}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-small week-force-button"
+                  onClick={() => setConfirmForce(true)}
+                >
+                  {t('Close the week anyway')}
+                </button>
+              )
+            ) : null}
           </div>
         ) : null}
         <p className="gplan-from">
@@ -560,12 +647,12 @@ export function WeekPlanCard({
               const ack = ackFor(acks, report.id);
               const approved = !!ack?.approvedAt;
               return (
-                <li key={report.id}>
+                <li key={report.id} className="week-digest-item">
                   <p className="week-digest-head">
                     <span>{formatFullDate(report.date)}</span>
                     <span>{t('{0} of {1} done', { 0: report.doneIds.length, 1: total })}</span>
                   </p>
-                  {report.note ? <p className="week-report-note">{report.note}</p> : null}
+                  <ReportContents plan={plan} report={report} />
                   {ack ? <AckLine ack={ack} /> : null}
                   {!approved && (onAck || onApproveReport) ? (
                     <AckRow

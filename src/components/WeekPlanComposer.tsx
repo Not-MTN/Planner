@@ -37,6 +37,9 @@ import {
 } from '../weekPlans';
 import { LessonTimePicker, TimeSlots } from './LessonTime';
 import { Field } from './ui';
+import { PlanQuickAssign, type QuickAssignRef } from './PlanQuickAssign';
+import { FixedClassChips, FixedClassWeekdayWarning, weekdayOfOffset } from './FixedClasses';
+import type { FixedClass } from '../types';
 
 const PREFS_KEY = 'planner-weekplan-prefs';
 
@@ -89,6 +92,7 @@ export function WeekPlanComposer({ link, onClose }: { link: GuardianLink; onClos
 
   const startOk = isValidISODate(draft.start);
   const end = startOk ? planEnd({ cadence: 'week', start: draft.start }) : '';
+  const fixedClasses: FixedClass[] = link.fixedClasses ?? [];
   const count = weekPlanLessonCount(draft);
   /** What the add bar's pair will become: the chips and the target line read it. */
   const addPair = readLessonTimePair(time, endTime);
@@ -138,6 +142,25 @@ export function WeekPlanComposer({ link, onClose }: { link: GuardianLink; onClos
               lessons: [
                 ...day.lessons,
                 { id: newId('lesson'), name: clean, time: pair.time, end: pair.end, url: '' },
+              ],
+            }
+          : day,
+      ),
+    }));
+    setError(null);
+  };
+
+  /** Homework/tests created here land in the selected day of the week too. */
+  const addMirroredLesson = (ref: QuickAssignRef) => {
+    setDraft((current) => ({
+      ...current,
+      days: current.days.map((day) =>
+        day.offset === addDay
+          ? {
+              ...day,
+              lessons: [
+                ...day.lessons,
+                { id: newId('lesson'), name: ref.title, time: '', end: '', url: '', kind: ref.kind, refId: ref.refId },
               ],
             }
           : day,
@@ -223,7 +246,7 @@ export function WeekPlanComposer({ link, onClose }: { link: GuardianLink; onClos
     // tapped "add" for. Sending the week sends it, so nothing typed is lost —
     // the other reading of this is a week that quietly drops a lesson.
     const pending = name.trim()
-      ? { ...readLessonTimePair(time, endTime), id: newId('lesson'), name: name.trim(), url: '' }
+      ? { ...readLessonTimePair(time, endTime), id: newId('lesson'), name: name.trim(), url: '', kind: 'lesson' as const, refId: '' }
       : null;
     const days = pending && !full
       ? draft.days.map((day) => (day.offset === addDay ? { ...day, lessons: [...day.lessons, pending] } : day))
@@ -257,6 +280,11 @@ export function WeekPlanComposer({ link, onClose }: { link: GuardianLink; onClos
               url: normalizeLessonUrl(lesson.url),
               minutes: null,
               subject: isCurriculumLesson(lesson.name, draft.field, draft.grade) ? lesson.name.trim() : null,
+              // Mirrored homework/tests carry their reference; plain lessons
+              // keep the unchanged wire shape.
+              ...(lesson.kind === 'homework' || lesson.kind === 'test'
+                ? { kind: lesson.kind, refId: lesson.refId || null }
+                : {}),
             };
           }),
       ),
@@ -409,6 +437,7 @@ export function WeekPlanComposer({ link, onClose }: { link: GuardianLink; onClos
             })}
           </p>
         ) : null}
+        <PlanQuickAssign link={link} onCreated={addMirroredLesson} />
         <datalist id={lessonListId}>
           {suggestions.map((lesson) => (
             <option key={lesson} value={lesson} />
@@ -505,6 +534,14 @@ export function WeekPlanComposer({ link, onClose }: { link: GuardianLink; onClos
             setError(null);
           }}
         />
+        {startOk ? (
+          <FixedClassWeekdayWarning
+            classes={fixedClasses}
+            weekday={weekdayOfOffset(draft.start, addDay)}
+            time={time}
+            end={endTime}
+          />
+        ) : null}
         <p className="hint">{t('Pick a time first, then tap the lessons that run in it.')}</p>
         <ol className="week-draft-list">
           {draft.days.map((day) => {
@@ -519,6 +556,9 @@ export function WeekPlanComposer({ link, onClose }: { link: GuardianLink; onClos
                   </span>
                 ) : null}
               </div>
+              {startOk ? (
+                <FixedClassChips classes={fixedClasses} weekday={weekdayOfOffset(draft.start, day.offset)} />
+              ) : null}
               {day.lessons.length > 0 ? (
                 <ul className="week-lessons">
                   {[...day.lessons].sort(byTimeThenName).map((lesson) => {
@@ -527,7 +567,11 @@ export function WeekPlanComposer({ link, onClose }: { link: GuardianLink; onClos
                     return (
                       <li key={lesson.id} className="week-lesson week-draft-lesson">
                         <span className="week-draft-main">
-                          <span className="week-lesson-title">{lesson.name}</span>
+                          <span className="week-lesson-title">
+                            {lesson.name}
+                            {lesson.kind === 'homework' ? <em className="plan-kind-badge is-homework">{t('Homework')}</em> : null}
+                            {lesson.kind === 'test' ? <em className="plan-kind-badge is-test">{t('Test')}</em> : null}
+                          </span>
                           {/* The time of a lesson already in the draft is a pair
                               of boxes, not a label: a lesson added from a chip
                               can still be given its four to six. */}
@@ -548,6 +592,14 @@ export function WeekPlanComposer({ link, onClose }: { link: GuardianLink; onClos
                           ) : (
                             <span className="week-time is-open">{t('Any time')}</span>
                           )}
+                          {startOk ? (
+                            <FixedClassWeekdayWarning
+                              classes={fixedClasses}
+                              weekday={weekdayOfOffset(draft.start, day.offset)}
+                              time={pair.time}
+                              end={pair.end}
+                            />
+                          ) : null}
                         </span>
                         <span className="week-draft-actions">
                           <button

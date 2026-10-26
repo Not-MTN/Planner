@@ -225,6 +225,31 @@ function setValue(selector: string, value: string): void {
   );
 }
 
+/**
+ * Drive the tap-first TimeField: open its sheet, type the exact time into the
+ * sheet's native entry, and confirm with Done. Nothing half-typed leaves the
+ * sheet, so a field value only exists after Done closes it.
+ */
+async function setTime(triggerLabel: string, value: string, scope: ParentNode = document): Promise<void> {
+  const trigger = scope.querySelector<HTMLButtonElement>(`button[aria-label="${triggerLabel}"]`);
+  if (!trigger) throw new Error(`Missing time field ${triggerLabel}`);
+  await act(async () => trigger.click());
+  await settle();
+  const sheet = query<HTMLElement>('.time-sheet');
+  const input = sheet.querySelector<HTMLInputElement>('input[type="time"]');
+  if (!input) throw new Error('Missing exact time input');
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, value);
+  await act(async () => input.dispatchEvent(new Event('input', { bubbles: true })));
+  await click('Done', sheet);
+}
+
+/** What a TimeField trigger currently shows: the value, or its placeholder. */
+function timeTriggerText(triggerLabel: string, scope: ParentNode = document): string {
+  const trigger = scope.querySelector<HTMLButtonElement>(`button[aria-label="${triggerLabel}"]`);
+  if (!trigger) throw new Error(`Missing time field ${triggerLabel}`);
+  return trigger.textContent ?? '';
+}
+
 /** The composer's selects in order: field, grade, then the add-bar day. */
 function setComposerSelect(index: number, value: string): void {
   const elements = document.querySelectorAll('.week-plan-composer select');
@@ -364,8 +389,8 @@ describe('planning a week of lessons', () => {
     setComposerSelect(1, 'school-11');
     await click('زیست‌شناسی (۲)');
     setValue('input[aria-label="Lesson name"]', 'Physics problems');
-    setValue('input[aria-label="From"]', '17:30');
-    setValue('input[aria-label="To"]', '19:00');
+    await setTime('From', '17:30');
+    await setTime('To', '19:00');
     await click('Add a lesson');
     setValue('.week-plan-composer input', 'Nina’s week');
     await click('Send the plan');
@@ -396,8 +421,8 @@ describe('planning a week of lessons', () => {
 
     // The time first, then the lesson: the chip lands in the slot that is
     // showing, which is what "chemistry from four to six" means at the desk.
-    setValue('input[aria-label="From"]', '16:00');
-    setValue('input[aria-label="To"]', '18:00');
+    await setTime('From', '16:00');
+    await setTime('To', '18:00');
     expect(query('.week-add-bar').textContent).toContain('16:00 – 18:00');
     await click('شیمی (۲)');
 
@@ -427,9 +452,9 @@ describe('planning a week of lessons', () => {
 
     // The row holds its own pair of boxes, named after the lesson, so the four
     // to six can come after the tap that added it.
-    const inRow = (label: string) => `.week-draft-day [aria-label="Time for زیست‌شناسی (۲)"] input[aria-label="${label}"]`;
-    setValue(inRow('From'), '16:00');
-    setValue(inRow('To'), '18:00');
+    const rowGroup = query('.week-draft-day [aria-label="Time for زیست‌شناسی (۲)"]');
+    await setTime('From', '16:00', rowGroup);
+    await setTime('To', '18:00', rowGroup);
     row = query('.week-draft-day .week-lesson');
     expect(row.textContent).toContain('16:00 – 18:00');
     expect(row.textContent).toContain('2 h');
@@ -448,7 +473,7 @@ describe('planning a week of lessons', () => {
     await click('View student', query('.student-card'));
     await openLessonsPlan();
     setValue('input[aria-label="Lesson name"]', 'Evening review');
-    setValue('input[aria-label="To"]', '19:30');
+    await setTime('To', '19:30');
     expect(query('.week-add-bar').textContent).toContain('Read as the start time.');
     setValue('.week-plan-composer input', 'Nina’s week');
     await click('Send the plan');
@@ -467,8 +492,8 @@ describe('planning a week of lessons', () => {
     await click('View student', query('.student-card'));
     await openLessonsPlan();
     setValue('input[aria-label="Lesson name"]', 'Early start');
-    setValue('input[aria-label="From"]', '19:00');
-    setValue('input[aria-label="To"]', '08:00');
+    await setTime('From', '19:00');
+    await setTime('To', '08:00');
     expect(query('.week-add-bar').textContent).toContain('only the start is kept');
     await click('Add a lesson');
     setValue('.week-plan-composer input', 'Nina’s week');
@@ -485,11 +510,14 @@ describe('planning a week of lessons', () => {
     await click('View student', query('.student-card'));
     await openLessonsPlan();
     await click('16:00 – 18:00', query('.lesson-slots'));
-    expect(query<HTMLInputElement>('input[aria-label="From"]').value).toBe('16:00');
-    expect(query<HTMLInputElement>('input[aria-label="To"]').value).toBe('18:00');
+    expect(timeTriggerText('From')).toContain('16:00');
+    expect(timeTriggerText('To')).toContain('18:00');
     await click('16:00 – 18:00', query('.lesson-slots'));
-    expect(query<HTMLInputElement>('input[aria-label="From"]').value).toBe('');
-    expect(query<HTMLInputElement>('input[aria-label="To"]').value).toBe('');
+    // Cleared fields show their placeholder again, not a blank input value.
+    expect(query<HTMLButtonElement>('button[aria-label="From"]').classList.contains('has-value')).toBe(false);
+    expect(query<HTMLButtonElement>('button[aria-label="To"]').classList.contains('has-value')).toBe(false);
+    expect(timeTriggerText('From')).toContain('Start');
+    expect(timeTriggerText('To')).toContain('End');
   });
 
   it('sends a lesson that was typed but never tapped into the week', async () => {
@@ -497,7 +525,7 @@ describe('planning a week of lessons', () => {
     await click('View student', query('.student-card'));
     await openLessonsPlan();
     setValue('input[aria-label="Lesson name"]', 'Left in the box');
-    setValue('input[aria-label="From"]', '17:00');
+    await setTime('From', '17:00');
     setValue('.week-plan-composer input', 'Nina’s week');
     await click('Send the plan');
     expect(sendPlan).toHaveBeenCalledTimes(1);
@@ -517,11 +545,11 @@ describe('planning a week of lessons', () => {
     expect(query('.week-plan-composer .field-error').textContent).toContain('at least one thing');
 
     setValue('input[aria-label="Lesson name"]', 'Evening');
-    setValue('input[aria-label="From"]', '19:00');
+    await setTime('From', '19:00');
     await click('Add a lesson');
     setValue('input[aria-label="Lesson name"]', 'Morning');
-    setValue('input[aria-label="From"]', '08:00');
-    setValue('input[aria-label="To"]', '09:30');
+    await setTime('From', '08:00');
+    await setTime('To', '09:30');
     await click('Add a lesson');
     const rows = [...query('.week-draft-day').querySelectorAll('.week-lesson')];
     expect(rows.map((item) => item.querySelector('.week-lesson-title')?.textContent)).toEqual([
@@ -1299,15 +1327,17 @@ describe('changing a week that is already running', () => {
     const rows = [...panel.querySelectorAll('.week-editor-lesson')];
     expect(rows).toHaveLength(1);
     expect(rows[0]!.querySelector<HTMLInputElement>('input[aria-label="Lesson name"]')!.value).toBe('Maths');
-    expect(rows[0]!.querySelector<HTMLInputElement>('input[aria-label="From"]')!.value).toBe('09:00');
+    expect(
+      rows[0]!.querySelector<HTMLButtonElement>('button[aria-label="From"]')?.textContent,
+    ).toContain('09:00');
 
     // "Maths from 9 to 11", and a lesson after it: one change, one day.
-    setField(rows[0]!.querySelector('input[aria-label="To"]')!, '11:00');
+    await setTime('To', '11:00', rows[0]!);
     expect(panel.textContent).toContain('2 h');
     const add = query('.week-editor-add');
     setField(add.querySelector('input[aria-label="Lesson name"]')!, 'Geometry');
-    setField(add.querySelectorAll('input[aria-label="From"]')[0]!, '15:00');
-    setField(add.querySelectorAll('input[aria-label="To"]')[0]!, '16:30');
+    await setTime('From', '15:00', add);
+    await setTime('To', '16:30', add);
     // Scoped to the sheet: the week behind it has buttons of its own.
     await click('Add a lesson', query('.week-editor-add'));
     const panelAfter = query('.week-editor-panel');
@@ -1416,9 +1446,8 @@ describe('a student asking for a change', () => {
 
     setField(form.querySelector('input[data-autofocus]')!, 'Physics');
     setField(form.querySelector('select.input')!, tomorrow);
-    const times = form.querySelectorAll('input[type="time"]');
-    setField(times[0]!, '16:00');
-    setField(times[1]!, '17:30');
+    await setTime('From', '16:00', form);
+    await setTime('To', '17:30', form);
     expect(form.textContent).toContain('16:00 – 17:30');
     setField(form.querySelector('textarea')!, 'We have a test that morning.');
 

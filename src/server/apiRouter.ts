@@ -71,6 +71,7 @@ import { resolveProviders } from './aiProviders.js';
 import { handleICS } from './icsProxy.js';
 import { handleCalDav } from './calDav.js';
 import { handleSync, handleSyncStatus, neonStore } from './sync.js';
+import { handleApiTokens, handleExternalMe, handleExternalVault } from './apiTokens.js';
 import { handleGroqChatCompletions, handleGroqStatus } from './groqProxy.js';
 import { handlePushConfig, handlePushDevice, handlePushDispatch, handlePushSubscription } from './pushApi.js';
 
@@ -295,6 +296,8 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
       return (request) => authStore(env.DATABASE_URL).then((store) => handleTotpConfirm(request, store));
     case '/api/auth/totp/disable':
       return (request) => authStore(env.DATABASE_URL).then((store) => handleTotpDisable(request, store));
+    case '/api/auth/api-tokens':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleApiTokens(request, store));
     case '/api/auth/status':
       return (request) => handleAuthStatus(request, env.DATABASE_URL);
     case '/api/auth/vault': {
@@ -332,6 +335,10 @@ export function apiRoute(pathname: string, env: ApiEnv): Handler | null {
       };
     case '/api/sync/status':
       return (request) => handleSyncStatus(request, env.DATABASE_URL);
+    case '/api/external/me':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleExternalMe(request, store));
+    case '/api/external/vault':
+      return (request) => authStore(env.DATABASE_URL).then((store) => handleExternalVault(request, store));
     case '/api/ai/chat/completions':
     case '/api/groq/chat/completions':
       return (request) =>

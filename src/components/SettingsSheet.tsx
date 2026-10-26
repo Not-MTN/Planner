@@ -6,6 +6,7 @@ import { DownloadIcon, ExitIcon, SparklesIcon, UploadIcon, UserIcon } from '../i
 import { Rich } from './Rich';
 import { Modal } from './ui';
 import { AdminSqlEditor } from './AdminSqlEditor';
+import { ApiTokensSection } from './ApiTokensSection';
 import { RealtimeIndicator } from './RealtimeIndicator';
 import { RecoveryCodes } from './RecoveryCodes';
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
@@ -1618,7 +1619,7 @@ function ActivitySection() {
   );
 }
 
-export type SettingsTab = 'account' | 'appearance' | 'language' | 'reminders' | 'sync' | 'connections' | 'app' | 'admin';
+export type SettingsTab = 'account' | 'appearance' | 'language' | 'reminders' | 'sync' | 'connections' | 'developer' | 'app' | 'admin';
 
 /*
  * Settings grew to twenty sections, and one long scroll buries all of them:
@@ -1632,6 +1633,7 @@ const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
   { id: 'reminders', label: t("Reminders") },
   { id: 'sync', label: t("Sync & backup") },
   { id: 'connections', label: t("Connections") },
+  { id: 'developer', label: t("Developer API") },
   { id: 'app', label: t("App") },
   { id: 'admin', label: 'Admin · SQL' },
 ];
@@ -1837,6 +1839,8 @@ export function SettingsSheet() {
             <TemplatesSection />
           </>
         ) : null}
+
+        {tab === 'developer' ? <ApiTokensSection /> : null}
 
         {tab === 'app' ? (
           <>

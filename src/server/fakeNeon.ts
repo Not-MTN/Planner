@@ -44,6 +44,7 @@ export function createFakeNeon(): FakeDb {
     planner_login_challenges: [],
     planner_auth_events: [],
     planner_exam_seals: [],
+    planner_api_tokens: [],
   };
 
   const now = () => new Date().toISOString();
@@ -683,6 +684,77 @@ export function createFakeNeon(): FakeDb {
 
     if (/^DELETE FROM planner_sync WHERE id = /i.test(q)) {
       tables.planner_sync = tables.planner_sync.filter((row) => row.id !== values[0]);
+      return [];
+    }
+
+    if (/^INSERT INTO planner_api_tokens /i.test(q)) {
+      const [id, user_id, label, token_hash, scope, expires_at] = values;
+      if (tables.planner_api_tokens.some((row) => row.token_hash === token_hash)) return []; // ON CONFLICT DO NOTHING
+      const row: Row = {
+        id,
+        user_id,
+        label,
+        token_hash,
+        scope,
+        created_at: now(),
+        last_used_at: null,
+        expires_at: expires_at ?? null,
+        revoked_at: null,
+      };
+      tables.planner_api_tokens.push(row);
+      return [{ ...row }];
+    }
+
+    if (/^SELECT id, user_id, label, token_hash, scope, created_at, last_used_at, expires_at, revoked_at\s+FROM planner_api_tokens WHERE user_id = /i.test(q)) {
+      return tables.planner_api_tokens
+        .filter((row) => row.user_id === values[0])
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+        .map((row) => ({ ...row }));
+    }
+
+    if (/^UPDATE planner_api_tokens SET revoked_at = now\(\)/i.test(q)) {
+      const [id, user_id] = values;
+      const row = tables.planner_api_tokens.find(
+        (item) => item.id === id && item.user_id === user_id && !item.revoked_at,
+      );
+      if (!row) return [];
+      row.revoked_at = now();
+      return [{ id }];
+    }
+
+    if (/^SELECT t\.id, t\.user_id, t\.label, t\.token_hash/i.test(q)) {
+      const token = tables.planner_api_tokens.find(
+        (row) =>
+          row.token_hash === values[0] &&
+          !row.revoked_at &&
+          (row.expires_at == null || new Date(row.expires_at as string).getTime() > Date.now()),
+      );
+      if (!token) return [];
+      const user = tables.planner_users.find((row) => row.id === token.user_id);
+      if (!user) return [];
+      return [{
+        id: token.id,
+        user_id: token.user_id,
+        label: token.label,
+        token_hash: token.token_hash,
+        scope: token.scope,
+        created_at: token.created_at,
+        last_used_at: token.last_used_at,
+        expires_at: token.expires_at,
+        revoked_at: token.revoked_at,
+        u_id: user.id,
+        username: user.username,
+        username_lower: user.username_lower,
+        email_lower: user.email_lower,
+        display_name: user.display_name,
+        role: user.role,
+        u_created_at: user.created_at,
+      }];
+    }
+
+    if (/^UPDATE planner_api_tokens SET last_used_at = now\(\) WHERE id = /i.test(q)) {
+      const row = tables.planner_api_tokens.find((item) => item.id === values[0]);
+      if (row) row.last_used_at = now();
       return [];
     }
 

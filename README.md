@@ -108,6 +108,16 @@ How it works: the sync code never leaves your devices. The browser derives an AE
 | `/api/sync/status` | GET | `{ configured: boolean }` |
 | `/api/sync` | GET / PUT / DELETE | Read, compare-and-swap write, or delete the encrypted blob (`X-Sync-Id` header) |
 
+### External API for your own projects
+
+Opt-in personal access tokens let an external project (a home assistant, a script, a dashboard) read this planner and make changes over HTTPS. Create one in **Settings → Developer API**, with a read-only or read-write scope and an expiry, and revoke it there any time. The token authenticates the account; the vault stays end-to-end encrypted, so the same settings section reveals the 256-bit vault key your project uses to decrypt and re-encrypt the data. Tokens are stored only as SHA-256 hashes, the plaintext is shown once, and writes use the same optimistic-concurrency rule as the apps (`409` + current blob on a stale version, never a silent overwrite). [docs/API.md](docs/API.md) has the full reference, curl examples, and a Node WebCrypto snippet. Two dependency-free, copy-paste-ready files in [`src/external/`](src/external/plannerClient.ts) wrap all of it as a TypeScript `PlannerClient` — encrypted pull/mutate/push with automatic 409 retries, plus pure helpers for home-screen widgets, locally derived reminders and notifications, and the student panel — with recipes in the docs.
+
+| Endpoint | Method | Purpose |
+| --- | --- | --- |
+| `/api/auth/api-tokens` | GET / POST / DELETE | Session-authenticated token management (used by Settings) |
+| `/api/external/me` | GET | Bearer-auth check: which account and scope the token belongs to |
+| `/api/external/vault` | GET / PUT | Pull the encrypted vault, or write it back with `baseVersion` |
+
 ### Two-way calendars (CalDAV)
 
 Feeds are read-only by design. A **two-way calendar** is the other arrangement: the planner is allowed to write to it, so an event added on the Today page can appear on your phone's calendar and an event your phone adds comes back.

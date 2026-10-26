@@ -62,13 +62,15 @@ import {
   normalizeLessonUrl,
   openRequests,
   planDayChangeSummary,
+  planPeriodEnd,
   requestNotice,
   withPlanDaysRewritten,
   type PlanDayEdit,
 } from '../weekPlans';
-import { ACK_REACTIONS, ACK_TEXT_MAX, CHAT_TEXT_MAX, CHAT_WIRE, DAY_REPORT_NOTE_MAX, DAY_REPORTS_WIRE, EXAMS_WIRE, EXAM_FEEDBACK_MAX, EXAM_RESULTS_WIRE, GOAL_ANSWERS_KEPT, GOAL_STEPS_MAX, HOMEWORK_ITEMS_KEPT, HOMEWORK_NOTE_MAX, PANEL_GOALS_KEPT, PLAN_CHANGES_KEPT, PLAN_CHANGES_WIRE, PLAN_CHANGE_NOTE_MAX, PLAN_CHANGE_TITLE_MAX, PLAN_REQUESTS_WIRE, PRAISE_KEPT } from '../types';
-import type { ChatMessage, ClassAssignment, ClassProgress, DayReport, Exam, ExamSubmission, Goal, GoalAnswer, GoalSuggestion, GuardianLink, GuardianNotice, GuardianPlan, HomeworkAssignment, HomeworkPhoto, HomeworkReview, HomeworkSubmission, Panels, PlanChangeRequest, PlanDraft, PlanItem, PlanRequest, PlannerState, ReportAck, StudentGuardian, WeekResults, WeekSubjectMinutes } from '../types';
+import { ACK_REACTIONS, ACK_TEXT_MAX, CHAT_TEXT_MAX, CHAT_WIRE, DAY_REPORT_NOTE_MAX, DAY_REPORTS_WIRE, EXAMS_WIRE, EXAM_FEEDBACK_MAX, EXAM_RESULTS_WIRE, FIXED_CLASSES_LIMIT, GOAL_ANSWERS_KEPT, GOAL_STEPS_MAX, HOMEWORK_ITEMS_KEPT, HOMEWORK_NOTE_MAX, PANEL_GOALS_KEPT, PLAN_CHANGES_KEPT, PLAN_CHANGES_WIRE, PLAN_CHANGE_NOTE_MAX, PLAN_CHANGE_TITLE_MAX, PLAN_REQUESTS_WIRE, PRAISE_KEPT } from '../types';
+import type { ChatMessage, ClassAssignment, ClassProgress, DayReport, Exam, ExamSubmission, FixedClass, Goal, GoalAnswer, GoalSuggestion, GuardianLink, GuardianNotice, GuardianPlan, HomeworkAssignment, HomeworkPhoto, HomeworkReview, HomeworkSubmission, Panels, PlanChangeRequest, PlanDraft, PlanItem, PlanRequest, PlannerState, ReportAck, StudentGuardian, WeekResults, WeekSubjectMinutes } from '../types';
 import { mergeChat, sanitizeChatMessage, withChatMessage } from '../chat';
+import { sanitizeFixedClass } from '../fixedClasses';
 import {
   buildComposedExam,
   drawVariantId,
@@ -321,6 +323,8 @@ interface StudentOutbox {
   chat: ChatMessage[];
   /** Exams this student sat, newest first. */
   examResults: ExamSubmission[];
+  /** The student's standing class times — read-only for guardians. */
+  fixedClasses: FixedClass[];
 }
 
 const OUTBOX_PLANS = 5;
@@ -377,6 +381,8 @@ function wirePlan(value: unknown): GuardianPlan | null {
         minutes: typeof entry.minutes === 'number' && Number.isFinite(entry.minutes) ? Math.max(0, Math.round(entry.minutes)) : null,
         subject: typeof entry.subject === 'string' && entry.subject.trim() ? entry.subject.trim().slice(0, 60) : null,
         url: typeof entry.url === 'string' ? normalizeLessonUrl(entry.url) : null,
+        kind: entry.kind === 'homework' || entry.kind === 'test' ? entry.kind : undefined,
+        refId: typeof entry.refId === 'string' && entry.refId ? entry.refId.slice(0, 80) : null,
         done: entry.done === true,
       }];
     })
@@ -683,7 +689,13 @@ function asStudentOutbox(payload: unknown): Omit<StudentOutbox, 'v'> {
       return clean ? [clean] : [];
     })
     .slice(0, EXAM_RESULTS_WIRE);
-  return { relayed, progress, answers, reports, classProgress, homeworkSubmissions, requests, changes, chat, examResults };
+  const fixedClasses = (Array.isArray(raw.fixedClasses) ? raw.fixedClasses : [])
+    .flatMap((item) => {
+      const clean = sanitizeFixedClass(item);
+      return clean ? [clean] : [];
+    })
+    .slice(0, FIXED_CLASSES_LIMIT);
+  return { relayed, progress, answers, reports, classProgress, homeworkSubmissions, requests, changes, chat, examResults, fixedClasses };
 }
 
 /**
@@ -801,6 +813,8 @@ export async function sendPlan(panels: Panels, linkId: string, draft: PlanDraft)
       minutes: item.minutes,
       subject: item.subject?.trim() ? item.subject.trim().slice(0, 60) : null,
       url: item.url ? normalizeLessonUrl(item.url) : null,
+      kind: item.kind === 'homework' || item.kind === 'test' ? item.kind : undefined,
+      refId: item.refId || null,
       done: false,
     })),
     createdAt: now,
@@ -986,14 +1000,28 @@ export async function answerChangeRequest(
   return withLinkChangeRequests(withLinkPlan(noticed, linkId, updated), linkId, [answered]);
 }
 
-/** Guardian: finish an ended period. A week waits for each daily report to be approved. */
-export async function approvePlanPeriod(panels: Panels, linkId: string, planId: string): Promise<Panels> {
+/**
+ * Guardian: finish an ended period. A week waits for each daily report to be
+ * approved. `force` closes an ended week anyway — for a student who stopped
+ * reporting halfway — after the UI has asked the guardian to confirm; it can
+ * never close a period whose last day has not passed.
+ */
+export async function approvePlanPeriod(
+  panels: Panels,
+  linkId: string,
+  planId: string,
+  force = false,
+): Promise<Panels> {
   const session = await requireSession();
   const link = panels.guardian.links.find((item) => item.linkId === linkId);
   const plan = link?.plans.find((item) => item.id === planId);
   if (!link?.wrappedShareKey || !plan) throw new LinkError('That plan is no longer available.');
   if (plan.approvedAt) return panels;
-  if (!canApprovePlanPeriod(plan, link.reports ?? [], link.acks ?? [])) {
+  const periodHasEnded = planPeriodEnd(plan) < todayISO();
+  if (!periodHasEnded) {
+    throw new LinkError('This period can be closed once its last day has passed.');
+  }
+  if (!force && !canApprovePlanPeriod(plan, link.reports ?? [], link.acks ?? [])) {
     throw new LinkError('Wait for this period to end and approve every submitted daily report first.');
   }
   const now = new Date().toISOString();
@@ -2046,6 +2074,12 @@ export async function syncStudentInbox(
       changes,
       chat: chatForLink,
       examResults: examResultsForLink,
+      fixedClasses: (panels.student.fixedClasses ?? [])
+        .flatMap((item) => {
+          const clean = sanitizeFixedClass(item);
+          return clean ? [clean] : [];
+        })
+        .slice(0, FIXED_CLASSES_LIMIT),
     };
     try {
       await writeSlot(target.linkId, target.wrappedShareKey, session.dek, outbox);
@@ -2264,6 +2298,14 @@ export async function readNotices(panels: Panels): Promise<{ panels: Panels; cha
         links[index] = { ...link, homeworkSubmissions };
         link = links[index]!;
       }
+    }
+    // The student owns their class timetable: the copy in their outbox is
+    // authoritative, including an empty one (every class removed).
+    const incomingFixed = outbox.fixedClasses ?? [];
+    if (JSON.stringify(incomingFixed) !== JSON.stringify(link.fixedClasses ?? [])) {
+      changed = true;
+      links[index] = { ...link, fixedClasses: incomingFixed };
+      link = links[index]!;
     }
   }
 

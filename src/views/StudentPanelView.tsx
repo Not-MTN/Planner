@@ -21,6 +21,7 @@ import {
   CalendarIcon,
   ChatIcon,
   CheckIcon,
+  ClockIcon,
   ExamIcon,
   FlagIcon,
   FlameIcon,
@@ -73,6 +74,7 @@ import { ChatThread } from '../components/ChatThread';
 import { PanelNotifications } from '../components/PanelNotifications';
 import { PlanReviews } from '../components/PlanReviews';
 import { StudentExams } from '../components/StudentExams';
+import { FixedClassesEditor } from '../components/FixedClassesEditor';
 import { PanelDebugInspector } from '../components/PanelDebugInspector';
 import { openExamCount } from '../exams';
 import { unreadChatCount } from '../chat';
@@ -102,7 +104,7 @@ import { PlanChangeForm } from '../components/PlanChangeForm';
 import { StudentChangeRequests } from '../components/PlanChangeRequests';
 import '../panels.css';
 
-type StudentTab = 'today' | 'week' | 'subjects' | 'classes' | 'exams' | 'sharing' | 'chat' | 'notices';
+type StudentTab = 'today' | 'week' | 'subjects' | 'schedule' | 'classes' | 'exams' | 'sharing' | 'chat' | 'notices';
 
 const TAB_ID = 'student-panel';
 
@@ -465,6 +467,7 @@ export function StudentPanelView() {
       count: unreadInbox + openGoals.length,
     },
     { id: 'subjects', label: t('Subjects'), icon: BookIcon },
+    { id: 'schedule', label: t('My classes'), icon: ClockIcon },
     { id: 'classes', label: t('Classes'), icon: StudyIcon, count: (panels.student.inbox.classes ?? []).length + (panels.student.inbox.homework ?? []).length },
     { id: 'exams', label: t('Exams'), icon: ExamIcon, count: openExamCount(panels.student.inbox.exams, panels.student.examSubmissions) },
     { id: 'sharing', label: t('Sharing'), icon: HeartIcon },
@@ -1346,6 +1349,7 @@ export function StudentPanelView() {
           </section>
         ) : null}
 
+        {tab === 'schedule' ? <FixedClassesEditor /> : null}
         {tab === 'classes' ? <StudentLearningHub /> : null}
       </PanelTabPanel>
 
