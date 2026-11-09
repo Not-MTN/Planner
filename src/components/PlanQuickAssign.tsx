@@ -12,7 +12,7 @@ import { usePlanner } from '../context';
 import { sendExam, sendHomeworkAssignment } from '../auth/links';
 import { emptyExamQuestion, examDraftError, type ExamQuestionDraft } from '../exams';
 import { newId } from '../panels';
-import { t } from '../i18n';
+import { faNum, t } from '../i18n';
 import { PlusIcon, TrashIcon } from '../icons';
 import { Field } from './ui';
 import { TimeField } from './TimeField';
@@ -31,6 +31,12 @@ function dueIso(date: string, time: string): string | null {
   if (!date) return null;
   const parsed = new Date(time ? `${date}T${time}:00` : `${date}T23:59:00`);
   return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
+}
+
+/** In “tests as homework” mode the number is the whole assignment: one or more tests. */
+function testCountValid(value: string): boolean {
+  const count = Number(value);
+  return !!value.trim() && Number.isInteger(count) && count >= 1;
 }
 
 export function PlanQuickAssign({
@@ -53,8 +59,12 @@ export function PlanQuickAssign({
     minutes: '',
     date: '',
     time: '',
+    // In "tests as homework" mode this is the only thing that matters: how many
+    // tests the student should do. No questions, no options.
+    testCount: '',
     questions: [emptyExamQuestion(newId('q'))] as ExamQuestionDraft[],
   });
+  const [testMode, setTestMode] = useState<'exam' | 'homework'>('exam');
 
   if (!link.linkId || link.status !== 'linked') {
     return <p className="hint">{t('This link needs to sync before you can assign homework or tests here.')}</p>;
@@ -140,10 +150,48 @@ export function PlanQuickAssign({
         onCreated({ kind: 'test', refId: created.id, title: created.title, subject: created.subject });
         flash(t('Test created — it is now in their exams list and in this plan.'));
       }
-      setTest({ title: '', subject: '', note: '', minutes: '', date: '', time: '', questions: [emptyExamQuestion(newId('q'))] });
+      setTest({ title: '', subject: '', note: '', minutes: '', date: '', time: '', testCount: '', questions: [emptyExamQuestion(newId('q'))] });
       setOpen(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : t('The test could not be created.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const sendHomeworkTest = async (event: FormEvent) => {
+    event.preventDefault();
+    if (busy) return;
+    setError('');
+    const count = Number(test.testCount);
+    if (!test.testCount.trim() || !Number.isInteger(count) || count < 1) return setError(t('Enter the number of tests.'));
+    const dueAt = dueIso(test.date, test.time);
+    setBusy(true);
+    let next = panels;
+    let sent = 0;
+    try {
+      const before = new Set((panels.guardian.links.find((item) => item.linkId === linkId)?.homework ?? []).map((item) => item.id));
+      const title = test.title.trim() || t('Tests');
+      next = await sendHomeworkAssignment(next, linkId, {
+        title,
+        subject: test.subject.trim(),
+        instructions: t('Do {0} tests as homework. Upload photos of your work, or not.', { 0: count }),
+        dueAt,
+      });
+      updatePanels(next);
+      const created = next.guardian.links
+        .find((item) => item.linkId === linkId)
+        ?.homework?.find((item) => !before.has(item.id));
+      if (created) {
+        onCreated({ kind: 'homework', refId: created.id, title: created.title, subject: created.subject });
+        flash(t('{0} tests set as homework.', { 0: faNum(count) }));
+        sent += 1;
+      }
+      setTest({ title: '', subject: '', note: '', minutes: '', date: '', time: '', testCount: '', questions: [emptyExamQuestion(newId('q'))] });
+      setOpen(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : t('The homework could not be created.'));
+      if (sent > 0) flash(t('Some of the tests were set as homework before the connection failed.'));
     } finally {
       setBusy(false);
     }
@@ -166,7 +214,7 @@ export function PlanQuickAssign({
             type="button"
             className={`segment ${open === 'test' ? 'on' : ''}`}
             aria-pressed={open === 'test'}
-            onClick={() => { setOpen(open === 'test' ? null : 'test'); setError(null); }}
+            onClick={() => { setOpen(open === 'test' ? null : 'test'); setTestMode('exam'); setError(null); }}
           >
             {t('Test')}
           </button>
@@ -209,20 +257,49 @@ export function PlanQuickAssign({
         </form>
       ) : null}
       {open === 'test' ? (
-        <form className="plan-quick-form" onSubmit={(event) => void sendTest(event)}>
+        <form className="plan-quick-form" onSubmit={(event) => void (testMode === 'homework' ? sendHomeworkTest(event) : sendTest(event))}>
           <Field label={t('Test name')}>
-            <input className="input" maxLength={120} value={test.title} disabled={busy} required
+            <input className="input" maxLength={120} value={test.title} disabled={busy}
+              placeholder={testMode === 'homework' ? t('Optional') : undefined}
               onChange={(event) => setTest({ ...test, title: event.target.value })} />
           </Field>
+          <div className="segmented test-mode-switch" role="group" aria-label={t('How the test works')}>
+            <button
+              type="button"
+              className={`segment ${testMode === 'exam' ? 'on' : ''}`}
+              aria-pressed={testMode === 'exam'}
+              onClick={() => { setTestMode('exam'); setError(null); }}
+            >
+              {t('A real exam with questions')}
+            </button>
+            <button
+              type="button"
+              className={`segment ${testMode === 'homework' ? 'on' : ''}`}
+              aria-pressed={testMode === 'homework'}
+              onClick={() => { setTestMode('homework'); setError(null); }}
+            >
+              {t('Tests as homework')}
+            </button>
+          </div>
+          {testMode === 'homework' ? (
+            <p className="hint">{t('Just the number — no questions to write. The student does this many tests as homework and can upload photos of the work, or not.')}</p>
+          ) : null}
           <div className="panel-form-grid">
             <Field label={t('Subject (optional)')}>
               <input className="input" maxLength={60} value={test.subject} disabled={busy}
                 onChange={(event) => setTest({ ...test, subject: event.target.value })} />
             </Field>
-            <Field label={t('Minutes allowed (optional)')}>
-              <input className="input" type="number" min={1} max={600} inputMode="numeric" value={test.minutes} disabled={busy}
-                onChange={(event) => setTest({ ...test, minutes: event.target.value })} />
-            </Field>
+            {testMode === 'exam' ? (
+              <Field label={t('Minutes allowed (optional)')}>
+                <input className="input" type="number" min={1} max={600} inputMode="numeric" value={test.minutes} disabled={busy}
+                  onChange={(event) => setTest({ ...test, minutes: event.target.value })} />
+              </Field>
+            ) : (
+              <Field label={t('Number of tests')}>
+                <input className="input" type="number" min={1} inputMode="numeric" value={test.testCount} disabled={busy} placeholder="1"
+                  onChange={(event) => setTest({ ...test, testCount: event.target.value })} />
+              </Field>
+            )}
             <Field label={t('Due date (optional)')}>
               <input className="input" type="date" value={test.date} disabled={busy}
                 onChange={(event) => setTest({ ...test, date: event.target.value })} />
@@ -232,90 +309,92 @@ export function PlanQuickAssign({
                 onChange={(value) => setTest({ ...test, time: value })} />
             </Field>
           </div>
-          <div className="plan-quick-questions">
-            {test.questions.map((question, qIndex) => (
-              <fieldset key={question.id} className="plan-quick-question">
-                <legend>
-                  {t('Question {0}', { 0: qIndex + 1 })}
-                  <button
-                    type="button"
-                    className="icon-btn round"
-                    aria-label={t('Remove question {0}', { 0: qIndex + 1 })}
-                    disabled={busy || test.questions.length === 1}
-                    onClick={() => removeQuestion(question.id)}
-                  >
-                    <TrashIcon size={13} />
-                  </button>
-                </legend>
-                <input
-                  className="input"
-                  maxLength={400}
-                  placeholder={t('What should they answer?')}
-                  value={question.prompt}
-                  disabled={busy}
-                  onChange={(event) => patchQuestion(question.id, { prompt: event.target.value })}
-                />
-                {question.choices.map((choice, index) => (
-                  <label key={index} className="plan-quick-option">
-                    <input
-                      type="radio"
-                      name={`${question.id}-answer`}
-                      checked={question.answer === index}
-                      disabled={busy}
-                      onChange={() => patchQuestion(question.id, { answer: index })}
-                    />
-                    <input
-                      className="input"
-                      maxLength={200}
-                      placeholder={t('Option {0}', { 0: index + 1 })}
-                      value={choice}
-                      disabled={busy}
-                      onChange={(event) => {
-                        const choices = question.choices.map((item, itemIndex) => (itemIndex === index ? event.target.value : item));
-                        patchQuestion(question.id, { choices });
-                      }}
-                    />
-                  </label>
-                ))}
-                <div className="plan-quick-option-actions">
-                  {question.choices.length < 5 ? (
+          {testMode === 'exam' ? (
+            <div className="plan-quick-questions">
+                {test.questions.map((question, qIndex) => (
+                <fieldset key={question.id} className="plan-quick-question">
+                  <legend>
+                    {t('Question {0}', { 0: qIndex + 1 })}
                     <button
                       type="button"
-                      className="btn btn-ghost btn-tiny"
-                      disabled={busy}
-                      onClick={() => patchQuestion(question.id, { choices: [...question.choices, ''] })}
+                      className="icon-btn round"
+                      aria-label={t('Remove question {0}', { 0: qIndex + 1 })}
+                      disabled={busy || test.questions.length === 1}
+                      onClick={() => removeQuestion(question.id)}
                     >
-                      <PlusIcon size={12} /> {t('Add option')}
+                      <TrashIcon size={13} />
                     </button>
-                  ) : null}
-                  {question.choices.length > 2 ? (
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-tiny"
-                      disabled={busy}
-                      onClick={() =>
-                        patchQuestion(question.id, {
-                          choices: question.choices.slice(0, -1),
-                          answer: question.answer === question.choices.length - 1 ? null : question.answer,
-                        })
-                      }
-                    >
-                      <TrashIcon size={12} /> {t('Remove option')}
-                    </button>
-                  ) : null}
-                </div>
-              </fieldset>
-            ))}
-            <button type="button" className="btn btn-ghost btn-small" disabled={busy || test.questions.length >= 25} onClick={addQuestion}>
-              <PlusIcon size={14} /> {t('Add question')}
-            </button>
-          </div>
+                  </legend>
+                  <input
+                    className="input"
+                    maxLength={400}
+                    placeholder={t('What should they answer?')}
+                    value={question.prompt}
+                    disabled={busy}
+                    onChange={(event) => patchQuestion(question.id, { prompt: event.target.value })}
+                  />
+                  {question.choices.map((choice, index) => (
+                    <label key={index} className="plan-quick-option">
+                      <input
+                        type="radio"
+                        name={`${question.id}-answer`}
+                        checked={question.answer === index}
+                        disabled={busy}
+                        onChange={() => patchQuestion(question.id, { answer: index })}
+                      />
+                      <input
+                        className="input"
+                        maxLength={200}
+                        placeholder={t('Option {0}', { 0: index + 1 })}
+                        value={choice}
+                        disabled={busy}
+                        onChange={(event) => {
+                          const choices = question.choices.map((item, itemIndex) => (itemIndex === index ? event.target.value : item));
+                          patchQuestion(question.id, { choices });
+                        }}
+                      />
+                    </label>
+                  ))}
+                  <div className="plan-quick-option-actions">
+                    {question.choices.length < 5 ? (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-tiny"
+                        disabled={busy}
+                        onClick={() => patchQuestion(question.id, { choices: [...question.choices, ''] })}
+                      >
+                        <PlusIcon size={12} /> {t('Add option')}
+                      </button>
+                    ) : null}
+                    {question.choices.length > 2 ? (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-tiny"
+                        disabled={busy}
+                        onClick={() =>
+                          patchQuestion(question.id, {
+                            choices: question.choices.slice(0, -1),
+                            answer: question.answer === question.choices.length - 1 ? null : question.answer,
+                          })
+                        }
+                      >
+                        <TrashIcon size={12} /> {t('Remove option')}
+                      </button>
+                    ) : null}
+                  </div>
+                </fieldset>
+              ))}
+              <button type="button" className="btn btn-ghost btn-small" disabled={busy || test.questions.length >= 25} onClick={addQuestion}>
+                <PlusIcon size={14} /> {t('Add question')}
+              </button>
+              </div>
+          ) : null}
           <div className="plan-quick-actions">
-            <button type="submit" className="btn btn-primary btn-small" disabled={busy || !test.title.trim()}>
+            <button type="submit" className="btn btn-primary btn-small" disabled={busy || (testMode === 'homework' ? !testCountValid(test.testCount) : !test.title.trim())}>
               {busy ? <span className="spinner" aria-hidden="true" /> : <PlusIcon size={14} />}
-              {t('Create test and add to plan')}
+              {testMode === 'homework' ? t('Set tests as homework') : t('Create test and add to plan')}
             </button>
-            <button type="button" className="btn btn-ghost btn-small" disabled={busy} onClick={() => setOpen(null)}>
+            <button type="button" className="btn btn-ghost btn-small" disabled={busy} onClick={() => { setOpen(null); setTestMode('exam'); }}>
               {t('Cancel')}
             </button>
           </div>
