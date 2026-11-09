@@ -2,20 +2,20 @@
  * The guardian panel, rebuilt around one student at a time.
  *
  * Guardians receive results, not a live view of a student's private planner.
- * The panel is therefore two pages and three tabs:
+ * The panel is therefore two pages with single-purpose student tabs:
  *
  *   Students — the attention-first roster: search, filter, invite, and the
  *              shared updates from the whole circle.
- *   one student — a shared summary first, then This week (charts, sent plans),
- *              Plan (build a suggestion and send it), Support (a note, kind
- *              words, questions worth asking, and a goal to aim at).
+ *   one student — a shared summary, This week (charts and current plans),
+ *              Reports (daily updates grouped by week), Plan, Classes, Exams,
+ *              Support, Messages, and Notifications.
  *
  * Planning used to be four buttons deep inside a roster card — a day, a week, a
  * month, or a lesson timetable. It is now one tab, with the period chosen inside
  * the plan itself, so the way to plan a student's time is the same path every
  * time.
  */
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { usePlanner } from '../context';
 import { cx } from '../cx';
 import { formatEdited } from '../dates';
@@ -29,6 +29,7 @@ import {
   EyeIcon,
   HeartIcon,
   HorizonIcon,
+  NoteIcon,
   PencilIcon,
   PlusIcon,
   PrinterIcon,
@@ -45,7 +46,7 @@ import { timetableHtml, weekPlanHtml } from '../weekPlanPrint';
 import { downloadBlob } from '../download';
 import { printDocument } from '../printDocument';
 import { todayISO } from '../dates';
-import { faNum, t } from '../i18n';
+import { faNum, t, tn } from '../i18n';
 import { Field, Empty } from '../components/ui';
 import { PanelTabPanel, PanelTabs, type PanelTab } from '../components/PanelTabs';
 import { ChatThread } from '../components/ChatThread';
@@ -61,6 +62,7 @@ import { PanelDebugInspector } from '../components/PanelDebugInspector';
 import { PraiseComposer } from '../components/PraiseComposer';
 import { GuardianPlanComposer } from '../components/GuardianPlanComposer';
 import { GuardianReview } from '../components/GuardianReview';
+import { GuardianReports } from '../components/GuardianReports';
 import { WeekPlanCard } from '../components/WeekPlanCard';
 import { WeekPlanComposer } from '../components/WeekPlanComposer';
 import { WeekPlanEditor } from '../components/WeekPlanEditor';
@@ -106,10 +108,11 @@ import {
 import type { DayReport, GuardianLink, GuardianNotice, GuardianPlan, QueuedPlan, ReportAck } from '../types';
 import '../panels.css';
 
-type GuardianTab = 'week' | 'plan' | 'assignments' | 'exams' | 'support' | 'chat' | 'notices';
+type GuardianTab = 'week' | 'reports' | 'plan' | 'assignments' | 'exams' | 'support' | 'chat' | 'notices';
 type PlanMode = 'steps' | 'lessons';
 
 const TAB_ID = 'guardian-student';
+const GuardianProgressCharts = lazy(() => import('../components/GuardianProgressCharts').then((module) => ({ default: module.GuardianProgressCharts })));
 
 /**
  * Plain words for when a code stops working. A date means nothing to someone
@@ -161,9 +164,8 @@ export function GuardianPanelView() {
   const open = guardian.links.find((link) => link.id === openId) ?? null;
 
   // Opening a student is the move this panel is built around: the roster is the
-  // list, and one student at a time is the page. The three tabs it offers are
-  // the three things a guardian actually does — read the week, plan the next
-  // one, and say something.
+  // list, and one student at a time is the page. Reading results, finding daily
+  // reports, planning, and reaching out each have their own place.
   const openStudent = (link: GuardianLink, nextTab: GuardianTab = 'week', mode: PlanMode = 'steps') => {
     setOpenId(link.id);
     setTab(nextTab);
@@ -571,9 +573,13 @@ export function GuardianPanelView() {
   const waitingExams = open
     ? (open.examResults ?? []).filter((sitting) => !sitting.reviewedAt).length
     : 0;
+  const reportsToReview = open
+    ? (open.reports ?? []).filter((report) => !ackFor(open.acks ?? [], report.id)?.approvedAt).length
+    : 0;
 
   const studentTabs: Array<PanelTab<GuardianTab>> = [
     { id: 'week', label: t('This week'), icon: CalendarIcon },
+    { id: 'reports', label: t('Reports'), icon: NoteIcon, count: reportsToReview },
     { id: 'plan', label: t('Plan'), icon: WeekIcon, dot: queued.length > 0 },
     { id: 'assignments', label: t('Classes'), icon: BookIcon },
     // Counted, not badged: a handed-in exam is waiting to be read, and a
@@ -585,6 +591,117 @@ export function GuardianPanelView() {
     // tab had room. Counted, so a notice nobody has read is not missed.
     { id: 'notices', label: t('Notifications'), icon: BellIcon, count: unread },
   ];
+
+  const renderSentPlan = (link: GuardianLink, plan: GuardianPlan) => {
+    const progress = planProgress(plan);
+    const percent = progress.total ? Math.round((progress.done / progress.total) * 100) : 0;
+    if (plan.cadence === 'week') {
+      return (
+        <WeekPlanCard
+          key={plan.id}
+          plan={plan}
+          reports={link.reports ?? []}
+          variant="guardian"
+          acks={link.acks ?? []}
+          onApprovePlanPeriod={(period) => approvePeriod(link, period)}
+          onForceApprovePlanPeriod={(period) => approvePeriod(link, period, true)}
+          onNudge={() => nudgeStudent(link)}
+          nudgeSent={nudgedToday(guardian.notices, link.username)}
+          actions={
+            <>
+              {!plan.approvedAt && editablePlanDays(plan).length > 0 ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-tiny"
+                  onClick={() => setEditingPlan({ linkId: link.id, planId: plan.id })}
+                >
+                  <PencilIcon size={14} />
+                  {t('Change plan')}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="icon-btn round"
+                aria-label={`${t('Preview and print')} · ${plan.title}`}
+                title={t('Preview and print')}
+                onClick={() => setPreview({ linkId: link.id, planId: plan.id })}
+              >
+                <EyeIcon size={14} />
+              </button>
+              <button
+                type="button"
+                className="icon-btn round"
+                aria-label={t('Take back {0}', { 0: plan.title })}
+                onClick={() => dropSentPlan(link, plan.id)}
+              >
+                <TrashIcon size={14} />
+              </button>
+            </>
+          }
+        />
+      );
+    }
+
+    const periodClosed = !!plan.approvedAt || planEnd(plan) < todayISO();
+    if (periodClosed) {
+      return (
+        <li
+          key={plan.id}
+          className={cx(
+            'gplan-card week-period-summary',
+            progress.done === progress.total && progress.total > 0 ? 'is-complete' : 'is-incomplete',
+          )}
+        >
+          <div className="gplan-head">
+            <div>
+              <p className="gplan-kicker">{planPeriodLabel(plan)}</p>
+              <p className="gplan-title">{plan.title}</p>
+              <p className="week-period-performance-label">{t('Period performance')}</p>
+            </div>
+            <div className="gplan-progress" aria-label={t('{0} of {1} done', { 0: progress.done, 1: progress.total })}>
+              <strong>{faNum(progress.done)}</strong>
+              <span>/{faNum(progress.total)}</span>
+            </div>
+          </div>
+          <p className="week-period-state">
+            {plan.approvedAt ? t('Approved by your guardian. This period is closed.') : t('This period has ended. Performance summary only.')}
+          </p>
+          <div className="gplan-bar" aria-hidden="true"><i style={{ width: `${percent}%` }} /></div>
+        </li>
+      );
+    }
+
+    return (
+      <li key={plan.id} className="gplan-card">
+        <div className="gplan-head">
+          <div>
+            <p className="gplan-kicker">{planPeriodLabel(plan)}</p>
+            <p className="gplan-title">{plan.title}</p>
+          </div>
+          <button
+            type="button"
+            className="icon-btn round"
+            aria-label={t('Take back {0}', { 0: plan.title })}
+            onClick={() => dropSentPlan(link, plan.id)}
+          >
+            <TrashIcon size={14} />
+          </button>
+        </div>
+        {plan.note ? <p className="gplan-note">{plan.note}</p> : null}
+        <div
+          className="gplan-bar"
+          role="progressbar"
+          aria-label={t('Progress for {0}', { 0: plan.title })}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={percent}
+        >
+          <i style={{ width: `${percent}%` }} />
+        </div>
+        <p className="gplan-from">{t('{0} of {1} done', { 0: progress.done, 1: progress.total })}</p>
+      </li>
+    );
+  };
 
   return (
     <div className="view panels-view guardian-panel-view">
@@ -963,7 +1080,7 @@ export function GuardianPanelView() {
         </>
       ) : (
         <>
-          {queued.length > 0 ? (
+          {queued.length > 0 && tab !== 'reports' ? (
             <div className="queued-banner" role="status">
               <span><strong>{faNum(queued.length)}</strong> {t('plan(s) waiting to send — offline queue')}</span>
               <button type="button" className="btn btn-primary btn-small" onClick={() => setTab('week')}>{t('View queue')}</button>
@@ -1010,6 +1127,16 @@ export function GuardianPanelView() {
           <PanelTabs id={TAB_ID} label={open.displayName} tabs={studentTabs} active={tab} onChange={setTab} />
 
           <PanelTabPanel id={TAB_ID} tab={tab}>
+            {tab === 'reports' ? (
+              <GuardianReports
+                link={open}
+                canRespond={ready}
+                onAck={(report, text) => ackReport(open, report, text)}
+                onApprove={(report) => approveReport(open, report)}
+                onReact={(report, ack, emoji) => reactReport(open, report, ack, emoji)}
+              />
+            ) : null}
+
             {/* ------------------------------------------------------ This week */}
             {tab === 'week' ? (
               <>
@@ -1094,6 +1221,9 @@ export function GuardianPanelView() {
                 </section>
 
                 <GuardianReview link={open} />
+                <Suspense fallback={null}>
+                  <GuardianProgressCharts link={open} />
+                </Suspense>
 
                 {queued.length > 0 ? (
                   <section className="gplan-sent" aria-label={t('Waiting to send')}>
@@ -1136,117 +1266,40 @@ export function GuardianPanelView() {
                     guardian, and the week beside it may be about to change. */}
                 <GuardianChangeRequests link={open} />
 
-                {open.plans.length > 0 ? (
-                  <section className="gplan-sent" aria-label={t('Plans you sent')}>
-                    <p className="chart-title">{t('Plans you sent')}</p>
-                    <ul className="gplan-list">
-                      {open.plans.map((plan) => {
-                        const progress = planProgress(plan);
-                        const percent = progress.total ? Math.round((progress.done / progress.total) * 100) : 0;
-                        if (plan.cadence === 'week') {
-                          return (
-                            <WeekPlanCard
-                              key={plan.id}
-                              plan={plan}
-                              reports={open.reports ?? []}
-                              variant="guardian"
-                              acks={open.acks ?? []}
-                              onAck={(report, text) => ackReport(open, report, text)}
-                              onApproveReport={(report) => approveReport(open, report)}
-                              onApprovePlanPeriod={(plan) => approvePeriod(open, plan)}
-                              onForceApprovePlanPeriod={(plan) => approvePeriod(open, plan, true)}
-                              onReact={(report, ack, emoji) => reactReport(open, report, ack, emoji)}
-                              onNudge={() => nudgeStudent(open)}
-                              nudgeSent={nudgedToday(guardian.notices, open.username)}
-                              actions={
-                                <>
-                                  {!plan.approvedAt && editablePlanDays(plan).length > 0 ? (
-                                    <button
-                                      type="button"
-                                      className="btn btn-ghost btn-tiny"
-                                      onClick={() => setEditingPlan({ linkId: open.id, planId: plan.id })}
-                                    >
-                                      <PencilIcon size={14} />
-                                      {t('Change plan')}
-                                    </button>
-                                  ) : null}
-                                  <button
-                                    type="button"
-                                    className="icon-btn round"
-                                    aria-label={`${t('Preview and print')} · ${plan.title}`}
-                                    title={t('Preview and print')}
-                                    onClick={() => setPreview({ linkId: open.id, planId: plan.id })}
-                                  >
-                                    <EyeIcon size={14} />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="icon-btn round"
-                                    aria-label={t('Take back {0}', { 0: plan.title })}
-                                    onClick={() => dropSentPlan(open, plan.id)}
-                                  >
-                                    <TrashIcon size={14} />
-                                  </button>
-                                </>
-                              }
-                            />
-                          );
-                        }
-                        const periodClosed = !!plan.approvedAt || planEnd(plan) < todayISO();
-                        if (periodClosed) {
-                          return (
-                            <li key={plan.id} className={cx('gplan-card week-period-summary', progress.done === progress.total && progress.total > 0 ? 'is-complete' : 'is-incomplete')}>
-                              <div className="gplan-head">
-                                <div>
-                                  <p className="gplan-kicker">{planPeriodLabel(plan)}</p>
-                                  <p className="gplan-title">{t('Period performance')}</p>
-                                </div>
-                                <div className="gplan-progress" aria-label={t('{0} of {1} done', { 0: progress.done, 1: progress.total })}>
-                                  <strong>{faNum(progress.done)}</strong>
-                                  <span>/{faNum(progress.total)}</span>
-                                </div>
-                              </div>
-                              <p className="week-period-state">{plan.approvedAt ? t('Approved by your guardian. This period is closed.') : t('This period has ended. Performance summary only.')}</p>
-                              <div className="gplan-bar" aria-hidden="true"><i style={{ width: `${percent}%` }} /></div>
-                            </li>
-                          );
-                        }
-                        return (
-                          <li key={plan.id} className="gplan-card">
-                            <div className="gplan-head">
-                              <div>
-                                <p className="gplan-kicker">{planPeriodLabel(plan)}</p>
-                                <p className="gplan-title">{plan.title}</p>
-                              </div>
-                              <button
-                                type="button"
-                                className="icon-btn round"
-                                aria-label={t('Take back {0}', { 0: plan.title })}
-                                onClick={() => dropSentPlan(open, plan.id)}
-                              >
-                                <TrashIcon size={14} />
-                              </button>
-                            </div>
-                            {plan.note ? <p className="gplan-note">{plan.note}</p> : null}
-                            <div
-                              className="gplan-bar"
-                              role="progressbar"
-                              aria-label={t('Progress for {0}', { 0: plan.title })}
-                              aria-valuemin={0}
-                              aria-valuemax={100}
-                              aria-valuenow={percent}
-                            >
-                              <i style={{ width: `${percent}%` }} />
-                            </div>
-                            <p className="gplan-from">
-                              {t('{0} of {1} done', { 0: progress.done, 1: progress.total })}
-                            </p>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </section>
-                ) : null}
+                {open.plans.length > 0 ? (() => {
+                  const today = todayISO();
+                  const currentPlans = open.plans.filter((plan) => !plan.approvedAt && planEnd(plan) >= today);
+                  const earlierPlans = open.plans.filter((plan) => plan.approvedAt || planEnd(plan) < today);
+                  const earlierToReview = earlierPlans.filter((plan) => !plan.approvedAt).length;
+                  return (
+                    <section className="gplan-sent guardian-sent-plans" aria-label={t('Plans you sent')}>
+                      <p className="chart-title">{t('Plans you sent')}</p>
+                      {currentPlans.length > 0 ? (
+                        <ul className="gplan-list">
+                          {currentPlans.map((plan) => renderSentPlan(open, plan))}
+                        </ul>
+                      ) : null}
+                      {earlierPlans.length > 0 ? (
+                        <details className="guardian-plan-history">
+                          <summary>
+                            <span>{t('Earlier plans')}</span>
+                            <span className="guardian-plan-history-count">
+                              {tn(earlierPlans.length, '{count} plan', '{count} plans')}
+                            </span>
+                            {earlierToReview > 0 ? (
+                              <span className="guardian-plan-history-pending">
+                                {t('{0} to review', { 0: faNum(earlierToReview) })}
+                              </span>
+                            ) : null}
+                          </summary>
+                          <ul className="gplan-list">
+                            {earlierPlans.map((plan) => renderSentPlan(open, plan))}
+                          </ul>
+                        </details>
+                      ) : null}
+                    </section>
+                  );
+                })() : null}
               </>
             ) : null}
 

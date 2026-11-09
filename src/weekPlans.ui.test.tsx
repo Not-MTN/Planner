@@ -177,7 +177,10 @@ async function settle(): Promise<void> {
 
 async function click(label: string, scope: ParentNode = document): Promise<void> {
   const button = [...scope.querySelectorAll<HTMLButtonElement>('button')].find(
-    (item) => item.textContent?.trim() === label || item.getAttribute('aria-label') === label,
+    (item) =>
+      item.textContent?.trim() === label ||
+      item.querySelector('.panel-tab-label')?.textContent?.trim() === label ||
+      item.getAttribute('aria-label') === label,
   );
   if (!button) throw new Error(`No button ${label}`);
   await act(async () => button.click());
@@ -609,16 +612,84 @@ describe('reading the week back', () => {
     return { plans, reports };
   }
 
-  it('shows the guardian reports, notes, and what is still waiting', async () => {
+  it('keeps daily reports out of This week and gathers them in the Reports tab', async () => {
     const { plans, reports } = reportedWeek();
     await mount(guardianState(plans, reports), 'guardian');
     await click('View student', query('.student-card'));
-    const card = query('.week-plan-card');
-    expect(card.textContent).toContain('Reported');
-    expect(card.textContent).toContain('Finished early.');
-    expect(card.textContent).toContain('Missing');
-    expect(card.textContent).toContain('Waiting on 1 daily report');
-    expect(card.textContent).toContain('Daily reports');
+    const weekCard = query('.week-plan-card');
+    expect(weekCard.textContent).toContain('Reported');
+    expect(weekCard.textContent).toContain('Missing');
+    expect(weekCard.textContent).toContain('Waiting on 1 daily report');
+    expect(weekCard.textContent).not.toContain('Finished early.');
+    expect(weekCard.textContent).not.toContain('Daily reports');
+
+    await click('Reports', query('[role="tablist"]'));
+    const reportsPanel = query('.guardian-reports');
+    expect(reportsPanel.textContent).toContain('Daily reports');
+    expect(reportsPanel.textContent).toContain('Finished early.');
+    expect(reportsPanel.textContent).toContain('Awaiting guardian approval');
+  });
+
+  it('groups reports by week, filters review status, and folds earlier plans out of This week', async () => {
+    const today = todayISO();
+    const recentDate = addDays(today, -2);
+    const olderDate = addDays(today, -9);
+    const currentPlan = weekPlan({
+      id: 'current-week',
+      title: 'Current study week',
+      start: addDays(today, -6),
+      items: [{ id: 'recent-lesson', title: 'Algebra', date: recentDate, time: null, minutes: null, subject: 'Maths', done: true }],
+    });
+    const earlierPlan = weekPlan({
+      id: 'earlier-week',
+      title: 'Last week’s study plan',
+      start: addDays(today, -13),
+      approvedAt: `${today}T09:00:00.000Z`,
+      items: [{ id: 'older-lesson', title: 'Geometry', date: olderDate, time: null, minutes: null, subject: 'Maths', done: true }],
+    });
+    const reports: DayReport[] = [
+      {
+        id: 'recent-report', planId: currentPlan.id, linkId: ninaLinkId, date: recentDate,
+        doneIds: ['recent-lesson'], note: 'A good session.',
+        createdAt: `${recentDate}T20:00:00.000Z`, updatedAt: `${recentDate}T20:00:00.000Z`,
+      },
+      {
+        id: 'older-report', planId: earlierPlan.id, linkId: ninaLinkId, date: olderDate,
+        doneIds: ['older-lesson'], note: 'Finished the chapter.',
+        createdAt: `${olderDate}T20:00:00.000Z`, updatedAt: `${olderDate}T20:00:00.000Z`,
+      },
+    ];
+    const acks: ReportAck[] = [{
+      id: 'older-ack', reportId: 'older-report', planId: earlierPlan.id, linkId: ninaLinkId,
+      date: olderDate, text: 'Well done.', reactions: [], approvedAt: `${today}T09:30:00.000Z`,
+      createdAt: `${today}T09:30:00.000Z`,
+    }];
+
+    await mount(guardianState([currentPlan, earlierPlan], reports, acks), 'guardian');
+    await click('View student', query('.student-card'));
+    const history = query<HTMLDetailsElement>('.guardian-plan-history');
+    expect(history.open).toBe(false);
+    expect(query('.guardian-plan-history > summary').textContent).toContain('Earlier plans');
+    await act(async () => history.querySelector('summary')?.click());
+    expect(history.open).toBe(true);
+    expect(history.textContent).toContain('Last week’s study plan');
+
+    await click('Reports', query('[role="tablist"]'));
+    expect(document.querySelectorAll('.guardian-report-week')).toHaveLength(2);
+    expect(document.querySelectorAll('.guardian-report-card')).toHaveLength(1);
+    const weekButtons = query('.guardian-report-weeks').querySelectorAll<HTMLButtonElement>('.guardian-report-week-toggle');
+    expect(weekButtons[0]?.getAttribute('aria-expanded')).toBe('true');
+    expect(weekButtons[1]?.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => weekButtons[1]?.click());
+    expect(document.querySelectorAll('.guardian-report-card')).toHaveLength(2);
+
+    await click('Needs review', query('.guardian-reports'));
+    expect(document.querySelectorAll('.guardian-report-card')).toHaveLength(1);
+    expect(query('.guardian-report-card').textContent).toContain('A good session.');
+    await click('Approved', query('.guardian-reports'));
+    expect(document.querySelectorAll('.guardian-report-card')).toHaveLength(1);
+    expect(query('.guardian-report-card').textContent).toContain('Finished the chapter.');
+    expect(query('.guardian-report-card').textContent).toContain('Day approved');
   });
 
   it('keeps the student panel usable while offering the missing report', async () => {
@@ -740,6 +811,23 @@ describe('resting and the exam on the horizon', () => {
 });
 
 describe('answering a report', () => {
+  it('approves a submitted day from the Reports tab', async () => {
+    const dayBefore = addDays(todayISO(), -2);
+    const plans = [
+      weekPlan({ items: [{ id: 'a', title: 'Maths', date: dayBefore, time: null, minutes: null, subject: null, done: true }] }),
+    ];
+    const reports: DayReport[] = [{
+      id: 'report-approval', planId: 'week-1', linkId: ninaLinkId, date: dayBefore,
+      doneIds: ['a'], note: '', createdAt: `${dayBefore}T20:00:00.000Z`, updatedAt: `${dayBefore}T20:00:00.000Z`,
+    }];
+    await mount(guardianState(plans, reports), 'guardian');
+    await click('View student', query('.student-card'));
+    await click('Reports', query('[role="tablist"]'));
+    await click('Approve day', query('.guardian-report-card'));
+    expect(sendAck).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(sendAck).mock.calls[0]?.[2]).toMatchObject({ reportId: 'report-approval', approve: true });
+  });
+
   it('sends seen-with-a-line and the reply stays on the report', async () => {
     const dayBefore = addDays(todayISO(), -2);
     const plans = [
@@ -761,14 +849,15 @@ describe('answering a report', () => {
     ];
     await mount(guardianState(plans, reports), 'guardian');
     await click('View student', query('.student-card'));
-    const card = query('.week-plan-card');
+    await click('Reports', query('[role="tablist"]'));
+    const card = query('.guardian-report-card');
     expect(card.querySelector('.week-ack-row')).not.toBeNull();
 
     setValue('.week-ack-row .input', 'Well done — rest tomorrow.');
     await click('Reply', card);
     expect(sendAck).toHaveBeenCalledTimes(1);
     expect(vi.mocked(sendAck).mock.calls[0]?.[2].text).toBe('Well done — rest tomorrow.');
-    expect(query('.week-plan-card').textContent).toContain('Well done — rest tomorrow.');
+    expect(query('.guardian-report-card').textContent).toContain('Well done — rest tomorrow.');
     expect(saved().panels.guardian.links[0]?.acks?.[0]?.text).toBe('Well done — rest tomorrow.');
   });
 });
@@ -1156,16 +1245,17 @@ describe('reacting to a report', () => {
   it('taps a reaction onto a report and back off', async () => {
     await mount(guardianState(plans(), reports()), 'guardian');
     await click('View student', query('.student-card'));
-    const card = query('.week-plan-card');
+    await click('Reports', query('[role="tablist"]'));
+    const card = query('.guardian-report-card');
 
     await click('React with 🎉', card);
     expect(sendAck).toHaveBeenCalledTimes(1);
     expect(vi.mocked(sendAck).mock.calls[0]?.[2]).toMatchObject({ text: '', reactions: ['🎉'] });
-    expect(query('.week-plan-card .week-ack').textContent).toContain('🎉');
+    expect(query('.guardian-report-card .week-ack').textContent).toContain('🎉');
 
-    await click('React with 🎉', query('.week-plan-card'));
+    await click('React with 🎉', query('.guardian-report-card'));
     expect(vi.mocked(sendAck).mock.calls[1]?.[2]).toMatchObject({ reactions: [] });
-    expect(query('.week-plan-card .week-ack').textContent).not.toContain('🎉');
+    expect(query('.guardian-report-card .week-ack').textContent).not.toContain('🎉');
   });
 
   it('keeps the reactions when words follow the tap', async () => {
@@ -1183,14 +1273,15 @@ describe('reacting to a report', () => {
     ];
     await mount(guardianState(plans(), reports(), acks), 'guardian');
     await click('View student', query('.student-card'));
-    const card = query('.week-plan-card');
+    await click('Reports', query('[role="tablist"]'));
+    const card = query('.guardian-report-card');
     expect(card.querySelector('.week-ack-row')).not.toBeNull();
 
     setValue('.week-ack-row .input', 'Well done.');
     await click('Reply', card);
     expect(sendAck).toHaveBeenCalledTimes(1);
     expect(vi.mocked(sendAck).mock.calls[0]?.[2]).toMatchObject({ id: 'ack-1', text: 'Well done.', reactions: ['💪'] });
-    expect(query('.week-plan-card .week-ack').textContent).toContain('💪');
+    expect(query('.guardian-report-card .week-ack').textContent).toContain('💪');
   });
 });
 

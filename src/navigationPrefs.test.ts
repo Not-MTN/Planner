@@ -5,19 +5,20 @@ import { loadMobileFavorites, loadNavigationPages, MAX_MOBILE_FAVORITES, moveMob
 beforeEach(() => localStorage.clear());
 
 describe('sidebar preferences', () => {
-  it('defaults to every section', () => {
+  it('defaults to every section, including the permanent Today and Review destinations', () => {
     expect(loadNavigationPages()).toContain('ai');
     expect(loadNavigationPages()).toContain('today');
+    expect(loadNavigationPages()).toContain('review');
   });
 
-  it('persists selected sections and always keeps Today available', () => {
+  it('persists selected sections while keeping Today and Review available', () => {
     saveNavigationPages(['tasks', 'calendar']);
-    expect(loadNavigationPages()).toEqual(['today', 'tasks', 'calendar']);
+    expect(loadNavigationPages()).toEqual(['today', 'tasks', 'calendar', 'review']);
   });
 
   it('ignores corrupt and unsupported stored values', () => {
     localStorage.setItem('planner-sidebar-pages', JSON.stringify(['tasks', 'secret-page', 7]));
-    expect(loadNavigationPages()).toEqual(['today', 'tasks']);
+    expect(loadNavigationPages()).toEqual(['today', 'tasks', 'review']);
     localStorage.setItem('planner-sidebar-pages', '{broken');
     expect(loadNavigationPages()).toContain('ai');
   });

@@ -40,26 +40,26 @@ import { SettingsSheet } from './SettingsSheet';
 import { RealtimeIndicator } from './RealtimeIndicator';
 import { LoadingScreen, Modal } from './ui';
 import { lazy, Suspense } from 'react';
+// Keep Today and the panel chooser in the first paint; less frequent pages
+// arrive only when someone opens them.
 import { DayView } from '../views/DayView';
-import { GoalsView } from '../views/GoalsView';
-import { HabitsView } from '../views/HabitsView';
-import { NotesView } from '../views/NotesView';
-import { TasksView } from '../views/TasksView';
-import { MatrixView } from '../views/MatrixView';
-// The front door: it renders on the very first paint, so it ships with the
-// shell instead of waiting on a lazy chunk.
 import { HomeView } from '../views/HomeView';
 import { ShortcutsSheet } from './ShortcutsSheet';
-import { WeeklyReview } from './WeeklyReview';
 import { NotificationsSheet } from './NotificationsSheet';
 import { clearNotifications, deleteNotification, loadNotifications, markNotificationsRead, subscribeNotifications } from '../notificationCenter';
 import { snoozeReminder } from '../reminders';
 import { loadMobileFavorites, loadNavigationPages, subscribeNavigationPages } from '../navigationPrefs';
 
 const CalendarView = lazy(() => import('../views/CalendarView').then((m) => ({ default: m.CalendarView })));
+const TasksView = lazy(() => import('../views/TasksView').then((m) => ({ default: m.TasksView })));
+const MatrixView = lazy(() => import('../views/MatrixView').then((m) => ({ default: m.MatrixView })));
+const HabitsView = lazy(() => import('../views/HabitsView').then((m) => ({ default: m.HabitsView })));
+const GoalsView = lazy(() => import('../views/GoalsView').then((m) => ({ default: m.GoalsView })));
+const NotesView = lazy(() => import('../views/NotesView').then((m) => ({ default: m.NotesView })));
 const InsightsView = lazy(() => import('../views/InsightsView').then((m) => ({ default: m.InsightsView })));
-const AIView = lazy(() => import('../views/AIView').then((m) => ({ default: m.AIView })));
+const WeeklyReview = lazy(() => import('./WeeklyReview').then((m) => ({ default: m.WeeklyReview })));
 const PlansView = lazy(() => import('../views/PlansView').then((m) => ({ default: m.PlansView })));
+const AIView = lazy(() => import('../views/AIView').then((m) => ({ default: m.AIView })));
 // Optional panels: only downloaded once someone actually adds one.
 const PanelsView = lazy(() => import('../views/PanelsView').then((m) => ({ default: m.PanelsView })));
 const StudentPanelView = lazy(() => import('../views/StudentPanelView').then((m) => ({ default: m.StudentPanelView })));
@@ -83,18 +83,46 @@ function accountInitial(name: string): string {
   return first ? first.toUpperCase() : '·';
 }
 
+type NavigationGroup = 'plan' | 'growth' | 'review' | 'tools';
+
 const NAV = [
-  { name: 'today', label: t("Today"), icon: SunIcon },
-  { name: 'calendar', label: t("Calendar"), icon: CalendarIcon },
-  { name: 'tasks', label: t("Tasks"), icon: CheckIcon },
-  { name: 'matrix', label: t("Matrix"), icon: FlagIcon },
-  { name: 'habits', label: t("Habits"), icon: DotsIcon },
-  { name: 'goals', label: t("Goals"), icon: HorizonIcon },
-  { name: 'notes', label: t("Notes"), icon: NoteIcon },
-  { name: 'plans', label: t("Plans"), icon: WeekIcon },
-  { name: 'insights', label: t("Insights"), icon: ArcIcon },
-  { name: 'ai', label: t("AI coach"), icon: SparklesIcon },
+  { name: 'today', label: t("Today"), icon: SunIcon, group: 'plan' },
+  { name: 'calendar', label: t("Calendar"), icon: CalendarIcon, group: 'plan' },
+  { name: 'tasks', label: t("Tasks"), icon: CheckIcon, group: 'plan' },
+  { name: 'matrix', label: t("Matrix"), icon: FlagIcon, group: 'plan' },
+  { name: 'plans', label: t("Plans"), icon: WeekIcon, group: 'plan' },
+  { name: 'habits', label: t("Habits"), icon: DotsIcon, group: 'growth' },
+  { name: 'goals', label: t("Goals"), icon: HorizonIcon, group: 'growth' },
+  { name: 'review', label: t("Weekly Review"), icon: WeekIcon, group: 'review' },
+  { name: 'notes', label: t("Notes"), icon: NoteIcon, group: 'review' },
+  { name: 'insights', label: t("Insights"), icon: ArcIcon, group: 'review' },
+  { name: 'ai', label: t("AI coach"), icon: SparklesIcon, group: 'tools' },
 ] as const;
+
+const MOBILE_DOCK_PAGES = new Set(['today', 'calendar', 'tasks', 'habits']);
+const PAGE_PRELOADERS: Record<string, () => Promise<unknown>> = {
+  calendar: () => import('../views/CalendarView'),
+  tasks: () => import('../views/TasksView'),
+  matrix: () => import('../views/MatrixView'),
+  habits: () => import('../views/HabitsView'),
+  goals: () => import('../views/GoalsView'),
+  notes: () => import('../views/NotesView'),
+  review: () => import('./WeeklyReview'),
+  insights: () => import('../views/InsightsView'),
+  plans: () => import('../views/PlansView'),
+  ai: () => import('../views/AIView'),
+};
+
+function preloadNavigationPage(name: string): void {
+  const preload = PAGE_PRELOADERS[name];
+  if (preload) void preload().catch(() => undefined);
+}
+
+function navItemIsActive(name: string, routeName: Route['name']): boolean {
+  if (name === 'today') return routeName === 'today' || routeName === 'quickadd';
+  if (name === 'calendar') return routeName === 'calendar' || routeName === 'day';
+  return routeName === name;
+}
 
 export function Shell() {
   const planner = usePlanner();
@@ -155,21 +183,27 @@ export function Shell() {
   // The chooser is a separate front door. Only the personal workspace has
   // planner navigation; panel pages provide their own tabs and actions.
   const personalWorkspace = !['home', 'panels', 'student', 'guardian'].includes(route.name);
-  const planNav = NAV.slice(0, 4).filter((item) => visiblePages.includes(item.name));
-  const growthNav = NAV.slice(4, 6).filter((item) => visiblePages.includes(item.name));
-  const trackNav = NAV.slice(6).filter((item) => visiblePages.includes(item.name));
+  const allPagesIn = (group: NavigationGroup) => NAV.filter((item) => item.group === group);
+  const pagesIn = (group: NavigationGroup) => allPagesIn(group).filter((item) => visiblePages.includes(item.name));
+  const planNav = pagesIn('plan');
+  const growthNav = pagesIn('growth');
+  const reviewNav = pagesIn('review');
+  const toolsNav = pagesIn('tools');
+  const todayNav = planNav.find((item) => item.name === 'today');
+  const planLinks = planNav.filter((item) => item.name !== 'today');
   const mobileFavoriteNav = mobileFavorites.flatMap((name) => {
     const item = NAV.find((candidate) => candidate.name === name);
     return item ? [item] : [];
   });
-  const mobilePlanNav = NAV.slice(0, 4).filter((item) => !mobileFavorites.includes(item.name));
-  const mobileGrowthNav = NAV.slice(4, 6).filter((item) => !mobileFavorites.includes(item.name));
-  const mobileTrackNav = NAV.slice(6).filter((item) => !mobileFavorites.includes(item.name));
+  const mobilePlanNav = allPagesIn('plan').filter((item) => !MOBILE_DOCK_PAGES.has(item.name) && !mobileFavorites.includes(item.name));
+  const mobileGrowthNav = allPagesIn('growth').filter((item) => !MOBILE_DOCK_PAGES.has(item.name) && !mobileFavorites.includes(item.name));
+  const mobileReviewNav = allPagesIn('review').filter((item) => !mobileFavorites.includes(item.name));
+  const mobileToolsNav = allPagesIn('tools').filter((item) => !mobileFavorites.includes(item.name));
   const openTasksCount = planner.state.tasks.filter((task) => !task.completed).length;
   const importFile = useImportFile(importText);
   const key = routeKey(route);
   const today = todayISO();
-  const [tabletFlyout, setTabletFlyout] = useState<null | 'plan' | 'focus' | 'growth' | 'track'>(null);
+  const [tabletFlyout, setTabletFlyout] = useState<null | 'plan' | 'focus' | 'growth' | 'review' | 'tools'>(null);
   const tabletFlyoutRef = useRef<HTMLDivElement>(null);
   const tabletTriggerRef = useRef<HTMLButtonElement>(null);
   const tabletFlyoutTitleId = useId();
@@ -488,8 +522,10 @@ export function Shell() {
       <button
         key={item.name}
         type="button"
-        className={cx('more-tile', className, route.name === item.name && 'on', item.name === 'ai' && 'more-tile-violet')}
-        aria-current={route.name === item.name ? 'page' : undefined}
+        className={cx('more-tile', className, navItemIsActive(item.name, route.name) && 'on', item.name === 'ai' && 'more-tile-violet')}
+        aria-current={navItemIsActive(item.name, route.name) ? 'page' : undefined}
+        onPointerEnter={() => preloadNavigationPage(item.name)}
+        onFocus={() => preloadNavigationPage(item.name)}
         onClick={() => go(item.name)}
       >
         <Icon size={18} />
@@ -502,7 +538,7 @@ export function Shell() {
     );
   };
 
-  const moreActive = ['goals', 'notes', 'insights', 'ai', 'plans', 'matrix', 'review'].includes(route.name);
+  const moreActive = !['today', 'quickadd', 'day', 'calendar', 'tasks', 'habits'].includes(route.name);
 
   return (
     <div className={cx('app-shell', !personalWorkspace && 'app-shell--standalone')}>
@@ -546,14 +582,22 @@ export function Shell() {
             active={false}
             onClick={() => go('home')}
           />
-          {planNav.length > 0 ? (
+          {todayNav ? (
+            <NavButton
+              key={todayNav.name}
+              item={todayNav}
+              active={navItemIsActive(todayNav.name, route.name)}
+              onClick={() => go(todayNav.name)}
+            />
+          ) : null}
+          {planLinks.length > 0 ? (
             <>
               <p className="nav-label">{t("Plan")}</p>
-              {planNav.map((item) => (
+              {planLinks.map((item) => (
                 <NavButton
                   key={item.name}
                   item={item}
-                  active={route.name === item.name || (item.name === 'calendar' && route.name === 'calendar')}
+                  active={navItemIsActive(item.name, route.name)}
                   badge={item.name === 'tasks' && openTasksCount > 0 ? String(faNum(openTasksCount)) : undefined}
                   onClick={() => go(item.name)}
                 />
@@ -571,18 +615,26 @@ export function Shell() {
             <>
               <p className="nav-label">{t("Growth")}</p>
               {growthNav.map((item) => (
-                <NavButton key={item.name} item={item} active={route.name === item.name} onClick={() => go(item.name)} />
+                <NavButton key={item.name} item={item} active={navItemIsActive(item.name, route.name)} onClick={() => go(item.name)} />
               ))}
             </>
           ) : null}
-          {trackNav.length > 0 ? (
+          {reviewNav.length > 0 ? (
             <>
-              <p className="nav-label">{t("Track")}</p>
-              {trackNav.map((item) => (
+              <p className="nav-label">{t("Review")}</p>
+              {reviewNav.map((item) => (
+                <NavButton key={item.name} item={item} active={navItemIsActive(item.name, route.name)} onClick={() => go(item.name)} />
+              ))}
+            </>
+          ) : null}
+          {toolsNav.length > 0 ? (
+            <>
+              <p className="nav-label">{t("Tools")}</p>
+              {toolsNav.map((item) => (
                 <NavButton
                   key={item.name}
                   item={item}
-                  active={route.name === item.name}
+                  active={navItemIsActive(item.name, route.name)}
                   attention={item.name === 'ai' && !aiSeen}
                   violet={item.name === 'ai'}
                   onClick={() => go(item.name)}
@@ -601,7 +653,7 @@ export function Shell() {
             <button type="button" className="rail-btn rail-search" aria-label={t("Search")} title={t("Search")} onClick={openPalette}>
               <SearchIcon size={18} />
             </button>
-            <button type="button" className={cx('rail-btn', tabletFlyout === 'plan' && 'on', planNav.some((n) => route.name === n.name) && 'active')} aria-label={t("Plan")} title={t("Plan")} aria-haspopup="dialog" aria-expanded={tabletFlyout === 'plan'} aria-controls="tablet-flyout" onClick={(event) => toggleTabletFlyout('plan', event.currentTarget)}>
+            <button type="button" className={cx('rail-btn', tabletFlyout === 'plan' && 'on', planNav.some((n) => navItemIsActive(n.name, route.name)) && 'active')} aria-label={t("Plan")} title={t("Plan")} aria-haspopup="dialog" aria-expanded={tabletFlyout === 'plan'} aria-controls="tablet-flyout" onClick={(event) => toggleTabletFlyout('plan', event.currentTarget)}>
               <CalendarIcon size={19} />
               <i className="rail-cat">{t("Plan")}</i>
             </button>
@@ -609,19 +661,20 @@ export function Shell() {
               <StopwatchIcon size={19} />
               <i className="rail-cat">{t("Focus")}</i>
             </button>
-            <button type="button" className={cx('rail-btn', tabletFlyout === 'growth' && 'on', growthNav.some((n) => route.name === n.name) && 'active')} aria-label={t("Growth")} title={t("Growth")} aria-haspopup="dialog" aria-expanded={tabletFlyout === 'growth'} aria-controls="tablet-flyout" onClick={(event) => toggleTabletFlyout('growth', event.currentTarget)}>
+            <button type="button" className={cx('rail-btn', tabletFlyout === 'growth' && 'on', growthNav.some((n) => navItemIsActive(n.name, route.name)) && 'active')} aria-label={t("Growth")} title={t("Growth")} aria-haspopup="dialog" aria-expanded={tabletFlyout === 'growth'} aria-controls="tablet-flyout" onClick={(event) => toggleTabletFlyout('growth', event.currentTarget)}>
               <FlameIcon size={19} />
               <i className="rail-cat">{t("Growth")}</i>
             </button>
-            <button type="button" className={cx('rail-btn', tabletFlyout === 'track' && 'on', trackNav.some((n) => route.name === n.name) && 'active')} aria-label={t("Track")} title={t("Track")} aria-haspopup="dialog" aria-expanded={tabletFlyout === 'track'} aria-controls="tablet-flyout" onClick={(event) => toggleTabletFlyout('track', event.currentTarget)}>
+            <button type="button" className={cx('rail-btn', tabletFlyout === 'review' && 'on', reviewNav.some((n) => navItemIsActive(n.name, route.name)) && 'active')} aria-label={t("Review")} title={t("Review")} aria-haspopup="dialog" aria-expanded={tabletFlyout === 'review'} aria-controls="tablet-flyout" onClick={(event) => toggleTabletFlyout('review', event.currentTarget)}>
               <ArcIcon size={19} />
-              <i className="rail-cat">{t("Track")}</i>
+              <i className="rail-cat">{t("Review")}</i>
+            </button>
+            <button type="button" className={cx('rail-btn', tabletFlyout === 'tools' && 'on', toolsNav.some((n) => navItemIsActive(n.name, route.name)) && 'active')} aria-label={t("Tools")} title={t("Tools")} aria-haspopup="dialog" aria-expanded={tabletFlyout === 'tools'} aria-controls="tablet-flyout" onClick={(event) => toggleTabletFlyout('tools', event.currentTarget)}>
+              <SparklesIcon size={19} />
+              <i className="rail-cat">{t("Tools")}</i>
             </button>
           </div>
           <div className="rail-foot">
-            <button type="button" className={cx('rail-btn rail-util', route.name === 'review' && 'active')} aria-label={t("Weekly Review")} title={t("Weekly Review")} onClick={() => go('review')}>
-              <WeekIcon size={17} />
-            </button>
             <button type="button" className="rail-btn rail-util" aria-label={t("Notifications")} title={t("Notifications")} onClick={() => setNotificationsOpen(true)}>
               <BellIcon size={17} />
               {unreadNotifications > 0 ? <span className="rail-badge" aria-hidden="true" /> : null}
@@ -641,15 +694,6 @@ export function Shell() {
           </div>
         </nav>
         <div className="side-foot">
-          <button
-            type="button"
-            className={cx('side-tool', route.name === 'review' && 'active')}
-            onClick={() => go('review')}
-            title={t("Weekly Review")}
-          >
-            <WeekIcon size={16} />
-            <span>{t("Weekly Review")}</span>
-          </button>
           <button type="button" className="side-tool notification-trigger" onClick={() => setNotificationsOpen(true)}>
             <BellIcon size={16} />
             <span>{t("Notifications")}</span>
@@ -757,9 +801,11 @@ export function Shell() {
                     ? t("Focus")
                     : tabletFlyout === 'growth'
                       ? t("Growth")
-                      : tabletFlyout === 'track'
-                        ? t("Track")
-                        : t("Panels")}
+                      : tabletFlyout === 'review'
+                        ? t("Review")
+                        : tabletFlyout === 'tools'
+                          ? t("Tools")
+                          : t("Panels")}
               </strong>
               <button type="button" className="icon-btn round tablet-flyout-close" aria-label={t("Close")} onClick={() => setTabletFlyout(null)}>✕</button>
             </div>
@@ -768,7 +814,7 @@ export function Shell() {
                 <NavButton
                   key={item.name}
                   item={item}
-                  active={route.name === item.name || (item.name === 'calendar' && route.name === 'calendar')}
+                  active={navItemIsActive(item.name, route.name)}
                   badge={item.name === 'tasks' && openTasksCount > 0 ? String(faNum(openTasksCount)) : undefined}
                   onClick={() => { go(item.name); setTabletFlyout(null); }}
                 />
@@ -782,13 +828,16 @@ export function Shell() {
                 />
               )}
               {tabletFlyout === 'growth' && growthNav.map((item) => (
-                <NavButton key={item.name} item={item} active={route.name === item.name} onClick={() => { go(item.name); setTabletFlyout(null); }} />
+                <NavButton key={item.name} item={item} active={navItemIsActive(item.name, route.name)} onClick={() => { go(item.name); setTabletFlyout(null); }} />
               ))}
-              {tabletFlyout === 'track' && trackNav.map((item) => (
+              {tabletFlyout === 'review' && reviewNav.map((item) => (
+                <NavButton key={item.name} item={item} active={navItemIsActive(item.name, route.name)} onClick={() => { go(item.name); setTabletFlyout(null); }} />
+              ))}
+              {tabletFlyout === 'tools' && toolsNav.map((item) => (
                 <NavButton
                   key={item.name}
                   item={item}
-                  active={route.name === item.name}
+                  active={navItemIsActive(item.name, route.name)}
                   attention={item.name === 'ai' && !aiSeen}
                   violet={item.name === 'ai'}
                   onClick={() => { go(item.name); setTabletFlyout(null); }}
@@ -922,8 +971,8 @@ export function Shell() {
       </div>
 
       {personalWorkspace ? <nav className="tabbar" aria-label={t("Primary")}>
-        <Tab icon={SunIcon} name="today" label={t("Today")} active={route.name === 'today'} onClick={() => go('today')} />
-        <Tab icon={CalendarIcon} name="calendar" label={t("Calendar")} active={route.name === 'calendar'} onClick={() => go('calendar')} />
+        <Tab icon={SunIcon} name="today" label={t("Today")} active={navItemIsActive('today', route.name)} onClick={() => go('today')} />
+        <Tab icon={CalendarIcon} name="calendar" label={t("Calendar")} active={navItemIsActive('calendar', route.name)} onClick={() => go('calendar')} />
         {/* The add action lives in the bar itself, centred for the thumb,
             instead of a floating button that lands on top of the content. */}
         <button type="button" className="tab tab-add" aria-label={t("Quick add")} onClick={openPalette}>
@@ -981,11 +1030,20 @@ export function Shell() {
               </div>
             </div>
 
-            {mobileTrackNav.length > 0 ? (
+            {mobileReviewNav.length > 0 ? (
               <div className="more-section">
-                <p className="more-group-label">{t("Track")}</p>
+                <p className="more-group-label">{t("Review")}</p>
                 <div className="more-grid more-grid-2">
-                  {mobileTrackNav.map((item) => renderMobileTile(item))}
+                  {mobileReviewNav.map((item) => renderMobileTile(item))}
+                </div>
+              </div>
+            ) : null}
+
+            {mobileToolsNav.length > 0 ? (
+              <div className="more-section">
+                <p className="more-group-label">{t("Tools")}</p>
+                <div className="more-grid more-grid-2">
+                  {mobileToolsNav.map((item) => renderMobileTile(item))}
                 </div>
               </div>
             ) : null}
@@ -997,7 +1055,7 @@ export function Shell() {
             </div>
 
             <div className="more-section more-section-sys">
-              <p className="more-group-label">{t("System & tools")}</p>
+              <p className="more-group-label">{t("System")}</p>
               <div className="more-grid more-grid-2">
                 <button type="button" className="more-tile" onClick={() => { setMoreOpen(false); setNotificationsOpen(true); }}>
                   <BellIcon size={18} />{' '}
@@ -1008,9 +1066,6 @@ export function Shell() {
                 </button>
                 <button type="button" className="more-tile" onClick={() => { setMoreOpen(false); openSettings(); }}>
                   <SlidersIcon size={18} /> <span>{t("Settings")}</span>
-                </button>
-                <button type="button" className={cx('more-tile', route.name === 'review' && 'on')} onClick={() => go('review')}>
-                  <WeekIcon size={18} /> <span>{t("Weekly Review")}</span>
                 </button>
                 <button type="button" className="more-tile" onClick={() => { setMoreOpen(false); requestTour(); }}>
                   <HelpIcon size={18} /> <span>{t("How it works")}</span>
@@ -1302,7 +1357,9 @@ export function Shell() {
       {shortcutsOpen ? <ShortcutsSheet onClose={() => setShortcutsOpen(false)} /> : null}
       {reviewOpen ? (
         <Modal title={t("Weekly Review")} onClose={() => setReviewOpen(false)}>
-          <WeeklyReview state={planner.state} onClose={() => setReviewOpen(false)} />
+          <Suspense fallback={<LoadingScreen />}>
+            <WeeklyReview state={planner.state} onClose={() => setReviewOpen(false)} />
+          </Suspense>
         </Modal>
       ) : null}
       <input ref={importFile.ref} className="visually-hidden" tabIndex={-1} aria-hidden="true" type="file" accept="application/json,.json" onChange={importFile.onChange} />
@@ -1329,7 +1386,16 @@ function NavButton({
 }) {
   const Icon = item.icon;
   return (
-    <button type="button" data-tour-nav={item.name} className={cx('nav-link', active && 'active', violet && 'nav-link-violet')} aria-current={active ? 'page' : undefined} title={item.label} onClick={onClick}>
+    <button
+      type="button"
+      data-tour-nav={item.name}
+      className={cx('nav-link', active && 'active', violet && 'nav-link-violet')}
+      aria-current={active ? 'page' : undefined}
+      title={item.label}
+      onPointerEnter={() => preloadNavigationPage(item.name)}
+      onFocus={() => preloadNavigationPage(item.name)}
+      onClick={onClick}
+    >
       <span className="nav-icon-wrap">
         <Icon size={17} />
         {attention && !active ? <i className="nav-attention" aria-hidden="true" /> : null}
@@ -1355,7 +1421,15 @@ function Tab({
   onClick: () => void;
 }) {
   return (
-    <button type="button" data-tour-nav={name} className={cx('tab', active && 'active')} aria-current={active ? 'page' : undefined} onClick={onClick}>
+    <button
+      type="button"
+      data-tour-nav={name}
+      className={cx('tab', active && 'active')}
+      aria-current={active ? 'page' : undefined}
+      onPointerEnter={() => { if (name) preloadNavigationPage(name); }}
+      onFocus={() => { if (name) preloadNavigationPage(name); }}
+      onClick={onClick}
+    >
       <span className="tab-icon"><Icon size={20} /></span>
       {label}
     </button>

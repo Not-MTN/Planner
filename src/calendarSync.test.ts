@@ -31,6 +31,7 @@ import { createEmptyState, type PlannerEvent, type PlannerState } from './types'
 
 const EARLIER = '2026-09-20T09:00:00.000Z';
 const LATER = '2026-09-25T10:00:00.000Z';
+const SYNC_NOW = new Date('2026-10-05T12:00:00.000Z');
 const CALENDAR = 'https://dav.example.com/me/cal/';
 
 function subscription(patch: Partial<CalendarSubscription> = {}): CalendarSubscription {
@@ -128,6 +129,7 @@ describe('which copy is the newer one', () => {
       stateWith(local),
       subscription({ seen: [`${CALENDAR}one.ics`], hrefs: { standup: `${CALENDAR}one.ics` }, etags: { [`${CALENDAR}one.ics`]: 'e1' } }),
       [remote(`${CALENDAR}one.ics`, EARLIER, {}, 'standup@planner')],
+      SYNC_NOW,
     );
     expect(plan.push).toHaveLength(1);
     expect(plan.push[0]).toMatchObject({ id: 'standup', href: `${CALENDAR}one.ics`, etag: 'e1' });
@@ -147,14 +149,14 @@ describe('which copy is the newer one', () => {
   });
 
   it('uploads a local event that has nowhere to be yet, and never twice over', () => {
-    const plan = planCalendarSync(stateWith(event()), subscription(), []);
+    const plan = planCalendarSync(stateWith(event()), subscription(), [], SYNC_NOW);
     expect(plan.push).toHaveLength(1);
     expect(plan.push[0]).toMatchObject({ id: 'standup', href: null, etag: null });
 
     // Once it is mapped, a second run against an empty listing deletes it
     // instead of uploading it again — the mapping is the identity.
     const mapped = subscription({ seen: [`${CALENDAR}one.ics`], hrefs: { standup: `${CALENDAR}one.ics` } });
-    const again = planCalendarSync(stateWith(event()), mapped, [remote(`${CALENDAR}one.ics`, EARLIER, {}, 'standup@planner')]);
+    const again = planCalendarSync(stateWith(event()), mapped, [remote(`${CALENDAR}one.ics`, EARLIER, {}, 'standup@planner')], SYNC_NOW);
     expect(again.push).toHaveLength(0);
     expect(again.removeLocal).toEqual([]);
   });
@@ -192,7 +194,7 @@ describe('what a sync is allowed to write to', () => {
 
   it('stops after a run’s worth of uploads and continues on the next one', () => {
     const many = stateWith(...Array.from({ length: MAX_PUSH_PER_RUN + 5 }, (_, index) => event({ id: `e${index}` })));
-    expect(planCalendarSync(many, subscription(), []).push).toHaveLength(MAX_PUSH_PER_RUN);
+    expect(planCalendarSync(many, subscription(), [], SYNC_NOW).push).toHaveLength(MAX_PUSH_PER_RUN);
   });
 });
 
@@ -345,8 +347,8 @@ describe('identities', () => {
 
 describe('pulling into a state that already has the event', () => {
   it('never adds a second copy when the pull runs twice', () => {
-    const first = applyCalendarPull(createEmptyState(), CALENDAR, planCalendarSync(stateWith(), subscription(), [remote(`${CALENDAR}one.ics`, LATER)]).pull[0]!);
-    const second = planCalendarSync(first, subscription({ seen: [`${CALENDAR}one.ics`] }), [remote(`${CALENDAR}one.ics`, LATER)]);
+    const first = applyCalendarPull(createEmptyState(), CALENDAR, planCalendarSync(stateWith(), subscription(), [remote(`${CALENDAR}one.ics`, LATER)], SYNC_NOW).pull[0]!);
+    const second = planCalendarSync(first, subscription({ seen: [`${CALENDAR}one.ics`] }), [remote(`${CALENDAR}one.ics`, LATER)], SYNC_NOW);
     expect(second.pull).toEqual([]);
     expect(second.push.map((item) => item.id)).toEqual([first.events[0]!.id]);
     void addEvent;

@@ -55,8 +55,8 @@ import { supportsPackagedUpdates } from '../shared/updateRuntime';
 import { useStartupState, type StartupUpdateState } from '../shared/startup';
 
 const NAV_LABELS: Record<NavigationPage, string> = {
-  today: t("Today"), calendar: t("Calendar"), tasks: t("Tasks"), matrix: t("Matrix"), habits: t("Habits"),
-  goals: t("Goals"), notes: t("Notes"), plans: t("Plans"), insights: t("Insights"), ai: t("AI coach"),
+  today: t("Today"), calendar: t("Calendar"), tasks: t("Tasks"), matrix: t("Matrix"), plans: t("Plans"),
+  habits: t("Habits"), goals: t("Goals"), review: t("Weekly Review"), notes: t("Notes"), insights: t("Insights"), ai: t("AI coach"),
 };
 
 function NavigationSection() {
@@ -89,9 +89,9 @@ function NavigationSection() {
       <div className="navigation-preferences">
         {NAVIGATION_PAGES.map((page) => (
           <label key={page} className="navigation-preference">
-            <input type="checkbox" checked={pages.includes(page)} disabled={page === 'today'} onChange={(event) => toggle(page, event.target.checked)} />
+            <input type="checkbox" checked={pages.includes(page)} disabled={page === 'today' || page === 'review'} onChange={(event) => toggle(page, event.target.checked)} />
             <span>{NAV_LABELS[page]}</span>
-            {page === 'today' ? <small>{t("Always shown")}</small> : null}
+            {page === 'today' || page === 'review' ? <small>{t("Always shown")}</small> : null}
           </label>
         ))}
       </div>
