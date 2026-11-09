@@ -8,6 +8,9 @@ test('fixed desktop sidebar leaves the planner workspace in the second grid colu
   expect(styles).toMatch(/@media \(min-width: 1024px\) \{[\s\S]*?grid-template-columns: var\(--sidebar\) minmax\(0, 1fr\)/);
   expect(styles).toMatch(/\.app-shell:not\(\.app-shell--standalone\) \.workspace\s*\{\s*grid-column:\s*2\s*;/);
   expect(styles).toMatch(/\.sidebar\s*\{[\s\S]*?position:\s*fixed\s*;/);
+  // The fixed sidebar must pin to the inline-start side, matching the grid's
+  // reserved first track in both LTR and RTL (Persian sets dir="rtl").
+  expect(styles).toMatch(/\.sidebar\s*\{[\s\S]*?inset-inline-start:\s*0\s*;/);
 });
 
 test('standalone panel shells keep their workspace in the single grid column', () => {
