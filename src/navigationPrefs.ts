@@ -1,4 +1,4 @@
-export const NAVIGATION_PAGES = ['today', 'calendar', 'tasks', 'matrix', 'habits', 'goals', 'notes', 'plans', 'insights', 'ai'] as const;
+export const NAVIGATION_PAGES = ['today', 'calendar', 'tasks', 'matrix', 'plans', 'habits', 'goals', 'review', 'notes', 'insights', 'ai'] as const;
 export type NavigationPage = (typeof NAVIGATION_PAGES)[number];
 
 export const MAX_MOBILE_FAVORITES = 4;
@@ -7,6 +7,15 @@ const KEY = 'planner-sidebar-pages';
 const MOBILE_FAVORITES_KEY = 'planner-mobile-favorites';
 const CHANGE_EVENT = 'planner-sidebar-pages-change';
 export const DEFAULT_NAVIGATION_PAGES: NavigationPage[] = [...NAVIGATION_PAGES];
+const ALWAYS_VISIBLE_PAGES = new Set<NavigationPage>(['today', 'review']);
+
+function withAlwaysVisible(values: NavigationPage[]): NavigationPage[] {
+  return [
+    'today',
+    ...values.filter((page) => !ALWAYS_VISIBLE_PAGES.has(page)),
+    'review',
+  ];
+}
 
 function validPages(values: unknown[]): NavigationPage[] {
   const allowed = new Set<string>(NAVIGATION_PAGES);
@@ -18,16 +27,16 @@ export function loadNavigationPages(): NavigationPage[] {
     const raw = JSON.parse(localStorage.getItem(KEY) ?? 'null') as unknown;
     if (!Array.isArray(raw)) return [...DEFAULT_NAVIGATION_PAGES];
     const selected = validPages(raw);
-    // Today is always available and can never be hidden. (The front door is
-    // the panel picker; Today is the personal panel's own front page.)
-    return ['today', ...selected.filter((page) => page !== 'today')];
+    // Today is the personal front page, and Weekly Review has always had a
+    // permanent navigation entry; keep both visible across the nav reorg.
+    return withAlwaysVisible(selected);
   } catch {
     return [...DEFAULT_NAVIGATION_PAGES];
   }
 }
 
 export function saveNavigationPages(pages: NavigationPage[]): void {
-  const value: NavigationPage[] = ['today', ...validPages(pages).filter((page) => page !== 'today')];
+  const value = withAlwaysVisible(validPages(pages));
   try { localStorage.setItem(KEY, JSON.stringify(value)); } catch { /* optional preference */ }
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(CHANGE_EVENT));
 }

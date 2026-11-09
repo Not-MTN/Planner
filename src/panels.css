@@ -275,6 +275,40 @@
 .subject-trend-dot.subject-trend-line-2 { fill: #e0781a; }
 .subject-trend-dot.subject-trend-line-3 { fill: #8b5cf6; }
 
+/* ------------------------------------------------ guardian progress trends */
+.guardian-progress-trends { display: flex; flex-direction: column; gap: 12px; }
+.guardian-progress-intro { max-width: 64ch; margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.guardian-progress-grid { align-items: start; margin-top: 0; }
+.guardian-progress-grid > .chart-block { min-width: 0; }
+.guardian-progress-svg { display: block; width: 100%; height: 126px; overflow: visible; }
+.guardian-progress-gridline line { stroke: var(--line-strong); stroke-dasharray: 3 4; stroke-width: 1; }
+.guardian-progress-gridline text { fill: var(--muted); stroke: none; font: 9px var(--sans); font-variant-numeric: tabular-nums; }
+.guardian-progress-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.guardian-progress-point { fill: var(--accent); stroke: var(--surface); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.guardian-progress-test-list,
+.guardian-progress-rows,
+.guardian-progress-legend { display: grid; gap: 11px; margin: 8px 0 0; padding: 0; list-style: none; }
+.guardian-progress-test { min-width: 0; }
+.guardian-progress-test-head,
+.guardian-progress-row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.guardian-progress-row-label { min-width: 0; overflow: hidden; color: var(--ink); font-size: 12.5px; font-weight: 600; text-overflow: ellipsis; }
+.guardian-progress-row-value { flex: none; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.guardian-progress-test-detail { display: block; margin-top: 3px; color: var(--muted); font-size: 10.5px; overflow-wrap: anywhere; }
+.guardian-progress-track { display: block; width: 100%; height: 8px; margin-top: 6px; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--muted) 14%, transparent); direction: ltr; }
+.guardian-progress-fill { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.guardian-progress-stacked { display: flex; width: 100%; height: 12px; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--muted) 14%, transparent); direction: ltr; }
+.guardian-progress-segment { display: block; height: 100%; min-width: 2px; }
+.guardian-progress-segment.is-not-submitted,
+.guardian-progress-key.is-not-submitted { background: var(--status-incomplete); }
+.guardian-progress-segment.is-awaiting-review,
+.guardian-progress-key.is-awaiting-review { background: var(--cat-peach); }
+.guardian-progress-segment.is-approved,
+.guardian-progress-key.is-approved { background: var(--status-complete); }
+.guardian-progress-legend { gap: 7px; }
+.guardian-progress-legend li { display: grid; grid-template-columns: 9px minmax(0, 1fr) auto; align-items: center; gap: 8px; color: var(--muted); font-size: 11.5px; }
+.guardian-progress-legend strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.guardian-progress-key { width: 9px; height: 9px; border-radius: 3px; }
+
 /* ------------------------------------------------ goals suggested to a student */
 
 /* A suggested goal is a question, not work: it is shown as one until answered. */
@@ -863,10 +897,95 @@
 .week-report-status.is-complete { color: var(--status-complete); }
 .week-report-status.is-incomplete { color: var(--status-incomplete); }
 .day-report-performance { padding: 9px 11px; border-inline-start: 3px solid var(--status-complete); border-radius: 8px; background: var(--status-complete-soft); color: var(--status-complete); font-weight: 700; font-size: 13px; }
+
+/* Reports live in one dated inbox; completed weeks stay out of the main view. */
+.guardian-reports { gap: 14px; }
+.guardian-reports-intro { margin: 0; }
+.guardian-reports-total {
+  display: grid;
+  place-items: center;
+  min-width: 40px;
+  height: 40px;
+  padding: 0 10px;
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--cat-peach) 16%, var(--surface));
+  color: var(--cat-peach-text);
+  font-size: 17px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.guardian-reports-filter { align-self: flex-start; max-width: 100%; overflow-x: auto; }
+.guardian-reports-filter .segment { gap: 7px; white-space: nowrap; }
+.guardian-reports-filter-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 5px;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.guardian-reports-filter .segment.on .guardian-reports-filter-count { background: var(--accent-soft); color: var(--accent-deep, var(--accent)); }
+.guardian-report-weeks { display: flex; flex-direction: column; gap: 10px; }
+.guardian-report-week { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-small); background: color-mix(in srgb, var(--surface-2) 48%, var(--surface)); }
+.guardian-report-week-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 50px;
+  padding: 10px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.guardian-report-week-toggle:hover { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.guardian-report-week-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.guardian-report-week-title { flex: 1; min-width: 0; font-weight: 650; font-variant-numeric: tabular-nums; }
+.guardian-report-week-count { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.guardian-report-week-chevron { display: grid; place-items: center; width: 25px; height: 25px; flex: none; border-radius: 50%; background: var(--surface); color: var(--accent); font-size: 18px; line-height: 1; }
+.guardian-report-list { display: flex; flex-direction: column; gap: 8px; list-style: none; margin: 0; padding: 0 12px 12px; }
+.guardian-report-card { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 13px; border: 1px solid var(--line); border-radius: var(--radius-small); background: var(--surface); }
+.guardian-report-card > * { margin-block: 0; }
+.guardian-report-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.guardian-report-heading { min-width: 0; }
+.guardian-report-date { margin: 0; color: var(--ink); font-size: 13.5px; font-weight: 700; }
+.guardian-report-plan { margin: 3px 0 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.guardian-report-card .week-report-status { margin: 2px 0 0; flex: none; }
+.guardian-report-card .week-ack-row { margin-top: 3px; }
+.guardian-report-card .week-reactions { margin-top: 0; }
+.guardian-plan-history { margin-block-start: 12px; padding-block-start: 12px; border-block-start: 1px solid var(--line); }
+.guardian-plan-history > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  color: var(--accent-deep, var(--accent));
+  font-size: 12.5px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.guardian-plan-history-count { color: var(--muted); font-weight: 500; }
+.guardian-plan-history-pending { color: var(--cat-peach-text); font-size: 11.5px; }
+@media (max-width: 640px) {
+  .guardian-reports-filter { width: 100%; }
+  .guardian-reports-filter .segment { flex: 0 0 auto; }
+  .guardian-report-week-toggle { gap: 7px; padding-inline: 10px; }
+  .guardian-report-week-count { font-size: 11px; }
+  .guardian-report-list { padding-inline: 8px; }
+  .guardian-report-card-head { flex-direction: column; }
+}
 .week-late-report,
 .week-missing-alert { padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--status-incomplete) 42%, var(--line)); border-inline-start: 4px solid var(--status-incomplete); border-radius: 12px; background: var(--status-incomplete-soft); color: var(--status-incomplete); }
 .week-late-report { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 10px; font-size: 12.5px; }
 .week-missing-alert { margin: 10px 0; font-size: 13px; font-weight: 650; }
+.week-period-performance-label { margin: 1px 0 0; color: var(--muted); font-size: 11.5px; }
 .week-period-summary { border-inline-start: 4px solid var(--status-incomplete); }
 .week-period-summary.is-complete { border-inline-start-color: var(--status-complete); }
 .week-period-summary.is-incomplete { border-inline-start-color: var(--status-incomplete); }

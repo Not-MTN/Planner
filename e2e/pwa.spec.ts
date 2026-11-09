@@ -226,9 +226,11 @@ test('with the network down the app still opens, and an edit still sticks', asyn
     );
     expect(saved).toBe(true);
 
-    // Routing is local too: moving between screens is a hash change, and the
-    // task is really in the board rather than only on the screen it was typed on.
-    // The move is a tap on the sidebar, the way a reader would — a full
+    // Tasks is part of the loaded offline core, so this route needs no uncached
+    // lazy chunk after the network goes down. Routing is local too: moving
+    // screens is a hash change, and the task is really in the board rather than
+    // only on the screen it was typed on. The move is a tap on the sidebar,
+    // the way a reader would — a full
     // navigation to another path while offline is a browser-level race (the
     // service worker serves the cached shell, and Chrome occasionally drops a
     // navigation it started during the offline flip), not a route the app has.

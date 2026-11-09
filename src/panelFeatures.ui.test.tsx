@@ -424,7 +424,10 @@ describe('guardian roster and planning', () => {
   it('shows a guardian the same numbers as a student, in Persian digits', async () => {
     setLang('fa');
     await mount(guardianState(), 'guardian');
+    await act(async () => query<HTMLButtonElement>('.student-card .student-card-actions button').click());
+    await settle();
     expect(document.documentElement.dir).toBe('rtl');
+    expect(document.querySelector('.guardian-progress-trends')).not.toBeNull();
     // Alice's week is 3 of 4 in the fixture; both numbers are rendered by the
     // guardian's own summary markup rather than a shared component.
     // The ring prints the percentage and the list beside it prints done/planned;

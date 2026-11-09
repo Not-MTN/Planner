@@ -11,7 +11,6 @@
  * Argon2id runs from @noble/hashes (pure JavaScript) rather than WebAssembly so
  * the strict `script-src 'self'` content security policy stays intact.
  */
-import { argon2idAsync } from '@noble/hashes/argon2';
 import { hkdf } from '@noble/hashes/hkdf';
 import { sha256 } from '@noble/hashes/sha256';
 import type { PlannerState } from '../types';
@@ -68,6 +67,9 @@ function importAes(raw: Uint8Array<ArrayBuffer>, extractable: boolean): Promise<
 export async function deriveFromPassword(password: string, salt: string): Promise<{ authToken: string; kek: CryptoKey }> {
   const saltBytes = fromBase64(salt);
   if (saltBytes.length < 16) throw new VaultError('The KDF salt is too short.');
+  // Argon2 is sizeable and only needed when credentials are derived; defer it
+  // so the planner shell and unlock screen do not carry the KDF implementation.
+  const { argon2idAsync } = await import('@noble/hashes/argon2');
   const out = await argon2idAsync(new TextEncoder().encode(password.normalize('NFKC')), saltBytes, KDF_PARAMS);
   const authToken = toBase64(out.subarray(0, 32));
   const kek = await importAes(copyToBuffer(out.subarray(32)), false);

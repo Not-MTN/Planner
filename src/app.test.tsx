@@ -131,6 +131,42 @@ describe('app smoke', () => {
     expect(buttons.filter((button) => button.textContent?.trim() === 'How it works')).toHaveLength(1);
   });
 
+  it('organizes the mobile More menu by intent without repeating dock pages', () => {
+    mountApp();
+    const moreButton = [...document.querySelectorAll<HTMLButtonElement>('.tabbar .tab')]
+      .find((button) => button.textContent?.includes('More'));
+    act(() => moreButton?.click());
+
+    const sections = [...document.querySelectorAll<HTMLElement>('.more-section')];
+    const section = (label: string) => sections.find((item) => item.querySelector('.more-group-label')?.textContent?.trim() === label);
+    const plan = section('Plan')?.textContent ?? '';
+    const review = section('Review')?.textContent ?? '';
+    const tools = section('Tools')?.textContent ?? '';
+    expect(plan).toContain('Matrix');
+    expect(plan).toContain('Plans');
+    expect(plan).not.toContain('Today');
+    expect(plan).not.toContain('Calendar');
+    expect(plan).not.toContain('Tasks');
+    expect(review).toContain('Weekly Review');
+    expect(review).toContain('Notes');
+    expect(review).toContain('Insights');
+    expect(tools).toContain('AI coach');
+    expect(sections.find((item) => item.classList.contains('more-section-sys'))?.textContent).not.toContain('Weekly Review');
+  });
+
+  it('keeps desktop-hidden pages available in the mobile More menu', () => {
+    localStorage.setItem('planner-sidebar-pages', JSON.stringify(['today', 'calendar', 'tasks', 'habits']));
+    mountApp();
+    const moreButton = [...document.querySelectorAll<HTMLButtonElement>('.tabbar .tab')]
+      .find((button) => button.textContent?.includes('More'));
+    act(() => moreButton?.click());
+
+    expect(document.querySelector('.side-nav-desktop [data-tour-nav="matrix"]')).toBeNull();
+    expect(document.querySelector('.more-list')?.textContent).toContain('Matrix');
+    expect(document.querySelector('.more-list')?.textContent).toContain('Plans');
+    expect(document.querySelector('.more-list')?.textContent).toContain('Weekly Review');
+  });
+
   it('exposes accessible controls to reorder mobile favorites and persists their order', async () => {
     localStorage.setItem('planner-mobile-favorites', JSON.stringify(['calendar', 'tasks', 'habits']));
     mountApp();
@@ -1027,10 +1063,11 @@ describe('new features', () => {
     }
   });
 
-  it('renders notes as safe markdown with tags', () => {
+  it('renders notes as safe markdown with tags', async () => {
     window.history.replaceState(null, '', '#/notes');
     localStorage.setItem('personal-planner.v1', JSON.stringify({ notes: [{ id: 'n', title: 'Ideas', body: '**Bold** #work <img src=x onerror=alert(1)>\n- [x] done', kind: 'idea' }] }));
     mountApp();
+    await waitForText('Bold');
     expect(document.querySelector('.md-body strong')?.textContent).toBe('Bold');
     expect(document.querySelector('.md-body img')).toBeNull();
     expect(document.querySelector('.tag-row')?.textContent).toContain('#work');

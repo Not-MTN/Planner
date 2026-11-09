@@ -15,6 +15,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { App } from '../App';
 import { STORAGE_KEY, serialize } from '../storage';
 import { addEvent } from '../mutate';
+import { todayISO } from '../dates';
 import { createEmptyState } from '../types';
 
 const CALENDAR = 'https://dav.example.com/me/cal/';
@@ -225,7 +226,7 @@ describe('connecting a calendar that can be written to', () => {
   it('uploads an event the planner already had, and remembers where it went', async () => {
     const seeded = addEvent(
       createEmptyState(),
-      { title: 'Dentist', date: '2026-10-07', startTime: '08:00', endTime: '08:30', category: 'personal', note: 'Bring the card', important: false, source: null },
+      { title: 'Dentist', date: todayISO(), startTime: '08:00', endTime: '08:30', category: 'personal', note: 'Bring the card', important: false, source: null },
       'dentist',
       '2026-09-29T09:00:00.000Z',
     );
