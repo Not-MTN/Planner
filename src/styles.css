@@ -66,6 +66,10 @@
     display: grid;
     grid-template-columns: var(--sidebar) minmax(0, 1fr);
   }
+  /* The desktop sidebar is fixed to the viewport, so it no longer occupies
+     the grid's first cell. Keep the workspace in the reserved second column;
+     otherwise it auto-places beneath the fixed sidebar and appears blank. */
+  .workspace { grid-column: 2; }
   .sidebar {
     display: flex;
     flex-direction: column;
