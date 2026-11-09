@@ -40,10 +40,11 @@ import { SettingsSheet } from './SettingsSheet';
 import { RealtimeIndicator } from './RealtimeIndicator';
 import { LoadingScreen, Modal } from './ui';
 import { lazy, Suspense } from 'react';
-// Keep Today and the panel chooser in the first paint; less frequent pages
-// arrive only when someone opens them.
+// Keep Today, Tasks, and the panel chooser in the offline-ready core. Less
+// frequent pages arrive only when someone opens them.
 import { DayView } from '../views/DayView';
 import { HomeView } from '../views/HomeView';
+import { TasksView } from '../views/TasksView';
 import { ShortcutsSheet } from './ShortcutsSheet';
 import { NotificationsSheet } from './NotificationsSheet';
 import { clearNotifications, deleteNotification, loadNotifications, markNotificationsRead, subscribeNotifications } from '../notificationCenter';
@@ -51,7 +52,6 @@ import { snoozeReminder } from '../reminders';
 import { loadMobileFavorites, loadNavigationPages, subscribeNavigationPages } from '../navigationPrefs';
 
 const CalendarView = lazy(() => import('../views/CalendarView').then((m) => ({ default: m.CalendarView })));
-const TasksView = lazy(() => import('../views/TasksView').then((m) => ({ default: m.TasksView })));
 const MatrixView = lazy(() => import('../views/MatrixView').then((m) => ({ default: m.MatrixView })));
 const HabitsView = lazy(() => import('../views/HabitsView').then((m) => ({ default: m.HabitsView })));
 const GoalsView = lazy(() => import('../views/GoalsView').then((m) => ({ default: m.GoalsView })));
@@ -102,7 +102,6 @@ const NAV = [
 const MOBILE_DOCK_PAGES = new Set(['today', 'calendar', 'tasks', 'habits']);
 const PAGE_PRELOADERS: Record<string, () => Promise<unknown>> = {
   calendar: () => import('../views/CalendarView'),
-  tasks: () => import('../views/TasksView'),
   matrix: () => import('../views/MatrixView'),
   habits: () => import('../views/HabitsView'),
   goals: () => import('../views/GoalsView'),
