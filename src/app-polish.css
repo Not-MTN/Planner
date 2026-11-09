@@ -1146,6 +1146,10 @@
    inherits the personal planner's sidebar, mobile toolbar or bottom tabs. */
 @media (min-width: 768px) {
   .app-shell--standalone { grid-template-columns: minmax(0, 1fr); }
+  /* Guard: the desktop sidebar fix pins `.workspace` to grid column 2, but a
+     standalone shell has a single column. Keep its workspace in column 1 so
+     panel pages always span the full width. */
+  .app-shell--standalone .workspace { grid-column: 1; }
 }
 .app-shell--standalone .content { padding-bottom: calc(48px + env(safe-area-inset-bottom, 0px)); }
 

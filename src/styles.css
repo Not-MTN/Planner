@@ -68,14 +68,24 @@
   }
   /* The desktop sidebar is fixed to the viewport, so it no longer occupies
      the grid's first cell. Keep the workspace in the reserved second column;
-     otherwise it auto-places beneath the fixed sidebar and appears blank. */
-  .workspace { grid-column: 2; }
+     otherwise it auto-places beneath the fixed sidebar and appears blank.
+     Standalone shells (panel picker, student/guardian panels) render NO
+     sidebar and use a single-column grid, so they are excluded: forcing their
+     workspace into a non-existent column 2 shoves all content into an
+     implicit auto-sized track on the side of the screen. */
+  .app-shell:not(.app-shell--standalone) .workspace { grid-column: 2; }
   .sidebar {
     display: flex;
     flex-direction: column;
     gap: 6px;
     position: fixed;
+    /* The reserved grid track sits at the inline-start side (right in RTL),
+       so the fixed sidebar must pin there too — a physical `left: 0` would
+       overlap the workspace in Persian/Arabic. `left` stays as the fallback
+       for browsers that predate logical insets; where both apply the
+       over-constraint resolves per direction, so each side wins correctly. */
     left: 0;
+    inset-inline-start: 0;
     top: 0;
     width: var(--sidebar);
     height: 100dvh;
