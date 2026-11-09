@@ -70,8 +70,10 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
-    position: sticky;
+    position: fixed;
+    left: 0;
     top: 0;
+    width: var(--sidebar);
     height: 100dvh;
     padding: 22px 16px 18px;
     border-inline-end: 1px solid var(--line);
@@ -80,6 +82,7 @@
     /* The rail never spills: the tab list scrolls inside `.side-nav` instead,
        so Settings and the tools below it stay on screen at any height. */
     overflow: hidden;
+    z-index: 10;
   }
 }
 /* ---------- Tablet: 66px icon rail + contextual flyout (design board) ---------- */
