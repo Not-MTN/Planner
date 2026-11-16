@@ -505,6 +505,18 @@ export function StudentPanelView() {
 
   const weekPlans = inbox.plans.filter((plan) => plan.cadence === 'week');
   const shortPlans = inbox.plans.filter((plan) => plan.cadence !== 'week');
+  const currentWeekStart = (() => {
+    const date = new Date(`${todayISO()}T12:00:00`);
+    date.setDate(date.getDate() - ((date.getDay() + 6) % 7));
+    return date.toISOString().slice(0, 10);
+  })();
+  const twoWeeksAgo = (() => {
+    const date = new Date(`${currentWeekStart}T12:00:00`);
+    date.setDate(date.getDate() - 14);
+    return date.toISOString().slice(0, 10);
+  })();
+  const pastWeekPlans = weekPlans.filter((plan) => planEnd(plan) < currentWeekStart && planEnd(plan) >= twoWeeksAgo);
+  const visibleWeekPlans = weekPlans.filter((plan) => planEnd(plan) >= currentWeekStart);
   const currentGuardianLinkIds = panels.student.guardians.map((guardian) => guardian.linkId);
   const canDeletePlan = (plan: GuardianPlan) => studentCanDeletePlan(plan, currentGuardianLinkIds);
   const deletePlan = (plan: GuardianPlan) => {
@@ -790,7 +802,7 @@ export function StudentPanelView() {
                     {t('Daily report missed for {0}. Send the oldest report first; other days stay locked until you catch up.', { 0: formatFullDate(missingDays[0]!.date) })}
                   </p>
                 ) : null}
-                {weekPlans.map((plan) => (
+                {visibleWeekPlans.map((plan) => (
                   <Fragment key={plan.id}>
                   <WeekPlanCard
                     plan={plan}
@@ -837,6 +849,26 @@ export function StudentPanelView() {
                   <StudentChangeRequests planId={plan.id} />
                   </Fragment>
                 ))}
+                {pastWeekPlans.length > 0 ? (
+                  <details className="guardian-plan-history">
+                    <summary><span>{t('Earlier plans')}</span><span className="guardian-plan-history-count">{tn(pastWeekPlans.length, '{count} plan', '{count} plans')}</span></summary>
+                    {pastWeekPlans.map((plan) => (
+                      <WeekPlanCard
+                        key={plan.id}
+                        plan={plan}
+                        reports={panels.student.reports ?? []}
+                        acks={panels.student.acks ?? []}
+                        variant="student"
+                        focusMinutes={planFocusMinutes(plan, state.focusLog, state.tasks)}
+                        onToggleItem={(planId, itemId) => updatePanels((latest) => withPlanItemToggled(latest, planId, itemId))}
+                        canToggleItem={(planId, itemId) => studentCanTogglePlanItem(panels, planId, itemId)}
+                        canReportDay={(planId, date) => canSubmitDayReport(panels, planId, date)}
+                        reportingDate={reporting?.planId === plan.id ? reporting.date : null}
+                        onReportDay={(date) => setReporting(date ? { planId: plan.id, date } : null)}
+                      />
+                    ))}
+                  </details>
+                ) : null}
 
                 {shortPlans.length > 0 ? (
                   <ul className="gplan-list">
