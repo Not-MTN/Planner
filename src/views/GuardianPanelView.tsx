@@ -1282,7 +1282,7 @@ export function GuardianPanelView() {
                       {earlierPlans.length > 0 ? (
                         <details className="guardian-plan-history">
                           <summary>
-                            <span>{t('Earlier plans')} · {t('Past 2 weeks’ full plans')}</span>
+                            <span>{t('Earlier plans')}</span>
                             <span className="guardian-plan-history-count">
                               {tn(earlierPlans.length, '{count} plan', '{count} plans')}
                             </span>

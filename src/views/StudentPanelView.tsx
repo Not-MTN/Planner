@@ -851,7 +851,7 @@ export function StudentPanelView() {
                 ))}
                 {pastWeekPlans.length > 0 ? (
                   <details className="guardian-plan-history">
-                    <summary><span>{t('Past 2 weeks’ full plans')}</span><span className="guardian-plan-history-count">{tn(pastWeekPlans.length, '{count} plan', '{count} plans')}</span></summary>
+                    <summary><span>{t('Earlier plans')}</span><span className="guardian-plan-history-count">{tn(pastWeekPlans.length, '{count} plan', '{count} plans')}</span></summary>
                     {pastWeekPlans.map((plan) => (
                       <WeekPlanCard
                         key={plan.id}
