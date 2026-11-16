@@ -19,6 +19,7 @@ import {
   cleanDisplayName,
   cleanEmail,
   cleanLinkId,
+  cleanNoteCiphertext,
   cleanRole,
   cleanShareCiphertext,
   cleanUsername,
@@ -26,6 +27,8 @@ import {
   cleanWrappedShare,
   isBase64,
   MAX_AUTH_BODY_BYTES,
+  MAX_NOTE_BODY_BYTES,
+  MAX_NOTE_BYTES,
   MAX_VAULT_BODY_BYTES,
   MAX_VAULT_BYTES,
   MAX_LINKS_PER_SIDE,
@@ -1797,13 +1800,22 @@ export async function handleNote(request: Request, store: AuthStore | null): Pro
   if (!session) return error(401, 'That session has expired. Please sign in again.', 'unauthenticated');
 
   if (request.method === 'PUT') {
-    const body = await readJsonBody(request);
+    // The outbox is the largest thing either side writes, so this one read gets
+    // a body limit sized for it rather than the 64 KB default.
+    const body = await readJsonBody(request, MAX_NOTE_BODY_BYTES);
     const linkId = cleanLinkId(body?.linkId);
     const weekOf = cleanWeekOf(body?.weekOf);
     if (!linkId || !weekOf) return error(400, 'Expected { linkId, weekOf }.');
     // Empty clears the note after it has been collected.
-    const ciphertext = body?.ciphertext === null || body?.ciphertext === '' ? null : cleanShareCiphertext(body?.ciphertext);
-    if (body?.ciphertext !== null && body?.ciphertext !== '' && !ciphertext) return error(400, 'That note could not be sent.');
+    const ciphertext = body?.ciphertext === null || body?.ciphertext === '' ? null : cleanNoteCiphertext(body?.ciphertext);
+    if (body?.ciphertext !== null && body?.ciphertext !== '' && !ciphertext) {
+      // Separate from a malformed body: a full outbox is a real answer the
+      // sender has to be told about, with a message they can act on.
+      if (typeof body?.ciphertext === 'string' && body.ciphertext.length > MAX_NOTE_BYTES * 2) {
+        return error(413, 'That note is too large to send.', 'too_large');
+      }
+      return error(400, 'That note could not be sent.');
+    }
 
     // Who is writing decides where it lands: the guardian's note waits for the
     // student, the student's note waits for their guardian.

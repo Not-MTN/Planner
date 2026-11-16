@@ -96,9 +96,11 @@ import {
 } from '../exams';
 import { commitExamAnswers, fetchReleasedExamKey, sealExamKey } from '../examSeal';
 import type { ExamFile, StudentExamDraft } from '../types';
+import { MAX_NOTE_BYTES } from '../shared/authContract';
+import type { AcceptLinkResponse, LinksResponse, OutgoingLink, ShareResponse } from '../shared/authContract';
+import { fitToWire, wireBytes, type TrimStep } from './wireBudget';
 /** Matches the cap in storage.ts, so the vault and the view agree. */
 const WEEKS_KEPT = 12;
-import type { AcceptLinkResponse, LinksResponse, OutgoingLink, ShareResponse } from '../shared/authContract';
 
 export class LinkError extends Error {}
 
@@ -574,6 +576,98 @@ async function writeSlot(linkId: string, wrappedShareKey: string, dek: CryptoKey
   });
 }
 
+/**
+ * Fit a guardian's outbox inside the wire before it goes out.
+ *
+ * The note slot carries the whole outbox, not one message, so a guardian who
+ * has been at this for a few weeks — a handful of plans with their lessons, a
+ * thread, a few notices — is past the ceiling unless something gives. What
+ * gives is the oldest of the least urgent: the start of the thread, then
+ * answers, notices, exams, homework and goals that have been out there
+ * longest, and finally the older plans. Nothing just written is ever the first
+ * to go, so the plan being sent survives whole.
+ */
+function fitOutbox(outbox: GuardianOutbox): GuardianOutbox {
+  const fitted = fitToWire(outbox, [
+    ['chat', 'front'],
+    ['acks', 'back'],
+    ['notices', 'back'],
+    ['examFeedback', 'back'],
+    ['exams', 'back'],
+    ['homework', 'back'],
+    ['homeworkReviews', 'back'],
+    ['classes', 'back'],
+    ['changeAnswers', 'back'],
+    ['goals', 'back'],
+  ] as ReadonlyArray<TrimStep<GuardianOutbox>>);
+  if (wireBytes(fitted) <= MAX_NOTE_BYTES) return fitted;
+  // The plans go last, oldest first, and the newest one is never dropped: its
+  // lessons are the whole reason it exists. One plan is far inside the budget
+  // on its own, so this only ever trims weeks that have already been lived.
+  let trimmed = fitted;
+  while (wireBytes(trimmed) > MAX_NOTE_BYTES && trimmed.plans.length > 1) {
+    trimmed = { ...trimmed, plans: trimmed.plans.slice(0, -1) };
+  }
+  if (wireBytes(trimmed) > MAX_NOTE_BYTES) throw new LinkError('That plan is too large to send.');
+  return trimmed;
+}
+
+/**
+ * Fit a student's outbox the same way.
+ *
+ * Almost everything here is rebuilt from the student's own planner on the next
+ * write, so what is dropped is not lost — it travels a little later, which is
+ * far better than the whole write being refused. The thread goes last: a
+ * message that fell off the wire would be gone for good (see the relay below),
+ * so its oldest entry is only given up when there is nothing else left.
+ */
+function fitStudentOutbox(outbox: StudentOutbox): StudentOutbox {
+  return fitToWire(outbox, [
+    ['progress', 'back'],
+    ['classProgress', 'back'],
+    ['homeworkSubmissions', 'back'],
+    ['examResults', 'back'],
+    ['answers', 'back'],
+    ['relayed', 'back'],
+    ['reports', 'back'],
+    ['requests', 'front'],
+    ['changes', 'front'],
+    ['chat', 'front'],
+  ] as ReadonlyArray<TrimStep<StudentOutbox>>);
+}
+
+/**
+ * Every guardian-side outbox write goes through here, so the slot a guardian
+ * writes is one the server will accept — see `fitOutbox` for what is dropped
+ * when it is not.
+ */
+async function writeOutbox(
+  linkId: string,
+  wrappedShareKey: string,
+  dek: CryptoKey,
+  outbox: GuardianOutbox,
+): Promise<void> {
+  await writeSlot(linkId, wrappedShareKey, dek, fitOutbox(outbox));
+}
+
+/**
+ * The student's side of the same rule: a slot the server will accept.
+ *
+ * Returns what actually went out, which is the outbox unless something had to
+ * be left for the next write — the caller counts relays, and counting one that
+ * was trimmed away would mean it is never sent again.
+ */
+async function writeStudentOutbox(
+  linkId: string,
+  wrappedShareKey: string,
+  dek: CryptoKey,
+  outbox: StudentOutbox,
+): Promise<StudentOutbox> {
+  const fitted = fitStudentOutbox(outbox);
+  await writeSlot(linkId, wrappedShareKey, dek, fitted);
+  return fitted;
+}
+
 /** The guardian's outbox for one link; a legacy single note folds in as one notice. */
 function asGuardianOutbox(payload: unknown): Omit<GuardianOutbox, 'v'> {
   const raw = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
@@ -774,7 +868,7 @@ async function postToStudent(
   } catch {
     /* first write, or the slot is empty */
   }
-  await writeSlot(linkId, link.wrappedShareKey, session.dek, outbox);
+  await writeOutbox(linkId, link.wrappedShareKey, session.dek, outbox);
   // The author sees their own words straight away, marked as read.
   const notice: GuardianNotice = { ...note, read: true };
   return { ...panels, guardian: { ...panels.guardian, notices: [notice, ...panels.guardian.notices].slice(0, 20) } };
@@ -841,7 +935,7 @@ export async function sendPlan(panels: Panels, linkId: string, draft: PlanDraft)
   } catch {
     /* first write */
   }
-  await writeSlot(linkId, link.wrappedShareKey, session.dek, outbox);
+  await writeOutbox(linkId, link.wrappedShareKey, session.dek, outbox);
   return withLinkPlan(panels, linkId, plan);
 }
 
@@ -914,7 +1008,7 @@ export async function updatePlanDays(
     createdAt: new Date().toISOString(),
     kind: 'note',
   };
-  await writeSlot(linkId, link.wrappedShareKey, session.dek, {
+  await writeOutbox(linkId, link.wrappedShareKey, session.dek, {
     ...outbox,
     notices: [note, ...outbox.notices.filter((item) => item.id !== note.id)].slice(0, OUTBOX_NOTICES),
     plans: [updated, ...outbox.plans.filter((item) => item.id !== planId)].slice(0, OUTBOX_PLANS),
@@ -980,7 +1074,7 @@ export async function answerChangeRequest(
     createdAt: new Date().toISOString(),
     kind: 'note',
   };
-  await writeSlot(linkId, link.wrappedShareKey, session.dek, {
+  await writeOutbox(linkId, link.wrappedShareKey, session.dek, {
     v: 3,
     ...current,
     notices: [note, ...current.notices.filter((item) => item.id !== note.id)].slice(0, OUTBOX_NOTICES),
@@ -1032,7 +1126,7 @@ export async function approvePlanPeriod(
     ...current,
     plans: [approved, ...current.plans.filter((item) => item.id !== planId)].slice(0, OUTBOX_PLANS),
   };
-  await writeSlot(linkId, link.wrappedShareKey, session.dek, outbox);
+  await writeOutbox(linkId, link.wrappedShareKey, session.dek, outbox);
   return withLinkPlan(panels, linkId, approved);
 }
 
@@ -1067,7 +1161,7 @@ export async function sendClass(panels: Panels, linkId: string, draft: ClassDraf
     ...current,
     classes: [assignment, ...current.classes.filter((item) => item.id !== assignment.id)].slice(0, OUTBOX_CLASSES),
   };
-  await writeSlot(linkId, link.wrappedShareKey, session.dek, outbox);
+  await writeOutbox(linkId, link.wrappedShareKey, session.dek, outbox);
   return withLinkClass(panels, linkId, assignment);
 }
 
@@ -1077,7 +1171,7 @@ export async function dropClass(panels: Panels, linkId: string, classId: string)
   const link = panels.guardian.links.find((item) => item.linkId === linkId);
   if (!link?.wrappedShareKey) throw new LinkError('That student link is not ready yet.');
   const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
-  await writeSlot(linkId, link.wrappedShareKey, session.dek, {
+  await writeOutbox(linkId, link.wrappedShareKey, session.dek, {
     v: 3,
     ...current,
     classes: current.classes.filter((item) => item.id !== classId),
@@ -1138,7 +1232,7 @@ export async function sendHomeworkAssignment(panels: Panels, linkId: string, dra
     ...current,
     homework: [assignment, ...current.homework.filter((item) => item.id !== assignment.id)].slice(0, OUTBOX_HOMEWORK),
   };
-  await writeSlot(linkId, link.wrappedShareKey, session.dek, outbox);
+  await writeOutbox(linkId, link.wrappedShareKey, session.dek, outbox);
   return withLinkHomework(panels, linkId, assignment);
 }
 
@@ -1174,7 +1268,7 @@ export async function approveHomeworkSubmission(
     ...current,
     homeworkReviews: [cleanReview, ...current.homeworkReviews.filter((item) => item.submissionId !== submissionId)].slice(0, HOMEWORK_ITEMS_KEPT),
   };
-  await writeSlot(linkId, link.wrappedShareKey, session.dek, outbox);
+  await writeOutbox(linkId, link.wrappedShareKey, session.dek, outbox);
   return withGuardianHomeworkReview(panels, cleanReview);
 }
 
@@ -1216,7 +1310,7 @@ export async function sendChatMessage(
     ...current,
     chat: [...current.chat.filter((entry) => entry.id !== message.id), message].slice(-CHAT_WIRE),
   };
-  await writeSlot(linkId, link.wrappedShareKey, session.dek, outbox);
+  await writeOutbox(linkId, link.wrappedShareKey, session.dek, outbox);
   return withChatMessage(panels, message, 'guardian');
 }
 
@@ -1253,7 +1347,7 @@ export async function sendExam(panels: Panels, linkId: string, draft: ExamDraft)
     ...current,
     exams: [exam, ...current.exams.filter((item) => item.id !== exam.id)].slice(0, EXAMS_WIRE),
   };
-  await writeSlot(linkId, link.wrappedShareKey, session.dek, outbox);
+  await writeOutbox(linkId, link.wrappedShareKey, session.dek, outbox);
   return withLinkExam(panels, linkId, exam);
 }
 
@@ -1263,7 +1357,7 @@ export async function dropExam(panels: Panels, linkId: string, examId: string): 
   const link = panels.guardian.links.find((item) => item.linkId === linkId);
   if (!link?.wrappedShareKey) throw new LinkError('That student link is not ready yet.');
   const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
-  await writeSlot(linkId, link.wrappedShareKey, session.dek, {
+  await writeOutbox(linkId, link.wrappedShareKey, session.dek, {
     v: 3,
     ...current,
     exams: current.exams.filter((exam) => exam.id !== examId),
@@ -1295,7 +1389,7 @@ export async function reviewExamSubmission(
     feedback: feedback.trim().slice(0, EXAM_FEEDBACK_MAX),
     reviewedAt: new Date().toISOString(),
   };
-  await writeSlot(linkId, link.wrappedShareKey, session.dek, {
+  await writeOutbox(linkId, link.wrappedShareKey, session.dek, {
     v: 3,
     ...current,
     examFeedback: [reviewed, ...current.examFeedback.filter((item) => item.id !== submissionId)].slice(
@@ -1369,7 +1463,7 @@ export async function sendComposedExam(
     // The student never receives an answer: only the keyless paper.
     exams: [keylessExam(exam), ...current.exams.filter((item) => item.id !== exam.id)].slice(0, EXAMS_WIRE),
   };
-  await writeSlot(linkId, link.wrappedShareKey, session.dek, outbox);
+  await writeOutbox(linkId, link.wrappedShareKey, session.dek, outbox);
   // The guardian's local record keeps the full key for their own review.
   return withLinkExam(panels, linkId, exam);
 }
@@ -1565,7 +1659,7 @@ export async function grantResubmission(panels: Panels, linkId: string, examId: 
     status: sitting.files?.length ? sitting.status : 'missed',
   };
   const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
-  await writeSlot(linkId, link.wrappedShareKey, session.dek, {
+  await writeOutbox(linkId, link.wrappedShareKey, session.dek, {
     v: 3,
     ...current,
     examFeedback: [granted, ...current.examFeedback.filter((item) => item.id !== granted.id)].slice(0, EXAM_RESULTS_WIRE),
@@ -1597,7 +1691,7 @@ export async function markPaperSubmission(
     status: 'reviewed',
   };
   const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
-  await writeSlot(linkId, link.wrappedShareKey, session.dek, {
+  await writeOutbox(linkId, link.wrappedShareKey, session.dek, {
     v: 3,
     ...current,
     examFeedback: [reviewed, ...current.examFeedback.filter((item) => item.id !== submissionId)].slice(0, EXAM_RESULTS_WIRE),
@@ -1608,9 +1702,14 @@ export async function markPaperSubmission(
 let planQueueFlushing = false;
 
 /**
- * Guardian: send what is waiting, oldest first. One at a time, stopping at
- * the first failure so a dead link cannot eat the plans behind it — and never
+ * Guardian: send what is waiting, oldest first. One at a time, stopping at the
+ * first failure so a dead connection cannot eat the plans behind it — and never
  * attempted without a signal. Re-entry returns the panels untouched.
+ *
+ * A plan addressed to a student who is no longer linked is a different case:
+ * it cannot go out however good the connection is, and stopping for it would
+ * leave every plan behind it waiting for a send that will never be attempted.
+ * It is kept in the queue — a link can come back — and the rest go out.
  */
 export async function flushPlanQueue(panels: Panels): Promise<Panels> {
   const waiting = panels.guardian.queuedPlans ?? [];
@@ -1620,6 +1719,8 @@ export async function flushPlanQueue(panels: Panels): Promise<Panels> {
   try {
     let current = panels;
     for (const queued of waiting) {
+      const link = current.guardian.links.find((item) => item.linkId === queued.linkId);
+      if (!link || link.status !== 'linked' || !link.wrappedShareKey) continue;
       try {
         current = withoutQueuedPlan(await sendPlan(current, queued.linkId, queued.draft), queued.id);
       } catch {
@@ -1687,7 +1788,7 @@ export async function sendGoal(panels: Panels, linkId: string, draft: GoalDraft)
   } catch {
     /* first write */
   }
-  await writeSlot(linkId, link.wrappedShareKey, session.dek, outbox);
+  await writeOutbox(linkId, link.wrappedShareKey, session.dek, outbox);
   return withLinkGoal(panels, linkId, goal);
 }
 
@@ -1702,7 +1803,7 @@ export async function dropGoal(panels: Panels, linkId: string, goalId: string): 
   if (!link?.wrappedShareKey) throw new LinkError('That link is not ready yet.');
   try {
     const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
-    await writeSlot(linkId, link.wrappedShareKey, session.dek, {
+    await writeOutbox(linkId, link.wrappedShareKey, session.dek, {
       v: 3,
       notices: current.notices,
       plans: current.plans,
@@ -1729,7 +1830,7 @@ export async function dropPlan(panels: Panels, linkId: string, planId: string): 
   if (!link?.wrappedShareKey) throw new LinkError('That link is not ready yet.');
   try {
     const current = asGuardianOutbox(await readSlot(linkId, link.wrappedShareKey, session.dek, true));
-    await writeSlot(linkId, link.wrappedShareKey, session.dek, {
+    await writeOutbox(linkId, link.wrappedShareKey, session.dek, {
       v: 3,
       notices: current.notices,
       plans: current.plans.filter((item) => item.id !== planId),
@@ -1792,7 +1893,7 @@ export async function sendAck(
     ...current,
     acks: [ack, ...current.acks.filter((item) => item.reportId !== ack.reportId)].slice(0, DAY_REPORTS_WIRE),
   };
-  await writeSlot(linkId, link.wrappedShareKey, session.dek, outbox);
+  await writeOutbox(linkId, link.wrappedShareKey, session.dek, outbox);
   return withLinkAck(panels, linkId, ack);
 }
 
@@ -2082,8 +2183,8 @@ export async function syncStudentInbox(
         .slice(0, FIXED_CLASSES_LIMIT),
     };
     try {
-      await writeSlot(target.linkId, target.wrappedShareKey, session.dek, outbox);
-      relayed += passed.length;
+      const written = await writeStudentOutbox(target.linkId, target.wrappedShareKey, session.dek, outbox);
+      relayed += written.relayed.length;
     } catch {
       /* best effort */
     }
