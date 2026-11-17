@@ -20,7 +20,7 @@
  */
 'use strict';
 
-const { app, BrowserWindow, Menu, Notification, Tray, dialog, ipcMain, nativeImage, nativeTheme, net, protocol, session, shell } = require('electron');
+const { app, BrowserWindow, Menu, Notification, Tray, dialog, ipcMain, nativeImage, nativeTheme, net, protocol, screen, session, shell } = require('electron');
 const { createHash } = require('node:crypto');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
@@ -31,6 +31,8 @@ const { pathToFileURL } = require('node:url');
 const {
   DEFAULT_PREFERENCES,
   PREFERENCES_FILE,
+  WINDOW_DEFAULTS,
+  fitWindowBounds,
   contentType,
   contentSecurityPolicy,
   dueReminders,
@@ -53,6 +55,8 @@ const APP_ID = 'com.notmtn.planner';
 const RELEASES_URL = 'https://github.com/Not-MTN/Planner/releases/latest';
 const GUIDE_URL = 'https://github.com/Not-MTN/Planner#readme';
 const WEB_ROOT = path.join(__dirname, 'dist');
+/** How long a window may stay hidden waiting for its first paint. */
+const REVEAL_TIMEOUT_MS = 6000;
 const LOCAL_ORIGIN = `${SCHEME}://${AUTHORITY}`;
 
 /** Build-time settings, with environment overrides for development. */
@@ -515,7 +519,14 @@ async function installWindowsUpdate(event, untrustedOffer) {
   // did nothing while the tray icon was still hidden.
   setTimeout(() => {
     quitting = true;
-    app.quit();
+    // Remember where the window was, because the next line skips the close
+    // handlers that would normally do it. Then leave at once. `app.quit()`
+    // unwinds slowly, and a process still unwinding when the installer starts
+    // Planner again is still holding the single-instance lock: the new copy
+    // asks for it, is refused, and exits — the update installs perfectly and
+    // no window ever appears, which is the worst way for an update to end.
+    if (mainWindow && !mainWindow.isDestroyed()) saveWindowState(mainWindow);
+    app.exit(0);
   }, 800);
   return { started: true };
 }
@@ -533,12 +544,36 @@ function readWindowState() {
   } catch {
     /* first run */
   }
-  return { width: 1180, height: 820 };
+  return { width: WINDOW_DEFAULTS.width, height: WINDOW_DEFAULTS.height };
+}
+
+/**
+ * The area each display leaves for windows, primary first.
+ *
+ * `screen` only answers once the app is ready, and a container or a CI run may
+ * have no display at all — in which case the caller gets nothing and simply
+ * lets Electron place the window.
+ */
+function windowWorkAreas() {
+  try {
+    const primary = screen.getPrimaryDisplay();
+    const others = screen.getAllDisplays().filter((display) => display.id !== primary.id);
+    return [primary, ...others].map((display) => display.workArea);
+  } catch {
+    return [];
+  }
+}
+
+/** The rectangle this window may actually open in — see `fitWindowBounds`. */
+function windowBounds(saved) {
+  return fitWindowBounds(saved, windowWorkAreas(), WINDOW_DEFAULTS);
 }
 
 function saveWindowState(win) {
   try {
-    const bounds = win.getNormalBounds();
+    // Saved through the same check it is read back with, so the file never
+    // records a place that only this session's displays could have shown.
+    const bounds = windowBounds(win.getNormalBounds());
     fs.mkdirSync(path.dirname(stateFile()), { recursive: true });
     fs.writeFileSync(stateFile(), JSON.stringify(bounds));
   } catch {
@@ -595,6 +630,16 @@ function broadcastPreferences() {
 function showWindow() {
   const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow();
   if (win.isMinimized()) win.restore();
+  // A window whose saved place no longer exists on any display is "open" as far
+  // as the OS is concerned — the taskbar button is right there — but clicking it
+  // shows nothing, because it is drawn off the edge of every screen. Put it
+  // back on one before asking for focus, so the click always produces a window.
+  const current = win.getNormalBounds();
+  const bounds = windowBounds(current);
+  if (bounds.x !== undefined && (bounds.x !== current.x || bounds.y !== current.y
+    || bounds.width !== current.width || bounds.height !== current.height)) {
+    win.setBounds(bounds);
+  }
   win.show();
   win.focus();
   return win;
@@ -608,13 +653,14 @@ function trayImage() {
 }
 
 function buildTray() {
-  if (tray) return;
+  if (tray) return true;
   try {
     tray = new Tray(trayImage());
   } catch {
-    // A headless session (CI, a container) has no tray to show; background
-    // mode still works, there is just no icon to click.
-    return;
+    // A headless session (CI, a container) has no tray to show. Background mode
+    // has nothing to come back through there, so it must not be entered: the
+    // caller decides what to do with the "no".
+    return false;
   }
   const refresh = () => {
     if (!tray) return;
@@ -634,6 +680,7 @@ function buildTray() {
   };
   refresh();
   tray.on('click', () => showWindow());
+  return true;
 }
 
 function destroyTray() {
@@ -741,14 +788,13 @@ function hardenSession() {
 // ── The window ─────────────────────────────────────────────────────────────
 
 function createWindow() {
-  const state = readWindowState();
+  const bounds = windowBounds(readWindowState());
   const win = new BrowserWindow({
-    width: state.width,
-    height: state.height,
-    x: state.x,
-    y: state.y,
-    minWidth: 360,
-    minHeight: 520,
+    width: bounds.width,
+    height: bounds.height,
+    ...(bounds.x === undefined ? {} : { x: bounds.x, y: bounds.y }),
+    minWidth: WINDOW_DEFAULTS.minWidth,
+    minHeight: WINDOW_DEFAULTS.minHeight,
     title: 'Planner',
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#171410' : '#F5F0E7',
     show: false,
@@ -766,18 +812,33 @@ function createWindow() {
 
   mainWindow = win;
 
-  win.once('ready-to-show', () => win.show());
+  // Shown once the first paint is ready — and shown anyway if that paint never
+  // arrives, because a window that stays hidden is an app that looks like it
+  // failed to start: the process is there, the icon is there, and no amount of
+  // clicking produces a window. Six seconds is far past a normal first paint.
+  const reveal = setTimeout(() => {
+    if (!win.isDestroyed() && !win.isVisible()) win.show();
+  }, REVEAL_TIMEOUT_MS);
+  win.once('ready-to-show', () => {
+    clearTimeout(reveal);
+    win.show();
+  });
   win.on('close', (event) => {
     saveWindowState(win);
     // The close button means "hide" while background mode is on: the process
     // has to outlive the window for reminders to keep arriving. Quit is always
     // available — the tray menu, and File → Quit when the window is open.
     if (quitting || !preferences.background) return;
+    // Hiding is only kind when there is an icon to come back through. Without
+    // one, "closed" has to mean closed: a process with no window and no tray is
+    // indistinguishable from an app that never opened.
+    if (!buildTray()) return;
     event.preventDefault();
     win.hide();
     explainBackground();
   });
   win.on('closed', () => {
+    clearTimeout(reveal);
     mainWindow = null;
   });
 
@@ -912,9 +973,15 @@ if (!gotLock) {
     ipcMain.handle('planner:preferences-get', () => preferences);
     ipcMain.handle('planner:preferences-set', (_event, patch) => {
       const next = patch && typeof patch === 'object' ? { ...preferences, ...patch } : preferences;
-      const saved = savePreferences(next);
-      if (saved.background) buildTray();
-      else destroyTray();
+      let saved = savePreferences(next);
+      if (!saved.background) {
+        destroyTray();
+        return saved;
+      }
+      // A switch that says Planner keeps running in the tray is a lie where the
+      // tray cannot be created — and the lie is the lockout. Turn it back off
+      // and let the close button mean what it says.
+      if (!buildTray()) saved = savePreferences({ ...saved, background: false });
       return saved;
     });
     ipcMain.handle('planner:reminders-set', (_event, schedule) => {
@@ -984,8 +1051,9 @@ if (!gotLock) {
 
   app.on('window-all-closed', () => {
     // With background mode on the window may close while the process stays;
-    // the tray icon is the way back in. Otherwise this is an ordinary quit.
-    if (preferences.background && !quitting) return;
+    // the tray icon is the way back in. Without that icon there is no way back
+    // in, so staying alive would only leave a process nobody can reach.
+    if (preferences.background && !quitting && tray) return;
     if (process.platform !== 'darwin') app.quit();
   });
 
