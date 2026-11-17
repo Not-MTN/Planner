@@ -204,3 +204,39 @@ way back in.
 
 Nothing here changes the browser or the phone apps: `src/desktop.ts` is a no-op
 unless `window.plannerDesktop` exists.
+
+## 10. When a window would be invisible
+
+An app can be running and still look broken: the process is there, the taskbar
+shows a button, and clicking it produces nothing. Three ways that used to happen,
+and what the shell does now.
+
+- **The remembered place is gone.** `window-state.json` keeps the window's
+  rectangle. Unplug the monitor it lived on — or let Windows write the
+  `-32000`/`-32000` rectangle it uses for a minimized window — and the next
+  launch creates the window exactly there, past the edge of every screen.
+  `fitWindowBounds` (`desktop/lib.cjs`) keeps a saved rectangle only when a
+  display can show at least a grabbable strip of it, opens the window centred on
+  the primary display otherwise, and clamps its size to the screen it lands on.
+  The same check runs when the tray icon or a second launch asks for the window,
+  and again before the rectangle is saved — so a state file that has already
+  gone bad is repaired rather than carried forward.
+- **The first paint never arrives.** The window is created hidden and shown on
+  `ready-to-show`. That event depends on the page, and a page that never renders
+  — a deployment that is down, a session that hangs — leaves a process with no
+  window at all. After six seconds the window is shown regardless, with whatever
+  it has, so an unreachable deployment looks like a stuck page instead of a
+  vanished app.
+- **Background mode with no tray.** Closing the window hides it while the
+  process keeps running for reminders — but only if a tray icon exists to come
+  back through. Where the tray cannot be created, background mode is refused
+  (and the setting turns itself back off), the close button closes, and the last
+  window closing quits. A process nobody can reach is not a feature.
+
+The Windows in-app update has the same problem in its last step. The installer
+is spawned detached and the app exits 800 ms later, and the installer reopens
+Planner when it is done. If the old process is still unwinding at that moment it
+still holds the single-instance lock, the reopened copy is refused the lock and
+quits, and an update that installed perfectly leaves no window behind. The app
+now saves its window state and calls `app.exit(0)` — released immediately, no
+teardown left to race.

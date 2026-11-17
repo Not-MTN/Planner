@@ -1673,6 +1673,7 @@ export const fi: Record<string, string> = {
   "Waiting to send": "Odottaa lähetystä",
   "Send now": "Lähetä nyt",
   "The send queue is full — reconnect to send what is waiting.": "Lähetysjono on täynnä — yhdistä uudelleen lähettääksesi odottavat.",
+  "The plan is still waiting — it will send when you are back online.": "Suunnitelma odottaa yhä — se lähtee, kun olet taas verkossa.",
   "Sent {count} queued plan.": "Lähetettiin {count} jonossa ollut suunnitelma.",
   "Sent {count} queued plans.": "Lähetettiin {count} jonossa ollutta suunnitelmaa.",
   "The planner uses a server-side proxy for Groq. Your API key stays out of the browser and planner backups.": "Planner käyttää palvelinpuolen välityspalvelinta Groqille. API-avaimesi ei päädy selaimeen eikä suunnitelman varmuuskopioihin.",

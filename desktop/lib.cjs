@@ -196,6 +196,109 @@ function isTrustedUpdateUrl(value) {
   }
 }
 
+// ── Where the window may open ─────────────────────────────────────────────
+//
+// The window remembers its place in `window-state.json`, and comes back to it
+// on the next launch. What was saved can be a place that no longer exists: the
+// second monitor it lived on is unplugged, the laptop is now on a smaller
+// screen, or the state was written while Windows reported the window minimised
+// at -32000. Electron does not check any of that — it creates the window at the
+// coordinates it is handed. The result is the worst kind of broken app: the
+// process runs, the taskbar shows a button, and clicking it does nothing,
+// because the window is drawn where no eye can reach it.
+
+/** What a window gets when nothing better is known. Mirrors `main.cjs`. */
+const WINDOW_DEFAULTS = { width: 1180, height: 820, minWidth: 360, minHeight: 520 };
+/** Windows writes this rectangle for a minimized window; it is never a place. */
+const MINIMIZED_AXIS = -32000;
+/** How much of the window has to be on a display to count as reachable. */
+const REACHABLE_WIDTH = 120;
+const REACHABLE_HEIGHT = 40;
+
+function isWorkArea(value) {
+  return Boolean(value) && typeof value === 'object'
+    && ['x', 'y', 'width', 'height'].every((key) => typeof value[key] === 'number' && Number.isFinite(value[key]));
+}
+
+function roundRect(rect) {
+  return {
+    x: Math.round(rect.x),
+    y: Math.round(rect.y),
+    width: Math.round(rect.width),
+    height: Math.round(rect.height),
+  };
+}
+
+/** Does enough of `rect` land inside `area` to see and grab it? */
+function reachableOn(rect, area) {
+  const overlapWidth = Math.min(rect.x + rect.width, area.x + area.width) - Math.max(rect.x, area.x);
+  const overlapHeight = Math.min(rect.y + rect.height, area.y + area.height) - Math.max(rect.y, area.y);
+  return overlapWidth >= Math.min(REACHABLE_WIDTH, rect.width)
+    && overlapHeight >= Math.min(REACHABLE_HEIGHT, rect.height);
+}
+
+/**
+ * The rectangle a window can safely be opened in.
+ *
+ * `workAreas` is a display's `workArea` for each screen, primary first (see
+ * `windowWorkAreas` in `main.cjs`). A saved rectangle is kept when some display
+ * can show it; otherwise the window opens centred on the primary one, which is
+ * always a place the user can see. Size is clamped to the display the window
+ * belongs to, so a window remembered as 1180 wide cannot be opened wider than
+ * a 1024-wide screen.
+ *
+ * With no display information at all (a headless run), the size alone is
+ * returned and Electron places the window itself.
+ */
+function fitWindowBounds(saved, workAreas, options = {}) {
+  const wanted = { ...WINDOW_DEFAULTS, ...(options && typeof options === 'object' ? options : {}) };
+  const minWidth = Math.max(1, Math.round(Number.isFinite(wanted.minWidth) ? wanted.minWidth : WINDOW_DEFAULTS.minWidth));
+  const minHeight = Math.max(1, Math.round(Number.isFinite(wanted.minHeight) ? wanted.minHeight : WINDOW_DEFAULTS.minHeight));
+  const preferredWidth = Math.max(minWidth, Math.round(Number.isFinite(wanted.width) ? wanted.width : WINDOW_DEFAULTS.width));
+  const preferredHeight = Math.max(minHeight, Math.round(Number.isFinite(wanted.height) ? wanted.height : WINDOW_DEFAULTS.height));
+
+  const areas = (Array.isArray(workAreas) ? workAreas : [])
+    .filter(isWorkArea)
+    .map(roundRect)
+    .filter((area) => area.width > 0 && area.height > 0);
+  const state = saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+
+  const savedWidth = Number.isFinite(state.width) ? Math.round(state.width) : preferredWidth;
+  const savedHeight = Number.isFinite(state.height) ? Math.round(state.height) : preferredHeight;
+
+  // No displays to measure against: keep the remembered size and let Electron
+  // choose the place. Guessing a rectangle here could hide the window on a
+  // screen this process cannot see.
+  if (areas.length === 0) {
+    return { width: Math.max(savedWidth, minWidth), height: Math.max(savedHeight, minHeight) };
+  }
+
+  const primary = areas[0];
+  const savedX = Number.isFinite(state.x) ? Math.round(state.x) : null;
+  const savedY = Number.isFinite(state.y) ? Math.round(state.y) : null;
+  const hasPosition = savedX !== null && savedY !== null && savedX > MINIMIZED_AXIS && savedY > MINIMIZED_AXIS;
+
+  // The display the window belongs on: the one under the middle of its saved
+  // rectangle, or the primary one when that display is gone.
+  const centreX = (hasPosition ? savedX : primary.x) + Math.round(savedWidth / 2);
+  const centreY = (hasPosition ? savedY : primary.y) + Math.round(savedHeight / 2);
+  const host = areas.find((area) => centreX >= area.x && centreX < area.x + area.width && centreY >= area.y && centreY < area.y + area.height)
+    ?? primary;
+
+  const width = Math.min(Math.max(savedWidth, minWidth), Math.max(host.width, minWidth));
+  const height = Math.min(Math.max(savedHeight, minHeight), Math.max(host.height, minHeight));
+  const centred = {
+    x: primary.x + Math.round((primary.width - width) / 2),
+    y: primary.y + Math.round((primary.height - height) / 2),
+    width,
+    height,
+  };
+
+  if (!hasPosition) return centred;
+  const candidate = { x: savedX, y: savedY, width, height };
+  return areas.some((area) => reachableOn(candidate, area)) ? candidate : centred;
+}
+
 // ── Background mode and reminders (docs/DESKTOP.md §9) ─────────────────────
 //
 // Two things the desktop shell keeps for the page, both of them plain data so
@@ -306,4 +409,6 @@ module.exports = {
   stableReleaseVersion,
   validateWindowsOffer,
   windowsOfferFromManifest,
+  fitWindowBounds,
+  WINDOW_DEFAULTS,
 };

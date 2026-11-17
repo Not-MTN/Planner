@@ -498,8 +498,11 @@ export function mergePanels(local: Panels, remote: Panels): Panels {
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         .slice(0, 20),
       // Unsent drafts wait for a signal; the newest copy of each one survives.
+      // Oldest first, as the queue itself keeps them: the flush sends in that
+      // order, so a merged vault must not quietly put this week's draft ahead
+      // of the one that has been waiting since Monday.
       queuedPlans: byId(local.guardian.queuedPlans ?? [], remote.guardian.queuedPlans ?? [])
-        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
         .slice(0, QUEUED_PLANS_KEPT) as QueuedPlan[],
       chat: mergeThread(local.guardian.chat, remote.guardian.chat),
       chatSeen: mergeChatSeen(local.guardian.chatSeen, remote.guardian.chatSeen),

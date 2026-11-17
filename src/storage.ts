@@ -15,7 +15,7 @@ import {
   sanitizeStudentExamDraft,
 } from './exams';
 import { PLAN_REVIEWS_KEPT } from './planRetention';
-import { ACK_REACTIONS, ACK_TEXT_MAX, AI_PLAN_LIMIT, CHAT_KEPT, DAY_REPORT_NOTE_MAX, DAY_REPORTS_KEPT, EXAMS_KEPT, EXAM_RESULTS_KEPT, FIXED_CLASSES_LIMIT, GOAL_STEPS_MAX, HOMEWORK_ITEMS_KEPT, PLAN_CHANGES_KEPT, PLAN_CHANGE_NOTE_MAX, PLAN_CHANGE_TITLE_MAX, PLAN_REQUESTS_KEPT, PRAISE_KEPT, QUEUED_PLANS_KEPT, createEmptyPanels, createEmptyState, isGradeLevel, type AIDeclined, type AIDeclinedKind, type AIMemory, type AttachmentRef, type AIMemoryCategory, type ChangeNote, type DayReport, type EventInput, type FixedCommitment, type FocusLog, type GoalAnswer, type GoalSuggestion, type GuardianKind, type GuardianLink, type GuardianNotice, type GuardianPlan, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Panels, type PlanCadence, type PlanChangeRequest, type PlanDraft, type PlanItem, type PlanRequest, type PlanReview, type QueuedPlan, type ReportAck, type StudentExamDraft, type StudentGuardian, type StudentInbox, type StudentSubject, type Subtask, type TaskInput, type TaskRepeat, type WeekResults, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task, type WeekArchive } from './types';
+import { ACK_REACTIONS, ACK_TEXT_MAX, AI_PLAN_LIMIT, CHAT_KEPT, DAY_REPORT_NOTE_MAX, DAY_REPORTS_KEPT, EXAMS_KEPT, EXAM_RESULTS_KEPT, FIXED_CLASSES_LIMIT, GOAL_STEPS_MAX, HOMEWORK_ITEMS_KEPT, PLAN_CHANGES_KEPT, PLAN_CHANGE_NOTE_MAX, PLAN_CHANGE_TITLE_MAX, PLAN_REQUESTS_KEPT, PRAISE_KEPT, QUEUED_PLANS_KEPT, createEmptyPanels, createEmptyState, isGradeLevel, type AIDeclined, type AIDeclinedKind, type AIMemory, type AttachmentRef, type AIMemoryCategory, type ChangeNote, type DayReport, type EventInput, type FixedCommitment, type FocusLog, type GoalAnswer, type GoalSuggestion, type GuardianKind, type GuardianLink, type GuardianNotice, type GuardianPlan, type HabitCompletion, type HabitInput, type MoodEntry, type MoodValue, type Panels, type PlanCadence, type PlanChangeRequest, type PlanDraft, type PlanItem, type PlanItemKind, type PlanRequest, type PlanReview, type QueuedPlan, type ReportAck, type StudentExamDraft, type StudentGuardian, type StudentInbox, type StudentSubject, type Subtask, type TaskInput, type TaskRepeat, type WeekResults, type Goal, type Habit, type HabitFrequency, type HabitUnit, type Note, type PlannerEvent, type PlannerState, type SavedAIPlan, type Task, type WeekArchive } from './types';
 import { t } from './i18n';
 import { downloadBlob } from './download';
 
@@ -752,6 +752,12 @@ function sanitizePlanDraft(value: unknown): PlanDraft | null {
             typeof entry.minutes === 'number' && Number.isFinite(entry.minutes) ? Math.max(0, Math.round(entry.minutes)) : null,
           subject: asString(entry.subject, 60)?.trim() || null,
           url: typeof entry.url === 'string' ? normalizeLessonUrl(entry.url) : null,
+          // A queued plan keeps what each step is: a homework or test step
+          // that came back from a reload as a plain lesson would be filed as
+          // the wrong thing when it is finally sent.
+          ...(entry.kind === 'homework' || entry.kind === 'test'
+            ? { kind: entry.kind as PlanItemKind, refId: asString(entry.refId, 80) }
+            : {}),
         },
       ];
     })

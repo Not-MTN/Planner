@@ -1681,6 +1681,7 @@ export const fa: Record<string, string> = {
   "Waiting to send": "در انتظار فرستادن",
   "Send now": "همین حالا بفرست",
   "The send queue is full — reconnect to send what is waiting.": "صف فرستادن پر است — وصل شوید تا موارد در انتظار فرستاده شوند.",
+  "The plan is still waiting — it will send when you are back online.": "این برنامه هنوز در انتظار است — وقتی دوباره آنلاین شوید فرستاده می‌شود.",
   "Sent {count} queued plan.": "{count} برنامهٔ در انتظار فرستاده شد.",
   "Sent {count} queued plans.": "{count} برنامهٔ در انتظار فرستاده شد.",
   "This week at a glance": "این هفته در یک نگاه",

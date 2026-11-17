@@ -178,6 +178,23 @@ export function cleanRole(value: unknown): AccountRole | null {
 
 /** Weekly results are small: counts, minutes and one line of words. */
 export const MAX_SHARE_BYTES = 16 * 1024;
+/**
+ * The note slot is not one note.
+ *
+ * Both sides send the *whole* outbox through it — notices, plans with every
+ * lesson they hold, goals, replies, classes, homework, exams and the thread —
+ * so capping it at the results size refused any guardian who had been at this
+ * for a few weeks. A refused write is not a small thing: the week the composer
+ * just failed to send is parked in the offline queue, and every later attempt
+ * to send it is refused for the same reason. The guardian sees a send that
+ * never works and the student never receives the plan.
+ *
+ * The figure is the plaintext budget; the wire carries base64, which is why the
+ * server compares against twice this (see `cleanNoteCiphertext`).
+ */
+export const MAX_NOTE_BYTES = 96 * 1024;
+/** A note body is that ciphertext plus its link id, the week and JSON framing. */
+export const MAX_NOTE_BODY_BYTES = MAX_NOTE_BYTES * 2 + 16 * 1024;
 export const MAX_LINKS_PER_SIDE = 20;
 
 export type LinkStatus = 'pending' | 'linked' | 'revoked';
@@ -270,6 +287,17 @@ export function cleanWeekOf(value: unknown): string | null {
 export function cleanShareCiphertext(value: unknown): string | null {
   if (typeof value !== 'string' || !value) return null;
   return value.length <= MAX_SHARE_BYTES * 2 && BASE64_PATTERN.test(value) ? value : null;
+}
+
+/**
+ * The note slot's ceiling, which is the outbox's ceiling rather than one
+ * note's. Kept apart from `cleanShareCiphertext` because the two slots carry
+ * very different things: results are a week of counts, an outbox is everything
+ * the guardian has said and planned since the link was made.
+ */
+export function cleanNoteCiphertext(value: unknown): string | null {
+  if (typeof value !== 'string' || !value) return null;
+  return value.length <= MAX_NOTE_BYTES * 2 && BASE64_PATTERN.test(value) ? value : null;
 }
 
 /* ------------------------------------------------------------------ notices */

@@ -312,6 +312,27 @@ A signed-in device caches the wrapped DEK and session, so **opening and editing 
 planner works offline** — a planner you cannot open on a plane is broken. Only
 sign-up, sign-in, and linking need a connection.
 
+**A queued plan is never lost.** Every send that fails for want of a connection
+keeps its draft in the queue, and "Send now" says the plan is still waiting rather
+than pretending it went; the queue drains by itself on the next connection, and an
+entry whose link is gone (revoked, or never linked) is skipped so it cannot block
+the ones behind it.
+
+**A slot carries the whole outbox, not one message.** Each link has two encrypted
+slots — the guardian's outbox and the student's — and each holds *all* of what that
+side has said and planned, so its size grows with history. Two limits keep that
+honest. The server refuses a note that would carry more than 96 KB of plaintext
+(HTTP 413, `too_large`) rather than accept half of it: a slot is written whole or
+not at all (`MAX_NOTE_BYTES` in `src/shared/authContract.ts`). And the client,
+which is the only side that knows what is in the slot, fits the payload to the
+wire before writing it — giving up the start of the thread first, then the oldest
+answers, notices, exams, homework and goals, and only then the oldest weeks that
+were already sent, never the item being written and never the last entry of a
+list (`src/auth/wireBudget.ts`, `fitOutbox` / `fitStudentOutbox` in
+`src/auth/links.ts`). Without that trimming, enough history puts the outbox
+permanently over the ceiling and every write — "Send now" included — is refused
+forever, which is exactly the bug this paragraph exists to prevent.
+
 ---
 
 ## 7. Linking and consent

@@ -14,6 +14,8 @@ const require = createRequire(import.meta.url);
 const {
   DEFAULT_PREFERENCES,
   MAX_REMINDERS,
+  WINDOW_DEFAULTS,
+  fitWindowBounds,
   WINDOWS_UPDATE_MANIFEST_URL,
   contentType,
   contentSecurityPolicy,
@@ -287,5 +289,74 @@ describe('the reminder schedule the main process accepts', () => {
     // forty days out is past anything the schedule should have carried.
     expect(reminderInHorizon({ at: now - 3 * 24 * 60 * 60_000 }, now)).toBe(false);
     expect(reminderInHorizon({ at: now + 41 * 24 * 60 * 60_000 }, now)).toBe(false);
+  });
+});
+
+/**
+ * The window remembers where it was. That memory has to be checked against the
+ * screens this launch actually has, or "the app does not open" is exactly what
+ * happens: the process runs, the taskbar shows a button, and the window is
+ * drawn past the edge of every display.
+ */
+describe('fitWindowBounds', () => {
+  const laptop = { x: 0, y: 0, width: 1440, height: 900 };
+  const second = { x: 1440, y: 0, width: 1440, height: 900 };
+  const centredOnLaptop = { x: 130, y: 40, width: 1180, height: 820 };
+
+  it('keeps a saved place that is still on a screen', () => {
+    expect(fitWindowBounds({ x: 100, y: 60, width: 1000, height: 700 }, [laptop]))
+      .toEqual({ x: 100, y: 60, width: 1000, height: 700 });
+  });
+
+  it('keeps a window on a second display that is still plugged in', () => {
+    expect(fitWindowBounds({ x: 2000, y: 100, width: 1180, height: 820 }, [laptop, second]))
+      .toEqual({ x: 2000, y: 100, width: 1180, height: 820 });
+  });
+
+  it('brings back a window saved on a display that is gone', () => {
+    // 2400 is past the right edge of the only display left.
+    expect(fitWindowBounds({ x: 2400, y: 100, width: 1180, height: 820 }, [laptop])).toEqual(centredOnLaptop);
+  });
+
+  it('ignores the rectangle Windows writes for a minimized window', () => {
+    expect(fitWindowBounds({ x: -32000, y: -32000, width: 1180, height: 820 }, [laptop])).toEqual(centredOnLaptop);
+  });
+
+  it('centres when only a sliver of the window would be visible', () => {
+    // 80 px of a 1180 px window is not something anyone can grab.
+    expect(fitWindowBounds({ x: -1100, y: 100, width: 1180, height: 820 }, [laptop])).toEqual(centredOnLaptop);
+  });
+
+  it('keeps a window that hangs off the edge but can still be dragged back', () => {
+    expect(fitWindowBounds({ x: -300, y: 100, width: 1180, height: 820 }, [laptop]))
+      .toEqual({ x: -300, y: 100, width: 1180, height: 820 });
+  });
+
+  it('never opens wider or taller than the screen it opens on', () => {
+    expect(fitWindowBounds({ x: 10, y: 10, width: 9000, height: 4000 }, [laptop]))
+      .toEqual({ x: 10, y: 10, width: 1440, height: 900 });
+  });
+
+  it('honours the minimum size, so a tiny saved window is still usable', () => {
+    expect(fitWindowBounds({ x: 10, y: 10, width: 100, height: 100 }, [laptop]))
+      .toEqual({ x: 10, y: 10, width: 360, height: 520 });
+  });
+
+  it('centres the default window on a first run, with nothing saved', () => {
+    expect(WINDOW_DEFAULTS).toMatchObject({ width: 1180, height: 820, minWidth: 360, minHeight: 520 });
+    expect(fitWindowBounds({}, [laptop])).toEqual(centredOnLaptop);
+    expect(fitWindowBounds(null, [laptop])).toEqual(centredOnLaptop);
+  });
+
+  it('returns only a size when there are no displays to measure against', () => {
+    // A headless run: Electron places the window itself.
+    const bounds = fitWindowBounds({ x: 10, y: 10, width: 900, height: 700 }, []);
+    expect(bounds).toEqual({ width: 900, height: 700 });
+    expect(bounds.x).toBeUndefined();
+  });
+
+  it('survives a state file someone has edited by hand', () => {
+    expect(fitWindowBounds('not a rectangle', [laptop])).toEqual(centredOnLaptop);
+    expect(fitWindowBounds({ width: 'wide', height: null, x: NaN, y: {} }, [laptop])).toEqual(centredOnLaptop);
   });
 });

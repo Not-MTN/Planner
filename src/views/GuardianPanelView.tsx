@@ -17,6 +17,7 @@
  */
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { usePlanner } from '../context';
+import { AuthError } from '../auth/session';
 import { cx } from '../cx';
 import { formatEdited } from '../dates';
 import {
@@ -112,6 +113,17 @@ type GuardianTab = 'week' | 'reports' | 'plan' | 'assignments' | 'exams' | 'supp
 type PlanMode = 'steps' | 'lessons';
 
 const TAB_ID = 'guardian-student';
+
+/**
+ * Did this failure happen because nothing could be reached, rather than because
+ * the server said no? A browser that is offline, a `fetch` that threw, and the
+ * session layer's own `network` answer are the same event from here.
+ */
+function hasSignal(error: unknown): boolean {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
+  if (error instanceof TypeError) return false;
+  return !(error instanceof AuthError && error.code === 'network');
+}
 const GuardianProgressCharts = lazy(() => import('../components/GuardianProgressCharts').then((module) => ({ default: module.GuardianProgressCharts })));
 
 /**
@@ -425,7 +437,17 @@ export function GuardianPanelView() {
       });
       flash(t('The plan is on its way to {0}.', { 0: link.displayName }));
     } catch (caught) {
-      flash(caught instanceof Error ? caught.message : t('That plan could not be sent.'));
+      // A dead signal is not a failure of the plan. Saying so — and leaving the
+      // plan where it is — is the difference between "the app is broken" and
+      // "it will go as soon as there is a connection", which is what pressing
+      // Send now while still offline actually means.
+      flash(
+        hasSignal(caught)
+          ? caught instanceof Error
+            ? caught.message
+            : t('That plan could not be sent.')
+          : t('The plan is still waiting — it will send when you are back online.'),
+      );
     } finally {
       setSendingQueue(false);
     }
